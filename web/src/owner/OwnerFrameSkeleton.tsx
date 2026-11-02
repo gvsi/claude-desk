@@ -32,7 +32,7 @@ function pageShapes(
   if (page === 'safety' && safetyRoute && new URLSearchParams(search).get('view') !== 'entries') return <SafetySkeleton withHeader />;
   if (page === 'people' && exact) return <PeopleSkeleton withHeader />;
   if (page === 'profile' && exact) return <ProfileSkeleton />;
-  if (page === 'knowledge' && exact) return <KnowledgeSkeleton showSampleQuestions={showSampleContent} />;
+  if (page === 'knowledge' && exact) return <KnowledgeSkeleton />;
   if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} recordedHistory={showSampleContent} />;
   // One conversation open beside the list: `/conversations/:id`.
   const [conversation = '', ...after] = rest;

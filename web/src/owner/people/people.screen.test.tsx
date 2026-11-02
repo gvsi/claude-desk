@@ -11,10 +11,10 @@ import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { newIdempotencyKey } from '../../api/http.ts';
-import type { RulesView, SetupState } from '../../api/views.ts';
+import type { ConversationSummary, RulesView, SetupState } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { copyResultLine } from '../../ds/index.ts';
-import { formatWhen } from '../../lib/format.ts';
+import { formatListTime, formatWhen } from '../../lib/format.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
@@ -520,6 +520,121 @@ describe('customers', () => {
     expect(failed.getByText(dana.maskedContact).query()).toBeNull();
     await failed.getByRole('button', { name: 'Try again' }).click();
     await expect.element(failed.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+  });
+});
+
+/** The Desk's conversations as the mock lists them now. */
+async function summaries(): Promise<ConversationSummary[]> {
+  const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock lists the conversations');
+  return answer.body as ConversationSummary[];
+}
+
+/** A conversation's page, as a row links to it. */
+const chatPath = (sessionId: string) => `${DESK}/conversations/${sessionId}`;
+
+/** The chats Dana verified in, as `rivera_regulars` gives them, newest first, with each row's words. */
+const DANAS_CHATS = [
+  { sessionId: 'ses-dana-invoice', quote: 'Can you send me my drain clearing invoice?', status: 'Verified · Invoice sent' },
+  { sessionId: 'ses-dana-quote', quote: 'How much is drain clearing?', status: 'Quoted' },
+] as const;
+
+describe("a person's conversations", () => {
+  beforeEach(freezeClock);
+
+  it.each(['desktop', 'phone'] as const)('person_page_lists_their_verified_chats_newest_first_%s', async (viewport) => {
+    // A visitor who verifies as Bob, newer than all of Dana's chats, and her live chat, where she
+    // hasn't confirmed it's her: neither is on her page.
+    await cleanup();
+    mockStore.nextEpoch();
+    mockStore.reset('rivera_regulars');
+    const desk = mockStore.world.desk(RIVERA.deskId)!;
+    const bobs = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(bobs, 'Is my warranty still good?');
+    mockStore.world.verify(bobs, bob);
+    const listed = new Map((await summaries()).map((s) => [s.session_id, s]));
+    const { screen, router } = await renderRoute(`${PEOPLE}/${dana.personId}`, { viewport });
+
+    // Her chats, under the rules, newest first, each drawn as Conversations draws it: her name and
+    // the time, what she wrote, and how it stands, under the day Conversations groups it by.
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(section).toBeVisible();
+    const rules = screen.getByRole('region', { name: `Rules for ${dana.name}` }).element();
+    expect(section.element().getBoundingClientRect().top).toBeGreaterThan(rules.getBoundingClientRect().bottom);
+    await expect.element(section.getByRole('heading', { level: 3, name: 'Earlier', exact: true })).toBeVisible();
+    const rows = section.getByRole('link').elements() as HTMLAnchorElement[];
+    expect(rows.map((row) => row.getAttribute('href'))).toEqual(DANAS_CHATS.map((chat) => chatPath(chat.sessionId)));
+    rows.forEach((row, i) => {
+      const chat = DANAS_CHATS[i]!;
+      const time = formatListTime(listed.get(chat.sessionId)!.last_activity, LA, new Date());
+      expect(row.querySelector('.cd-conversation-item__name')?.textContent).toBe(dana.name);
+      expect(row.querySelector('.cd-conversation-item__time')?.textContent).toBe(time);
+      expect(row.querySelector('.cd-conversation-item__quote')?.textContent).toBe(`“${chat.quote}”`);
+      expect(row.querySelector('.cd-conversation-item__status')?.textContent).toBe(chat.status);
+    });
+    expect(screen.getByRole('link', { name: /warranty/ }).query()).toBeNull();
+    expect(section.element().querySelector(`a[href="${chatPath('ses-dana-web')}"]`)).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+    assertNoJargon(screen.container);
+    expectNoHorizontalScroll();
+    const content = screen.container.querySelector('.cd-app-shell__content')!.getBoundingClientRect();
+    for (const el of section.element().querySelectorAll('*')) {
+      expect(Math.round(el.getBoundingClientRect().right), el.className).toBeLessThanOrEqual(Math.round(content.right));
+    }
+
+    // A row opens its chat, and Back returns to her page.
+    await section.getByRole('link').first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(chatPath(DANAS_CHATS[0].sessionId));
+    await expect.element(screen.getByRole('log').getByText(DANAS_CHATS[0].quote, { exact: true })).toBeVisible();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(`${PEOPLE}/${dana.personId}`);
+    await expect.element(screen.getByRole('region', { name: 'Conversations', exact: true }).getByRole('link').first()).toBeVisible();
+
+    // Bob's page lists his.
+    await router.navigate(`${PEOPLE}/${bob.personId}`);
+    const his = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(his.getByRole('link', { name: /warranty/ })).toHaveAttribute('href', chatPath(bobs.state.session_id));
+    expect(his.getByRole('link').elements()).toHaveLength(1);
+  });
+
+  it.each(['desktop', 'phone'] as const)('person_page_with_no_verified_chats_says_so_%s', async (viewport) => {
+    const { screen } = await renderRoute(`${PEOPLE}/${bob.personId}`, { viewport, seed: 'rivera_regulars' });
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(section.getByText('No verified conversations yet.', { exact: true })).toBeVisible();
+    expect(section.getByRole('link').elements()).toEqual([]);
+    expect(section.getByRole('list').elements()).toEqual([]);
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+  });
+
+  it('person_page_conversations_load_then_fail_with_a_retry', async () => {
+    // While the conversations are on their way, their loading line, and her contact already shows.
+    await cleanup();
+    mockStore.nextEpoch();
+    mockStore.reset('rivera_regulars');
+    const list = held();
+    mockStore.inject({ route: 'conversations', status: 200, until: list.until, body: await summaries() });
+    const slow = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 })).screen;
+    await expect.element(slow.getByRole('status').filter({ hasText: /^Loading their conversations$/ })).toBeVisible();
+    await expect.element(slow.getByRole('region', { name: 'Contact on record' })).toBeVisible();
+    expect(slow.getByRole('region', { name: 'Conversations', exact: true }).query()).toBeNull();
+    list.release();
+    await expect.element(slow.getByRole('region', { name: 'Conversations', exact: true }).getByRole('link').first()).toBeVisible();
+    expect(slow.getByRole('status').filter({ hasText: /^Loading their conversations$/ }).query()).toBeNull();
+
+    // A read that fails (and its one retry, at once): what went wrong and Try again, then her chats.
+    await cleanup();
+    mockStore.nextEpoch();
+    mockStore.reset('rivera_regulars');
+    mockStore.inject({ route: 'conversations', status: 503, times: 2 });
+    const failed = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100, retryScale: 0 })).screen;
+    await expect.element(failed.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(failed.getByRole('region', { name: `Rules for ${dana.name}` })).toBeVisible();
+    expect(failed.getByRole('region', { name: 'Conversations', exact: true }).query()).toBeNull();
+    await expectScreenBasics(failed.container, { owner: true });
+    await failed.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(failed.getByRole('region', { name: 'Conversations', exact: true }).getByRole('link').first()).toBeVisible();
+    expect(failed.getByText(UNAVAILABLE, { exact: true }).query()).toBeNull();
   });
 });
 

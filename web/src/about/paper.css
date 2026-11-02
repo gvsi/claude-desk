@@ -54,7 +54,6 @@
   --line-focus: var(--va-ink-2);
   /* No text entry is drawn on the paper. If one ever is, map line-field here too, so its outline and the
      composer's focused edge reach 3:1 on the paper. */
-  --line-field-focus: var(--va-ink-2);
   --status-handled: var(--va-done);
   --status-held: var(--va-held);
   --status-refused: var(--va-declined);
