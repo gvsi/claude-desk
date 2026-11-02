@@ -1385,8 +1385,11 @@ describe("Ask Claude's question about a hold", () => {
       if (outcome.key === 'rules' && outcome.ok) rulesRead = true;
     }));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport: 'desktop' });
-    await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+    // Each step may take a moment longer on a loaded runner; what they show, and their order, stay the same.
+    // The Rules read has landed while Needs you's read is still held.
+    await vi.waitFor(() => expect(rulesRead && reads.held() > 0).toBe(true), { timeout: 4_000 });
+    // Rules says it's still reading, and draws neither the body nor the hold question yet.
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Tool by tool' }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
@@ -1401,12 +1404,16 @@ describe("Ask Claude's question about a hold", () => {
     observer.observe(screen.container, { childList: true, subtree: true });
     onTestFinished(() => observer.disconnect());
     reads.release();
-    await expect.poll(() => pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?');
-    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    // Once Needs you lands, the hold question joins the chips.
+    await vi.waitFor(() => expect(pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?'), { timeout: 4_000 });
+    // The question shows, drawn in the same render as the body.
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' }), { timeout: 4_000 }).toBeVisible();
     expect(screen.getByRole('region', { name: 'Tool by tool' }).elements()).toHaveLength(1);
-    await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
+    // The suggested rule's draft button shows with them.
+    await expect.element(screen.getByRole('button', { name: 'Draft this rule' }), { timeout: 4_000 }).toBeVisible();
     expect(mismatches).toEqual([]);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
+    // And the reading note is gone.
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).not.toBeInTheDocument();
     expectNoHorizontalScroll();
   });
 

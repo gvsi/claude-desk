@@ -86,6 +86,22 @@ it('limits each activation sentence meta to the tool being turned on', () => {
   }
 });
 
+it('names a tool two automatic shared rules cover only together, in each rule and activation line', () => {
+  // Refund both sends money out and touches private data, so an automatic rule on either group
+  // covers it only beside an automatic rule on the other. Each line reads coverage among its side.
+  const payOut = card('auto-pay-out', 'effect:pay_out');
+  const privateData: RuleCard = { ...card('auto-private-data', 'effect:private_data'), who: 'record_owner' };
+  const refund: RuleDraft['turnedOn'][number] = {
+    ...chenBusinessTools[0]!, tool: 'payments.create_refund', source: 'mcp', business: null, effects: ['pay_out', 'private_data'],
+  };
+  const rows = changeRowViews(draft([], [payOut, privateData], [refund]), null, [refund]);
+  for (const key of ['auto-pay-out', 'auto-private-data', 'turned-on:payments.create_refund']) {
+    const row = rows.find((one) => one.key === key);
+    expect(row?.title, key).toEqual({ titles: ['Refund'] });
+    expect(row?.after?.sentence?.meta?.tools, key).toEqual({ titles: ['Refund'] });
+  }
+});
+
 it('an added rule follows the changed rows of its own tool', () => {
   // Weekday and Saturday bookings go to the default ask, and a 9-to-5 weekday booking rule comes in
   // beside them; Payment link's rule is reworded. The added booking rule reads with the booking rows
