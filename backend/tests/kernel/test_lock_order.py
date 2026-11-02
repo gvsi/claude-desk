@@ -31,7 +31,7 @@ from desk.contracts import Decision, ExecResult, NormalizedAction
 from desk.contracts import PolicyVersion as PolicyVersionContract
 from desk.db.models import CalendarSlot, DemoInboxEntry, Execution, PaymentLink, PolicyVersion
 from desk.db.session import database_url, libpq_url
-from desk.kernel_service import demo_inbox, desks, execute
+from desk.kernel_service import demo_inbox, desks, execute, payments
 from desk.kernel_service.adapters.base import AdapterFailure, AdapterResult, AdapterUnknown, ExecCtx
 
 from .fakes import FakeAdapter
@@ -47,7 +47,7 @@ from .test_handoff_card import legacy_call_back
 from .test_lead_tools import CALLBACK, callback, handoff_done
 from .test_link_completion import PASS as LINK_PASS
 from .test_link_completion import RV_LINK_100, charged, completed, rivera_cards, rv_link
-from .test_mandates import CHARGE, asked, rivera_agent
+from .test_mandates import CHARGE, LINK, asked, rivera_agent
 from .test_mandates import quoted as agent_quoted
 from .test_money_cap import post_draft
 from .test_payment_links import confirm, delay, landed, link_for, quoted, view
@@ -783,6 +783,63 @@ async def test_payment_reconciliation_keeps_the_lock_order(app, client, reviewer
     # the quote SKIP LOCKED before the link, since settling it records the payment
     assert completion.transactions == [["quotes", "payment_links", "facts", "ledger_heads"]]
     assert all(map(in_lock_order, completion.transactions))
+
+
+async def agent_link_and_charge(app: FastAPI, client, reviewer, frozen_clock) -> PaymentLink:
+    """A demo agent's payment link to its deposit quote, issued under the seed's `rv-link` (the reviewer
+    passes it), then the same quote paid by a mandate charge: the link's row, still `issued`."""
+    setup = await rivera_agent(app, client, frozen_clock)
+    signed = setup.turn()
+    reviewer.answer = LINK_PASS
+    quote_id = await agent_quoted(client, signed)
+    issuing = await asked(client, signed, LINK, quote_id, call_id="call-link")
+    assert issuing.outcome == "allow", issuing.reason_plain
+    assert (await executed(client, signed, issuing)).state == "succeeded"
+    charging = await asked(client, signed, CHARGE, quote_id, call_id="call-charge")
+    assert charging.outcome == "allow", charging.reason_plain
+    assert (await executed(client, signed, charging)).state == "succeeded"
+    [link] = await rows_of(app, setup.desk.copy_id, select(PaymentLink))
+    assert link.state == "issued"
+    return link
+
+
+async def test_a_read_cancels_a_paid_quotes_link_in_the_lock_order(app, client, reviewer, frozen_clock):
+    link = await agent_link_and_charge(app, client, reviewer, frozen_clock)
+    with lock_log(app) as cancelled:
+        assert (await view(client, link.token)).state == "cancelled"
+    # an unlocked read finds the quote paid; then the quote SKIP LOCKED before the link, the link's
+    # fact expired (and the agent's reservation released, an adapter's own row this log doesn't name),
+    # then the ledger head
+    assert cancelled.transactions == [["quotes", "payment_links", "facts", "ledger_heads"]]
+    assert all(map(in_lock_order, cancelled.transactions))
+
+
+async def test_a_started_completion_of_a_paid_quotes_link_is_refused_in_the_lock_order(
+        app, client, reviewer, frozen_clock, monkeypatch):
+    link = await agent_link_and_charge(app, client, reviewer, frozen_clock)
+    seen: list[str] = []
+
+    async def read_meanwhile() -> None:
+        seen.append((await view(client, link.token)).state)
+
+    monkeypatch.setattr(payments, "_after_marker", read_meanwhile)
+    with lock_log(app) as completion:
+        response = await client.post(f"/payment_links/{link.token}/complete", json={})
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    # a read once the marker is set leaves the link to its completion, and C2 refuses it for its quote
+    assert seen == ["issued"]
+    assert completion.transactions == [
+        ["payment_links"],                                          # C1: the marker
+        ["payment_links"],                                          # the read, SKIP LOCKED: it moves nothing
+        # C2: the quote before the link, then the link cancelled, its fact, then the ledger head
+        ["sessions", "quotes", "payment_links", "facts", "ledger_heads"],
+    ]
+    assert all(map(in_lock_order, completion.transactions))
+    [row] = await rows_of(app, link.copy_id, select(PaymentLink).where(PaymentLink.link_id == link.link_id))
+    assert (row.state, row.cancel_reason) == ("cancelled", None)
+    entries = [entry.event.summary for entry in await ledger_rows(app, link)
+               if entry.event.kind == "payment" and entry.event.summary.get("link_id") == link.link_id]
+    assert entries[-1] == {"link_id": link.link_id, "state": "cancelled", "reason": "quote_paid"}
 
 
 @pytest.mark.solver
