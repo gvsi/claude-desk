@@ -2620,10 +2620,13 @@ async def test_charge_mandate_bounds_and_commits(kernel, ro_read):
 
 
 @pytest.mark.kernel_plan("01c")
-async def test_a_link_whose_quote_a_mandate_charge_paid_reads_cancelled(kernel, ro_read):
+@pytest.mark.parametrize("first", ["read", "complete"])
+async def test_a_link_whose_quote_a_mandate_charge_paid_reads_cancelled(kernel, ro_read, first):
     """A quote is paid once. An agent gets a payment link to its deposit quote, then pays the same quote within its
-    mandate: the link can never be paid now, so the checkout reads it `cancelled`, naming no rule change, and
-    completing it is 409 `conflict`. The mandate holds the one $20 charge and nothing more."""
+    mandate: the link can never be paid now. Whether the checkout reads it first or completes it first, it is
+    cancelled once, ledgered `payment` `{link_id, state: "cancelled", reason: "quote_paid"}` with nothing more for
+    the move, and then reads `cancelled`, naming no rule change; completing it is 409 `conflict`. The mandate holds
+    the one $20 charge and nothing more."""
     http, ro_schema, state = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -2634,16 +2637,22 @@ async def test_a_link_whose_quote_a_mandate_charge_paid_reads_cancelled(kernel, 
     owner = http.owner(copy.owner_token) if state is None else None      # the real kernel holds it for the owner
     token, _ = await issue_payment_link(view, session_id, item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
                                         owner=owner)
-    (link,) = ro_read(ro_schema, copy.copy_id, "SELECT quote_id FROM {ro}.payment_links WHERE session_id = %s",
-                      (session_id,))
+    (link,) = ro_read(ro_schema, copy.copy_id, "SELECT link_id, quote_id FROM {ro}.payment_links"
+                                               " WHERE session_id = %s", (session_id,))
     view = turn_view(http, issued, slug, session_id, "Charge the deposit to the signed limit")
     charging = await decide(view, session_id, 0, "call-charge", "native.charge_mandate", {"quote_id": link["quote_id"]})
     assert charging.outcome == "allow"
     assert (await execute(view, charging, 0)).state == "succeeded"
 
     get, complete, _ = LINK_ROUTES
+    if first == "complete":
+        assert await refused(checkout(http, complete, token)) == (409, "conflict")
     shown = await checkout(http, get, token)
     assert (shown.state, shown.cancel_reason, shown.customer_name) == ("cancelled", None, None)
+    page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
+    moved = [entry.event.summary for entry in page.entries if entry.event.kind == "payment"
+             and entry.event.summary.get("link_id") == link["link_id"] and entry.event.summary.get("state") != "issued"]
+    assert moved == [{"link_id": link["link_id"], "state": "cancelled", "reason": "quote_paid"}]
     assert await refused(checkout(http, complete, token)) == (409, "conflict")
     assert (await checkout(http, get, token)).state == "cancelled"
     (row,) = ro_read(ro_schema, copy.copy_id, "SELECT state FROM {ro}.payment_links WHERE session_id = %s",
