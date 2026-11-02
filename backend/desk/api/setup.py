@@ -74,13 +74,14 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   when changes are made in the owner app), the owner's message takes the interview back to `questions` as its next
   turn, answered on the contact question behind a code ask the owner isn't shown. A change that belongs to another
   topic is asked there next, a limit on its own question with code's choices (`_next_ask`, on that turn alone), and
-  so is a fact the turn gave that the contact question can't record off its topic (`_held_off_topic`). A drop of a
-  job or connector the owner accepted shows its card again for them to decide, unless the same call adds a job of
-  its kind, which replaces it (`_record_plan`). The turn drops the rules draft, so the rules, situations and safety
-  check are drafted again on the way forward; the confirm then waits for the safety check to run again, and proving
-  work that read the interview before a reopen never writes after it (`Interview.reopens`). The safety check, the
-  confirm and going live never run alongside a change in this process (`_transition`). Each send carries an
-  idempotency key, kept on the owner's message.
+  so is each fact the turn gave that the contact question can't record off its topic, in turn (`_held_off_topic`,
+  `Entry.asks_after`). A drop of a job or connector the owner accepted shows its card again for them to decide (and
+  "Use your suggestions" settles it as their no), unless the same call adds a job of its kind, which replaces it
+  (`_record_plan`); a Stripe connection taken away has its payment tools switched off (`publish_plan`). The turn
+  drops the rules draft, so the rules, situations and safety check are drafted again on the way forward; the confirm
+  then waits for the safety check to run again, and proving work that read the interview before a reopen never
+  writes after it (`Interview.reopens`). The safety check, the confirm and going live never run alongside a change in
+  this process (`_transition`). Each send carries an idempotency key, kept on the owner's message.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
