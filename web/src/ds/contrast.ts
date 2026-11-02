@@ -12,8 +12,6 @@ export type ContrastPair = {
   readonly fg: string;
   /** The color token it sits on. */
   readonly ground: string;
-  /** A different fill under the foreground, such as the selected thumb beside its track. */
-  readonly fgGround?: string;
   /** What the ground sits on: an opaque token, or a translucent one with `under` beneath it. */
   readonly over?: string;
   /** The opaque token under a translucent `over`, such as the app under a card's fill. */
@@ -106,11 +104,10 @@ function luminance({ r, g, b }: Rgba): number {
  * `var(--token)`, a hex color, an `rgb()`/`rgba()` color or `transparent`. The ground sits on
  * `over`, and a translucent `over` on an opaque `under`; at an `opacity` under 1 the label and the
  * ground fade together over what is beneath them. Throws on anything it can't read, and on layers
- * that don't end on something opaque. `fgGround` names the fill under the foreground when it
- * differs from the adjacent ground, as an inset thumb edge beside its track does. Tokens read their values in `theme`, dark unless asked.
+ * that don't end on something opaque. Tokens read their values in `theme`, dark unless asked.
  */
 export function pairContrast(
-  { fg, ground, fgGround, over, under, opacity = 1 }: Omit<ContrastPair, 'min' | 'use' | 'themes'>,
+  { fg, ground, over, under, opacity = 1 }: Omit<ContrastPair, 'min' | 'use' | 'themes'>,
   theme: Theme = 'dark',
 ): number {
   if (under !== undefined && over === undefined) throw new Error(`${under} is under nothing; name the layer it sits under as over`);
@@ -129,7 +126,7 @@ export function pairContrast(
 
   const groundColor = parseColor(ground, theme);
   const fade = (c: Rgba): Rgba => ({ ...c, a: c.a * opacity });
-  const label = fade(composite(parseColor(fg, theme), fgGround === undefined ? groundColor : parseColor(fgGround, theme)));
+  const label = fade(composite(parseColor(fg, theme), groundColor));
   const fill = fade(groundColor);
   const back = beneath === undefined ? fill : composite(fill, beneath);
   if (back.a !== 1) throw new Error(`${ground} is translucent; pass the opaque color it sits over`);
@@ -237,11 +234,9 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['qr-ink'], ['qr-tile'], 3, "The QR code's dark modules on its sand tile, on Share's printable card."),
   ...pairs(['line-field'], ['bg-surface', 'bg-app'], 3, "A text field's outline, its boundary, on a dialog or a page."),
   ...pairs(['line-focus'], ['bg-surface', 'bg-app'], 3, "A text field's 2 px focused edge against its ground, on a dialog or a page."),
-  ...['bg-app', 'bg-panel', 'bg-surface'].map((over): ContrastPair => ({
-    fg: 'line-focus', fgGround: 'bg-selected', ground: 'fill-count', over, min: 3,
-    use: "The selected segmented thumb's inset edge against its track; the fill beneath the edge is the thumb's, not the track's.",
-  })),
   ...pairs(['line-field'], ['fill-card'], 3, "The outline of an inline CopyField's value, such as the agents page's address, in a card.", 'bg-app'),
+  ...pairs(['line-field'], ['fill-count'], 3, "The chosen segment's edge in a SegmentedControl, against its track on a page.", 'bg-app'),
+  ...pairs(['line-focus'], ['fill-count'], 3, "A segment's 2 px keyboard focus edge in a SegmentedControl, against its track on a page.", 'bg-app'),
   ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'A danger button in a card, such as Deny this time on a held request, at rest and on hover.', 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['fill-card'], 4.5, 'A danger-ghost button in a card: a refusal in red words with no fill.', 'bg-app'),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, 'A danger-ghost button in a card while it is hovered.', 'fill-card', { under: 'bg-app' }),

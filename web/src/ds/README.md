@@ -160,7 +160,6 @@ Field state-change pairs on `bg-app` (each edge composited against that ground s
 | --- | ---: | ---: | ---: | ---: |
 | Focused edge vs resting `line-field` | 1.29 | 1.46 | 2.04 | 2.27 |
 
-The selected segmented thumb keeps `bg-selected` and `text-primary`, with a 1 px inset `line-focus` edge against the `fill-count` track (3:1 in both themes). Keyboard focus strengthens this to 2 px. Both layers are measured on the app, panel and surface grounds in `CONTRAST_PAIRS`.
 
 On the intro illustration's light cards, `illustration-ink` reads 16.3 and `illustration-ink-secondary` 5.4 on `illustration-card`, and `illustration-ink` reads 13.1 on `illustration-avatar`. The check and the receipt dots in `illustration-handled` read 4.9 (3:1).
 

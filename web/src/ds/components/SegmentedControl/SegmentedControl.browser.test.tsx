@@ -1,13 +1,14 @@
-/** Touch targets keep the track, labels and inline baseline exactly where they were. */
+/**
+ * Touch targets keep the track, labels and inline baseline exactly where they were, and the chosen
+ * segment shows by its edge, not by its ink alone.
+ */
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { userEvent } from 'vitest/browser';
-import { render } from 'vitest-browser-react';
-import { chooseTheme } from '../../test/theme.ts';
-import { pairContrast } from '../../contrast.ts';
 import { expect, it } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
 import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
+import { chooseTheme } from '../../test/theme.ts';
 import { SegmentedControl } from './SegmentedControl.tsx';
 
 declare global {
@@ -67,31 +68,86 @@ it('touch_segments_reach_44_px_and_cap_their_shared_gap_without_moving', async (
   }
 });
 
-
-it.each(['dark', 'light'] as const)('the_selected_thumb_has_a_visible_edge_in_%s', async (theme) => {
-  chooseTheme(theme);
-  const screen = await render(<SegmentedControl label="Appearance" options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]} value="dark" onChange={() => {}} />);
-  try {
-    const selected = screen.getByRole('radio', { name: 'Dark' }).element() as HTMLElement;
-    const track = selected.parentElement!;
+it('the_chosen_segment_has_a_field_edge_and_choosing_moves_nothing', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const options = [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }];
+  const draw = (value: string) => act(() => root.render(<SegmentedControl label="Appearance" options={options} value={value} onChange={() => {}} />));
+  const segments = () => [...host.querySelectorAll<HTMLElement>('.cd-segmented__option')];
+  const edges = () => segments().map((segment) => {
+    const style = getComputedStyle(segment);
+    return [style.borderTopWidth, style.borderTopStyle, style.borderTopColor].join(' ');
+  });
+  const boxes = () => [host.querySelector('.cd-segmented'), ...segments()].map((element) => element!.getBoundingClientRect().toJSON());
+  const field = () => getComputedStyle(host.querySelector('.cd-segmented')!).getPropertyValue('--line-field').trim();
+  const resolved = (color: string) => {
     const probe = document.createElement('span');
-    probe.style.color = 'var(--line-focus)';
-    track.append(probe);
-    const edge = getComputedStyle(probe).color;
+    probe.style.color = color;
+    host.append(probe);
+    const value = getComputedStyle(probe).color;
     probe.remove();
-    const style = () => getComputedStyle(selected);
-    const bounds = selected.getBoundingClientRect().toJSON();
-    expect(style().boxShadow).toBe(`${edge} 0px 0px 0px 1px inset`);
-    expect(pairContrast({ fg: edge, fgGround: style().backgroundColor, ground: getComputedStyle(track).backgroundColor, over: getComputedStyle(document.body).backgroundColor })).toBeGreaterThanOrEqual(3);
-    await userEvent.hover(selected);
-    expect(style().boxShadow).toBe(`${edge} 0px 0px 0px 1px inset`);
-    await userEvent.keyboard('{Tab}');
-    selected.focus();
-    expect(selected.matches(':focus-visible')).toBe(true);
-    expect(style().boxShadow).toBe(`${edge} 0px 0px 0px 2px inset`);
-    expect(selected.getBoundingClientRect().toJSON()).toEqual(bounds);
+    return value;
+  };
+  try {
+    for (const theme of ['dark', 'light'] as const) {
+      chooseTheme(theme);
+      draw('system');
+      // The chosen segment's edge is the field outline, which reads 3:1 on the track in both themes
+      // (contrast.ts); the others keep a clear edge of the same width, so nothing shifts.
+      const chosen = `1px solid ${resolved(field())}`;
+      const clear = '1px solid rgba(0, 0, 0, 0)';
+      expect(edges(), theme).toEqual([chosen, clear, clear]);
+      const before = boxes();
+      draw('dark');
+      expect(edges(), theme).toEqual([clear, clear, chosen]);
+      expect(boxes(), `${theme}: choosing moves no segment and no track`).toEqual(before);
+    }
   } finally {
-    await screen.unmount();
-    chooseTheme('dark');
+    act(() => root.unmount());
+    host.remove();
+  }
+});
+
+it('keyboard_focus_draws_a_2px_focus_edge_unlike_the_chosen_segments_field_edge', async () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const options = [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }];
+  const resolved = (color: string) => {
+    const probe = document.createElement('span');
+    probe.style.color = color;
+    host.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  };
+  const before = document.createElement('button');
+  before.textContent = 'Before';
+  host.before(before);
+  try {
+    for (const theme of ['dark', 'light'] as const) {
+      chooseTheme(theme);
+      act(() => root.render(<SegmentedControl label="Appearance" options={options} value="light" onChange={() => {}} />));
+      const chosen = host.querySelector<HTMLElement>('.cd-segmented__option[aria-checked="true"]')!;
+      const box = chosen.getBoundingClientRect().toJSON();
+      const focus = resolved(getComputedStyle(chosen).getPropertyValue('--line-focus').trim());
+      // Reached by keyboard: the border and base.css's inset, both line-focus, a 2 px edge that
+      // differs from the chosen segment's 1 px line-field edge in colour and width, and nothing moves.
+      before.focus();
+      await userEvent.keyboard('{Tab}');
+      expect(document.activeElement, theme).toBe(chosen);
+      const style = getComputedStyle(chosen);
+      expect(style.borderTopColor, theme).toBe(focus);
+      expect(style.boxShadow, theme).toBe(`${focus} 0px 0px 0px 1px inset`);
+      expect(chosen.getBoundingClientRect().toJSON(), `${theme}: focus moves nothing`).toEqual(box);
+      chosen.blur();
+    }
+  } finally {
+    act(() => root.unmount());
+    host.remove();
+    before.remove();
   }
 });

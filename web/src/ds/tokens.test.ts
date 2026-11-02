@@ -176,16 +176,6 @@ describe('design tokens', () => {
     }
   });
 
-  test('the_selected_segment_has_an_edge_at_3_to_1_against_its_track', () => {
-    for (const over of ['bg-app', 'bg-panel', 'bg-surface']) {
-      const pair = CONTRAST_PAIRS.find((p) => p.fg === 'line-focus' && p.ground === 'fill-count' && p.over === over);
-      expect(pair, `selected thumb against track on ${over}`).toBeDefined();
-      expect(pair?.min).toBe(3);
-      expect(pair?.fgGround).toBe('bg-selected');
-      for (const theme of THEMES) expect(pairContrast(pair!, theme)).toBeGreaterThanOrEqual(3);
-    }
-  });
-
   test('focus_edge_is_the_secondary_ink', () => {
     // Keyboard focus changes a control's own edge, never the link blue and never a ring outside it
     // (owner, 2026-11-01): line-focus, the secondary ink, which the About pages' paper points at its own.
@@ -658,13 +648,6 @@ describe('design tokens', () => {
       expect(after).toBeGreaterThan(before);
       expect(after).toBeCloseTo(theme === 'light' ? 1.46 : 2.27, 2);
     }
-  });
-
-  test('a_thumb_edge_is_composited_on_the_thumb_before_comparing_it_with_the_track', () => {
-    // Dark line-focus at 64% over #3c392f is rgb(181.6,179.88,173.72), while the
-    // fill-count track is rgb(39.1,38.1,36) on bg-app. These are adjacent pixels.
-    expect(pairContrast({ fg: 'line-focus', fgGround: 'bg-selected', ground: 'fill-count', over: 'bg-app' }))
-      .toBeCloseTo(contrastRatio('rgb(181.6,179.88,173.72)', 'rgb(39.1,38.1,36)'), 6);
   });
 
   test('contrast_composites_layers_and_opacity', () => {
