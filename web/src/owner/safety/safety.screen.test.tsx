@@ -845,6 +845,41 @@ describe('Safety', () => {
     expect(open.element().textContent).not.toContain('The rule that turned it down');
   });
 
+  it('a_failed_rules_read_still_names_an_always_on_rule_and_says_so_for_an_owners_rule', async () => {
+    // The always-on rules need no read, so a request one of them turned down still names it. One the
+    // owner's own Never rule turned down says the read failed, with Try again, in the rule's place,
+    // and names the rule once the rules are read.
+    const never = { ...rivera.ruleCards['rv-refund'], card_id: 'rv-no-refunds', mode: 'never' as const, who: 'anyone' as const, reason: 'Refunds never go out.' };
+    const rules = await mockStore.dispatch('rules', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in rules || rules.status !== 200) throw new Error('the mock reads the rules');
+    const view = rules.body as RulesView;
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts([attempt({ ref_id: 'dec-private', cause: 'not_verified' }), attempt({ ref_id: 'dec-never', cause: 'owner_rule', card_ids: ['rv-no-refunds'] })]);
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    const { screen } = await renderRoute(`${SAFETY}/dec-private`, { retryScale: 0 });
+    const open = detail(screen);
+    await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
+      'The rule that turned it downClaude never shows private data to anyone but its verified ownerShare a document and See charges · EveryoneNever',
+    );
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+
+    await screen.getByRole('link', { name: /Your rule says no/ }).click();
+    const failed = open.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    expect(open.getByRole('group', { name: 'The rule that turned it down', exact: true }).elements()).toHaveLength(0);
+    // Right under what was stopped, where the rule goes.
+    const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
+    const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
+    expect(at(failed.element())).toBe(at(open.getByText(REFUND_REASON, { exact: true }).element()) + 1);
+
+    mockStore.inject({ route: 'rules', status: 200, times: 10_000, body: { ...view, active: { ...view.active, cards: [...view.active.cards, never] } } });
+    await open.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
+      'The rule that turned it downClaude never sends refundsRefund · AnyoneNever',
+    );
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+  });
+
   it.each(['missing', 'empty'] as const)('an_entry_with_its_visitor_words_%s_shows_none', async (words) => {
     // During a deploy, a newer page can read an older API that sends no `from_the_visitor` at all,
     // and an empty one quotes nothing: either way the entry shows no label and no quote.

@@ -151,6 +151,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const needsYouRetryRef = useReadRecoveryFocus(() =>
     (needsYouSection.current ?? liveNow.current ?? sinceLastNight.current)?.querySelector<HTMLElement>('h2') ?? null,
   );
+  // A focused Try again on the rules' failed read hands its place to Needs you's heading.
+  const rulesRetryRef = useReadRecoveryFocus(() => needsYouSection.current?.querySelector<HTMLElement>('h2') ?? null);
   const [returning] = useState(() => briefingOpener?.deskId === deskId && briefingOpener.key === location.key ? briefingOpener : null);
   // This return spends the hash landing for the entry that opened the briefing.
   // Fresh hash entries and returns from other pages still land as usual.
@@ -319,6 +321,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                 answers={answers}
                 readAt={readAt}
                 rules={rules.rules}
+                rulesFailure={rules.failure}
+                rulesRetryRef={rulesRetryRef}
                 registerCard={registerCard}
                 answeredFocus={answeredFocus}
                 readFailure={readFailure}

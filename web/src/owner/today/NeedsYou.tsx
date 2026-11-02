@@ -34,6 +34,10 @@ export interface NeedsYouProps {
   readAt: number;
   /** The active rules, once read, which name the rule that held each request. */
   rules: RequestRules | null;
+  /** The rules' latest read failed, so the held requests can't name their rules: said with Try again while any is listed. */
+  rulesFailure: ReadFailure | null;
+  /** Tracks focus before the rules' recovered read removes its Try again. */
+  rulesRetryRef: Ref<HTMLButtonElement>;
   /** Called with each request's card as it mounts and unmounts, so "Open the request" and a request's address can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
   /** `useAnsweredFocus` over `answers.answered`, kept by the page so a request's address can find its answered card. */
@@ -51,12 +55,28 @@ export interface NeedsYouProps {
 }
 
 /**
- * Today's "Needs you": a failed read first, when the latest one failed; then one list of the held
+ * Today's "Needs you": a failed read first, when the latest one failed, and with a request listed, a
+ * failed read of the rules its card would name; then one list of the held
  * requests and those answered here, oldest first, each an approval card answered in place, then
  * each open handoff. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, rules, registerCard, answeredFocus, readFailure, retryRef, sectionRef, onDismiss, onDone }: NeedsYouProps) {
+export function NeedsYou({
+  held,
+  callbacks,
+  answers,
+  readAt,
+  rules,
+  rulesFailure,
+  rulesRetryRef,
+  registerCard,
+  answeredFocus,
+  readFailure,
+  retryRef,
+  sectionRef,
+  onDismiss,
+  onDone,
+}: NeedsYouProps) {
   const titleId = useId();
   const now = useTodayNow();
   const open = held.length + callbacks.length;
@@ -86,6 +106,8 @@ export function NeedsYou({ held, callbacks, answers, readAt, rules, registerCard
     <section ref={sectionRef} className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
       <SectionHeader id={titleId} title="Needs you" count={open > 0 ? { n: open, label: countLabel(open) } : undefined} />
       <ReadFailed failure={readFailure} buttonRef={retryRef} />
+      {/* One line at a time: Needs you's own failure first, then the rules', once a request is listed. */}
+      {readFailure === null && requests.length > 0 ? <ReadFailed failure={rulesFailure} buttonRef={rulesRetryRef} /> : null}
       {requests.length + callbacks.length > 0 ? (
         <ul className="cd-needs-you">
           {requests.map((item) => {

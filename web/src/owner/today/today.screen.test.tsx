@@ -598,6 +598,26 @@ describe('Today', () => {
     await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
   });
 
+  it('a_failed_rules_read_says_so_over_the_held_card', async () => {
+    // The rules can't be read, so the held card can't name the rule that held it: Needs you says
+    // the read failed, with Try again, rather than leaving the box out as if no rule had held it.
+    // Try again reads them, and the box lands on the card.
+    const { screen } = await renderRoute(TODAY, {
+      seed: 'rivera',
+      retryScale: 0,
+      beforeRender: () => mockStore.inject({ route: 'rules', status: 503, times: 2 }),
+    });
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    const failed = needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    expect(card.getByRole('group', { name: 'Your rule', exact: true }).elements()).toHaveLength(0);
+    await needs.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await expect.poll(() => needs.getByRole('alert').elements().length).toBe(0);
+  });
+
   it('reload_waits_for_the_rules_a_held_card_names', async () => {
     // A held card names the rule that held it, so with a request held, a reload's loading page
     // stays until the rules are read too: Today then opens with the card's "Your rule" box drawn,

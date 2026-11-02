@@ -681,6 +681,23 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('a_failed_rules_read_says_so_over_the_held_card', async () => {
+    // The rules can't be read, so the held card can't name its rule: the chat says the read failed,
+    // with Try again, and the box lands once it reads them.
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), {
+      retryScale: 0,
+      beforeRender: () => mockStore.inject({ route: 'rules', status: 503, times: 2 }),
+    });
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held).toBeVisible();
+    const failed = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    expect(held.getByRole('group', { name: 'Your rule', exact: true }).elements()).toHaveLength(0);
+    await screen.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(held.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await expect.poll(() => screen.getByRole('alert').elements().length).toBe(0);
+  });
+
   it('denied_request_hands_off_with_claudes_summary', async () => {
     // The seeded chat's draft was stopped, so its triage is Safety's. Its held request shows no
     // summary; denied, the follow-up hands the chat to Mike, and the handoff's card carries that

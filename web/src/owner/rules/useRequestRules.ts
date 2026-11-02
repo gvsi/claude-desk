@@ -9,6 +9,7 @@ import { useState } from 'react';
 import type { RuleCard } from '../../api/contracts.ts';
 import { businessTools } from '../connectors/catalog.ts';
 import { FRESH_MS, type ReadOptions } from '../useDesks.ts';
+import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { requestRulesQuery } from './requestRulesQuery.ts';
 import { peopleQuery } from './RuleDraftReview.tsx';
 import type { SentenceWords } from './ruleSentence.ts';
@@ -29,6 +30,11 @@ export interface RequestRulesRead {
    * settled it stays settled, so a paused read sent again on reconnect never brings a skeleton back.
    */
   settled: boolean;
+  /**
+   * The latest read failed: the line and Try again a screen shows where the rule would be named, so
+   * a failed read never looks like a request no rule decided. Null once a read works.
+   */
+  failure: ReadFailure | null;
 }
 
 /**
@@ -38,6 +44,7 @@ export interface RequestRulesRead {
  */
 export function useRequestRules(deskId: string, { retryOnMount = true }: ReadOptions = {}): RequestRulesRead {
   const rules = useQuery({ ...requestRulesQuery(deskId), staleTime: FRESH_MS, retryOnMount });
+  const failure = useReadFailure(rules, { pausedRoute: 'rules' });
   const view = rules.data;
   const namesPeople = view?.active.cards.some((card) => card.who === 'person') ?? false;
   const people = useQuery({ ...peopleQuery(deskId), enabled: namesPeople });
@@ -45,10 +52,11 @@ export function useRequestRules(deskId: string, { retryOnMount = true }: ReadOpt
   const [wasSettled, setWasSettled] = useState(settledNow);
   if (settledNow && !wasSettled) setWasSettled(true);
   const settled = settledNow || wasSettled;
-  if (view === undefined) return { rules: null, settled };
+  if (view === undefined) return { rules: null, settled, failure };
   const cards = view.active.cards;
   return {
     rules: { cards, words: { business: businessTools(view.tools), tools: view.tools, cards, people: people.data ?? null } },
     settled,
+    failure,
   };
 }

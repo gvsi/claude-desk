@@ -177,6 +177,8 @@ interface AttemptsViewProps {
   deskId: string;
   /** The active rules, once read, which name the rule that turned a request down. */
   rules: RequestRules | null;
+  /** The rules' latest read failed. */
+  rulesFailure: ReadFailure | null;
   /** The attempt the address opens, if it names one. */
   refId: string | undefined;
   page: LedgerPage | undefined;
@@ -191,7 +193,7 @@ interface AttemptsViewProps {
  * read is said above, beside the headline (`Headline`), over the attempts read before, and
  * with nothing read yet it takes the place of "Reading what was stopped".
  */
-function AttemptsView({ deskId, rules, refId, page, devKey, timezone }: AttemptsViewProps) {
+function AttemptsView({ deskId, rules, rulesFailure, refId, page, devKey, timezone }: AttemptsViewProps) {
   const safety = useAttempts(deskId);
   const failure = useReadFailure(safety, { pausedRoute: 'safety' });
   const [filter, setFilter] = useState(ALL);
@@ -250,7 +252,7 @@ function AttemptsView({ deskId, rules, refId, page, devKey, timezone }: Attempts
       <div className="cd-safety__beside">
         {open !== null ? (
           <div ref={opened} className="cd-safety__opened" tabIndex={-1}>
-            <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} rules={rules} />
+            <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} rules={rules} rulesFailure={rulesFailure} />
           </div>
         ) : refId !== undefined ? (
           <EmptyState title="This one isn't in the list" body="It may be from an earlier copy of this Desk. Choose one from the list to see how it was stopped." />
@@ -331,7 +333,7 @@ export function SafetyPage() {
             <RecordList page={ledger.data} devKey={devKey} timezone={business.timezone} />
           ) : null
         ) : (
-          <AttemptsView deskId={deskId} rules={rules.rules} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />
+          <AttemptsView deskId={deskId} rules={rules.rules} rulesFailure={rules.failure} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />
         )}
       </SkeletonScreen>
     </div>

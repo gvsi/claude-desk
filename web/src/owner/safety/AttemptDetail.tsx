@@ -4,9 +4,12 @@ import type { LedgerPage } from '../../api/contracts.ts';
 import type { Attempt } from '../../api/views.ts';
 import { Card, CheckpointMeter, FullTrace, Icon, OWNER_STATE_WORDS, RuleSentence, StatusLabel, TextLink } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { NO_BUSINESS_TOOLS } from '../connectors/catalog.ts';
 import { conversationPath } from '../conversations/status.ts';
+import { ReadFailed } from '../ReadFailed.tsx';
 import { turnedDownRule } from '../rules/requestRule.ts';
 import type { RequestRules } from '../rules/useRequestRules.ts';
+import type { ReadFailure } from '../useReadFailure.ts';
 import { REPLAYED_LABEL, attemptTime, categoryLabel, entryFor, originCopy, replayedOf, stoppedBy, triageOf } from './copy.ts';
 import { focusTrace } from './focusTrace.ts';
 
@@ -19,8 +22,10 @@ export interface AttemptDetailProps {
   deskId: string;
   /** The business's time zone, which the time is read in. */
   timezone: string;
-  /** The active rules, once read (`useRequestRules`), which name the rule that turned a request down. */
+  /** The active rules, once read (`useRequestRules`), which name the owner's rule that turned a request down. */
   rules: RequestRules | null;
+  /** The rules' latest read failed: said in the rule's place for a request the owner's own rule turned down. */
+  rulesFailure: ReadFailure | null;
 }
 
 /** The label over the rule that turned a request down. */
@@ -67,7 +72,7 @@ function Toggle({ label, open, controls, onToggle, buttonRef }: ToggleProps) {
  * that made it, quoted; Claude's summary, labelled as written by Claude; then, on request, the
  * checkpoints it went through and the signed entry it is kept in; and its conversation.
  */
-export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules }: AttemptDetailProps) {
+export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules, rulesFailure }: AttemptDetailProps) {
   const [showHow, setShowHow] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
   const traceButton = useRef<HTMLButtonElement>(null);
@@ -81,7 +86,9 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules }
   const claim = CLAIMS[attempt.kind] ?? null;
   const replayed = entry !== null && replayedOf(entry) !== null;
   const sessionId = entry?.event.session_id ?? null;
-  const rule = rules === null ? null : turnedDownRule(attempt, rules.cards, rules.words);
+  // An always-on rule needs no read of the rules; the owner's own Never rule does.
+  const rule = turnedDownRule(attempt, rules?.cards ?? [], rules?.words ?? { business: NO_BUSINESS_TOOLS });
+  const ruleUnread = rule === null && attempt.kind === 'refused' && attempt.cause === 'owner_rule' && rules === null;
   const ruleLabelId = useId();
 
   const toggleTrace = () => {
@@ -131,6 +138,8 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules }
             </p>
             <RuleSentence parts={rule.parts} meta={rule.meta} outcome={rule.outcome} />
           </div>
+        ) : ruleUnread ? (
+          <ReadFailed failure={rulesFailure} />
         ) : null}
         {/* The visitor's own untrusted words that made the request, from the chat, not the signed
             record: a part of their own, labelled as Claude's summary below is, and text only. An

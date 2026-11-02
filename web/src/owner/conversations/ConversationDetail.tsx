@@ -401,6 +401,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
+      {/* A request held here can't name its rule while the rules' latest read has failed. */}
+      {heldFailure === null && heldIds.length > 0 && rules.failure !== null ? <FailedRead failure={rules.failure} /> : null}
       {/* The transcript and its handoff cards scroll between the bar and the owner's controls, or in a short window under the bar, with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
         {callbacks.length > 0 ? (
