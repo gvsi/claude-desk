@@ -874,7 +874,8 @@ reviewed its tools, never that it's already connected. If <setup_plan> shows an 
 say they can finish connecting it on the Tools step; jobs that use it stay in the plan. Payments through Stripe can \
 also be connected on the Tools step if they turned Stripe down. You can't change a card the owner already decided or \
 decide it again: a job they accepted stays as they chose, and one they turned down can come back as a new job in \
-add_jobs when they ask for it."""
+add_jobs when they ask for it. Once the questions are done, Change something under the plan can change an accepted \
+job; that turn says how."""
 
 _SAFETY = """\
 What you never decide
@@ -1265,6 +1266,19 @@ SETUP_CLIENT_CARDS = {
 }
 SETUP_CLOSING_LINE = ("Every topic is covered and the plan is settled. Write the closing plan now. "
                       "Set next to done; only plan and reply will be read.")
+# The turn of a change the owner sent with "Change something" from a step after the questions (`setup.reopen`): code
+# adds this line to that turn's message alone (`setup._turn_message`, while `Interview.reopening`). A drop of an
+# accepted job or app shows its card again for the owner to decide (`setup._record_plan`), and a covered topic Claude
+# names in next is asked again on that turn alone (`setup._next_ask`).
+SETUP_REOPEN_LINE = (
+    "This turn: the owner pressed Change something from a later step, and <owner_answer> is the change they want; "
+    "no question was asked. To take away a job or app they accepted, put its id from <setup_plan> in drop; to change "
+    "a job, also put the changed job in add_jobs. Code then shows a card for them to decide, so say you'll show it, "
+    "never that it's changed. To change a fact, put it in its field as usual: code asks one that belongs to another "
+    "topic on that topic's question. To change a limit, or a fact this turn has no field for, set next to its topic "
+    "even though it's covered, with step_done true: code asks it next, after any such fact, and a limit in its own "
+    "words.")
+
 # This turn's line when the owner answered the test-client offer, after the closing plan, with neither a yes nor a no
 # (`_consult_on_offer` in setup.py): on each of its planning calls, in place of a card decision or a limit answer.
 SETUP_OFFER_ANSWER_LINE = (
@@ -1280,9 +1294,10 @@ SETUP_OFFER_ANSWER_LINE = (
     "next to its id, with question as the short line before its card, leave reply empty and add nothing. When they "
     "ask for an app <setup_plan> doesn't list, set next to it, with question as the line before its card; an app it "
     "already lists can't be proposed again, so say where it stands. Facts, limits and the jobs they accepted stay as "
-    "they are: those cards are closed and no later screen changes a job, so never say you've changed one, never "
-    "point to a card or another place to change it, and don't add a second job to change one; say plainly it stays "
-    "as they chose. A client that can't show cards gets no jobs or apps here: say you can't add one from here. "
+    "they are: this answer can't change them, so never say you've changed one, don't point to a card to change it, "
+    "and don't add a second job to change one. Say plainly it stays as they chose for now, and that once they've "
+    "answered the offer, they can change it with Change something under the plan. A client that can't show cards "
+    "gets no jobs or apps here: say you can't add one from here. "
     "Leave plan empty.")
 SETUP_RETRY = "That answer didn't fit the format:\n{errors}\nAnswer again in the same format, fixing those fields."
 # An answer turn's one retry when a time frame the owner stated is neither kept in a customer line nor named in reply

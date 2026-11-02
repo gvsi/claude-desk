@@ -24,6 +24,7 @@ from tests.api.test_setup_questions import Owner, answer, next_step, stored as s
 from tests.api.test_setup_rules import (  # noqa: F401  (the app and model fixtures)
     GOOD_CARDS,
     HOURS,
+    request_text,
     SITUATIONS,
     app,
     business_jobs,
@@ -90,6 +91,9 @@ async def test_a_change_from_a_later_step_reopens_the_questions_with_the_owners_
     (request,) = model.requests[calls:]
     assert request.output_schema is setup.SETUP_TURNS[setup.REOPEN_TOPIC]
     assert f"<owner_answer>{CHANGE}</owner_answer>" in request.messages[-1]["content"][0]["text"]
+    # Only the change's own turn is told how a change reaches what the owner accepted or answered.
+    assert setup.SETUP_REOPEN_LINE in request_text(request)
+    assert not any(setup.SETUP_REOPEN_LINE in request_text(earlier) for earlier in model.requests[:calls])
 
     # What was drafted from the answers is gone, so the steps after the questions draft it again.
     row = await stored(engine, state["interview_id"])
@@ -430,6 +434,7 @@ async def test_only_the_change_itself_can_ask_a_finished_topic_again(app, browse
                          turn(next={"kind": "topic", "topic": "quote_limit"}))
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools"
+    assert setup.SETUP_REOPEN_LINE not in request_text(model.requests[-1])     # the turn after the change
 
 
 async def test_proving_work_from_before_a_change_never_lands_after_it(app, browser, kernel_http, model, engine, fake,
