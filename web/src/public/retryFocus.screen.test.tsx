@@ -52,6 +52,7 @@ it('waits for a failed follow-up read before restoring focus to the new retry ac
 
 it('returns mouse focus to the composer after a successful retry', async () => {
   const { screen, box, retry } = await failedSend();
+  await box.click();
   await retry.click();
   await expect.element(screen.getByRole('article', { name: 'Quote', exact: true })).toBeVisible();
   await expect.element(box).toHaveFocus();
