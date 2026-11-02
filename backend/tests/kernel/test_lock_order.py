@@ -574,18 +574,15 @@ async def test_a_call_back_taking_over_a_card_handoff_runs_in_the_lock_order(app
     ]
 
 
-async def test_a_call_back_beside_several_open_ones_runs_in_the_lock_order(app, client, frozen_clock):
+async def test_a_call_back_replacing_one_from_before_runs_in_the_lock_order(app, client):
     copy, visitor = await visitor_of(app, client)
-    older = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
-    frozen_clock.advance(60)
-    newer = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
-    for handoff_id, decision in (("handoff-older", older), ("handoff-newer", newer)):   # from before, side by side
-        await legacy_call_back(app, copy, visitor, handoff_id, decision.action.action_id)
-    allowed = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
+    earlier = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
+    await legacy_call_back(app, copy, visitor, "handoff-earlier", earlier.action.action_id)   # no created_at
+    allowed = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
     with lock_log(app) as log:
         assert (await executed(client, visitor, allowed)).state == "succeeded"
-    # T2 holds the session row FOR UPDATE, then the open handoffs FOR UPDATE, closed newest first, and the
-    # call-back's own, then their facts, then the closings' entries and the outcome
+    # T2 holds the session row FOR UPDATE, then the open handoff FOR UPDATE, closed, and the call-back's own,
+    # then their facts, then the closing's entry and the outcome
     assert log.transactions[-1] == ["sessions", "decisions", "executions", "handoffs", "facts", "ledger_heads"]
     assert all(map(in_lock_order, log.transactions))
 

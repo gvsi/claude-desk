@@ -3787,7 +3787,7 @@ describe('setup', () => {
   it('preview_fills_the_height_down_to_go_live_on_a_laptop', async () => {
     // On a laptop the customer preview is a full-height chat: it runs from under the step's title down
     // to "Go live" and fills that height, as the public page fills its window: the chat's head at its
-    // top, the composer at its bottom and About in the right column, with only the conversation
+    // top, the composer at its bottom and About in the left column, with only the conversation
     // scrolling between them. At 1440 x 900 "Go live" is on the first screen: the page itself scrolls
     // neither down nor sideways.
     const state = await interviewAtPreview();
@@ -3806,9 +3806,9 @@ describe('setup', () => {
     expect(Math.round(box.bottom - chatBox.bottom)).toBe(1);
     expect(Math.round(box.bottom - composer.getBoundingClientRect().bottom)).toBe(1);
     expect(composer.getBoundingClientRect().top).toBeGreaterThan(box.top + box.height / 2);
-    // About in the right column, beside the chat from the header down.
+    // About in the left column, beside the chat from the header down.
     const about = screen.getByRole('region', { name: 'About Turner Plumbing' }).element().getBoundingClientRect();
-    expect(about.left).toBeGreaterThanOrEqual(chatBox.right - 1);
+    expect(about.right).toBeLessThanOrEqual(chatBox.left + 1);
     expect(Math.round(about.top)).toBe(Math.round(chatBox.top));
     expect(Math.round(about.bottom)).toBe(Math.round(chatBox.bottom));
     expect(shell.classList.contains('cd-public-shell--short')).toBe(false);
@@ -3836,7 +3836,8 @@ describe('setup', () => {
   it.each([768, 657, 625])('preview_fills_the_height_with_go_live_on_the_first_screen_at_1366x%s', async (height) => {
     // A 1366 x 768 laptop: a window of the screen's full height, then Chrome's page on that screen
     // (657 px tall, 625 with the bookmarks bar). The frame runs from under the title down to "Go live",
-    // which stays on the first screen, with the composer at the frame's bottom and About beside the chat.
+    // which stays on the first screen, with the composer at the frame's bottom and About in the left
+    // column beside the chat.
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 1366, height } });
     await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
@@ -3849,7 +3850,12 @@ describe('setup', () => {
     // The composer reaches the frame's bottom edge, inside its border.
     expect(Math.abs(box.bottom - parseFloat(getComputedStyle(preview).borderBottomWidth) - composer.getBoundingClientRect().bottom)).toBeLessThanOrEqual(1);
     const about = screen.getByRole('region', { name: 'About Turner Plumbing' }).element().getBoundingClientRect();
-    expect(about.left).toBeGreaterThanOrEqual(chat.getBoundingClientRect().right - 1);
+    // About in the left column, beside the chat from the header down.
+    const chatBox = chat.getBoundingClientRect();
+    expect(about.right).toBeLessThanOrEqual(chatBox.left + 1);
+    expect(Math.round(about.top)).toBe(Math.round(chatBox.top));
+    expect(Math.round(about.bottom)).toBe(Math.round(chatBox.bottom));
+    expect(Math.round(box.bottom - chatBox.bottom)).toBe(1);
     expectPreviewFillsToFooter(screen);
     expectLaunchBarOnTheFirstScreen(screen);
     expectNoHorizontalScroll();

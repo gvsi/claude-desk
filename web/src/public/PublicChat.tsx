@@ -43,7 +43,7 @@ import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { useTopFade } from '../lib/useTopFade.ts';
-import { brandFrom } from './brand.ts';
+import { brandFrom, givenOwnerName } from './brand.ts';
 import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { usePaymentLinks } from './usePaymentLinks.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
@@ -123,7 +123,11 @@ interface RowProps {
   paymentBlock: (block: RenderedBlock) => RenderedBlock;
   row: ChatRow;
   ownerPreview: boolean;
-  /** `owner_display_name` as served, for the owner's own messages and a card's "{owner} said". */
+  /**
+   * Who the owner is in the chat, for their own messages, a card's "{owner} said" and "{owner} joined
+   * the chat": `owner_display_name` as served, or the business's name when the owner gave none and
+   * the Desk carries setup's fallback (owner, 2026-11-02).
+   */
   ownerName: string;
   language: CopyLanguage;
   onResend: (id: string) => Promise<void>;
@@ -132,6 +136,14 @@ interface RowProps {
   resendHeld?: boolean;
   /** What goes under the row's receipts: "Cancel this request" for each open hold it holds. */
   after?: ReactNode[];
+}
+
+/**
+ * The owner's name as a stream event carries it (`owner_joined`, `owner_typing`): the event's, unless
+ * it is setup's fallback, which names no one, and then `ownerName`, the business's.
+ */
+function streamOwnerName(name: string, ownerName: string): string {
+  return givenOwnerName(name) ?? ownerName;
 }
 
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
@@ -199,7 +211,7 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, compose
   if (item.kind === 'system') {
     const line =
       item.ev.type === 'owner_joined' ? (
-        <SystemLine text={copy.joined(item.ev.name)} initials={initialsOf(item.ev.name)} />
+        <SystemLine text={copy.joined(streamOwnerName(item.ev.name, ownerName))} initials={initialsOf(streamOwnerName(item.ev.name, ownerName))} />
       ) : (
         <SystemLine text={copy.claudeIsBack} />
       );
@@ -901,20 +913,22 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // that didn't send when the chat ended, in the new chat's. Neither is sent without Send. Words
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
   // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
-  // The idea speaks as this Desk's owner, by the name the Desk carries; there is a composer to
+  // The idea speaks as this Desk's owner, by the name the Desk carries, or as the business when the
+  // owner gave none; there is a composer to
   // type it into only once the page has opened (the Desk read, and on the owner's preview, the bar).
   const carried = useRef<Carried | null>(idea === undefined ? null : { text: { idea }, focus: 'if_free' });
   const ideaOwner = desk === null ? null : brandFrom(desk).ownerName;
+  const ideaBusiness = desk?.business_name ?? '';
   useEffect(() => {
     const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
     if (opening || !ready || words === null || !box) return;
     carried.current = null;
-    const text = typeof words.text === 'string' ? words.text : breakItIdea(words.text.idea, ideaOwner);
+    const text = typeof words.text === 'string' ? words.text : breakItIdea(words.text.idea, ideaOwner, ideaBusiness);
     if (text === null) return;
     const free = document.activeElement === null || document.activeElement === document.body;
     fillComposer(box, text, { focus: words.focus === 'always' || free });
-  }, [opening, ready, ideaOwner]);
+  }, [opening, ready, ideaOwner, ideaBusiness]);
 
   const present = (children?: ReactNode) => (
     <>
@@ -957,6 +971,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
       </PublicState>
     );
   }
+  // Who the owner is in the chat: their name, or the business's when they gave none (owner, 2026-11-02).
+  const shownOwner = givenOwnerName(desk.owner_display_name) ?? desk.business_name;
 
   const { brand, ownerName } = brandFrom(desk);
   const { state } = chat;
@@ -1178,7 +1194,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               row={row}
               paymentBlock={paymentBlock}
               ownerPreview={ownerPreview}
-              ownerName={desk.owner_display_name}
+              ownerName={shownOwner}
               language={language}
               onResend={resend}
               composer={composerRef}
@@ -1190,7 +1206,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
           {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
           {state.ownerTyping !== null ? (
             <TranscriptRow>
-              <WritingIndicator language={language} variant="person" who={state.ownerTyping.name} />
+              <WritingIndicator language={language} variant="person" who={streamOwnerName(state.ownerTyping.name, shownOwner)} />
             </TranscriptRow>
           ) : null}
         </Transcript>

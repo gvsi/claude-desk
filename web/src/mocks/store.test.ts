@@ -2233,6 +2233,16 @@ describe('the owner in the chat', () => {
     expect(await typingUntil()).not.toBeNull();
   });
 
+  it('the_visitor_is_here_while_their_stream_is_open', async () => {
+    // A seeded chat has no one on its stream: the owner reads the visitor as away.
+    expect((await owner('ses-dana-web')).visitor_here).toBe(false);
+    // This browser's chat is here while its stream listens, and away once it stops.
+    const { session, stop } = await openChat();
+    expect((await owner(session.session_id)).visitor_here).toBe(true);
+    stop();
+    expect((await owner(session.session_id)).visitor_here).toBe(false);
+  });
+
   it('decision_reads_by_id_in_the_copy', async () => {
     const held = mockStore.world.addHeldRefund();
     expect(await call('decision', { params: { decision_id: held.decision_id } })).toEqual({ status: 200, body: held });

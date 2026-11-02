@@ -194,7 +194,7 @@
     "/api/owner/desks": {
       "get": {
         "summary": "Desks",
-        "description": "The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk\nnames its setup interview while that isn't finished.",
+        "description": "The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk\nnames its setup interview while that isn't finished, and counts its unread conversations, all read in one query.",
         "operationId": "owner_desks",
         "responses": {
           "200": {
@@ -1566,7 +1566,7 @@
     "/api/owner/conversations/{session_id}": {
       "get": {
         "summary": "Conversation",
-        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true\nfor a demo visitor's chat (`owner_reads.demo_visitors`).",
+        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing, and `visitor_here` whether their public stream is open now\n(presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true\nfor a demo visitor's chat (`owner_reads.demo_visitors`).",
         "operationId": "owner_conversation",
         "parameters": [
           {
@@ -2596,6 +2596,80 @@
               }
             },
             "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/conversations/{session_id}/read": {
+      "post": {
+        "summary": "Mark Read",
+        "description": "The owner has seen the conversation through the transcript cursor `through` (the `n` of the last item their\nscreen showed): its read marker moves there, held at the session's newest row, and never moves back, so a stale or\nreplayed call marks nothing unread again and a message that arrived after the screen drew stays unread. A session\nthat isn't a visitor's or an agent's on one of the copy's Desks is 404, and so is the owner's own preview, which is\nnever unread. No kernel call and no ledger entry: the marker is the API's own row, for the owner's reads alone.",
+        "operationId": "owner_mark_read",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReadThroughIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "422": {
             "content": {
@@ -9701,6 +9775,10 @@
               }
             ],
             "title": "Demo Visitor Run Id"
+          },
+          "unread": {
+            "type": "boolean",
+            "title": "Unread"
           }
         },
         "type": "object",
@@ -9715,10 +9793,11 @@
           "outcome_counts",
           "owner_preview",
           "latest_visitor_text",
-          "latest_outcome"
+          "latest_outcome",
+          "unread"
         ],
         "title": "ConversationSummary",
-        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `person_id` is the person on record a visitor's session was verified as, which that person's page lists\nthe conversation by; null for an unverified visitor, an agent and the owner's preview, even a verified one.\n`latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose\nor positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never\nthe owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger\nentries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release\n(`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the\nowner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later\nrequest still held, expired or cancelled, or a handoff card opening, clears it to null.\n\nAn agent's outcome carries the facts behind it, read from the kernel's rows, never from anyone's words:\n`latest_outcome_starts_at`, the booking's start (`visit_booked`, from the booking decision's action);\n`latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored\npayment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide\n(`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its\noutcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview.\n\n`demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,\n`owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its\npersona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before\nruns were recorded there."
+        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `person_id` is the person on record a visitor's session was verified as, which that person's page lists\nthe conversation by; null for an unverified visitor, an agent and the owner's preview, even a verified one.\n`latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose\nor positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never\nthe owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger\nentries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release\n(`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the\nowner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later\nrequest still held, expired or cancelled, or a handoff card opening, clears it to null.\n\nAn agent's outcome carries the facts behind it, read from the kernel's rows, never from anyone's words:\n`latest_outcome_starts_at`, the booking's start (`visit_booked`, from the booking decision's action);\n`latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored\npayment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide\n(`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its\noutcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview.\n\n`demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,\n`owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its\npersona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before\nruns were recorded there. `unread` is whether the visitor or the visiting agent wrote after the cursor the owner\nlast marked read (`POST /api/owner/conversations/{session_id}/read`), or wrote at all with nothing marked; what\nClaude, the owner, the API and the kernel add never makes a conversation unread, and the owner's preview never\nis."
       },
       "CopyOut": {
         "properties": {
@@ -10543,6 +10622,10 @@
               "other"
             ],
             "title": "Business Type"
+          },
+          "unread_conversations": {
+            "type": "integer",
+            "title": "Unread Conversations"
           }
         },
         "type": "object",
@@ -10554,10 +10637,11 @@
           "hours",
           "answering",
           "setup",
-          "business_type"
+          "business_type",
+          "unread_conversations"
         ],
         "title": "DeskSummary",
-        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set\n(`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the\nTurner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."
+        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set\n(`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the\nTurner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's.\n`unread_conversations` is how many of the Desk's conversations are unread (`ConversationSummary.unread`), so the\nowner's menu can show it on every page without reading the list."
       },
       "DeskUpdated": {
         "properties": {
@@ -12250,6 +12334,11 @@
             "title": "Replayed",
             "default": false
           },
+          "visitor_here": {
+            "type": "boolean",
+            "title": "Visitor Here",
+            "default": false
+          },
           "demo_visitor": {
             "type": "boolean",
             "title": "Demo Visitor",
@@ -12274,7 +12363,7 @@
           "typing_until"
         ],
         "title": "OwnerTranscript",
-        "description": "`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as\nthe owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).\n`typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,\nkept in the API's memory and shown to the owner alone."
+        "description": "`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as\nthe owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).\n`typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,\nkept in the API's memory and shown to the owner alone. `visitor_here`, presence too, is true while the visitor's\npublic chat stream is open, when a whisper reaches Claude at once; an agent holds no stream, so its session reads\nfalse (Claude reads a whisper at its next request)."
       },
       "OwnerTranscriptItem": {
         "properties": {
@@ -13261,6 +13350,22 @@
           "amount_cents"
         ],
         "title": "PurposePaymentProposalConfig"
+      },
+      "ReadThroughIn": {
+        "properties": {
+          "through": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Through"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "through"
+        ],
+        "title": "ReadThroughIn",
+        "description": "`POST /api/owner/conversations/{session_id}/read`: the transcript cursor the owner has seen (`TranscriptItem.n`,\nthe last item the screen showed). The marker only moves forward, and never past the session's newest row."
       },
       "RecordedHistory": {
         "properties": {
