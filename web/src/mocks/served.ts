@@ -33,6 +33,7 @@ import {
   businessOut,
   conversationSummary,
   copyOut,
+  decidingCard,
   HEALTH,
   ledgerPage,
   needsYou,
@@ -716,7 +717,8 @@ const SERVED: ServedRoutes = {
     const text = isRecord(req.body) ? req.body.text : undefined;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX) return INVALID;
     // Claude's answer, and the change it drafts when the owner asked for one, merged into the active
-    // rules. Claude reads the Desk's held requests too, newest first, as Needs you lists them.
+    // rules. Claude reads the Desk's held requests too, newest first, as Needs you lists them, each with
+    // the card that decided it (Needs you's `held_by` names only an ask card).
     const cap = desk.policy.auto_money_cap_cents ?? 0;
     const held = needsYou(sv.world, desk)
       .flatMap((item) => {
@@ -724,7 +726,7 @@ const SERVED: ServedRoutes = {
         if (!item.decision || !action) return [];
         const money = action.effects.some((effect) => MONEY_EFFECTS.has(effect));
         const aboveLimit = money && action.amount_cents != null && action.amount_cents > cap;
-        return [{ tool: action.tool, reasonPlain: item.decision.reason_plain, heldBy: item.held_by, aboveLimit }];
+        return [{ tool: action.tool, reasonPlain: item.decision.reason_plain, heldBy: decidingCard(desk, item.decision)?.reason ?? null, aboveLimit }];
       })
       .reverse();
     const reply = ruleChatReply(text, desk.policy.cards, held);

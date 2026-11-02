@@ -19,8 +19,6 @@ const LIST_FAMILIES = ['spacing', 'radius', 'size', 'motion'];
 // The color themes: dark is the base; light overrides it where it has values.
 const BASE_THEME = 'dark';
 const LIGHT_THEME = 'light';
-/** The choice that hands the theme to the system: its root mark, under which a system preferring light gets light. */
-const SYSTEM_CHOICE = 'system';
 // The numeral forms a type style may ask for: tabular figures, for numbers that line up.
 const NUMERIC = new Set(['tabular-nums']);
 // The font styles a type style may ask for: italic, for a reading page's quotations.
@@ -98,10 +96,9 @@ function themedDeclarations(tokens, themes, theme) {
 }
 
 /**
- * The theme blocks. Dark is the base and the default, on :root and on anything marked dark. Light is
- * chosen on the root (data-theme="light"), or by a system that prefers it on a root that hands the
- * choice to the system (data-theme="system"), and carries the browser's own scheme with it, so its
- * scrollbars and form controls follow. A token without a light value
+ * The theme blocks. Dark is the base, on :root and on anything marked dark. Light is chosen on the
+ * root (data-theme="light"), or by the system while dark isn't chosen, and carries the browser's
+ * own scheme with it, so its scrollbars and form controls follow. A token without a light value
  * keeps its dark one: an alias resolves against the light values on the same root.
  */
 function themeBlocks(tokens) {
@@ -111,7 +108,7 @@ function themeBlocks(tokens) {
   const light = [`  color-scheme: ${LIGHT_THEME};`, ...themedDeclarations(tokens, themes, LIGHT_THEME)];
   blocks.push(`:root[data-theme="${LIGHT_THEME}"] {\n${light.join('\n')}\n}`);
   blocks.push(
-    `@media (prefers-color-scheme: ${LIGHT_THEME}) {\n  :root[data-theme="${SYSTEM_CHOICE}"] {\n${light.map((line) => `  ${line}`).join('\n')}\n  }\n}`,
+    `@media (prefers-color-scheme: ${LIGHT_THEME}) {\n  :root:not([data-theme="${BASE_THEME}"]) {\n${light.map((line) => `  ${line}`).join('\n')}\n  }\n}`,
   );
   return blocks;
 }
