@@ -23,7 +23,7 @@
 - The name in `control` type, `text-primary`; the line under it in `caption` type, `text-secondary`, 2 px under the name. Padded 6 px by 10 px, so a row is 51 px tall.
 - A lead's time in `caption` at the right of its name, on the name's baseline, on one line. A replayed lead's Recorded tag sits at the end of the note's line, under the time, and the row keeps its 51 px.
 - Below 480 px of row width, as on a phone, the note takes the whole line and the tag a line of its own under it, from the note's start.
-- No fill at rest. A row that links takes `fill-hover` on hover at `radius-control`, like a conversation row, and the focus ring. Nothing else moves.
+- No fill at rest. A row that links takes `fill-hover` on hover at `radius-control`, like a conversation row, and the focus edge. Nothing else moves.
 - No separator between facts: "Lead" isn't repeated before the note, because the list's own heading says so.
 
 ## Accessibility

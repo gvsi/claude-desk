@@ -133,14 +133,17 @@ it('skip_link_is_the_first_stop_and_moves_focus_to_the_page', async () => {
     const box = skip.getBoundingClientRect();
     expect([layout, box.left < 24, box.top < 24]).toEqual([layout, true, true]);
     expect(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.closest('a')).toBe(skip);
-    const ring = getComputedStyle(skip);
-    expect([ring.outlineStyle, ring.outlineWidth, ring.outlineColor]).toEqual(['solid', '2px', 'rgba(250, 249, 245, 0.64)']);
+    // The focus edge inside it, 1 px of line-focus, and no ring outside it.
+    const edge = getComputedStyle(skip);
+    expect([edge.outlineStyle, edge.boxShadow]).toEqual(['none', 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset']);
 
     // Enter moves focus to the page, leaving the address as it is, and the next Tab is inside it.
     const address = window.location.href;
     await userEvent.keyboard('{Enter}');
     const main = container.querySelector('main') as HTMLElement;
     expect([layout, document.activeElement]).toEqual([layout, main]);
+    // The main region isn't a control: with focus from the keyboard it draws nothing.
+    expect([layout, main.matches(':focus-visible'), getComputedStyle(main).outlineStyle, getComputedStyle(main).boxShadow]).toEqual([layout, true, 'none', 'none']);
     expect(skip.getAttribute('href')).toBe(`#${main.id}`);
     expect(window.location.href).toBe(address);
     expect(hidden()).toBe(true);

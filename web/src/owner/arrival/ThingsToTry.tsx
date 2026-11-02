@@ -411,7 +411,7 @@ function Thing({ icon, title, held = false, detail, below, end = null, step }: T
 
 /**
  * A row's next step on a phone: a chevron at the row's right whose press area is the whole row, named
- * by the row's title and described by its line, with the focus ring around the row. From 640 px it
+ * by the row's title and described by its line, with the focus edge just inside the row. From 640 px it
  * isn't drawn, and the card's button is the step.
  */
 function RowStep({ step, labelledBy, describedBy }: { step: Step; labelledBy: string; describedBy: string }) {

@@ -40,7 +40,7 @@
 - A click outside, or focus leaving the button and its menu for anything else on the page, closes the menu and leaves focus where it went. A second click on the button closes it too. However a menu closes, focus that was in it goes back to its button, never to the page.
 - One menu is open on the page at a time: opening one closes any other, Allow's when Deny's opens, or a menu on another card.
 - A menu opens only on the owner's click or key. When an answer starts to be sent, or the answers it was opened on change (a side drops to one answer, or `decision.answers`, `decision_id` or `state` changes), it closes for good and never comes back by itself. Each side keeps one button, so focus stays on Allow when it turns from a menu button into "Allow this time" and back.
-- An item draws the focus ring just inside its edge (a 2 px `ring-focus` outline at -2 px), not 2 px outside as elsewhere, so the ring clears the menu's 4 px padding and the next item; `ring-focus` reads 5.8 on `fill-hover` over `bg-surface`. An open menu's button keeps its hover fill, so the menu reads as its own.
+- An item with keyboard focus takes its hover fill and the base focus edge, 1 px of `line-focus` just inside it, which reads 5.8 on `fill-hover` over `bg-surface`. An open menu's button keeps its hover fill, so the menu reads as its own.
 - Choosing an item calls `onAnswer` with that answer, closes the menu and leaves focus on its button while the answer is sent.
 
 ## Answering
@@ -90,7 +90,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 - `personName`: `NeedsYouItem.session.display_name` when the session is verified, so Allow's rule answer names the person. Leave it out for an agent or an unverified visitor. It is shown as user text (`.cd-user-name`, `data-copy="user"`).
 - `onAnswer`, returning the request's promise, then `pending` while it is sent and `error` if it fails. On success, pass the decision the kernel returned, to the same card: keep one card from held to answered, so the answer can land.
 - `after`: what sits under the card, outside it, such as the drafted rule and Dismiss once answered. The card lays it out `space-8` under itself and in a column `space-8` apart.
-- `cardRef`: given, the card's own box (without `after`) takes focus (`tabIndex={-1}`), with its ring on the card's corners, so a screen can bring the request into view and focus.
+- `cardRef`: given, the card's own box (without `after`) takes focus (`tabIndex={-1}`), its card's own border turning `line-focus` with keyboard focus, so a screen can bring the request into view and focus.
 
 ## Props
 

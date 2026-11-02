@@ -92,6 +92,13 @@
   border: 1px solid var(--line-card);
 }
 
+/* The Desk picker is the sidebar's one bordered control: keyboard focus turns its border line-focus.
+   Every other row takes the base edge, 1 px of line-focus just inside it. */
+.cd-sidebar__desk-toggle:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: none;
+}
+
 .cd-sidebar__desk-list {
   display: flex;
   flex-direction: column;
@@ -117,8 +124,8 @@
 
 /* The middle, the nav and the about group, takes the room between the top and the foot, and
    scrolls inside the column when the window is too short for it, so the foot always shows. It
-   reaches 4 px past the rows at the sides and into the gap under it, so a focused row's ring is
-   never clipped by the scroll, and every row sits where it would without it. */
+   reaches 4 px past the rows at the sides and into the gap under it, so nothing a row draws at its
+   edge is clipped by the scroll, and every row sits where it would without it. */
 .cd-sidebar__middle {
   display: flex;
   flex: 1 1 auto;
