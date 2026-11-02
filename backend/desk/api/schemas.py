@@ -721,6 +721,17 @@ class SetupProposalIn(BaseModel):
         return self
 
 
+class SetupReopenIn(BaseModel):
+    """`POST /api/owner/setup/{id}/reopen`: "Change something", the owner's message to Claude from a step after the
+    questions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),
+    makes a repeat answer the interview as the first left it instead of sending the message twice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    idempotency_key: IdempotencyKey
+
+
 class SetupSuggestionsIn(BaseModel):
     """Finish setup questions with the current suggestions; no additional answers are supplied."""
 

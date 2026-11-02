@@ -66,6 +66,14 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   (`TEST_CLIENT_OFFER`), and code alone reads the answer, with no model turn: only a yes puts them on record as a
   client with that contact (`PUT /desks/{id}/people`), and any answer moves on to step `tools`.
 
+- **Change something** (`reopen`): from a step after the questions (`tools` through `preview`; never once live,
+  when changes are made in the owner app), the owner's message takes the interview back to `questions` as its next
+  turn, answered on the contact question behind a code ask the owner isn't shown. A change that belongs to another
+  topic is asked there next, a limit on its own question with code's choices (`_next_ask`). The turn drops the rules
+  draft, so the rules, situations and safety check are drafted again on the way forward; the confirm then waits for
+  the safety check to run again, and proving work that read the interview before a reopen never writes after it
+  (`Interview.reopens`). Each send carries an idempotency key, kept on the owner's message.
+
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
 request waits for this commit, then up to `TURN_WAIT_S` (25 seconds): 200 with the landed state, an error if the task
@@ -505,6 +513,10 @@ class Entry(BaseModel):
     connector_connect_attempted: bool = False
     # On the owner's answer to the test-client offer: "yes" once their yes is saved, "added" once they're on record.
     test_client: Literal["yes", "added"] | None = None
+    # On the owner's message that reopened the questions from a later step ("Change something", `reopen`): the send's
+    # idempotency key and its body's hash, which a repeat must match.
+    reopen_key: str | None = None
+    reopen_sha256: str | None = None
 
 
 class ConnectedApp(BaseModel):
@@ -556,6 +568,12 @@ class Interview:
     def busy(self) -> bool:
         """A stored transcript entry explicitly marks a pending background run."""
         return any(entry.pending is not None for entry in self.transcript)
+
+    @property
+    def reopens(self) -> int:
+        """How many times "Change something" took the interview back to its questions (`reopen`), landed or running:
+        work that read the interview before one must not write after it."""
+        return sum(entry.reopen_key is not None for entry in self.transcript)
 
     @property
     def connected_apps(self) -> list[ConnectorKey]:
@@ -2189,11 +2207,15 @@ def _planned_job(interview: Interview, draft: JobDraft) -> ProposalCard | None:
 
 
 def _next_ask(interview: Interview, source, available: list[ProposalCard]) -> QuestionKey | ProposalCard | None:
-    """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order."""
+    """Honor one fitting ask, otherwise ordinary topics first, then the hidden plan in order. Once "Change something"
+    reopened the questions (`reopen`), a topic covered before can be asked again when Claude names it, but for the one
+    being answered, so a change reaches the question that records it."""
     unshown = [card for card in available if card.proposal_id not in interview.dropped] if interview.shows_cards else []
     proposed = source.next if source is not None else None
     if proposed is not None:
-        if proposed.kind == "topic" and proposed.topic not in interview.covered:
+        answering = interview.latest_ask.question if interview.latest_ask is not None else None
+        if proposed.kind == "topic" and (proposed.topic not in interview.covered
+                                         or (interview.reopens and proposed.topic != answering)):
             return proposed.topic
         if proposed.kind in {"job", "connector"}:
             found = next((card for card in unshown if _names_card(source, card)), None)
@@ -2530,66 +2552,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             if interview.step == "tools":
                 connect = _claim_connector_connect(interview)
             return
-        since = len(interview.transcript)
-        key = question
-        desk_id = interview.desk_id
         said, = staged
-        _hold_unless_kept(interview, key)
-        turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
-                                [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
-        patch = turn.patch()
-        if key in LIMIT_CHOICES:
-            choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)
-                           if text.strip() == choice.text), None)
-            if choice is not None:
-                patch = SetupPatch.model_validate({**patch.model_dump(), **choice.values})
-                turn.step_done = True
-        entries = []
-        reply = Entry(role="claude", text=turn.reply.strip())
-        replies = _TurnReplies()
-        replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
-        if reply.text:
-            entries.append(reply)
-        site = website_url(getattr(turn, "website", ""))  # the contact question's model has none (`FIELD_TURNS`)
-        if site is not None and site[0] not in interview.tried_websites():
-            if interview.consent:
-                entries.append(await _read_website(ctx, desk_id, *site))
-            else:
-                said.website = site[0]                   # kept as text: nothing is read without consent
-        await _rename(ctx, desk_id, patch)
-        backed = _backed_off_topic(patch, key, text, interview.answers)
-        updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields, backed=backed)
-        owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
-        said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
-        for name in _fact_patch_fields(patch, key):
-            if name not in FACT_HOMES:
-                continue
-            if name in said.owner_fields:
-                updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
-            elif getattr(interview.answers, name) == getattr(updated, name):
-                continue
-            elif name not in updated.suggested_fields:
-                updated.suggested_fields.append(name)
-        interview.answers = updated
-        interview.transcript += entries
-        if turn.step_done:
-            interview.cover([key])
-            following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
-            next_reply = reply
-            if key in LIMIT_CHOICES:
-                next_reply = Entry(role="claude", text=following.reply.strip() if following else "")
-                interview.transcript.append(next_reply)
-            elif not any(entry is reply for entry in interview.transcript):
-                interview.transcript.append(reply)
-            await _advance(ctx, engine, model, interview, following, next_reply,
-                           closing_call=key in LIMIT_CHOICES, replies=replies)
-        elif key not in LIMIT_CHOICES:
-            if not any(entry is reply for entry in interview.transcript):
-                interview.transcript.append(reply)
-            _record_plan(interview, turn, reply)
-        await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
-                                 follow_up=turn if not turn.step_done else None)
-
+        await _question_turn(ctx, engine, model, interview, question, text, said)
         if interview.step == "tools":
             connect = _claim_connector_connect(interview)
 
@@ -2604,6 +2568,145 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
     return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
                           check=check, stage=stage, turn=run, after=after,
                           render=partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled))
+
+
+async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
+                         key: QuestionKey, text: str, said: Entry) -> None:
+    """The owner's answer `text` (stored as `said`, this run's staged entry) to question `key`, in its own turn
+    model: the patch merged into the answers, Claude's reply, and the next ask or the close."""
+    since = len(interview.transcript)
+    desk_id = interview.desk_id
+    _hold_unless_kept(interview, key)
+    turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
+                            [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
+    patch = turn.patch()
+    if key in LIMIT_CHOICES:
+        choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)
+                       if text.strip() == choice.text), None)
+        if choice is not None:
+            patch = SetupPatch.model_validate({**patch.model_dump(), **choice.values})
+            turn.step_done = True
+    entries = []
+    reply = Entry(role="claude", text=turn.reply.strip())
+    replies = _TurnReplies()
+    replies.track(reply, reads_untrusted=key not in LIMIT_CHOICES)
+    if reply.text:
+        entries.append(reply)
+    site = website_url(getattr(turn, "website", ""))  # the contact question's model has none (`FIELD_TURNS`)
+    if site is not None and site[0] not in interview.tried_websites():
+        if interview.consent:
+            entries.append(await _read_website(ctx, desk_id, *site))
+        else:
+            said.website = site[0]                   # kept as text: nothing is read without consent
+    await _rename(ctx, desk_id, patch)
+    backed = _backed_off_topic(patch, key, text, interview.answers)
+    updated = merged(interview.answers, patch, key, owner_fields=interview.owner_fields, backed=backed)
+    owner_text = "\n".join(entry.text for entry in interview.transcript if entry.role == "owner")
+    said.owner_fields = _owner_patch_fields(patch, key, interview.answers, updated, owner_text, backed=backed)
+    for name in _fact_patch_fields(patch, key):
+        if name not in FACT_HOMES:
+            continue
+        if name in said.owner_fields:
+            updated.suggested_fields = [field for field in updated.suggested_fields if field != name]
+        elif getattr(interview.answers, name) == getattr(updated, name):
+            continue
+        elif name not in updated.suggested_fields:
+            updated.suggested_fields.append(name)
+    interview.answers = updated
+    interview.transcript += entries
+    if turn.step_done:
+        interview.cover([key])
+        following = await _next_step(ctx, engine, model, interview) if key in LIMIT_CHOICES else turn
+        next_reply = reply
+        if key in LIMIT_CHOICES:
+            next_reply = Entry(role="claude", text=following.reply.strip() if following else "")
+            interview.transcript.append(next_reply)
+        elif not any(entry is reply for entry in interview.transcript):
+            interview.transcript.append(reply)
+        await _advance(ctx, engine, model, interview, following, next_reply,
+                       closing_call=key in LIMIT_CHOICES, replies=replies)
+    elif key not in LIMIT_CHOICES:
+        if not any(entry is reply for entry in interview.transcript):
+            interview.transcript.append(reply)
+        _record_plan(interview, turn, reply)
+    await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
+                             follow_up=turn if not turn.step_done else None)
+
+
+# "Change something": the chat again, from a later step ------------------------------------------------------------
+
+# The steps "Change something" reopens the chat from. A live Desk is changed in the owner app instead.
+REOPEN_STEPS: tuple[SetupStep, ...] = ("tools", "rules", "situations", "safety_check", "preview")
+# The question the owner's change answers: a fact question that reads the answers so far, the plan and the memory and
+# website, and whose turn records hours, the contact, what happens after hours and what's urgent. A change that
+# belongs to another topic (a limit, say) is asked there next: Claude names it, and code asks it again
+# (`_next_ask`), a limit in code's own words with its choices, so a limit still comes only from its own question.
+REOPEN_TOPIC: QuestionKey = "contact_and_after_hours"
+
+
+def reopen_sha256(text: str) -> str:
+    """The sha256 of a reopen's canonical body, its key left out: what a repeat with the key must match."""
+    return body_sha256({"text": text})
+
+
+def _reopened_by(interview: Interview, key: str) -> Entry | None:
+    return next((entry for entry in interview.transcript if entry.reopen_key == key), None)
+
+
+async def reopen(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str, text: str, key: str, *,
+                 runs: TurnRuns, ro_schema: str, admit: Callable[[], Awaitable[None]],
+                 cards: bool = False, business_tools_enabled: bool = False) -> SetupState:
+    """"Change something": back to the questions from a later step (`REOPEN_STEPS`), with `text` as the owner's next
+    turn, run through the shared turn runner as an answer is. The turn moves the interview to `questions`, drops the
+    rules draft (its cards and version; the situations and the safety check were tried against it), then answers the
+    owner on `REOPEN_TOPIC`, behind a code ask the owner isn't shown. Nothing changes until the turn lands: a failed
+    or abandoned turn removes the owner's message and leaves the interview at its step.
+
+    Idempotent per send by `key`, kept on the owner's message with its body's hash: a repeat answers the interview as
+    it stands, and the same key with other text is 409 `conflict`. Another send is 409 `conflict` while a turn runs,
+    at the questions step and once the Desk is live."""
+    request_sha256 = reopen_sha256(text)
+    render = partial(setup_state, cards=cards, business_tools_enabled=business_tools_enabled)
+    interview = await _recover_turn(owner, engine, interview_id, runs)
+    first = _reopened_by(interview, key)
+    if first is not None:
+        if first.reopen_sha256 != request_sha256:
+            raise ApiProblem(409, "conflict")
+        interview.business_tools_enabled = business_tools_enabled
+        return render(interview, await _slug(owner, owner.desk(interview.desk_id)))
+    if interview.busy or interview_id in _RUNNING:
+        raise ApiProblem(409, "conflict")
+    connect = False
+
+    def check(interview: Interview) -> None:
+        interview.business_tools_enabled = business_tools_enabled
+        if interview.step not in REOPEN_STEPS or _reopened_by(interview, key) is not None:
+            raise ApiProblem(409, "conflict")
+
+    def stage(interview: Interview) -> list[Entry]:
+        return [Entry(role="owner", text=text, reopen_key=key, reopen_sha256=request_sha256)]
+
+    async def turn(ctx: OwnerCtx, interview: Interview, staged: list[Entry]) -> None:
+        nonlocal connect
+        interview.business_tools_enabled = business_tools_enabled
+        said, = staged
+        interview.step = "questions"
+        interview.draft_cards, interview.draft_version = [], None
+        # The question the change answers, before the owner's words; its empty text shows nothing.
+        at = next(index for index, entry in enumerate(interview.transcript) if entry is said)
+        interview.transcript.insert(at, Entry(role="claude", text="", question=REOPEN_TOPIC))
+        await _question_turn(ctx, engine, model, interview, REOPEN_TOPIC, text, said)
+        if interview.step == "tools":
+            connect = _claim_connector_connect(interview)
+
+    async def after(ctx: OwnerCtx, interview: Interview) -> None:
+        if connect:
+            await _connect_accepted_connector(ctx, engine, interview)
+        if interview.step == "tools":
+            await after_finish(ctx, interview)
+
+    return await run_turn(owner, engine, model, interview_id, runs=runs, ro_schema=ro_schema, admit=admit,
+                          check=check, stage=stage, turn=turn, after=after, render=render)
 
 
 # Finish ------------------------------------------------------------------------------------------------------
@@ -3167,9 +3270,17 @@ async def interview_desk(owner: OwnerCtx, engine: AsyncEngine, interview_id: str
     return owner.desk(interview.desk_id)
 
 
+async def interview_scope(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> tuple[str, int]:
+    """The Desk of the copy's interview `interview_id` (404 for any other), and how many times "Change something"
+    reopened its questions (`Interview.reopens`): what its proving work is kept by."""
+    async with engine.connect() as conn:
+        interview = await _load(conn, owner.copy_id, interview_id)
+    return owner.desk(interview.desk_id), interview.reopens
+
+
 def _require_step(interview: Interview, steps: tuple[SetupStep, ...], *, drafted: bool = False) -> None:
     """409 `conflict` unless the interview is at one of `steps` (and, with `drafted`, has a rules draft)."""
-    if interview.step not in steps or (drafted and interview.draft_version is None):
+    if interview.busy or interview.step not in steps or (drafted and interview.draft_version is None):
         raise ApiProblem(409, "conflict")
 
 
@@ -3178,10 +3289,14 @@ def _later(step: SetupStep, than: SetupStep) -> SetupStep:
 
 
 async def _update(engine: AsyncEngine, owner: OwnerCtx, interview_id: str,
-                  change: Callable[[Interview], None]) -> Interview:
-    """Apply `change` to the interview under its row lock and save it, in one transaction."""
+                  change: Callable[[Interview], None], *, reopens: int | None = None) -> Interview:
+    """Apply `change` to the interview under its row lock and save it, in one transaction. With `reopens` (what the
+    work read), 409 `conflict` with nothing saved once "Change something" has reopened the questions since: what the
+    work drafted or tried was about the answers before."""
     async with engine.connect() as conn, conn.begin():
         interview = await _load(conn, owner.copy_id, interview_id, lock=True)
+        if reopens is not None and interview.reopens != reopens:
+            raise ApiProblem(409, "conflict")
         change(interview)
         await _save(conn, interview)
     return interview
@@ -3791,22 +3906,24 @@ async def _posted(owner: OwnerCtx, desk_id: str, cards: list[RuleCard], template
 
 
 async def _store_cards(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, cards: list[RuleCard], *,
-                       replace_stored: bool = False) -> list[RuleCard]:
+                       replace_stored: bool = False, reopens: int | None = None) -> list[RuleCard]:
     """Store setup's cards for its rules draft and return the cards stored: those already there when another request
     stored them first, unless `replace_stored`."""
     def keep(interview: Interview) -> None:
         if replace_stored or not interview.draft_cards:
             interview.draft_cards = list(cards)
 
-    return (await _update(engine, owner, interview_id, keep)).draft_cards
+    return (await _update(engine, owner, interview_id, keep, reopens=reopens)).draft_cards
 
 
-async def _drafted(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, version: int, step: SetupStep) -> None:
+async def _drafted(engine: AsyncEngine, owner: OwnerCtx, interview_id: str, version: int, step: SetupStep, *,
+                   reopens: int | None = None) -> None:
     def note(interview: Interview) -> None:
+        # A new version after reopening has not been tried, even if the preceding draft reached the safety check.
+        interview.step = step if interview.reopens and interview.draft_version != version else _later(interview.step, step)
         interview.draft_version = version
-        interview.step = _later(interview.step, step)
 
-    await _update(engine, owner, interview_id, note)
+    await _update(engine, owner, interview_id, note, reopens=reopens)
 
 
 async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview_id: str,
@@ -3820,6 +3937,7 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
     _require_step(interview, RULE_STEPS)
+    reopens = interview.reopens
     answers, business_type = owner_rule_answers(interview.answers), interview.business_type
     cards = interview.draft_cards
     template = template_cards(business_type, answers)
@@ -3829,11 +3947,12 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
         today = now.astimezone(ZoneInfo(timezone)).date()
         held = await _put_parts(owner, desk_id, seed_parts(interview.answers, timezone, business_type=business_type,
                                                          today=today, publish_policies=setup_policy_claims_enabled))
-        await _update(engine, owner, interview_id, lambda current: current.hold_policies(held))
+        await _update(engine, owner, interview_id, lambda current: current.hold_policies(held), reopens=reopens)
 
         async def post(drafted: list[RuleCard]) -> PolicyVersion | None:
             nonlocal cards                      # the first set keeps cards another request stored first
-            cards = await _store_cards(engine, owner, interview_id, drafted, replace_stored=bool(cards))
+            cards = await _store_cards(engine, owner, interview_id, drafted, replace_stored=bool(cards),
+                                       reopens=reopens)
             return await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
 
         version = await draft_cards(model, recorder(engine, owner, CARD_DRAFT_ROUTE), business_type, answers,
@@ -3841,9 +3960,9 @@ async def rules(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interv
     else:
         version = await _posted(owner, desk_id, cards, template, answers.auto_money_cap_cents)
     if (version is None or version.status == "rejected") and cards != template:
-        cards = await _store_cards(engine, owner, interview_id, template, replace_stored=bool(cards))
+        cards = await _store_cards(engine, owner, interview_id, template, replace_stored=bool(cards), reopens=reopens)
         version = checkable(await _post_draft(owner, desk_id, cards, answers.auto_money_cap_cents))
-    await _drafted(engine, owner, interview_id, version.version, "rules")
+    await _drafted(engine, owner, interview_id, version.version, "rules", reopens=reopens)
     return rules_draft(version, version_cap(version))
 
 
@@ -4018,7 +4137,8 @@ async def situations(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, i
     built = [situation(number, draft, prices, answers.hours, timezone, now)
              for number, draft in enumerate(drafted.situations, 1)]
     results = await _run_probes(owner, desk_id, version, [each.probe for each in built])
-    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", _later(found.step, "situations")))
+    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", _later(found.step, "situations")),
+                  reopens=interview.reopens)
     by_id = {card.card_id: card for card in drafted_cards}
     return [SituationResult(situation=each, result=result, matches=situation_matches(each.expected, result, by_id))
             for each, result in zip(built, results, strict=True)]
@@ -4086,7 +4206,7 @@ async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) 
                       blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
             for (spec, _), result in zip(built, results, strict=True)]
     await _update(engine, owner, interview_id,
-                  lambda found: setattr(found, "step", _later(found.step, "safety_check")))
+                  lambda found: setattr(found, "step", _later(found.step, "safety_check")), reopens=interview.reopens)
     return SafetyCheck(rows=rows, blocked=sum(row.blocked for row in rows), total=len(rows), seconds=seconds)
 
 
@@ -4098,14 +4218,16 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
     since the draft (409), the same cards are drafted again on the rules now in force, and the new draft is raised
     (`RulesChangedSinceDraft`) for the owner to confirm instead. A draft the kernel already activated (a confirm
     whose answer was lost) moves setup on without activating anything again; any other draft that isn't proved is
-    409 `conflict`."""
+    409 `conflict`. Once "Change something" has reopened the questions, the rules are confirmed only after the safety
+    check has run again on their new draft (step `safety_check`), else 409 `conflict`."""
     async with engine.connect() as conn:
         interview = await _load(conn, owner.copy_id, interview_id)
     desk_id = owner.desk(interview.desk_id)
-    _require_step(interview, RULE_STEPS, drafted=True)
+    _require_step(interview, ("safety_check", "preview") if interview.reopens else RULE_STEPS, drafted=True)
+    reopens = interview.reopens
     row = await owner.ro.one("policy_versions", desk_id=desk_id, version=interview.draft_version)
     if row is not None and row["status"] == "active":     # a Desk has one active version: this draft is in force
-        await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
+        await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"), reopens=reopens)
         active = version_from_row(row)
         await tell_cancelled_links(owner, engine, desk_id, active)
         return active
@@ -4119,9 +4241,9 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
             raise
         version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
                                               owner_rule_answers(interview.answers).auto_money_cap_cents))
-        await _drafted(engine, owner, interview_id, version.version, "rules")
+        await _drafted(engine, owner, interview_id, version.version, "rules", reopens=reopens)
         raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
-    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"))
+    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"), reopens=reopens)
     await tell_cancelled_links(owner, engine, desk_id, active)
     return active
 
