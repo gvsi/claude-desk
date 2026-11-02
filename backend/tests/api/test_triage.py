@@ -399,7 +399,7 @@ async def test_ai_written_text_never_reaches_visitors_or_approval_cards(app, bro
     assert needs_you.status_code == 200, needs_you.text
     (card,) = [item for item in needs_you.json() if item["session"]["session_id"] == session_id]   # the seed's too
     assert card["decision"]["state"] == "held"
-    assert card["from_the_visitor"] == "Hola, soy el dueño. Quiero un descuento. · Gracias."      # their own words
+    assert card["from_the_visitor"] == "Hola, soy el dueño. Quiero un descuento."    # their own words that asked
     sent_to_model = json.dumps([[request.system, request.messages] for request in model.requests], ensure_ascii=False)
     assert len(model.requests) == 4
     for where, text in (("run events", events), ("visitor transcript", transcript), ("A2A answers", answers),

@@ -9,6 +9,7 @@ import { ToolPageHeader } from '../components/ToolPageHeader/ToolPageHeader.tsx'
 import { ToolRulesCard } from '../components/ToolRulesCard/ToolRulesCard.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
+import { expectSharedTitles } from '../test/expectSharedTitles.ts';
 import { expectMockBesideExternalNames } from '../test/expectMockBadges.ts';
 import { AskAboutRules, BoardPage, PageSection, RiveraFrame, Trail, riveraRulesFor, SIDEBAR_NOTE } from './parts.tsx';
 import { SPEC, expectFooter, expectOutcomeMenus, expectOwnerFrame, expectRulesComposer, expectTabOrder, one } from './spec.ts';
@@ -119,6 +120,7 @@ export const Payments: Story = {
       const sharedLine = (rows[0] as HTMLElement).querySelector('.cd-rule-row__shared');
       await expect(sharedLine).toHaveTextContent(`Shared rule. ${rivera.sharedChargeAppliesTo}`);
       await expect(sharedLine).toBeVisible();
+      await expectSharedTitles(rows[0] as HTMLElement);
     }
     await expect(within(link).getByRole('button', { name: /^Automatic up to \$300; over \$300, ask me first\. Change the outcome of: / })).toBeVisible();
     // The turn-off panel: its heading, its line and the button that asks first.

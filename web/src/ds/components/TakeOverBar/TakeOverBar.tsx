@@ -16,6 +16,11 @@ export interface TakeOverBarProps {
   ownerName: string;
   /** An agent's session: no line about what the visitor sees, because agents never receive it. */
   agent?: boolean;
+  /**
+   * The screen draws Take over itself, above, in the conversation's bar (the owner's open
+   * conversation): while Claude answers, this bar keeps only its line about whispers.
+   */
+  takeOverAbove?: boolean;
   onTakeOver: () => void;
   onHandBack: () => void;
   onResume: () => void;
@@ -44,14 +49,17 @@ function VisitorName({ children }: { children: string }) {
 
 /**
  * Who is answering a conversation, and the owner's controls for it, above the composer: Take over
- * while Claude answers, Hand back to Claude while the owner is in the chat, and Resume Claude or
- * Take over once the breaker paused it. Held approval cards stay answerable in every mode.
+ * while Claude answers (or, with `takeOverAbove`, only the line about whispers, as the screen draws
+ * Take over in the conversation's bar), Hand back to Claude while the owner is in the chat, and
+ * Resume Claude or Take over once the breaker paused it. Held approval cards stay answerable in
+ * every mode.
  */
 export function TakeOverBar({
   mode,
   visitorName,
   ownerName,
   agent = false,
+  takeOverAbove = false,
   onTakeOver,
   onHandBack,
   onResume,
@@ -101,7 +109,7 @@ export function TakeOverBar({
   );
 
   let lead: ReactNode;
-  let buttons: ReactNode;
+  let buttons: ReactNode = null;
   let visitorSees: ReactNode = null;
   switch (mode) {
     case 'owner':
@@ -131,12 +139,13 @@ export function TakeOverBar({
       );
       break;
     default:
-      // `ai`, and a mode this build doesn't know: only Take over is offered.
+      // `ai`, and a mode this build doesn't know: only Take over is offered, here or above.
       lead = (
         <FirstLine lineRef={firstLine}>
           <VisitorName>{visitorName}</VisitorName> never sees whispers. Whispers steer Claude, and your rules still apply.
         </FirstLine>
       );
+      if (takeOverAbove) break;
       buttons = button('secondary', 'Take over', onTakeOver);
       visitorSees = (
         <>
@@ -148,14 +157,16 @@ export function TakeOverBar({
   return (
     <div className="cd-take-over" aria-busy={pending || undefined}>
       <div className="cd-take-over__lead">{lead}</div>
-      <div className="cd-take-over__action">
-        <div className={`cd-take-over__buttons${mode === 'paused' ? ' cd-take-over__buttons--stacked' : ''}`}>{buttons}</div>
-        {visitorSees && !agent ? (
-          <p className="cd-take-over__line cd-type-caption">
-            <VisitorName>{visitorName}</VisitorName> sees {visitorSees}
-          </p>
-        ) : null}
-      </div>
+      {buttons === null ? null : (
+        <div className="cd-take-over__action">
+          <div className={`cd-take-over__buttons${mode === 'paused' ? ' cd-take-over__buttons--stacked' : ''}`}>{buttons}</div>
+          {visitorSees && !agent ? (
+            <p className="cd-take-over__line cd-type-caption">
+              <VisitorName>{visitorName}</VisitorName> sees {visitorSees}
+            </p>
+          ) : null}
+        </div>
+      )}
       {error && !pending ? (
         <div className="cd-take-over__error">
           <Notice tone="error">{error}</Notice>

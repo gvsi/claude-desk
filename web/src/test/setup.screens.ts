@@ -23,6 +23,7 @@ import { writeLocal } from '../lib/storage.ts';
 import { stampRequests, startTest, worker } from '../mocks/browser.ts';
 import { mockStore } from '../mocks/store.ts';
 import { CONNECTOR_PAGES_BUILT, setConnectorPagesBuilt } from '../owner/connectors/pages.ts';
+import { forgetSeen } from '../owner/notifications/seen.ts';
 import { resetLandings } from '../owner/rules/landing.ts';
 import { resetBrowserLanguage } from './renderRoute.tsx';
 import { mockDrain } from './mockDrain.ts';
@@ -41,6 +42,8 @@ beforeEach(() => {
   writeLocal('hadOwnerCopy', null);
   // Whether a paid checkout links back to a chat depends on what chats this browser showed.
   writeLocal('payChats', null);
+  // Which notifications count as unread depends on what this browser has seen.
+  forgetSeen();
   // Whether a reload's loading page draws a "Not live yet" card depends on the Desks this browser saw.
   writeLocal('todaySetup', null);
 });

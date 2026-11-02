@@ -369,34 +369,29 @@ it('a_desk_that_went_live_is_forgotten_and_draws_no_card_on_a_reload', async () 
   expect(document.querySelector('.cd-continue-setup')).toBeNull();
 });
 
-it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
-  // The Demo inbox is the demo bar's: Today opens with its read still out, the bar draws no inbox
-  // button meanwhile (nor a line that it is opening), then draws it once the read is in.
+it('reload_opens_today_without_waiting_for_the_notifications', async () => {
+  // The notifications are the sidebar's count: Today opens with their read still out, the sidebar
+  // counts none meanwhile, then counts them once the read is in.
   const inbox = holdReads(ROUTES.ownerInbox.path);
   onTestFinished(inbox.release);
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
   await vi.waitFor(() => expect(inbox.held()).toBe(1));
   await expect.element(screen.getByRole('heading', { name: 'Needs you', exact: true })).toBeVisible();
-  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
+  const nav = screen.getByRole('navigation', { name: 'Main' });
+  await expect.element(nav.getByRole('link', { name: 'Notifications', exact: true })).toBeVisible();
   inbox.release();
-  const button = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
-  await expect.element(button).toBeVisible();
-  expect(button.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
+  await expect.element(nav.getByRole('link', { name: 'Notifications 1 unread', exact: true })).toBeVisible();
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
-/** The demo bar's Demo inbox, which the frame's shapes draw before Start over. */
-const INBOX_ANCHOR: SkeletonAnchor = { name: 'inbox', page: '.cd-reviewer-bar .cd-owner-inbox > .cd-button', size: true };
-
-it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_shape at %s', async (viewport) => {
-  // The inbox is read with the Desks, so once it is in before them, the bar draws it with the frame,
-  // where the frame's shapes drew it.
+it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_desks at %s', async (viewport) => {
+  // The notifications are read with the Desks, so once they are in before them, the frame lands
+  // where its shapes drew it, the demo bar with Start over alone, and reads them only the once.
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: [...(viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS), INBOX_ANCHOR],
+    anchors: viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS,
     open: async () => {
       await renderRoute(TODAY, { viewport, pollScale: 100 });
       await vi.waitFor(() => expect(desks.held()).toBe(1));
@@ -405,6 +400,7 @@ it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_
     },
     release: desks.release,
   });
+  expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Start over']);
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
@@ -737,7 +733,7 @@ const WIDE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'sidebar-mark', page: '.cd-sidebar__brand .cd-mark' },
   { name: 'business-row', page: '.cd-sidebar__business' },
   { name: 'page-row-0', page: '.cd-sidebar__nav > a:first-child' },
-  ...Array.from({ length: 8 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
+  ...Array.from({ length: 9 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
   { name: 'owner-avatar', page: '.cd-sidebar__avatar' },
 ];
 const PHONE_ANCHORS: readonly SkeletonAnchor[] = [
@@ -1164,28 +1160,28 @@ it('desk_gate_hides_the_old_error_while_retrying_a_missing_desk', async () => {
   await expect.element(error).not.toBeInTheDocument();
 });
 
-it('failed_demo_inbox_read_says_so_in_its_sheet', async () => {
-  // The first read fails, and so does its one retry: the bar draws the inbox's button with no count,
-  // and its sheet holds the line with Try again, never an inbox that looks empty.
+it('failed_notifications_read_says_so_on_their_page', async () => {
+  // The first read fails, and so does its one retry: the sidebar counts nothing, and Notifications
+  // holds the line with Try again, never a page that looks empty.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
   const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-  const button = screen.getByRole('button', { name: 'Demo inbox', exact: true });
-  await expect.element(button).toBeVisible();
+  const nav = screen.getByRole('navigation', { name: 'Main' });
+  const row = nav.getByRole('link', { name: 'Notifications', exact: true });
+  await expect.element(row).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
-  expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2);
+  await vi.waitFor(() => expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2));
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
-  // The sheet's own read as it opens fails too.
+  // The page's own read as it opens fails too.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
-  await button.click();
-  const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-  await expect.element(sheet.getByRole('alert').getByText(/^Couldn't open your Demo inbox\./), { timeout: 4_000 }).toBeVisible();
-  expect(sheet.element().querySelector('.cd-demo-inbox__empty')).toBeNull();
-  await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
-  await expect.element(sheet.getByRole('alert')).not.toBeInTheDocument();
-  await expect.element(sheet.getByRole('list')).toBeVisible();
-  await sheet.getByRole('button', { name: 'Close' }).click();
-  await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+  await row.click();
+  const page = screen.getByRole('main');
+  await expect.element(page.getByRole('alert').getByText(/^Couldn't open your notifications\./), { timeout: 4_000 }).toBeVisible();
+  expect(page.element().querySelector('.cd-empty-state')).toBeNull();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+  await expect.element(page.getByRole('list')).toBeVisible();
+  // Shown, the entry is seen: the sidebar counts none.
+  await expect.element(row).toBeVisible();
 });
 
 it('screen_helper_selects_the_region_by_its_status', async () => {
@@ -1514,6 +1510,7 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
 
 /** Each part of the fresh copy's held chat, by the shape that stands for it and the part itself. */
 const CHAT_PARTS = {
+  bar: { name: 'conversation-bar', page: '.cd-conversation__bar', size: true },
   name: { name: 'conversation-name', page: '.cd-conversation__name', dimensions: ['height', 'bottom'] },
   head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height', 'bottom'] },
   visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height', 'bottom'] },
@@ -1529,6 +1526,7 @@ const CHAT_PARTS = {
  * is anchored to its shape.
  */
 const PANE_ANCHORS: readonly SkeletonAnchor[] = [
+  CHAT_PARTS.bar,
   CHAT_PARTS.name,
   CHAT_PARTS.head,
   CHAT_PARTS.visitor,
@@ -1544,6 +1542,15 @@ const PANE_ANCHORS: readonly SkeletonAnchor[] = [
  * request, each anchored to its shape by its top and bottom.
  */
 const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [CHAT_PARTS.name, CHAT_PARTS.reply, CHAT_PARTS.receipt0, CHAT_PARTS.receipt1, CHAT_PARTS.held];
+
+/**
+ * The phone's anchors as the shapes fade. There the open conversation scrolls as one, under its
+ * bar pinned at the top of the pane; the fading layer clips its shapes in a box of its own, where
+ * their bar no longer pins, and the page's bar lies over them. So the name is checked against its
+ * shape as the shapes show and once the chat has landed (`expectSkeletonLoad`), not frame by frame
+ * as they fade.
+ */
+const PHONE_LANDING_ANCHORS: readonly SkeletonAnchor[] = PHONE_PANE_ANCHORS.filter((anchor) => anchor !== CHAT_PARTS.name);
 
 /**
  * From the moment the pane's shapes start to leave, each anchored part of the chat, every frame
@@ -1624,7 +1631,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   // at its latest on a phone, over the owner's controls.
   const chat = holdReads(conversationRead(SEEDED_HOLD));
   const anchors = viewport === 'desktop' ? PANE_ANCHORS : PHONE_PANE_ANCHORS;
-  const inView = watchPaneLanding(anchors);
+  const inView = watchPaneLanding(viewport === 'desktop' ? PANE_ANCHORS : PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors,
@@ -1655,7 +1662,11 @@ it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_ma
     const rect = document.querySelector(selector)!.getBoundingClientRect();
     return { left: rect.left, right: rect.right, width: rect.width };
   };
-  const before = ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].map(part => {
+  // The bar runs across the whole pane; the transcript's rows and the controls fill the column.
+  const shapeBar = bounds(`${shape} .cd-conversation__bar`);
+  expect(Math.abs(shapeBar.left - pane.left), 'bar shape left').toBeLessThanOrEqual(1);
+  expect(Math.abs(shapeBar.width - pane.width), 'bar shape width').toBeLessThanOrEqual(1);
+  const before = ['.cd-transcript-row', '.cd-conversation__controls'].map(part => {
     const rect = bounds(`${shape} ${part}`);
     expect(Math.abs(rect.width - expectedWidth), `${part} shape width`).toBeLessThanOrEqual(1);
     expect(Math.abs((rect.left - pane.left) - (pane.right - rect.right)), `${part} shape centred`).toBeLessThanOrEqual(1);
@@ -1664,7 +1675,9 @@ it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_ma
   chat.release();
   await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector(shape)).toBeNull());
-  ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
+  const bar = bounds('.cd-conversation-pane .cd-conversation__bar');
+  for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(bar[edge] - shapeBar[edge]), `bar ${edge}`).toBeLessThanOrEqual(1);
+  ['.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
     const rect = bounds(`.cd-conversation-pane ${part}`);
     for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(rect[edge] - before[i]![edge]), `${part} ${edge}`).toBeLessThanOrEqual(1);
   });
@@ -1678,7 +1691,7 @@ it('conversation_shapes_follow_the_answer_buttons_height', async () => {
   document.head.append(style);
   onTestFinished(() => style.remove());
   const chat = holdReads(conversationRead(SEEDED_HOLD));
-  const landing = watchPaneLanding(PHONE_PANE_ANCHORS);
+  const landing = watchPaneLanding(PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors: PHONE_PANE_ANCHORS,
@@ -1710,7 +1723,7 @@ async function openChatWithOneReadHeld(key: 'needsYou' | 'conversations', path: 
     await vi.waitFor(() => expect(others.every((route) => served(route) > 0)).toBe(true));
     await vi.waitFor(() => expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
     await nextFrames();
-    expect(landedElement('.cd-conversation__head'), `the chat waits for ${key}`).toBeNull();
+    expect(landedElement('.cd-conversation__bar'), `the chat waits for ${key}`).toBeNull();
     expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown');
   };
   return { ...rendered, held, open };
@@ -1791,7 +1804,7 @@ it('conversation_reload_hands_off at 390', async () => {
   // The fresh copy's held chat, which on a phone opens at its latest.
   const desks = holdReads(ROUTES.desks.path);
   const chat = holdReads(conversationRead(SEEDED_HOLD));
-  const gaps = watchSkeletonGaps('.cd-conversation__head');
+  const gaps = watchSkeletonGaps('.cd-conversation__bar');
   const { screen } = await renderRoute(`${CONVERSATIONS}/${SEEDED_HOLD}`, { viewport: 'phone', pollScale: 100 });
   // From the loading page's first commit, which keeps the frame's hidden heading.
   const headings = watchTopHeadings();
@@ -1801,7 +1814,7 @@ it('conversation_reload_hands_off at 390', async () => {
   expect(document.querySelector(`${FULL_LAYER} .cd-conversations--open .cd-conversations__back`)).not.toBeNull();
   const names = PHONE_PANE_ANCHORS.map(({ name }) => name);
   const before = fullPageShapes(names);
-  const inView = watchPaneLanding(PHONE_PANE_ANCHORS);
+  const inView = watchPaneLanding(PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     continues: true,
@@ -2251,7 +2264,7 @@ it('conversations_paused_first_read_lands_its_error_and_stays_open_on_reconnect'
 it('conversation_paused_first_read_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: ['conversation', SEEDED_HOLD], readPath: conversationRead(SEEDED_HOLD),
-    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
+    region: '.cd-conversation-pane', landed: '.cd-conversation__bar',
     prime: CONVERSATIONS, primeLanded: '.cd-conversations__items',
   });
 });
@@ -2259,8 +2272,8 @@ it('conversation_paused_first_read_lands_its_error_and_stays_open_on_reconnect',
 it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: needsYouKey(RIVERA.deskId), readPath: NEEDS_YOU_READ,
-    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
-    prime: `${CONVERSATIONS}/${SEEDED_HOLD}`, primeLanded: '.cd-conversation__head',
+    region: '.cd-conversation-pane', landed: '.cd-conversation__bar',
+    prime: `${CONVERSATIONS}/${SEEDED_HOLD}`, primeLanded: '.cd-conversation__bar',
   });
 });
 

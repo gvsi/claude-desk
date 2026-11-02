@@ -449,6 +449,73 @@ describe('the scripted Desk', () => {
     expect(answersFor({ ...DECISIONS.heldRefund, amountCents: 50_000 })).toContain('allow_person');
   });
 
+  it('a_held_request_quotes_the_words_that_made_it', async () => {
+    // The held request quotes only its own turn after Claude answered the price question,
+    // as the API's Needs you does, while the same chat's callback quotes its latest.
+    const { session } = await openChat();
+    await send('How much to clear a drain?');
+    await drain();
+    await send('Can I get 15% off?');
+    await drain();
+    await send('Can you come Tuesday?');
+    await drain();
+    await send('Please call me back');
+    await drain();
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const chat = needsYou.filter((item) => item.session.session_id === session.session_id);
+    expect(chat.map((item) => [item.decision ? 'held' : 'handoff', item.from_the_visitor])).toEqual([
+      ['held', 'Can I get 15% off?'],
+      ['handoff', 'Can you come Tuesday? · Please call me back'],
+    ]);
+  });
+
+  it.each(['desk', 'owner'] as const)('a_%s_delivery_keeps_the_held_requests_visitor_words', async (author) => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    world.visitorText(session, 'It is the downstairs drain.');
+    world.visitorText(session, 'Can I get 15% off?');
+    world.emit(session, { ...ctx.reply([proseBlock('Your payment link was cancelled.')]), author });
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('It is the downstairs drain. · Can I get 15% off?');
+  });
+
+  it.each(['visitor', 'agent'] as const)('a_late_reply_keeps_one_line_from_the_%s_before_the_hold', async (kind) => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!, kind === 'agent' ? { agent: "Alex Kim's assistant" } : {});
+    const say = (text: string) => kind === 'agent' ? world.agentText(session, text) : world.visitorText(session, text);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    say('How much to clear a drain?');
+    say('Can I get 15% off?');
+    world.emit(session, ctx.reply([proseBlock('Here is the drain clearing quote.')]));
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+    say('A later request must not be quoted.');
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('Can I get 15% off?');
+  });
+
+  it('a_first_turn_hold_quotes_both_visitor_lines', async () => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    world.visitorText(session, 'It is the downstairs drain.');
+    world.visitorText(session, 'Can I get 15% off?');
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('It is the downstairs drain. · Can I get 15% off?');
+  });
+
   it('owner_alert_names_the_held_request', async () => {
     // Mike's Demo inbox alert for a hold names that held request; the code sent to a visitor names none.
     const before = mockStore.world.inbox.length;
@@ -1283,12 +1350,16 @@ describe('the scripted Desk', () => {
   });
 
   it('held_request_quotes_two_lines_each_cut_to_its_glimpse', async () => {
-    // A held request quotes the same two lines as a handoff (the API's `visitor_lines`): each with
+    // The last two visitor lines in the request's own turn (the API's `visitor_lines`): each with
     // whitespace collapsed, and past 200 characters cut to 199, trimmed, and "…".
     const { session } = await openChat();
     const long = `${'x'.repeat(198)}   ${'y'.repeat(10)}`;
-    await send(long);
+    await send('How much to clear a drain?');
     await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the visitor has a session');
+    mockStore.world.visitorText(record, 'One more question about the drain.');
+    mockStore.world.visitorText(record, long);
     await send('Can I get 50%   off if I pay cash?');
     await drain();
     const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
@@ -1992,6 +2063,74 @@ describe('the owner in the chat', () => {
     // Read in step with the stream: a stream opened after `last_seq` repeats none of them.
     expect(typesOf(events)).toEqual(['owner_joined', 'message', 'owner_left']);
     expect(read.last_seq).toBe(events.at(-1)?.[0]);
+  });
+
+  it('a_code_confirmed_while_the_owner_has_the_chat_waits_for_the_hand_back', async () => {
+    // As the API: the visitor is verified, but while the owner has the chat Claude takes no turn, so
+    // it doesn't answer for him and the chat stays his. Handed back, Claude goes on with the invoice, once.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
+    const before = events.length;
+    const checked = await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } });
+    expect(checked).toMatchObject({ status: 200, body: { state: { verified: true, mode: 'owner' } } });
+    await drain();
+    expect(typesOf(events.slice(before)).filter((type) => ['writing', 'message', 'turn_end'].includes(type))).toEqual([]);
+    expect((await call('visitorSession', { params: { slug } })).body).toMatchObject({ state: { mode: 'owner' } });
+
+    const handedBack = events.length;
+    expect((await call('handback', { params: { session_id: session.session_id }, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    const after = events.slice(handedBack).map(([, ev]) => ev);
+    expect(after.map((ev) => ev.type)).toEqual(['owner_left', 'writing', 'receipt', 'message', 'turn_end']);
+    const reply = after.find((ev) => ev.type === 'message');
+    expect(reply?.type === 'message' && reply.blocks.map((b) => b.template)).toContain('document_link');
+    // A second hand-back after another take-over has nothing left to go on with.
+    const again = events.length;
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation + 2 } })).status).toBe(200);
+    expect((await call('handback', { params: { session_id: session.session_id }, body: { generation: session.generation + 3 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events.slice(again))).toEqual(['owner_joined', 'owner_left']);
+  });
+
+  it('a_code_held_for_the_hand_back_survives_a_take_over_before_its_turn_and_comes_before_a_waiting_line', async () => {
+    // The owner takes the chat back before Claude's turn starts: that turn never runs, and the next
+    // hand-back has the code still. A line the visitor wrote meanwhile doesn't use it up: Claude goes
+    // on with the invoice, once.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    const at = (step: number) => ({ params: { session_id: session.session_id }, body: { generation: session.generation + step } });
+    expect((await call('takeover', at(0))).status).toBe(200);
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await send('Did it work?');
+    const before = events.length;
+    expect((await call('handback', at(1))).status).toBe(200);
+    expect((await call('takeover', at(2))).status).toBe(200);
+    await drain();
+    expect((await call('handback', at(3))).status).toBe(200);
+    await drain();
+    const replies = events.slice(before).flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((b) => b.template)] : []));
+    expect(replies.filter((templates) => templates.includes('document_link'))).toHaveLength(1);
+    expect(replies).toHaveLength(1);
+  });
+
+  it('a_code_confirmed_in_a_paused_chat_gets_the_kernels_handoff', async () => {
+    // As a message in a paused chat: no "writing" and no invoice, only the kernel's handoff card.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the chat is in the copy');
+    mockStore.world.pause(record);
+    const before = events.length;
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const shown = events.slice(before).map(([, ev]) => ev);
+    expect(shown.map((ev) => ev.type)).toEqual(['message', 'turn_end']);
+    const [message] = shown;
+    expect(message?.type === 'message' && [message.author, message.handoff, message.blocks.map((b) => b.template)]).toEqual(['claude', true, ['handoff']]);
   });
 
   it('typing_shows_both_ways', async () => {

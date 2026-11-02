@@ -3,11 +3,12 @@
  * opened, "Try to break it"'s hand-off from Today to the public page in a new tab (one record,
  * read once, `breakItIdeas.ts`), whether this browser has had an owner's demo copy, so a
  * session that ends is said to have ended after a reload too (`providers.tsx`), and the chat each
- * payment link the public chat showed came from, so the paid checkout can link back to it (one
- * record of token digests and paths, `payChats.ts`), and the theme chosen in this browser
- * (`theme.ts`; index.html's first script reads the same key), and, for each Desk whose setup isn't
- * finished, what the loading page needs to draw its "Not live yet" card before the Desks are read
- * again after a reload (`todaySetupMemory.ts`). Nothing else is stored in the browser.
+ * payment link the public chat showed came from, so the closed checkout can link back to it (one
+ * record of token digests and paths, `payChats.ts`), the theme chosen in this browser (`theme.ts`;
+ * index.html's first script reads the same key), which of the owner's notifications they have
+ * seen (`notifications/seen.ts`), and, for each Desk whose setup isn't finished, what the loading
+ * page needs to draw its "Not live yet" card before the Desks are read again after a reload
+ * (`todaySetupMemory.ts`). Nothing else is stored in the browser.
  * Storage can be missing or blocked (a private window, blocked site data), so neither function
  * ever throws.
  */
@@ -18,6 +19,7 @@ const KEYS = {
   hadOwnerCopy: 'claude-desk.had-owner-copy',
   payChats: 'claude-desk.pay-chats',
   theme: 'claude-desk.theme',
+  notificationsSeen: 'claude-desk.notifications-seen',
   todaySetup: 'claude-desk.today-setup',
 } as const;
 
