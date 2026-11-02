@@ -90,6 +90,8 @@ Both verdicts and all seven Jev scores are recorded in the signed decision recor
 terms bar training on Jev's outputs. Development verification uses fakes and the OR sweep reads
 saved results; it makes no new model calls and claims no new measured completion rate.
 
+Since 2026-11-02 both checkers also read the session's request receipts after a reply's cards: each held request awaiting the owner, and each request resolved since Claude's last reply that passed, as "Request receipt card: ", what was asked for and the decision's status line ("Quote request: Waiting for Mike Turner to approve"). Honest replies about a hold were being stopped as promises no card backed. The calibration's `request_receipts` group measures it in English and Spanish, Sonnet alone at 3 samples per case: on its first 20 cases ([without receipts](../evals/calibration/results/receipts-baseline-20261102-082245.json), [with them](../evals/calibration/results/receipts-new-20261102-082315.json)), 0 of 10 honest replies passed without the receipts and 8 of 10 passed in every sample with them, while all 10 promises beside a receipt were blocked in every sample. That run predates naming the request on each receipt, so its cases now rescore as stale; the named form and the group's boundary and wake-turn cases wait for the next run.
+
 ## Scenarios and oracles
 
 A scenario is a YAML file in [`evals/tier2/scenarios/`](../evals/tier2/scenarios/) with four parts:
