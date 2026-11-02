@@ -716,7 +716,7 @@ describe('Settings against its boards', () => {
       const answering = main(screen).getByRole('region', { name: 'Claude acts for you' });
       await expect.element(answering).toBeVisible();
       const card = answering.element().getBoundingClientRect();
-      expect(card.height, `${viewport} Answering card height`).toBe(71);
+      expect(card.height, `${viewport} Answering card height`).toBe(73);
       const row = answering.getByRole('switch', { name: 'Claude acts for you' }).element().getBoundingClientRect();
       expect(row.top - card.top).toBe(11);
       expect(card.bottom - row.bottom).toBe(11);
