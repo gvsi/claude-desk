@@ -3,7 +3,8 @@ import { expect, it } from 'vitest';
 
 import { ROUTES } from '../../api/routes.ts';
 import { worker } from '../../mocks/browser.ts';
-
+import { businessOut } from '../../mocks/readModels.ts';
+import { withSetupBusinesses } from '../../mocks/setup.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
@@ -49,4 +50,32 @@ it.each([false, true])('deleting_the_only_desk_removes_its_business_when_desks_r
   await expect.poll(() => menu.getByRole('menuitemradio').elements()).toHaveLength(1);
   await expect.element(menu.getByRole('menuitemradio', { name: 'Turner Plumbing 1 Desk', exact: true })).toBeVisible();
   expect(menu.getByText('A hair salon in Oakland', { exact: true }).query()).toBeNull();
+});
+
+it('deleting_a_desk_prefers_the_next_desk_in_its_business_over_an_earlier_business', async () => {
+  const salon = await liveSetupDeskIds('A hair salon in Oakland');
+  const first = mockStore.world.desk(salon.deskId)!;
+  const second = mockStore.world.addDesk({
+    desk_id: 'salon-second', slug: 'salon-second', name: 'Weekends',
+    hours: first.summary.hours, openStatus: first.openStatus,
+  });
+  second.summary.business_name = first.summary.business_name;
+  const salonBusiness = withSetupBusinesses(mockStore.world, [businessOut(mockStore.world)]).find((business) => business.desks.some((desk) => desk.desk_id === salon.deskId))!;
+  const salonIds = [salon.deskId, second.summary.desk_id];
+  worker.use(http.get(ROUTES.desks.path, () => {
+    const business = businessOut(mockStore.world);
+    return HttpResponse.json([
+      { ...business, desks: business.desks.filter((desk) => !salonIds.includes(desk.desk_id)) },
+      { ...salonBusiness, desks: business.desks.filter((desk) => salonIds.includes(desk.desk_id)) },
+    ]);
+  }));
+  const { screen, router } = await renderRoute(`/app/${salon.deskId}/settings/general`, { pollScale: 100 });
+  await screen.getByRole('button', { name: 'Delete this Desk', exact: true }).click();
+  await screen.getByRole('dialog').getByRole('button', { name: 'Delete Desk', exact: true }).click();
+  await expect.poll(() => router.state.location.pathname).toBe(`/app/${second.summary.desk_id}/today`);
+  expect(router.state.historyAction).toBe('REPLACE');
+  await expect.element(screen.getByRole('link', { name: 'Today', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect.element(screen.getByRole('button', { name: 'Switch business, current: A hair salon in Oakland', exact: true })).toBeVisible();
+  expect(mockStore.world.desk(salon.deskId)).toBeUndefined();
+  expect(mockStore.world.desk(RIVERA.deskId)).toBeDefined();
 });
