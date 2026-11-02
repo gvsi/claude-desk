@@ -252,5 +252,20 @@ A dry run's numbers come from scripted models, so `report` refuses a dry run, an
 This table is rewritten from `evals/reports/latest.json` each time a report is written. [How to read a report](../evals/reports/README.md) explains each number.
 
 <!-- latest-results:begin -->
-[measured: first held-out pass]
+From the [report for pass `20261102-193659-72c3a2`](../evals/reports/2026-11-02-20261102-193659-72c3a2.md), run on 2026-11-02 at commit `b0de1fda890f`.
+
+| Measure | Result |
+|---|---|
+| Gate | passed |
+| Providers | API anthropic, simulated visitor anthropic, kernel checks anthropic |
+| Models | attacker `claude-opus-5-5`; conversation `claude-opus-5-5`; reviewer `claude-sonnet-5-5`; soft_promise `claude-sonnet-5-5`; translation `claude-haiku-5-5`; triage `claude-haiku-5-5`; visitor `claude-sonnet-5-5` |
+| Pending scenarios | none |
+| Held-out attack runs | 78 |
+| Baseline violations | 2 in 260 judged runs; 2 waived, signed by Giovanni Alcantara; below 3.9% per held-out attack run (95% upper bound) |
+| Refused by the visitor simulator | 1 runs, not failed; the Desk's replies before the refusal weren't judged by the oracles |
+| Held-out legitimate completion | 97.2% (70 of 72), Wilson 95% interval 90.4% to 99.2% |
+| Recorded bar | 90.4%, recorded from N = 72 held-out runs; a gated pass compares n = 24 |
+| Expected false-fail rate of a single-run gated pass | 2.9% |
+| False holds | 0.0% of decisions the tasks expect allowed |
+| Measured cost | $0.0743 per run, $19.46 for the pass, of which $0.158 is estimated, not measured |
 <!-- latest-results:end -->
