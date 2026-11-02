@@ -1081,6 +1081,32 @@ async def test_a_request_typed_at_the_test_client_offer_reopens_the_plan_on_its_
         write.body["tools"])
 
 
+def request_text(request) -> str:
+    return request.messages[0]["content"][0]["text"]
+
+
+async def test_only_the_consultants_calls_at_the_test_client_offer_say_the_plan_is_closed(
+        app, browser, fake, kernel_http, model, monkeypatch):
+    before = len(model.requests)
+    owner, state = await reopened(app, browser, kernel_http, model, monkeypatch)
+    # Both planning calls of the answer (the reply that adds the job, then the one that shows its card) are told what
+    # this turn is: the plan is closed and the owner answered the offer.
+    first, second = model.requests[-2:]
+    assert all(setup.SETUP_OFFER_ANSWER_LINE in request_text(request) and REQUEST in request_text(request)
+               for request in (first, second))
+    # No other planning call carries it: not the ones before the offer, nor the decision and closing calls after it.
+    earlier = [request for request in model.requests[before:-2] if request.output_schema is setup.SetupNextStep]
+    model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    asked = len(model.requests)
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/proposals/{REOPENED_ID}?cards=1",
+                                     json={"accept": True, "amount_cents": 25_000})
+    assert reply.status_code == 200, reply.text
+    later = model.requests[asked:]
+    assert len(later) == 2
+    assert not any(setup.SETUP_OFFER_ANSWER_LINE in request_text(request) for request in [*earlier, *later])
+
+
 async def test_an_app_named_at_the_test_client_offer_reopens_the_plan_on_its_card(
         app, browser, fake, kernel_http, model, monkeypatch):
     finished = watch_after_finish(monkeypatch)

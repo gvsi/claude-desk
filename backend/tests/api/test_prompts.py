@@ -30,6 +30,7 @@ from desk.api.prompts import (
     SETUP_CARD_ANSWER_SYSTEM,
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
+    SETUP_OFFER_ANSWER_LINE,
     SETUP_NEXT_HEAD,
     SETUP_PLAN_NOT_CONNECTED,
     SETUP_TURN_HEAD,
@@ -342,7 +343,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.29"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.31"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -859,6 +860,7 @@ PROMPT_NAMES ={"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_
                 "SETUP_START_SYSTEM", "SETUP_TURN_SYSTEM", "SETUP_TURN_HEAD", "SETUP_RETRY", "QUESTIONS",
                 "QUESTION_KEYS", "SETUP_NEXT_SYSTEM", "SETUP_NEXT_HEAD", "SetupNextStep",
                 "SETUP_CARD_ANSWER_SYSTEM", "SETUP_CLIENT_CARDS", "SETUP_CLOSING_LINE", "SetupCardAnswer",
+                "SETUP_OFFER_ANSWER_LINE",
                 "question_text", "setup_turn_head", "SetupStart", "SetupTurn", "SETUP_TURNS", "SetupPatch",
                 "SetupAnswers", "HoursAnswer", "PriceAnswer", "MemoryDraft", "ConnectorKey", "CONNECTOR_LABELS",
                 # triage and owner translations (Plan 02b, Task 10)
@@ -903,7 +905,7 @@ def _fixed() -> set[str]:
             *(line for line in VISITING_AGENT_SYSTEM.splitlines() if len(line) > 20),
             *AGENT_TASK.split("{task}"), RECEIPT_LINE,
             *(field.description for field in AgentStep.model_fields.values()),
-            *SETUP_CLIENT_CARDS.values(), SETUP_CLOSING_LINE,
+            *SETUP_CLIENT_CARDS.values(), SETUP_CLOSING_LINE, SETUP_OFFER_ANSWER_LINE,
             *(line for system in (SETUP_START_SYSTEM, SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM) for line in system.splitlines()
               if len(line) > 20),
             *(part for template in (SETUP_TURN_HEAD, SETUP_NEXT_HEAD, SETUP_RETRY,

@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.29"
+PROMPT_VERSION = "2026-10-31.31"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -1112,6 +1112,18 @@ SETUP_CLIENT_CARDS = {
 }
 SETUP_CLOSING_LINE = ("Every topic is covered and the plan is settled. Write the closing plan now. "
                       "Set next to done; only plan and reply will be read.")
+# This turn's line when the owner answered the test-client offer, after the closing plan, with neither a yes nor a no
+# (`_consult_on_offer` in setup.py): on each of its planning calls, in place of a card decision or a limit answer.
+SETUP_OFFER_ANSWER_LINE = (
+    "This turn: the plan is closed, and the owner answered the offer to add them as a test client with something "
+    "other than yes or no, in <owner_answer>: a request or a question, not a card decision or a limit answer. In "
+    "reply, answer what they typed in one or two sentences. When they ask for a job the Desk can do, put it in "
+    "add_jobs and leave next as done; code shows it as a card next, so say you'll propose it, never that it's set "
+    "up. When <setup_plan> already lists a job as planned, it's the one you added for this answer and you've "
+    "replied: set next to its id, with question as the short line before its card, leave reply empty and add "
+    "nothing. When they ask for an app, set next to it, with question as the line before its card. A client that "
+    "can't show cards gets no jobs or apps here. Facts, limits and jobs already decided can't change from here, so "
+    "never say you've changed them. Leave plan empty.")
 SETUP_RETRY = "That answer didn't fit the format:\n{errors}\nAnswer again in the same format, fixing those fields."
 # The setup interview's wrappers (`setup.py`), named in `SETUP_START_SYSTEM` and `SETUP_TURN_SYSTEM`.
 OWNER_DESCRIPTION_TAG = "owner_description"

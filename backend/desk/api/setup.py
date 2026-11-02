@@ -190,6 +190,7 @@ from desk.api.prompts import (
     SETUP_CARD_ANSWER_SYSTEM,
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
+    SETUP_OFFER_ANSWER_LINE,
     SETUP_PLAN_NOT_CONNECTED,
     SETUP_PLAN_NO_AMOUNT,
     SETUP_PLAN_TAG,
@@ -2264,6 +2265,10 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
     if closing:
         parts.append(SETUP_CLOSING_LINE)
+    elif interview.offering and text is None:
+        # The owner answered the test-client offer with neither a yes nor a no (`_consult_on_offer`): the plan is
+        # closed, and this call is neither a card decision nor a limit answer.
+        parts.append(SETUP_OFFER_ANSWER_LINE)
     if decision is not None:
         parts.append(wrap(OWNER_DECISION_TAG, decision))
     if text is not None:
