@@ -23,6 +23,18 @@ export const VISITOR_VISIT_BOOKED = 'Booked';
 export const VISITOR_NO_MESSAGES = 'No messages yet';
 export const visitorCalledBack = (ownerFirstName: string): string => `${ownerFirstName} called back`;
 
+/**
+ * The whisper box's line: Claude reads a whisper in its next reply, which runs while the visitor
+ * is in the chat, or else when they next write. `name` is the one the conversation's bar shows,
+ * null when it has none.
+ */
+export function whisperHelper(name: string | null, here: boolean): string {
+  const who = name ?? 'The visitor';
+  return here
+    ? `${who} is in the chat now. Claude will use your whisper in its reply right away.`
+    : `${who} isn't in the chat now. Claude will use your whisper when they next write.`;
+}
+
 /** An agent's row line when a request was refused for asking more than its signed limit. */
 export const AGENT_OVER_LIMIT = 'Asked to pay more than its limit, and was turned down.';
 /** An agent's row line when a request was refused for any other reason, or one not known. */

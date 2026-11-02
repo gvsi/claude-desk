@@ -888,7 +888,10 @@ export function visitorTranscript(session: SessionRecord): VisitorTranscript {
   };
 }
 
-/** The owner's view of a chat: every item after `after`, whispers included, and whether the visitor is typing at `now`. */
+/**
+ * The owner's view of a chat: every item after `after`, whispers included, whether the visitor is
+ * typing at `now`, and whether they are in the chat now (their stream is open, as the API reads it).
+ */
 export function ownerTranscript(session: SessionRecord, after: number, now: number, world: MockWorld): OwnerTranscript {
   const typing = session.typingUntil;
   return {
@@ -902,6 +905,7 @@ export function ownerTranscript(session: SessionRecord, after: number, now: numb
       return { ...item, owner_translation: item.owner_translation ?? null, triage: item.triage ?? null, owner_plain: ownerPlain };
     }),
     typing_until: typing !== null && typing > now ? isoTime(typing) : null,
+    visitor_here: session.listeners.size > 0,
   };
 }
 

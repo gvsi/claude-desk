@@ -36,12 +36,12 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
-import { TRANSCRIPT_NOTE } from './copy.ts';
+import { TRANSCRIPT_NOTE, whisperHelper } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { latestOf } from './latest.ts';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
-import { whoLabel } from './status.ts';
+import { nameOf, whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
@@ -343,6 +343,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           variant="whisper"
           label="Whisper to Claude"
           placeholder="Whisper to Claude. They won't see it."
+          helper={whisperHelper(summary ? nameOf(summary) : null, read.visitor_here === true)}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}
           onSend={whisper}

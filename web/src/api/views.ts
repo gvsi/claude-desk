@@ -323,6 +323,11 @@ export interface OwnerTranscript {
   typing_until?: string | null;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+  /**
+   * The visitor's public chat stream is open now, so a whisper reaches Claude at once (owner view
+   * only). An agent holds no stream, so its chat reads false. Absent is false.
+   */
+  visitor_here?: boolean;
 }
 
 /** An item of the owner's transcript: a visitor's kinds, and where the reply check stopped a draft of Claude's. */
