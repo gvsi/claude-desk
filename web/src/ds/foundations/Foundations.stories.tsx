@@ -120,7 +120,12 @@ function Entry({ visual, name, value, usage }: { visual: ReactNode; name: string
   );
 }
 
-function ColorSheet() {
+/** A color's value in `theme`: its light value in the light theme, or its dark one where it keeps it. */
+function themeValue(value: { dark: string; light?: string | undefined }, theme: 'dark' | 'light'): string {
+  return theme === 'light' ? (value.light ?? value.dark) : value.dark;
+}
+
+function ColorSheet({ theme }: { theme: 'dark' | 'light' }) {
   const groups = new Map<string, typeof tokens.color.tokens>();
   for (const token of tokens.color.tokens) {
     const stem = token.name.split('-')[0] ?? token.name;
@@ -128,7 +133,10 @@ function ColorSheet() {
     groups.set(title, [...(groups.get(title) ?? []), token]);
   }
   return (
-    <Sheet title="Colors" intro="One dark theme. Translucent colors are shown over the app background, where they are used.">
+    <Sheet
+      title="Colors"
+      intro="Two themes: dark, the base, and light on warm paper. Each value is the theme's that the toolbar draws, and a color with no light value keeps its dark one. Translucent colors are shown over the app background, where they are used."
+    >
       {[...groups].map(([title, colors]) => (
         <Group key={title} title={title}>
           <ul style={list}>
@@ -136,7 +144,7 @@ function ColorSheet() {
               <Entry
                 key={token.name}
                 name={token.name}
-                value={token.value.dark}
+                value={themeValue(token.value, theme)}
                 usage={token.usage}
                 visual={
                   <span
@@ -331,7 +339,32 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Colors: Story = { render: () => <ColorSheet /> };
+/** The value `name`'s entry shows on the color sheet. */
+function shownValue(canvasElement: HTMLElement, name: string): string | null | undefined {
+  return within(canvasElement).getByText(name, { exact: true }).nextElementSibling?.textContent;
+}
+
+/** What the sheet shows for three colors in each theme: one that changes, one fixed, one alias. */
+const SHOWN: Record<'dark' | 'light', readonly string[]> = {
+  dark: ['#1c1b19', '#141413', '{text-secondary}'],
+  light: ['#f6f4ee', '#141413', '{text-secondary}'],
+};
+
+export const Colors: Story = {
+  render: (_, { globals }) => <ColorSheet theme={globals.theme === 'light' ? 'light' : 'dark'} />,
+  play: async ({ canvas, canvasElement, globals }) => {
+    // Each color's value in the theme the sheet draws in: dark, as Storybook draws unless asked, or
+    // light, where a color keeps its dark value if it has no light one.
+    const theme = globals.theme === 'light' ? 'light' : 'dark';
+    await expect(canvas.getByText(/^Two themes:/)).toBeVisible();
+    await expect([shownValue(canvasElement, 'bg-app'), shownValue(canvasElement, 'mark-ink'), shownValue(canvasElement, 'line-focus')]).toEqual([
+      ...SHOWN[theme],
+    ]);
+  },
+};
+
+/** The same sheet in the light theme. */
+export const ColorsLight: Story = { ...Colors, globals: { theme: 'light' } };
 
 export const Type: Story = { render: () => <TypeSheet /> };
 
