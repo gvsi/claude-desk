@@ -94,7 +94,7 @@ from desk.api.tools import (
     tool_delta,
 )
 from desk.api.triage import Stopped
-from desk.contracts import SessionState
+from desk.contracts import SessionState, shown_owner
 from desk.events import EvError, EvTurnEnd, EvWriting
 from desk.kernel_api import TURN_TEXT_CHARS, SessionContext, TurnRequest
 
@@ -178,8 +178,10 @@ async def desk_identity(conn: AsyncConnection, caller: Caller) -> DeskIdentity:
     business = await ro.one("businesses", business_id=desk["business_id"])
     if business is None:
         raise LookupError("the caller's business isn't in its copy")
+    # An owner who gave no name is called by the business's name, as the kernel's lines call them (`shown_owner`).
     return DeskIdentity(business_name=business["name"], desk_name=desk["name"],
-                        owner_name=business["owner_display_name"], kind=caller.kind)
+                        owner_name=shown_owner(business["owner_display_name"], business["name"]),
+                        kind=caller.kind)
 
 
 async def _surface_settled(conn: AsyncConnection, caller: Caller) -> None:

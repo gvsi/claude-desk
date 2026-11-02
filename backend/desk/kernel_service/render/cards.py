@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from desk.contracts import OWNER_NAME_FALLBACK, Fact, HoursWindow
+from desk.contracts import Fact, HoursWindow, shown_owner
 
 WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -19,14 +19,6 @@ WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 class NothingToShow(ValueError):
     """A fact its template has nothing to render from, such as hours with no windows: the card is
     left out, never shown empty."""
-
-
-def shown_owner(owner_display_name: str, business_name: str) -> str:
-    """The name the kernel's visitor lines give the owner ("Checked against {owner}'s rules", "Let
-    me check with {owner}."): the business's name when the owner's name is the one setup gives an
-    owner who gave none (`OWNER_NAME_FALLBACK`, "Owner"), else the owner's name as it is. A business
-    with no name keeps the fallback."""
-    return business_name if owner_display_name == OWNER_NAME_FALLBACK and business_name else owner_display_name
 
 
 @dataclass(frozen=True)
