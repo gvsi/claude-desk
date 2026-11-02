@@ -44,6 +44,9 @@
   flex: none;
   align-items: center;
   gap: var(--space-10);
+  /* Clear the bell and Preview badge with the inset edge, keeping the lockup in place at rest. */
+  padding: var(--space-6);
+  margin: calc(-1 * var(--space-6));
   /* A link home that keeps the lockup's look: its own ink, no underline, and no change on hover.
      Keyboard focus is the base edge, 1 px of line-focus just inside it at the control radius; a click
      shows none. */

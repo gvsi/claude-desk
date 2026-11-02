@@ -877,7 +877,9 @@
 .cd-about-contents__link {
   display: flex;
   gap: var(--space-14);
-  padding: var(--space-10) 0;
+  /* Give the inset edge room beside the numbers without moving the contents at rest. */
+  padding: var(--space-10) var(--space-8);
+  margin-inline: calc(-1 * var(--space-8));
   color: var(--text-primary);
   text-decoration: none;
 }
@@ -1025,11 +1027,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
-  transition: border-color var(--motion-instant) var(--motion-ease);
+  transition: background-color var(--motion-instant) var(--motion-ease);
 }
 
 .cd-about-next:hover .cd-card {
-  border-color: var(--line-control-hover);
+  background: var(--fill-hover);
 }
 
 .cd-about-page .cd-about-next__label {

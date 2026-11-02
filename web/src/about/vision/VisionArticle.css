@@ -272,7 +272,7 @@
 }
 
 .vision-article .va-card:hover {
-  border-color: var(--va-line-strong);
+  background: var(--va-hover);
 }
 
 .vision-article .va-card:focus-visible {
@@ -353,7 +353,7 @@
 }
 
 .vision-article .va-next:hover {
-  border-color: var(--va-line-strong);
+  background: var(--va-hover);
 }
 
 .vision-article .va-end .va-next__label {

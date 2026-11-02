@@ -6,10 +6,12 @@ import { render } from 'vitest-browser-react';
 import { Button } from '../components/Button/Button.tsx';
 import { Chip } from '../components/Chip/Chip.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
+import { ConnectorSignIn } from '../components/ConnectorSignIn/ConnectorSignIn.tsx';
 import { IconButton } from '../components/IconButton/IconButton.tsx';
 import { Sidebar } from '../components/Sidebar/Sidebar.tsx';
 import { TextField } from '../components/TextField/TextField.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
+import { rivera } from '../fixtures';
 
 import '../components/VerifyCodeForm/VerifyCodeForm.css';
 
@@ -299,6 +301,87 @@ describe('focus', () => {
     await userEvent.click(field);
     expect(document.activeElement).toBe(field);
     expect(getComputedStyle(field).boxShadow).toBe(insetEdge(tokenColor('--line-focus')));
+    await screen.unmount();
+  });
+
+  it('the_send_button_shows_a_2px_edge_of_the_page_on_its_fill', async () => {
+    // Send, enabled once there are words, is a round primary on the cream fill: its keyboard edge is 2 px of
+    // the page's own dark, as a primary Button's.
+    const screen = await render(<AfterStart><Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" onSend={noop} /></AfterStart>);
+    const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] textarea');
+    if (field === null) throw new Error('no composer');
+    await userEvent.click(field);
+    await userEvent.keyboard('Raise my cash discount limit');
+    const send = screen.getByRole('button', { name: 'Send' }).element() as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    await keyboardFocus(send);
+    const style = getComputedStyle(send);
+    expect([style.outlineStyle, style.boxShadow]).toEqual(['none', insetEdge(tokenColor('--bg-app'), 2)]);
+    await screen.unmount();
+  });
+
+  it('a_selected_sign_in_choice_keeps_blue_on_click_and_turns_its_border_on_keyboard_focus', async () => {
+    // Storybook's synthetic clicks don't set the browser's focus modality. Use native pointer and
+    // keyboard input here to prove that a selected radio's label changes only on keyboard focus.
+    const { googleCalendar } = rivera;
+    const screen = await render(
+      <ConnectorSignIn
+        connector={googleCalendar.view}
+        promise={{ title: googleCalendar.promise.title }}
+        {...googleCalendar.signIn}
+        onChange={noop}
+        onContinue={noop}
+        onCancel={noop}
+      />,
+    );
+    const jobs = screen.getByRole('radio', { name: /^Turner Plumbing jobs/ }).element() as HTMLInputElement;
+    const label = jobs.closest('label') as HTMLLabelElement;
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const drawn = (el: HTMLElement) => [getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow];
+
+    for (const afterKeyboard of [false, true]) {
+      await userEvent.click(cancel);
+      await userEvent.click(jobs);
+      expect(jobs.checked).toBe(true);
+      expect(jobs.matches(':focus-visible'), `clicked after keyboard: ${afterKeyboard}`).toBe(false);
+      expect(getComputedStyle(label).borderTopColor).toBe(tokenColor('--accent-blue'));
+      expect(drawn(label)).toEqual(['none', 'none']);
+      expect(drawn(jobs)).toEqual(['none', 'none']);
+
+      await keyboardFocus(jobs);
+      expect(getComputedStyle(label).borderTopColor).toBe(tokenColor('--line-focus'));
+      expect(drawn(label)).toEqual(['none', 'none']);
+      expect(drawn(jobs)).toEqual(['none', 'none']);
+    }
+    await screen.unmount();
+  });
+
+  it('what_takes_focus_without_being_a_control_draws_nothing', async () => {
+    // A heading, a section or a status line that a screen moves focus to (tabIndex -1) isn't a control, so even
+    // when the keyboard led there it draws no edge, ring or outline. A control in a roving group, a button with
+    // tabIndex -1 until the arrow keys reach it, still shows its edge.
+    const screen = await render(
+      <AfterStart>
+        <h2 tabIndex={-1}>Dana Whitfield</h2>
+        <section tabIndex={-1} aria-label="Needs you">
+          Held requests
+        </section>
+        <span role="status" tabIndex={-1}>
+          Sending your answer
+        </span>
+        <button type="button" tabIndex={-1}>
+          Ask me first
+        </button>
+      </AfterStart>,
+    );
+    const probe = screen.container.querySelector('[data-focus-probe]') as HTMLElement;
+    const [heading, section, status, roving] = [...probe.querySelectorAll<HTMLElement>('[tabindex="-1"]')] as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
+    for (const el of [heading, section, status]) {
+      await keyboardFocus(el);
+      expect([el.localName, getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow]).toEqual([el.localName, 'none', 'none']);
+    }
+    await keyboardFocus(roving);
+    expect([getComputedStyle(roving).outlineStyle, getComputedStyle(roving).boxShadow]).toEqual(['none', insetEdge(tokenColor('--line-focus'))]);
     await screen.unmount();
   });
 

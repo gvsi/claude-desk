@@ -431,8 +431,9 @@
    request keeps its place, with Dismiss under its card. The approval card's own box takes focus
    for "Open the request". */
 
-.cd-today__section[tabindex='-1']:focus:not(:focus-visible) {
+.cd-today__section[tabindex='-1']:focus {
   outline: none;
+  box-shadow: none;
 }
 
 .cd-needs-you {

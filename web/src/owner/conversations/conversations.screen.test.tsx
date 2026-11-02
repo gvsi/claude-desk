@@ -534,6 +534,35 @@ describe('Conversations', () => {
     expect(getComputedStyle(heading.element()).boxShadow).toBe('none');
   });
 
+  it('mark_done_by_keyboard_moves_focus_to_the_name_with_nothing_drawn', async () => {
+    // From the keyboard, Mark done moves focus to the conversation's name, which matches :focus-visible then.
+    // The name isn't a control: it draws no edge, ring or outline around itself.
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can you call me back?' } });
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('the visitor has a chat');
+    chat.displayName = DANA;
+    await expect.poll(() => [...mockStore.world.handoffs.values()].some((h) => h.handoff.session_id === chat.state.session_id)).toBe(true);
+    const { screen } = await renderRoute(LIST, { pollScale: 100 });
+    const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
+    await row.click();
+    const card = screen.getByRole('article', { name: 'Wants you', exact: true });
+    const done = card.getByRole('button', { name: 'Mark done' });
+    await expect.element(done).toBeVisible();
+    (done.element() as HTMLElement).blur();
+    await userEvent.keyboard('{Shift}');
+    (done.element() as HTMLElement).focus();
+    expect(done.element().matches(':focus-visible'), 'Mark done has focus from the keyboard').toBe(true);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(card).not.toBeInTheDocument();
+    const heading = screen.getByRole('heading', { level: 2, name: DANA });
+    await expect.poll(() => document.activeElement).toBe(heading.element());
+    expect(heading.element().matches(':focus-visible'), 'the name has focus from the keyboard').toBe(true);
+    const style = getComputedStyle(heading.element());
+    expect([style.outlineStyle, style.boxShadow]).toEqual(['none', 'none']);
+  });
+
   it('conversation_matches_its_board', async () => {
     named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));

@@ -325,8 +325,9 @@
   margin-bottom: var(--space-16);
 }
 
-.cd-conversation__name:focus:not(:focus-visible) {
+.cd-conversation__name:focus {
   outline: none;
+  box-shadow: none;
 }
 
 /* The pane's shapes: the transcript's region opens at its end, as the chat's does, but never

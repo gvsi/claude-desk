@@ -561,6 +561,11 @@ describe('setup', () => {
     expect(look.color).toBe(getComputedStyle(bar.element()).color);
     expect(look.cursor).toBe('pointer');
     expect([look.outlineStyle, look.boxShadow], 'nothing drawn before the keyboard').toEqual(['none', 'none']);
+    // Its box stands 6 px off the bell and the wordmark, so the focus edge clears the bell and the Preview badge,
+    // while the bell sits where the bar's 40 px padding puts it.
+    const [own, bell, words] = [lockup.element(), lockup.element().firstElementChild, lockup.element().lastElementChild].map((el) => el!.getBoundingClientRect());
+    expect([bell!.left - bar.element().getBoundingClientRect().left, bell!.left - own!.left, own!.right - words!.right]).toEqual([40, 6, 6]);
+    expect(Math.round(Math.min(bell!.top, words!.top) - own!.top)).toBe(6);
     await userEvent.keyboard('{Tab}');
     (lockup.element() as HTMLElement).focus();
     expect(lockup.element().matches(':focus-visible')).toBe(true);

@@ -41,6 +41,15 @@ a {
   box-shadow: inset 0 0 0 1px var(--line-focus);
 }
 
+/* Screens move focus to headings, regions and status lines with tabindex -1. They aren't controls
+   and draw nothing, including after a keyboard action. Native controls in roving groups keep their
+   keyboard edge even when they currently sit outside the Tab order. Bordered cards and traces
+   still turn their own border in their component styles. */
+[tabindex='-1']:not(:where(a, button, input, select, textarea)):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 /* A link in running text with no class of its own, as a reply's links are, shows focus in its words:
    they and a 2 px underline turn the primary ink (TextLink draws the same). A link with a class, such
    as a button or a row drawn as a link, keeps its own kind's edge. */

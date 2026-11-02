@@ -1279,6 +1279,12 @@ describe('ReaderPage', () => {
       await keyboardFocus(el);
       expect.soft([getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow], name).toEqual(['none', edge]);
     }
+    // A contents item reaches 8 px past its words on each side, so its edge clears the number, while the words
+    // stay level with the list's own edge.
+    const list = (item.closest('ol') as HTMLElement).getBoundingClientRect();
+    const number = (item.querySelector('.cd-about-contents__number') as HTMLElement).getBoundingClientRect();
+    const reach = item.getBoundingClientRect();
+    expect([number.left - list.left, list.left - reach.left, reach.right - list.right]).toEqual([0, 8, 8]);
 
     const inText = screen.container.querySelector('article a.cd-text-link') as HTMLElement;
     await keyboardFocus(inText);
@@ -1295,6 +1301,25 @@ describe('ReaderPage', () => {
     // The overlay lies over the card's border box, so its edge is the card's border.
     const over = next.closest('.cd-about-next') as HTMLElement;
     expect(over.getBoundingClientRect().toJSON()).toEqual(card.getBoundingClientRect().toJSON());
+    await screen.unmount();
+  });
+
+  it('read_next_fills_on_hover_and_keeps_its_border', async () => {
+    // Hover is a fill only, the paper's hover ink over the card, and the card's border stays as it rests: only
+    // keyboard focus changes an edge.
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
+    const over = screen.container.querySelector('.cd-about-next') as HTMLElement;
+    const card = over.querySelector('.cd-card') as HTMLElement;
+    over.scrollIntoView({ block: 'center' });
+    const rest = { fill: getComputedStyle(card).backgroundColor, border: getComputedStyle(card).borderTopColor };
+    const hoverInk = tokenColor('--fill-hover', root);
+    expect(hoverInk).toBe('rgba(28, 27, 25, 0.06)');
+    expect(rest.fill).not.toBe(hoverInk);
+    await userEvent.hover(over);
+    expect(over.matches(':hover')).toBe(true);
+    await expect.poll(() => getComputedStyle(card).backgroundColor).toBe(hoverInk);
+    expect(getComputedStyle(card).borderTopColor).toBe(rest.border);
     await screen.unmount();
   });
 

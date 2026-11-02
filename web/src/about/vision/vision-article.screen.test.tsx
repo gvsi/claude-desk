@@ -306,6 +306,27 @@ describe('The Vision article', () => {
     expect(getComputedStyle(nextLink, '::after').boxShadow, 'the next page').toBe('none');
   });
 
+  it('cards_fill_on_hover_and_keep_their_border', async () => {
+    // Hover is a fill only, in the paper's own hover ink, and a card's border stays as it rests: only keyboard focus
+    // changes a border.
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
+    const next = document.querySelector<HTMLElement>('.va-next');
+    if (next === null) throw new Error('no Read next');
+    const hoverInk = 'rgba(28, 27, 25, 0.06)';
+    for (const [name, el] of [['a picture card', card], ['Read next', next]] as const) {
+      el.scrollIntoView({ block: 'center' });
+      const rest = { fill: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderTopColor };
+      expect(rest.fill, name).not.toBe(hoverInk);
+      await userEvent.hover(el);
+      expect(el.matches(':hover'), name).toBe(true);
+      await expect.poll(() => getComputedStyle(el).backgroundColor, { message: name }).toBe(hoverInk);
+      expect(getComputedStyle(el).borderTopColor, name).toBe(rest.border);
+      await userEvent.unhover(el);
+    }
+  });
+
   it('the_picture_cards_draw_their_phones_with_an_even_bezel_and_a_clean_crop', async () => {
     for (const viewport of ['desktop', 'phone'] as const) {
       const { screen } = await renderRoute(PATH, { viewport });
