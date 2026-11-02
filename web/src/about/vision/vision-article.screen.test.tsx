@@ -346,6 +346,35 @@ describe('The Vision article', () => {
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
   });
 
+  it('read_next_ends_with_an_arrow_that_inks_on_hover', async () => {
+    // As on the other About pages, the "Read next" card ends with the arrow at its trailing edge, centred on the
+    // card and decoration only. Nothing on the article moves: pointing at the card turns it the paper's ink.
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+      const card = document.querySelector<HTMLElement>('.va-next');
+      const arrow = card?.querySelector<SVGSVGElement>('svg.va-next__arrow');
+      if (!card || !arrow) throw new Error(`${viewport}: Read next draws no arrow`);
+      expect(arrow.getAttribute('aria-hidden'), viewport).toBe('true');
+      const box = card.getBoundingClientRect();
+      const at = arrow.getBoundingClientRect();
+      expect([at.width, at.height], viewport).toEqual([20, 20]);
+      expect(Math.abs(box.right - 20 - at.right), viewport).toBeLessThanOrEqual(1);
+      expect(Math.abs((at.top + at.bottom) / 2 - (box.top + box.bottom) / 2), viewport).toBeLessThanOrEqual(1);
+      const words = card.querySelector('.va-next__summary')?.getBoundingClientRect();
+      expect(words && words.right <= at.left, viewport).toBe(true);
+      expect(getComputedStyle(arrow).color, viewport).toBe('rgb(92, 88, 80)');
+      card.scrollIntoView({ block: 'center' });
+      // A click on the arrow itself lands on the card's link.
+      const spot = arrow.getBoundingClientRect();
+      expect(document.elementFromPoint((spot.left + spot.right) / 2, (spot.top + spot.bottom) / 2)?.closest('a'), viewport).toBe(card.querySelector('a'));
+      await userEvent.hover(card.querySelector('a') as HTMLElement);
+      await expect.poll(() => getComputedStyle(arrow).color, { message: viewport }).toBe('rgb(28, 27, 25)');
+      expect(getComputedStyle(arrow).transform, viewport).toBe('none');
+      await userEvent.unhover(card.querySelector('a') as HTMLElement);
+    }
+  });
+
   it('keyboard_focus_edges_in_the_papers_secondary_ink', async () => {
     // No ring and no blue on the paper either: keyboard focus on the link in the bar draws a 1 px edge inside it,
     // and on a picture card and the way to the next page turns the card's own border, all in the paper's

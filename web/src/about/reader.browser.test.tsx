@@ -694,6 +694,42 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('read_next_ends_with_an_arrow', async () => {
+    // The "Read next" card ends with the design system's arrow at its trailing edge, centred on the card,
+    // decoration only: the words are the link's. Pointing at the card turns it the primary ink; with reduced
+    // motion, as here, it doesn't move (the nudge is checked in reader.motion.browser.test.tsx).
+    for (const id of IDS) {
+      for (const size of [DESKTOP, PHONE]) {
+        const where = `${id} at ${size.width}`;
+        const screen = await renderReader(id, { size });
+        const card = screen.container.querySelector<HTMLElement>('.cd-about-next .cd-card');
+        const arrow = card?.querySelector<SVGSVGElement>('svg.cd-about-next__arrow');
+        if (!card || !arrow) throw new Error(`${where}: Read next draws no arrow`);
+        expect(arrow.getAttribute('aria-hidden'), where).toBe('true');
+        expect(card.querySelectorAll('svg'), where).toHaveLength(1);
+        const box = card.getBoundingClientRect();
+        const at = arrow.getBoundingClientRect();
+        expect([at.width, at.height], where).toEqual([20, 20]);
+        // 20 px in from the card's edge, its padding.
+        expect(Math.abs(box.right - 20 - at.right), where).toBeLessThanOrEqual(1);
+        expect(Math.abs((at.top + at.bottom) / 2 - (box.top + box.bottom) / 2), where).toBeLessThanOrEqual(1);
+        // The title and summary keep clear of it.
+        const words = card.querySelector('.cd-about-next__summary')?.getBoundingClientRect();
+        expect(words && words.right <= at.left, where).toBe(true);
+        expect(getComputedStyle(arrow).transform, where).toBe('none');
+        card.scrollIntoView({ block: 'center' });
+        // A click on the arrow itself lands on the card's link.
+        const spot = arrow.getBoundingClientRect();
+        expect(document.elementFromPoint((spot.left + spot.right) / 2, (spot.top + spot.bottom) / 2)?.closest('a'), where).toBe(card.querySelector('a'));
+        await userEvent.hover(card.querySelector('a') as HTMLElement);
+        await expect.poll(() => getComputedStyle(arrow).color, { message: where }).toBe(getComputedStyle(card.querySelector('a') as HTMLElement).color);
+        expect(getComputedStyle(arrow).transform, where).toBe('none');
+        await userEvent.unhover(card.querySelector('a') as HTMLElement);
+        await screen.unmount();
+      }
+    }
+  });
+
   it('an_address_opens_at_its_section_or_the_top', async () => {
     const title = () => flat(document.querySelector('h1')?.textContent);
     /** Whether the section sits at the top of the window, below its scroll margin. */
