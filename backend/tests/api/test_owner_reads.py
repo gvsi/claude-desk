@@ -726,6 +726,58 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     assert items[held.session_id]["handoff"]["kind"] == "callback" and items[held.session_id]["claude_summary"] is None
 
 
+async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser, fake, kernel_http, engine, db,
+                                                                   ro_schema):
+    """A held request quotes what the visitor wrote up to the turn that made it, its previous and last lines before
+    its held status in the chat, not what they wrote after, so the owner answers it with their words for it. Each
+    hold in a chat quotes its own, and one made before the visitor wrote anything quotes nothing. A handoff in the
+    same chat quotes the chat's latest lines, and a hold whose status isn't in the chat (one held before the API
+    showed it) falls back to them too."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+
+    async def show(who: Guest, decision: Decision) -> None:
+        async with engine.connect() as conn:
+            await deliver(conn, who.ids, Status(decision, "held"), ro_schema=ro_schema)
+            await conn.commit()
+
+    await write(engine, db, asker.ids, "visitor_text", text="Hi there")
+    await write(engine, db, asker.ids, "visitor_text", text="How much to clear a clogged drain?")
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off if I pay cash?")
+    discount = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    await show(asker, discount)
+    await write(engine, db, asker.ids, "visitor_text", text="How much to clear a drain?")
+    await write(engine, db, asker.ids, "visitor_text", text="What about 20% off then?")
+    bigger = await asker.decide("native.quote", discounted_quote(fake, owner, 2000))
+    await show(asker, bigger)
+    await write(engine, db, asker.ids, "visitor_text", text="Can you come Tuesday?")
+    await write(engine, db, asker.ids, "visitor_text", text="Please call me back")
+    await asker.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                                "reason": "About the discount"})
+    unshown = await guest(kernel_http, fake, owner)
+    await write(engine, db, unshown.ids, "visitor_text", text="Can I get 10% off?")
+    older = await unshown.decide("native.quote", discounted_quote(fake, owner))
+    await write(engine, db, unshown.ids, "visitor_text", text="Do you work in Alameda?")
+    await write(engine, db, unshown.ids, "visitor_text", text="Thanks, and what about Berkeley?")
+    quiet = await guest(kernel_http, fake, owner)
+    unasked = await quiet.decide("native.quote", discounted_quote(fake, owner))
+    await show(quiet, unasked)
+    await write(engine, db, quiet.ids, "visitor_text", text="Thanks")
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    held = {item["decision"]["decision_id"]: item["from_the_visitor"] for item in listed.json() if item["decision"]}
+    handed = {item["handoff"]["handoff_id"]: item["from_the_visitor"] for item in listed.json() if item["handoff"]}
+    assert held == {
+        seeded_hold(fake, owner): None,
+        discount.decision_id: "How much to clear a clogged drain? · Can I get 15% off if I pay cash?",
+        bigger.decision_id: "How much to clear a drain? · What about 20% off then?",
+        older.decision_id: "Do you work in Alameda? · Thanks, and what about Berkeley?",
+        unasked.decision_id: None}
+    assert list(handed.values()) == ["Can you come Tuesday? · Please call me back"]
+
+
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
                                                                                    engine, db):
     """A conversation the kernel's handoff card handed to the owner (#96) is in Needs you as a handoff of kind `card`:
