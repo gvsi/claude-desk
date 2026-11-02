@@ -26,7 +26,7 @@ import { RIVERA } from '../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { renderRoute, VIEWPORTS } from '../test/renderRoute.tsx';
+import { renderRoute, VIEWPORTS, type RenderedRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { pageNow, watchFor, watchPages } from '../test/watch.ts';
 import { FRESH_MS, READ_AHEAD_MS } from './useDesks.ts';
@@ -338,6 +338,34 @@ describe('Arrival', () => {
     expect(router.state.historyAction).toBe('REPLACE');
   });
 
+  it('returning_owner_back_again_after_today_was_read_away_opens_today', async () => {
+    // Mike Turner goes Back while his Today is read ahead, and its answer comes while he is away,
+    // before Turner Plumbing's public page has drawn: the first visit's page waits. Forward again,
+    // it carries on and opens his Today, drawn.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { routes: publicPage.routes });
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await router.navigate('/');
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+
+    const answered = nextAnswerTo('needsYou');
+    needsYou.release();
+    await answered.settled;
+    // Well past the page's own code after the answer, had it gone on while he was away.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, still on screen').not.toBeNull();
+
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(router.state.historyAction).toBe('REPLACE');
+  });
+
   it('going_back_while_the_new_copy_is_read_stays_back', async () => {
     // Mike Turner opens the first visit's page from Turner Plumbing's public page, starts the demo,
     // and goes Back while the new copy's Today is read ahead. The read's answer comes before the
@@ -404,17 +432,36 @@ describe('Arrival', () => {
   });
 
   it('back_again_after_the_copy_was_made_away_opens_it_as_the_passcode_does', async () => {
-    // Mike Turner goes Back while the passcode is tried, and the copy is made while he is away,
-    // before Turner Plumbing's public page has drawn: the page does nothing with it meanwhile.
-    // Forward again, it opens the copy as the passcode does, the old copy's reads dropped and its
-    // Today read ahead, and the dialog leaves onto that Today.
+    // Mike Turner's demo session ended after he saw Today, whose Demo inbox held a note the next
+    // copy's doesn't. He starts the demo again, goes Back while the passcode is tried, and the copy
+    // is made while he is away, before Turner Plumbing's public page has drawn: the page does
+    // nothing with it meanwhile. Forward again, it opens the copy as the passcode does, the old
+    // copy's inbox dropped and its Today read ahead, and the dialog leaves onto that Today, which
+    // never shows the old copy's inbox.
     const publicPage = holdingRoutes('/d/:slug');
-    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+    mockStore.world.inbox.push({
+      entry: { entry_id: 'inbox-left-behind', to: 'owner', kind: 'alert', body: 'A note in the copy that ended.', created_at: new Date().toISOString(), decision_id: null },
+      deskId: RIVERA.deskId,
+      sessionId: null,
+    });
+    const { screen, router } = await renderRoute(TODAY, { routes: publicPage.routes });
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 2 entries', exact: true })).toBeVisible();
+    await router.navigate(PUBLIC_PAGE);
     await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    // The session ends, and he opens the first visit's page again.
+    mockStore.reset('rivera', { signedIn: false });
     await router.navigate('/');
     const dialog = introDialog(screen);
     await expect.element(dialog).toBeVisible();
     const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    // Whether the old copy's inbox, its count on the Demo inbox button, ever shows from now on.
+    const oldInbox = '.cd-owner-inbox [aria-label="2 entries"]';
+    let sawTheOldInbox = false;
+    const look = new MutationObserver(() => {
+      if (document.querySelector(oldInbox) !== null) sawTheOldInbox = true;
+    });
+    look.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label'] });
+    onTestFinished(() => look.disconnect());
     const copy = holdTheCopy();
     await startTheDemo(screen);
     await vi.waitFor(() => expect(copy.sent()).toBe(true));
@@ -434,6 +481,8 @@ describe('Arrival', () => {
     await router.navigate(1);
     await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    expect(sawTheOldInbox, 'the old copy’s inbox, on the new copy’s Today').toBe(false);
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
     expect(requests('copies')).toHaveLength(1);
   });
@@ -442,45 +491,28 @@ describe('Arrival', () => {
     // Mike Turner's new copy is read ahead and the dialog starts to leave onto its Today. He goes
     // Back before it has closed, and it closes before Turner Plumbing's public page has drawn, with
     // the first visit's page still on screen: closed, it doesn't take him to Today.
-    const publicPage = holdingRoutes('/d/:slug');
-    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
-    const welcome = screen.getByRole('heading', { name: 'How can Turner Plumbing help?' });
-    await expect.element(welcome).toBeVisible();
-    await router.navigate('/');
-    const dialog = introDialog(screen);
-    await expect.element(dialog).toBeVisible();
-    const el = dialog.element() as HTMLDialogElement;
-    const handOff = watchTheHandOff(el);
-    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
-    await startTheDemo(screen);
-    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
-
-    // Back the moment the dialog starts to leave, well inside its exit; and whether it is still open
-    // as the router moves to the public page.
-    let wentBack = false;
-    let openAsTheRouterLeft: boolean | null = null;
-    const stop = router.subscribe((state) => {
-      if (openAsTheRouterLeft === null && state.location.pathname === PUBLIC_PAGE) openAsTheRouterLeft = el.open;
-    });
-    onTestFinished(stop);
-    const watch = new MutationObserver(() => {
-      if (wentBack || !el.classList.contains('cd-intro--leaving')) return;
-      wentBack = true;
-      publicPage.hold();
-      void router.navigate(-1);
-    });
-    watch.observe(el, { attributes: true, attributeFilter: ['class'] });
-    onTestFinished(() => watch.disconnect());
-    needsYou.release();
-    await expect.poll(() => handOff.steps()).toContain('closed');
-    expect(openAsTheRouterLeft, 'the dialog, still open as the router left the page').toBe(true);
+    const { screen, router, publicPage, handOff } = await goBackAsTheDialogLeaves();
     // Time for the page to go on to Today, had it.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed']);
     publicPage.draw();
-    await expect.element(welcome).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
     expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('back_again_after_the_dialog_closed_away_opens_today', async () => {
+    // As above, Mike Turner goes Back as the dialog starts to leave, and it closes while he is away,
+    // before Turner Plumbing's public page has drawn. Forward again, the first visit's page, never
+    // gone, goes on to his new copy's Today.
+    const { screen, router, handOff } = await goBackAsTheDialogLeaves();
+    // Time for the page to go on to Today, had it gone on while he was away.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
   });
 
   it('returning_owner_in_strict_mode_reads_today_ahead_once', async () => {
@@ -2965,6 +2997,51 @@ function holdTheCopy(): { sent: () => boolean; release: () => void } {
     }),
   );
   return { sent: () => sent, release };
+}
+
+/**
+ * Mike Turner on the first visit's page, signed out, from Turner Plumbing's public page, which can
+ * wait before it draws: he starts the demo, and goes Back the moment the dialog starts to leave
+ * onto the new copy's Today, with the public page held from drawing. Settles once the dialog has
+ * closed on the first visit's page, still on screen, having checked the dialog was still open as
+ * the router left that page.
+ */
+async function goBackAsTheDialogLeaves(): Promise<
+  RenderedRoute & { publicPage: ReturnType<typeof holdingRoutes>; handOff: ReturnType<typeof watchTheHandOff> }
+> {
+  const publicPage = holdingRoutes('/d/:slug');
+  const rendered = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+  const { screen, router } = rendered;
+  await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+  await router.navigate('/');
+  const dialog = introDialog(screen);
+  await expect.element(dialog).toBeVisible();
+  const el = dialog.element() as HTMLDialogElement;
+  const handOff = watchTheHandOff(el);
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  await startTheDemo(screen);
+  await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+
+  // Back the moment the dialog starts to leave, well inside its exit; and whether it is still open
+  // as the router moves to the public page.
+  let wentBack = false;
+  let openAsTheRouterLeft: boolean | null = null;
+  const stop = router.subscribe((state) => {
+    if (openAsTheRouterLeft === null && state.location.pathname === PUBLIC_PAGE) openAsTheRouterLeft = el.open;
+  });
+  onTestFinished(stop);
+  const watch = new MutationObserver(() => {
+    if (wentBack || !el.classList.contains('cd-intro--leaving')) return;
+    wentBack = true;
+    publicPage.hold();
+    void router.navigate(-1);
+  });
+  watch.observe(el, { attributes: true, attributeFilter: ['class'] });
+  onTestFinished(() => watch.disconnect());
+  needsYou.release();
+  await expect.poll(() => handOff.steps()).toContain('closed');
+  expect(openAsTheRouterLeft, 'the dialog, still open as the router left the page').toBe(true);
+  return { ...rendered, publicPage, handOff };
 }
 
 /**
