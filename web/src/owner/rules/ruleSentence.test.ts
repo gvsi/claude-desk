@@ -18,6 +18,7 @@ import {
   holdSentence,
   moneyCapMeta,
   moneyCapSentence,
+  moneyCapToolSentence,
   ruleMeta,
   ruleSentence,
   type RuleMeta,
@@ -26,6 +27,11 @@ import {
 
 const cards = rivera.ruleCards;
 const words = { business: NO_BUSINESS_TOOLS };
+
+it('the C4 money cap has its compact sentence, including the unset cap', () => {
+  expect(read(moneyCapToolSentence(50_000))).toBe('Any payment over **$500** asks you first');
+  expect(read(moneyCapToolSentence(0))).toBe('Any payment asks you first');
+});
 
 /** The sentence as the board reads it, each key part between `**`. */
 function read(parts: readonly SentencePart[]): string {

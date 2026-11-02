@@ -1,11 +1,9 @@
-/* HouseRules: the trail over the page's title, then each connector's name over a card per tool,
-   12 px apart, the connectors 32 px apart, and the always-on rules at the end, in the content
-   column. On a phone the parts are 24 px apart. */
+/* Your tools: one card per connector, with tool rows and indented rule sentences (C4 / D). */
 
 .cd-house-rules {
   display: flex;
   flex-direction: column;
-  gap: var(--space-32);
+  gap: var(--space-16);
   min-width: 0;
 }
 
@@ -19,12 +17,97 @@
 .cd-house-rules__connector {
   display: flex;
   flex-direction: column;
-  gap: var(--space-12);
   min-width: 0;
 }
 
-@media (max-width: 639.98px) {
-  .cd-house-rules {
-    gap: var(--space-24);
-  }
+.cd-house-rules__connector-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  padding: var(--space-14) var(--space-16);
+}
+
+.cd-house-rules__identity,
+.cd-house-rules__tool-text,
+.cd-house-rules__rule-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-house-rules__identity > .cd-connector-name {
+  display: flex;
+}
+
+.cd-house-rules__identity p,
+.cd-house-rules__tool-description,
+.cd-house-rules__shared {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-house-rules__intro,
+.cd-house-rules__connector-header > h2 {
+  margin: 0;
+}
+
+.cd-house-rules__intro {
+  color: var(--text-secondary);
+}
+
+.cd-house-rules__tool {
+  padding: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+  min-width: 0;
+}
+
+.cd-house-rules__tool-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+}
+
+.cd-house-rules__tool-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: var(--space-4);
+  min-width: 0;
+}
+
+.cd-house-rules__tool-name {
+  min-width: 0;
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.cd-house-rules__rules {
+  margin: var(--space-8) 0 0;
+  padding: 0 0 0 var(--space-16);
+  border-left: 1px solid var(--line-card);
+  list-style: none;
+}
+
+.cd-house-rules__rule {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  padding: var(--space-8) 0;
+}
+
+.cd-house-rules__rule-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex: none;
+  min-height: 1lh;
+}
+
+.cd-house-rules__rule--reference {
+  padding: var(--space-6) 0;
+}
+
+.cd-house-rules__rule--reference .cd-rule-sentence__sentence {
+  font: inherit;
 }
