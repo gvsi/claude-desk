@@ -217,7 +217,7 @@ export function keepFor(kept: Kept, listed: readonly string[]): Kept {
 
 /**
  * What a newly drawn list starts from: what was kept, while the copy still lists a Desk it saw (a
- * Desk deleted leaves the others), else nothing (Start over makes a copy of all new Desks). Which
+ * Desk deleted leaves the others), else nothing (Reset demo makes a copy of all new Desks). Which
  * reads settled stays with the list that read them: a newly drawn list's first settled reads are
  * its own.
  */

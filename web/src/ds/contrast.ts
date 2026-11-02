@@ -175,7 +175,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(MARKS, SURFACES, 3, 'Focus edges and status dots on the app, panels, raised surfaces and the selected row.'),
   ...pairs(MARKS, ['fill-card'], 3, 'Focus edges and status dots inside cards.', 'bg-app'),
   ...pairs(MARKS, ['fill-hover'], 3, 'Focus edges and status dots on a hovered conversation or attempt row.', 'bg-app'),
-  ...pairs(['line-focus'], ['bg-muted'], 3, "The focus edge inside the reviewer bar's Start over."),
+  ...pairs(['line-focus'], ['bg-muted'], 3, "The focus edge inside the reviewer bar's Reset demo."),
   ...pairs(['line-focus'], ['fill-hover'], 3, 'The focus edge just inside a menu item that has focus, on its hover fill in a menu.', 'bg-surface'),
   ...pairs(['line-focus'], ['fill-hover'], 3, 'The focus edge just inside a sidebar row that has focus while it is hovered.', 'bg-panel'),
   ...pairs(
@@ -225,7 +225,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(MARKS, ['fill-card'], 3, "Focus edges and status marks in reply cards in the public page's about column.", 'bg-panel'),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "Count pills on the sidebar's nav rows.", 'bg-panel'),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "A count pill on the sidebar's current nav row.", 'bg-selected'),
-  ...pairs(['text-primary'], ['fill-hover'], 4.5, "The reviewer bar's Start over button while it is hovered.", 'bg-muted'),
+  ...pairs(['text-primary'], ['fill-hover'], 4.5, "The reviewer bar's Reset demo button while it is hovered.", 'bg-muted'),
   ...pairs(['text-primary'], ['fill-bubble'], 4.5, "The owner's words in a bubble in the Ask Claude panel.", 'bg-panel'),
   ...pairs(['text-primary'], ['fill-card'], 4.5, "The passcode typed into the intro dialog's field.", 'bg-surface'),
   ...pairs(['illustration-ink', 'illustration-ink-secondary'], ['illustration-card'], 4.5, "Names, messages and meta lines on the intro illustration's light cards."),

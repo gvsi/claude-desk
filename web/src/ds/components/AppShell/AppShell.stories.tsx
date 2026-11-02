@@ -186,7 +186,7 @@ export const SkipToContent: Story = {
     const skip = canvas.getByRole('link', { name: 'Skip to content' });
     await expect(skip.getBoundingClientRect().width).toBeLessThanOrEqual(1);
 
-    // The first Tab, before Start over: at the top left, over the reviewer bar, with the focus edge
+    // The first Tab, before Reset demo: at the top left, over the reviewer bar, with the focus edge
     // inside it and no ring outside it.
     await userEvent.tab();
     await expect(skip).toHaveFocus();

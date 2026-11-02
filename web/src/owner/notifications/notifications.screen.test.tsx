@@ -50,13 +50,13 @@ describe('Notifications', () => {
     const total = mockStore.world.inbox.length;
     const { screen } = await renderRoute(TODAY);
 
-    // The row under Safety, with every entry unread; the demo bar keeps only Start over.
+    // The row under Safety, with every entry unread; the demo bar keeps only Reset demo.
     const labels = () => [...nav(screen).element().querySelectorAll('.cd-sidebar__label')].map((label) => label.textContent);
     await expect.poll(labels).toContain('Notifications');
     expect(labels().indexOf('Notifications')).toBe(labels().indexOf('Safety') + 1);
     await expect.poll(() => unreadPill(screen)?.getAttribute('aria-label')).toBe(`${total} unread`);
     expect(screen.getByRole('button', { name: /Demo inbox/ }).query()).toBeNull();
-    await expect.element(screen.getByRole('note').getByRole('button', { name: 'Start over' })).toBeVisible();
+    await expect.element(screen.getByRole('note').getByRole('button', { name: 'Reset demo' })).toBeVisible();
 
     // Opened, the page shows them all with their dots, and the count goes.
     await notificationsRow(screen).click();

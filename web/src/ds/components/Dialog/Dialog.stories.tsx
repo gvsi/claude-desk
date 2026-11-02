@@ -57,7 +57,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote:
-      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too. Redrawn on 2026-11-02, the delete board quotes the Desk name and shows both delete buttons in red with no refused dot (owner decision, replacing the earlier neutral-delete rule). Default and DeleteDesk below use that red confirm with the default tone. The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
+      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Reset demo" in the reviewer bar on N-Today-Run1 opens one too. Redrawn on 2026-11-02, the delete board quotes the Desk name and shows both delete buttons in red with no refused dot (owner decision, replacing the earlier neutral-delete rule). Default and DeleteDesk below use that red confirm with the default tone. The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
   },
 } satisfies Meta<typeof Dialog>;
 
