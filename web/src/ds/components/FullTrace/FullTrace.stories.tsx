@@ -86,6 +86,10 @@ export const Verified: Story = {
     await expect(values.get('Signing key')?.textContent).toBe(verified.key_id);
     await expect(values.get('Signing key')).toHaveAttribute('title', verified.key_id);
     await expect(values.get('What was recorded')?.textContent).toBe(JSON.stringify(verified.event.summary, null, 2));
+    // The record shows at once, as the kernel signed it, as indented JSON in mono.
+    const record = trace.querySelector('pre');
+    if (!record) throw new Error('the record is drawn with the trace');
+    expectComputed(record, { fontFamily: /JetBrains Mono/, fontSize: '12.5px', lineHeight: '18px' });
 
     // The parts keep their spacing: the record and the chain line stand apart from the words above.
     expectComputed(trace.querySelector('dl') as Element, { marginTop: '12px' });
