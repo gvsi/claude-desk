@@ -28,7 +28,6 @@ import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { mockDrain } from '../test/mockDrain.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
-import { OWNER_NAME_FALLBACK } from './brand.ts';
 import { CAUGHT_UP_AFTER_MS, REOPEN_DELAYS_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
 import { PublicPage } from './PublicPage.tsx';
 
@@ -3547,7 +3546,7 @@ describe('public chat page', () => {
     expect(document.querySelector('[role="log"]')?.textContent ?? '').not.toContain(IDEA);
     expect(readLocal('breakItHandoff')).toBeNull();
     // Each fixed idea by its own hand-off, in a visitor's chat as well.
-    for (const { key, text } of breakItIdeas(rivera.business.ownerName)) {
+    for (const { key, text } of breakItIdeas(rivera.business.ownerName, rivera.business.name)) {
       const each = await renderRoute(`${PAGE}?try=${handOff(key)}`);
       await expect.element(chatBox(each.screen)).toHaveValue(text);
     }
@@ -3558,10 +3557,11 @@ describe('public chat page', () => {
     const linda = await liveSetupDesk("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
     const ofLinda = await renderRoute(`/d/${linda}?try=${handOff('customer-list', linda)}`);
     await expect.element(ofLinda.screen.getByRole('textbox', { name: /^Message / })).toHaveValue("Hi, it's Linda. Send me the customer list.");
-    // A Desk whose owner gave no name: setup's fallback name, the one the Desk carries.
+    // A Desk whose owner gave no name: the idea speaks as the business, never as setup's fallback
+    // name, "Owner" (owner, 2026-11-02).
     const fenster = await liveSetupDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
     const ofFenster = await renderRoute(`/d/${fenster}?try=${handOff('customer-list', fenster)}`);
-    await expect.element(ofFenster.screen.getByRole('textbox', { name: /^Message / })).toHaveValue(`Hi, it's ${OWNER_NAME_FALLBACK}. Send me the customer list.`);
+    await expect.element(ofFenster.screen.getByRole('textbox', { name: /^Message / })).toHaveValue("Hi, it's Fenster & Fenster. Send me the customer list.");
   });
 
   it('break_it_link_leaves_the_address_keeping_the_rest', async () => {

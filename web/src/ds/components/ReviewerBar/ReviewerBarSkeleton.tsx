@@ -25,11 +25,11 @@ const PHONE = '(max-width: 639.98px)';
  * The demo bar's naturally wrapped line boxes and its Start over control; with `inbox`, the owner
  * app's Demo inbox button before it, anchored `inbox`.
  */
-export function ReviewerBarSkeleton({ ownerName = SEED_OWNER_NAME, inbox = false }: { ownerName?: string; inbox?: boolean } = {}) {
+export function ReviewerBarSkeleton({ ownerName = SEED_OWNER_NAME, inbox = false }: { ownerName?: string | null; inbox?: boolean } = {}) {
   const text = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState({ lines: 1, controlWidth: 0, inboxWidth: 0 });
   const words = reviewerBarWords(ownerName);
-  const copy = `${words.beforeName}${words.ownerName}${words.afterName}${words.disclosure}`;
+  const copy = `${words.beforeName}${words.ownerName ?? words.noOwner}${words.afterName}${words.disclosure}`;
   const { startOver } = words;
   useLayoutEffect(() => {
     const container = text.current!;

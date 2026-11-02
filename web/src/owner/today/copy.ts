@@ -57,6 +57,8 @@ export const TODAY_COPY = {
   chatDetail: 'Your public page opens in a new tab. Ask about a price or a time.',
   breakBeforeOwner: "Ask for a discount, another customer's address or ",
   breakAfterOwner: "'s home number. Safety shows what was stopped and why.",
+  /** In the owner's name's place when they gave none (owner, 2026-11-02). */
+  breakNoOwner: 'the owner',
   waiting: 'A request is waiting for your answer.',
   heldBy: 'Held by your rule: ',
   /** "Answer a held request" before anything is held. */

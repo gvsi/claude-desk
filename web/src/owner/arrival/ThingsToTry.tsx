@@ -6,6 +6,7 @@ import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, Pill, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
 import { breakItIdeas, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { VISION_ARTICLE } from '../../about/links.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -136,7 +137,10 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
   }
 
   const link = customerLink(desk.slug, desk.desk_id);
-  const ownerName = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // The owner's first name, or null when they gave none: setup's fallback ("Owner") then stands in
+  // for a name, and the card says "the owner" instead, its idea speaking as the business.
+  const given = givenOwnerName(business.owner_display_name);
+  const ownerName = given === null ? null : (today.data?.greeting_name ?? firstName(given)).trim() || null;
   // "Answer a held request": done once answered; else waiting while a request is held (or its answer
   // is still out); else settled, in its slot, by an answer given here that the list doesn't count;
   // else empty: where a request will show, with no next step.
@@ -179,7 +183,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             end={rowDone(signals.done.chat, CHAT.done)}
             step={{ label: 'Open your public page', href: link, external: true }}
           />
-          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null, signals.onStartingDesk)} />
+          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} business={business.name} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null, signals.onStartingDesk)} />
           <Thing
             icon="clock"
             title={ANSWER.title}
@@ -471,11 +475,12 @@ function openByHand(href: string): ReactNode {
   );
 }
 
-function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: string; ownerName: string; end: RowEnd | null }) {
+function BreakIt({ slug, deskId, ownerName, business, end }: { slug: string; deskId: string; ownerName: string | null; business: string; end: RowEnd | null }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
-  // The ideas in this Desk's own words: the one that speaks as the owner names this Desk's owner.
-  const ideas = breakItIdeas(ownerName);
+  // The ideas in this Desk's own words: the one that speaks as the owner names this Desk's owner,
+  // or the business when the owner gave no name.
+  const ideas = breakItIdeas(ownerName, business);
 
   const onPick = (text: string) => {
     const idea = ideas.find((each) => each.text === text);
@@ -519,7 +524,9 @@ function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: strin
       title={BREAK.title}
       detail={
         <>
-          {TODAY_COPY.breakBeforeOwner}<span data-copy="user">{ownerName}</span>{TODAY_COPY.breakAfterOwner}
+          {TODAY_COPY.breakBeforeOwner}
+          {ownerName === null ? TODAY_COPY.breakNoOwner : <span data-copy="user">{ownerName}</span>}
+          {TODAY_COPY.breakAfterOwner}
         </>
       }
       below={below}
