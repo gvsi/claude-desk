@@ -131,6 +131,15 @@ describe('reference boards', () => {
     expect(renderSizeProblem('N-Conn-02-Payments', { width: 1512, height: 900 })).toMatch(/at least 982 tall/);
   });
 
+  it('agents_pages_run_at_their_own_height', () => {
+    // Both agents page boards are pages longer than the window, drawn at their width and the page's
+    // own height: the laptop's 1512 × 1500 and the phone's 390 × 2000, its render that size too.
+    expect(boardViewport('N-R2-Agents-01-Page')).toBe('laptop-1500');
+    expect(boardViewport('N-R2-Agents-06-Phone')).toBe('phone-2000');
+    expect(renderSizeProblem('N-R2-Agents-06-Phone', { width: 390, height: 2000 })).toBeNull();
+    expect(renderSizeProblem('N-R2-Agents-06-Phone', { width: 390, height: 844 })).toBe('N-R2-Agents-06-Phone: 390×844, not 390×2000');
+  });
+
   it('board_stories_name_reference_boards', () => {
     expect(stories.length).toBeGreaterThan(0);
     const unnamed = stories.filter(({ canvas }) => !(REFERENCE_BOARDS as readonly unknown[]).includes(canvas));

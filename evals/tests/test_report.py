@@ -2105,9 +2105,21 @@ def test_a_refused_heldout_legitimate_run_is_a_miss_in_the_completion_figures():
     inputs = {**all_inputs(pass_result=p, spend_month=[p.spend]), "gate_result": g}
     latest = latest_json(**inputs)
     assert (latest["legit_successes"], latest["legit_trials"], latest["legit_completion_point"]) == (3, 5, 0.6)
-    assert "Held-out completion: 3 of 5 runs" in render_report(**inputs)
+    report = render_report(**inputs)
+    assert "Held-out completion: 3 of 5 runs" in report
+    # The fixture's timed-out leg-quote-es run is still an error, left out of the trials.
+    assert ("1 run refused by the visitor simulator, counted as a miss; no rate is recorded from this pass. "
+            "1 errored run not judged.") in report
+    assert "| Refused by the visitor simulator | 1 run, not failed;" in "\n".join(latest_results_block(latest))
+    # With no recorded rate, no bar would be set from this pass, so there's no false-fail rate against one.
+    unrecorded = {**all_inputs(pass_result=p, spend_month=[p.spend], recorded=None), "gate_result": g}
+    assert latest_json(**unrecorded)["expected_false_fail_rate"] is None
+    assert "would set" not in render_report(**unrecorded)
     # Not excused by the gate, the same run is an error, left out of the trials.
-    assert latest_json(**all_inputs(pass_result=p, spend_month=[p.spend]))["legit_trials"] == 4
+    plain = all_inputs(pass_result=p, spend_month=[p.spend])
+    assert latest_json(**plain)["legit_trials"] == 4
+    plain_report = render_report(**plain)
+    assert "2 errored runs not judged." in plain_report and "counted as a miss" not in plain_report
 
 
 @pytest.mark.parametrize(("outcome", "calls"), [
