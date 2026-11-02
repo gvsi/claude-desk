@@ -523,6 +523,33 @@ async def test_an_agents_line_sent_as_the_owner_hands_back_gets_claudes_answer(a
         ("Hello", True), ("Do you fix leaks?", True)]
 
 
+async def test_hand_back_answers_a_waiting_agent_at_its_next_request(app, browser, fake, kernel_http, model, engine):
+    """A visiting agent's line during a take-over waits for the owner, as a visitor's does; handed back with it
+    unanswered, Claude answers it once, at the agent's next request (an agent's turn runs only on its own request)."""
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(reply("Happy to help.")))
+    assert (await agent.send("Hello")).status_code == 200
+    owner = owner_browser(app, browser, agent.owner_token)
+    assert (await agent_mode_change(owner, agent, "takeover")).status_code == 200
+    waited = await agent.send("Do you fix leaks?")
+    assert waited.status_code == 200 and waited.json()["blocks"] == []
+    assert (await agent_mode_change(owner, agent, "handback")).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert len(model.requests) == 1
+    assert await control_types(engine, agent.session_id) == ["run_resumable"]
+    assert await conversation_notes(engine, agent.session_id, "text", "wake") == [
+        (NOTES["taken_over"], False), (NOTES["handed_back"], True)]
+
+    model.add(response(reply("Yes, we can help with leaks.")))
+    answered = await agent.send("")
+    await app.state.runtime.runner.drain()
+
+    assert answered.status_code == 200, answered.text
+    assert [block["text"] for block in answered.json()["blocks"]] == ["Yes, we can help with leaks."]
+    assert len(model.requests) == 2
+    assert "<agent_message>Do you fix leaks?</agent_message>" in json.dumps(model.requests[1].messages)
+
+
 async def test_a_take_over_drops_the_wake_of_a_hand_back_no_turn_has_read(app, browser, fake, kernel_http, model,
                                                                           engine):
     """The owner hands back with no stream open, so the waiting line's turn waits for the visitor's next request, then

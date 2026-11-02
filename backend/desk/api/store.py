@@ -777,7 +777,7 @@ async def mode_for_message(ro: KernelRO, session_id: str, named: str) -> str:
     """The session's mode as a visitor's or an agent's message is about to be stored, which decides whether it wakes
     Claude: read from the session's kernel_ro row under its events lock, taken here and held until the transaction
     ends, so call it in the transaction that appends the message. The kernel commits a hand-back's mode before the
-    hand-back takes that lock to look for a waiting message (`has_unanswered_visitor`), so either this read sees
+    hand-back takes that lock to look for a waiting message (`has_unanswered_message`), so either this read sees
     Claude has the chat again, or the hand-back looks after the message has committed and finds it. `named` is the
     mode the kernel named the request's session in, used when the row isn't there."""
     if ro.own_transactions:
@@ -787,8 +787,9 @@ async def mode_for_message(ro: KernelRO, session_id: str, named: str) -> str:
     return named if session is None else session["mode"]
 
 
-async def has_unanswered_visitor(conn: AsyncConnection, session_id: str) -> bool:
-    """Whether the latest conversational message is the visitor's, with no delivered reply after it.
+async def has_unanswered_message(conn: AsyncConnection, session_id: str) -> bool:
+    """Whether the latest conversational message is the visitor's or visiting agent's, with no delivered reply after
+    it.
 
     Mode markers, private whispers and bookkeeping aren't answers. Read under the events lock so a message
     being stored has committed before deciding whether the hand-back should wake Claude.
@@ -796,9 +797,9 @@ async def has_unanswered_visitor(conn: AsyncConnection, session_id: str) -> bool
     await lock_events(conn, session_id)
     kind = (await conn.execute(select(MESSAGES.c.kind).where(
         MESSAGES.c.session_id == session_id, NOT_REPLAYED,
-        MESSAGES.c.kind.in_(("visitor_text", "agent_text", "owner_say", "delivered")))
+        MESSAGES.c.kind.in_((*SAID_KINDS, "owner_say", "delivered")))
         .order_by(MESSAGES.c.n.desc()).limit(1))).scalar_one_or_none()
-    return kind == "visitor_text"
+    return kind in SAID_KINDS
 
 
 async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
@@ -846,7 +847,7 @@ async def clear_wake(conn: AsyncConnection, session_id: str) -> int:
 async def clear_hand_back_wake(conn: AsyncConnection, session_id: str) -> int:
     """On a take-over, stop the wake of a hand-back note no model call has placed yet: it woke Claude for a message
     that waited, which the owner now has the chat to answer, and the next hand-back looks for one again
-    (`has_unanswered_visitor`). The note still reaches the model at its next call. Returns how many rows it cleared."""
+    (`has_unanswered_message`). The note still reaches the model at its next call. Returns how many rows it cleared."""
     cleared = await conn.execute(update(MESSAGES).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "note", MESSAGES.c.text == NOTES["handed_back"],
         MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake).values(wake=False))

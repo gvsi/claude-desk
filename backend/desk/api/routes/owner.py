@@ -56,7 +56,7 @@ from desk.api.schemas import (
 )
 from desk.api.sse import RUN_EVENTS, append_control, emit
 from desk.api.store import (MESSAGES, Ids, Replayed, append_message, blocks_text, clear_hand_back_wake, has_pending,
-                            has_unanswered_visitor, transcript)
+                            has_unanswered_message, transcript)
 from desk.contracts import (CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState,
                             effective_brand)
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
@@ -710,9 +710,9 @@ async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionSt
         return
     if before == "owner":
         await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))
-    waiting_visitor = before == "owner" and await has_unanswered_visitor(conn, ids.session_id)
+    waiting = before == "owner" and await has_unanswered_message(conn, ids.session_id)
     await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
-                         wake=waiting_visitor)
+                         wake=waiting)
     if await has_pending(conn, ids.session_id):
         await append_control(conn, ids, "run_resumable", {"generation": now.generation})
 
