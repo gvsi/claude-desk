@@ -1752,9 +1752,10 @@ describe('Today', () => {
     await userEvent.keyboard('{Enter}');
     await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
     expect(document.activeElement).toBe(live.element());
-    // The Today line above loses "held 1 for you" and may take a row less on a phone, which the
-    // browser's scroll anchoring takes off the column's scroll; the focus scrolls nothing itself.
+    // Callbacks aren't counted in the Today line, so marking one done leaves its height and the
+    // column's scroll unchanged; the focus scrolls nothing itself.
     const shrunk = lineBefore - todayLine();
+    expect(shrunk).toBe(0);
     expect(column.scrollTop).toBe(before.column - shrunk);
     expect(window.scrollY).toBe(before.window);
   });
