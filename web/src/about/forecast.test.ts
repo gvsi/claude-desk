@@ -43,7 +43,7 @@ describe('the forecast at a glance', () => {
       ['The trend', 'Straight-line fits reach 80% between Q2 and the start of Q4 2027', null],
       [
         'Safety',
-        'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
+        'Manipulation by the person in the chat won’t be shown solved through Q4 2027; prompt injection is expected to keep falling.',
         null,
       ],
       [
@@ -68,13 +68,14 @@ describe('the forecast at a glance', () => {
     // The trend: the fits' first and last quarters, in the document's words.
     expect(text).toContain('straight-line fits in log-odds reach 80% between Q2 2027 and the start of Q4 2027');
 
-    // Safety restates the safety section's prediction, clause by clause.
+    // Safety restates the safety section's prediction, clause by clause: it rests on the person in the chat, with
+    // prompt injection as the expected direction.
     const prediction = line('Prediction: ');
-    expect(prediction).toMatch(/^Prediction: through Q4 2027, prompt injection hidden in what the model reads keeps falling/);
-    expect(prediction).toContain('but manipulation by the person in the chat will not be shown solved');
-    expect(row('Safety')).toBe(
-      'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
-    );
+    expect(prediction).toMatch(/^Prediction: through Q4 2027, manipulation by the person in the chat will not be shown solved: /);
+    expect(prediction).toContain('Prompt injection hidden in what the model reads is expected to keep falling');
+    const [person, injection] = row('Safety').split('; ');
+    expect(person).toBe('Manipulation by the person in the chat won’t be shown solved through Q4 2027');
+    expect(injection).toBe('prompt injection is expected to keep falling.');
 
     // Wrong if restates both falsifiers: the trend's, in "Why it’s coming", and the safety section's.
     const falsifiers = text.split('\n').filter((paragraph) => paragraph.startsWith('Falsifier: '));

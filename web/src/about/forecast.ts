@@ -153,7 +153,7 @@ export const GLANCE: readonly GlanceRow[] = [
   { label: 'The trend', text: trendWords() },
   {
     label: 'Safety',
-    text: 'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
+    text: 'Manipulation by the person in the chat won’t be shown solved through Q4 2027; prompt injection is expected to keep falling.',
   },
   {
     label: 'Wrong if',

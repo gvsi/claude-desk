@@ -469,7 +469,7 @@ describe('ReaderPage', () => {
       ['The bar', '80% of a bank’s customer-service tasks done right on the first try, on τ³-Banking'],
       ['Today', 'Claude Opus 5.5 at 56.0% (Fireworks)'],
       ['The trend', 'Straight-line fits reach 80% between Q2 and the start of Q4 2027'],
-      ['Safety', 'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027'],
+      ['Safety', 'Manipulation by the person in the chat won’t be shown solved through Q4 2027; prompt injection is expected to keep falling.'],
       [
         'Wrong if',
         'No Claude model reaches 70% by the end of Q2 2027, or a public red team playing the person in the chat can’t get a model with no limits in code to break an owner’s rule',
@@ -784,7 +784,7 @@ describe('ReaderPage', () => {
           'The trend',
           'Straight-line fits reach 80% between Q2 and the start of Q4 2027',
           'Safety',
-          'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
+          'Manipulation by the person in the chat won’t be shown solved through Q4 2027; prompt injection is expected to keep falling.',
           'Wrong if',
           'No Claude model reaches 70% by the end of Q2 2027, or a public red team playing the person in the chat can’t get a model with no limits in code to break an owner’s rule',
         ];
