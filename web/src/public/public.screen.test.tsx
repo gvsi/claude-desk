@@ -2285,6 +2285,28 @@ describe('public chat page', () => {
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
   });
 
+  it.each(['desktop', 'phone'] as const)('hand_back_answers_the_waiting_line_after_claude_is_back_%s', async (viewport) => {
+    const { screen } = await renderRoute(PAGE, { viewport });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug)!;
+    const params = { session_id: chat.state.session_id };
+    expect((await mockStore.dispatch('takeover', { params, body: { generation: chat.state.generation } }))).toMatchObject({ status: 200 });
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Mike Turner joined the chat' })).toBeVisible();
+    await type(screen, 'Do you work in Alameda?');
+    await vi.waitFor(() => expect(chat.items.at(-1)).toMatchObject({ kind: 'visitor_text', text: 'Do you work in Alameda?' }));
+    expect(messagesOf(chatEvents())).toEqual([]);
+
+    const before = chatEvents().length;
+    expect((await mockStore.dispatch('handback', { params, body: { generation: chat.state.generation } }))).toMatchObject({ status: 200 });
+    await expect.element(screen.getByRole('status').filter({ hasText: 'Claude is helping again.' })).toBeVisible();
+    await turnEnded(before);
+    expect(rowsShown().slice(-3)).toEqual([
+      'Do you work in Alameda?', 'Claude is helping again.', expect.stringContaining('We work in Oakland, Berkeley, Alameda and Emeryville.'),
+    ]);
+    expect(messagesOf(chatEvents())).toHaveLength(1);
+    await expectScreenBasics(screen.container, { owner: false });
+  });
+
   it('reload_during_a_take_over_shows_the_owner_joined', async () => {
     // Dana asks for Mike, and Mike takes the chat over while the page is open.
     const first = await renderRoute(PAGE);

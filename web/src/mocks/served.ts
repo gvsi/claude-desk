@@ -280,6 +280,12 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
+/** Mode markers, whispers and annotations don't answer a visitor's line. */
+function waitingVisitorText(session: SessionRecord): string | null {
+  const latest = session.items.findLast((item) => ['visitor_text', 'agent_text', 'delivered'].includes(item.kind));
+  return latest?.kind === 'visitor_text' ? latest.text : null;
+}
+
 /** The owner-chat streams a test can plan: Ask Claude's answer, or a setup turn. */
 export type OwnerStreamKind = 'ruleChat' | 'setup';
 
@@ -407,6 +413,11 @@ export class Server {
       typeof steps === 'function' ? [{ pick: steps, language, text, generation }] : steps.map((step) => ({ step, language, text, generation }));
     turn.queue.push(...queued, { step: turnEnd, language, text, generation });
     if (turn.timer === null) this.tick(sessionId);
+  }
+
+  /** The same scripted turn for a visitor's send or work waiting when Claude resumes. */
+  runVisitorTurn(session: SessionRecord, text: string): void {
+    this.runTurn(session, () => scriptedTurn(text, hasAllTools(this.world, session), this.world.ownerOf(session), session.person), session.language, text);
   }
 
   private tick(sessionId: string): void {
@@ -615,7 +626,12 @@ const SERVED: ServedRoutes = {
     const session = ownerSession(sv, req);
     if (isFailure(session)) return session;
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
-    return ok(sv.world.handBack(session));
+    const state = sv.world.handBack(session);
+    const waiting = waitingVisitorText(session);
+    const joined = session.items.findLastIndex((item) => item.kind === 'owner_joined');
+    const whispered = joined >= 0 && session.items.slice(joined + 1).some((item) => item.kind === 'whisper');
+    if (waiting !== null || whispered) sv.runVisitorTurn(session, waiting ?? '');
+    return ok(state);
   },
   resume(sv, req) {
     const session = ownerSession(sv, req);
@@ -631,7 +647,11 @@ const SERVED: ServedRoutes = {
     const text = isRecord(req.body) ? req.body.text : undefined;
     const kind = isRecord(req.body) ? req.body.kind : undefined;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX || !OWNER_KINDS.has(kind)) return INVALID;
-    if (kind === 'whisper') return ok(sv.world.whisper(session, text));
+    if (kind === 'whisper') {
+      const result = sv.world.whisper(session, text);
+      if (session.state.mode === 'ai') sv.runVisitorTurn(session, waitingVisitorText(session) ?? '');
+      return ok(result);
+    }
     // Her own words reach the visitor only once she is in the chat.
     if (session.state.mode !== 'owner') return failWith(409, 'take_over_first');
     return ok(sv.world.say(session, text));
@@ -833,7 +853,7 @@ const SERVED: ServedRoutes = {
     const { session } = visitor;
     sv.world.visitorText(session, text);
     // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session), session.person), session.language, text);
+    if (session.state.mode === 'ai') sv.runVisitorTurn(session, text);
     // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
     else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
