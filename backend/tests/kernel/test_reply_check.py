@@ -1159,8 +1159,7 @@ async def test_a_booking_claim_beside_its_booking_card_passes_by_the_owners_deci
     assert (prose_block.text, card.template, card.fact_id) == (prose, "booking_confirmed", booking.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=prose,
                                                      cards=[f"Booking confirmed card: {card.text}"],
-                                                     next_steps=VISITOR_NEXT_STEPS,
-                                                     approved_names=["Emergency callback"])]
+                                                     next_steps=VISITOR_NEXT_STEPS)]
 
 
 @pytest.mark.parametrize(("prose", "language", "span"), [
@@ -2023,8 +2022,7 @@ async def test_a_policy_restated_beside_its_card_is_shown_by_the_owners_decision
     assert (verdict.ok, verdict.violations) == (True, [])
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", SERVICE_AREA), ("card", SERVICE_AREA)]
     assert reviewer.soft_inputs == [SoftPromiseInput(language="en", prose=SERVICE_AREA, cards=[f"Policy card: {SERVICE_AREA}"],
-                                                     next_steps=VISITOR_NEXT_STEPS,
-                                                     approved_names=["Emergency callback"])]
+                                                     next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
 
@@ -2090,8 +2088,7 @@ async def test_a_link_beside_a_quote_card_is_shown_by_the_owners_decision(app, c
     prose_block, card = verdict.blocks
     assert (prose_block.text, card.template, card.fact_id) == (reply_check.shown(prose), "quote", quote.fact_id)
     assert reviewer.soft_inputs == [SoftPromiseInput(language=language, prose=reply_check.shown(prose),
-                                                     cards=[f"Quote card: {card.text}"], next_steps=VISITOR_NEXT_STEPS,
-                                                     approved_names=["Emergency callback"])]
+                                                     cards=[f"Quote card: {card.text}"], next_steps=VISITOR_NEXT_STEPS)]
     [entry] = await reply_entries(app, copy)
     assert (entry.event.summary["ok"], entry.event.summary["rule_ids"]) == (True, [])
     assert link not in json.dumps(entry.event.summary)
@@ -3014,6 +3011,25 @@ def test_a_repeat_of_a_business_tools_name_reads_apostrophes_dashes_and_spaces_a
     """Apostrophes, dashes and runs of whitespace aren't letters, so a repeat that writes them
     another way is still the name (as the lexicons read them), and its free word passes."""
     assert reply_check.scan_prose(prose, approved_free_names=names) == []
+
+
+@pytest.mark.parametrize(("prose", "names", "used"), [
+    # Only the name the prose repeats, never the Desk's other titles and appointment types.
+    ("Would you like to book a free intro call?", ("Book a consult", "Free consult", "Book a free intro call"),
+     ["Book a free intro call"]),
+    ("May I help with that?", ("Book a free intro call", "Free consult"), []),
+    ("Your \uff26\uff32\uff25\uff25 CONSULT is ready.", FREE_CONSULT, ["Free consult"]),     # as the scan reads it
+    ("Tu consulta gratuíta está lista.", CONSULTA_GRATUITA, ["Consulta gratuita"]),
+    ("I can book you a Free  consult.", FREE_CONSULT, ["Free consult"]),
+    ("I can book an Emergency callback.", ("Emergency callback",), []),       # no free word to lend
+    ("Las consultas son gratis.", ("Gratis",), []),                           # free words alone back none
+    ("Ofrecemos una videoconsulta gratuita.", CONSULTA_GRATUITA, []),         # not at a word's start
+    ("A Free consult, then another free consult.", FREE_CONSULT * 2, ["Free consult"]),   # each name once
+])
+def test_the_soft_check_is_shown_only_the_free_names_the_scan_found(prose, names, used):
+    """The approved names the soft-promise check reads: those with a free word, not of free words
+    alone, that the prose repeats at a word's start as the scan reads it (`free_names_used`)."""
+    assert reply_check.free_names_used(prose, names) == used
 
 
 def test_a_long_draft_repeating_a_business_tools_name_is_scanned_in_one_pass():

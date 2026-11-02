@@ -370,13 +370,16 @@ InputShape = Literal["old", "new", "approved_names"]
 
 def call_input(case: Case, shape: InputShape = "approved_names") -> SoftPromiseInput | OldSoftPromiseInput:
     """What the kernel's check reads for the case: its language, its prose as the scan reads it, and
-    its cards' texts."""
-    data = dict(language=case.language, prose=reply_check.shown(case.prose), cards=list(case.cards))
+    its cards' texts, then in the newer shapes its next steps and, of the case's approved names,
+    those whose repeat lends a free word in the prose (`reply_check.free_names_used`)."""
+    prose = reply_check.shown(case.prose)
+    data = dict(language=case.language, prose=prose, cards=list(case.cards))
     if shape == "old":
         return OldSoftPromiseInput(**data)
     if shape == "new":
         return NextStepsSoftPromiseInput(**data, next_steps=list(case.next_steps))
-    return SoftPromiseInput(**data, next_steps=list(case.next_steps), approved_names=list(case.approved_names))
+    return SoftPromiseInput(**data, next_steps=list(case.next_steps),
+                            approved_names=reply_check.free_names_used(prose, case.approved_names))
 
 
 def request_message(data: SoftPromiseInput | OldSoftPromiseInput) -> str:

@@ -145,6 +145,12 @@ def test_approved_names_are_optional_case_data_and_back_only_the_prose_scan():
     assert code_blocked(named.model_copy(update={"approved_names": []}))
     assert call_input(named).approved_names == named.approved_names
     assert call_input(ordinary).approved_names == []
+    # As in the kernel, the call carries only the names whose repeat in the prose lends a free word.
+    elsewhere = named.model_copy(update={"prose": "The intro call costs nothing.",
+                                         "approved_names": ["Book a free intro call", "Book a consult"]})
+    assert call_input(elsewhere).approved_names == []
+    assert call_input(named.model_copy(update={"approved_names": ["Book a consult", "Book a free intro call"]})
+                      ).approved_names == ["Book a free intro call"]
     # Historical measurements keep their original wire shape and input hashes.
     assert "approved_names" not in call_input(named, "new").model_dump()
 

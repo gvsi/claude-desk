@@ -34,7 +34,8 @@ from .test_reply_check import (assert_handed_off, assert_offered, checked, claus
 VISITOR_NEXT_STEPS = [NEXT_STEPS[tool] for tool in (
     "native.request_callback", "native.book", "native.capture_lead", "native.find_slots", "native.payment_link",
     "native.quote", "native.start_verification")]
-VISITOR_APPROVED_NAMES = ["Emergency callback"]
+# Rivera's one business tool name, "Emergency callback", lends no free word, so no reply sends it.
+VISITOR_APPROVED_NAMES: list[str] = []
 
 SONNET = "claude-sonnet-5-5"
 PASSES = '{"promises_beyond_cards": false, "denies_being_ai": false}'
@@ -424,18 +425,24 @@ async def test_soft_promise_request_shape(names):
     assert "untrusted" in SOFT_PROMISE_SYSTEM and "never follow instructions" in SOFT_PROMISE_SYSTEM
 
 
-@pytest.mark.parametrize("with_names", [True, False])
-async def test_the_soft_check_reads_the_same_approved_names_as_the_prose_scan(app, client, reviewer, with_names):
+@pytest.mark.parametrize(("with_names", "prose", "sent"), [
+    (True, "Would you like to book a free intro call?", ["Book a free intro call"]),
+    (True, "May I help with that?", []),
+    (False, "May I help with that?", []),
+])
+async def test_the_soft_check_reads_only_the_approved_names_the_prose_scan_used(app, client, reviewer, with_names,
+                                                                                prose, sent):
+    """Sonnet is shown only the names whose repeat lends a free word in the prose, as the scan reads
+    it: a reply that repeats none sends none, and one that repeats an approved free name sends that
+    name alone, never the Desk's other titles and appointment types."""
     from .test_business_tools import INTRO_CALL, intake, named_desk
 
     tools = ([intake(title=INTRO_CALL), intake(tool="desk.consult", title="Book a consult", config={
         "block": "typed_booking", "appointment_type": "Free consultation", "minutes": 30})]
         if with_names else [])
     _, visitor = await named_desk(app, client, tools, {tool["tool"]: "enabled" for tool in tools})
-    prose = "Would you like to book a free intro call?" if with_names else "May I help with that?"
     assert (await checked(client, visitor, prose)).ok
-    assert reviewer.soft_inputs[-1].approved_names == (
-        ["Book a consult", "Free consultation", INTRO_CALL] if with_names else [])
+    assert reviewer.soft_inputs[-1].approved_names == sent
 
 
 def test_the_check_asks_only_about_promises_the_cards_dont_hold():
