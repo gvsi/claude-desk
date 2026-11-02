@@ -5,7 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { buildTokensCss, type DesignTokens, type ThemedValues, type TypeStyle } from '../../scripts/build-tokens.mjs';
-import { BRAND_TEXT_COLORS, CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast, tokenHex } from './contrast';
+import {
+  BRAND_TEXT_COLORS,
+  CONTRAST_PAIRS,
+  DECORATIVE_COLORS,
+  LIGHT_THEME_EXEMPTIONS,
+  THEMES,
+  contrastRatio,
+  pairContrast,
+  tokenHex,
+  type Theme,
+} from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -465,7 +475,7 @@ describe('design tokens', () => {
     }
   });
 
-  test('every_used_pair_meets_contrast', () => {
+  test('every_used_pair_meets_contrast_in_both_themes', () => {
     // The ratio itself, against known WCAG values, so a broken formula can't pass the pairs.
     expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5);
     expect(contrastRatio('#777777', '#ffffff')).toBeCloseTo(4.48, 2);
@@ -474,10 +484,24 @@ describe('design tokens', () => {
     expect(() => contrastRatio('text-primary', 'fill-card')).toThrow();
     expect(() => contrastRatio('not-a-color', 'bg-app')).toThrow();
 
-    type Required = { fg: string; ground: string; over?: string; under?: string; opacity?: number; min: 4.5 | 3 };
+    // Each theme reads its own values: light where a token has one, and its dark one where it hasn't,
+    // an alias resolving against the light values, as the CSS inherits them.
+    expect(pairContrast({ fg: 'text-primary', ground: 'bg-app' }, 'light')).toBeCloseTo(contrastRatio('rgba(28,27,25,0.92)', '#f6f4ee'), 6);
+    expect(pairContrast({ fg: 'line-focus', ground: 'bg-app' }, 'light')).toBeCloseTo(contrastRatio('rgba(28,27,25,0.68)', '#f6f4ee'), 6);
+    expect(pairContrast({ fg: 'mark-ink', ground: 'mark-tile' }, 'light')).toBeCloseTo(pairContrast({ fg: 'mark-ink', ground: 'mark-tile' }), 6);
+    expect(pairContrast({ fg: 'text-primary', ground: 'bg-app' })).toBeCloseTo(pairContrast({ fg: 'text-primary', ground: 'bg-app' }, 'dark'), 6);
+
+    type Required = { fg: string; ground: string; over?: string; under?: string; opacity?: number; min: 4.5 | 3; themes: readonly Theme[] };
     const required: Required[] = [];
+    let drawnIn: readonly Theme[] = THEMES;
     const add = (fgs: string[], grounds: string[], min: 4.5 | 3, over?: string, under?: string, opacity?: number) => {
-      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, under, opacity, min });
+      for (const fg of fgs) for (const ground of grounds) required.push({ fg, ground, over, under, opacity, min, themes: drawnIn });
+    };
+    /** Requires the pairs `require` adds in `themes` only. */
+    const only = (themes: readonly Theme[], require: () => void) => {
+      drawnIn = themes;
+      require();
+      drawnIn = THEMES;
     };
     const text = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'];
     add(text, ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted', 'bg-selected'], 4.5);
@@ -500,12 +524,14 @@ describe('design tokens', () => {
     add(['line-focus'], ['fill-secondary', 'fill-secondary-hover'], 3, 'bg-surface');
     add(['bg-app'], ['button-primary', 'button-primary-hover'], 3);
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
-    // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
-    add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);
+    // top bar, and the intro dialog's surface, in the dark theme; its dark ink on the same grounds in
+    // the light theme, and on the intro illustration's light card in both.
+    only(['dark'], () => add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3));
+    only(['light'], () => add(['mark-ink'], ['bg-app', 'bg-panel', 'bg-surface'], 3));
     add(['mark-ink'], ['illustration-card'], 3);
     // The mark with its tile: the tile on the app, as the design system's stories show it, and its
     // drawing on the tile, the ink where it crosses the clay dome included.
-    add(['mark-tile'], ['bg-app'], 3);
+    only(['dark'], () => add(['mark-tile'], ['bg-app'], 3));
     add(['mark-ink', 'mark-clay'], ['mark-tile'], 3);
     add(['mark-ink'], ['mark-clay'], 3);
     // Claude's writing dots carry the waiting status on the page and in the Ask Claude panel;
@@ -567,7 +593,8 @@ describe('design tokens', () => {
     add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'fill-card', 'bg-app');
     add(['button-danger-text'], ['fill-hover'], 3, 'bg-surface');
 
-    // Every required pair is listed, at no lower a minimum, so dropping one can't pass.
+    // Every required pair is listed, at no lower a minimum and in every theme it is required in, so
+    // dropping one can't pass.
     for (const want of required) {
       const listed = CONTRAST_PAIRS.find(
         (p) =>
@@ -575,11 +602,38 @@ describe('design tokens', () => {
       );
       expect(listed, label(want)).toBeDefined();
       expect(listed?.min).toBeGreaterThanOrEqual(want.min);
+      expect(listed?.themes ?? THEMES, `${label(want)} is checked in ${want.themes.join(' and ')}`).toEqual(expect.arrayContaining([...want.themes]));
     }
 
+    // Every listed pair meets its minimum in each theme it is drawn in: both, unless it says.
     for (const pair of CONTRAST_PAIRS) {
       expect(pair.use.trim().length, `${label(pair)} says where it is used`).toBeGreaterThan(0);
-      expect(pairContrast(pair), label(pair)).toBeGreaterThanOrEqual(pair.min);
+      for (const theme of pair.themes ?? THEMES) {
+        expect(pairContrast(pair, theme), `${label(pair)} in ${theme}`).toBeGreaterThanOrEqual(pair.min);
+      }
+    }
+
+    // Only the mark's pairs are drawn in one theme: on the app's grounds its ink is light in the dark
+    // theme and dark in the light one. The clay dome and the lone tile there are dark-only pairs, and
+    // the light theme draws them as the logo they are, exempt from contrast, each named with why.
+    const oneTheme = CONTRAST_PAIRS.filter((p) => p.themes !== undefined).map((p) => `${label(p)} in ${p.themes?.join(' and ')}`);
+    expect(oneTheme.sort()).toEqual(
+      [
+        ...['bg-app', 'bg-panel', 'bg-surface'].flatMap((ground) => [
+          `mark-ink-light on ${ground} in dark`,
+          `mark-clay on ${ground} in dark`,
+          `mark-ink on ${ground} in light`,
+        ]),
+        'mark-tile on bg-app in dark',
+      ].sort(),
+    );
+    expect(LIGHT_THEME_EXEMPTIONS.map(label)).toEqual(['mark-clay on bg-app', 'mark-clay on bg-panel', 'mark-clay on bg-surface', 'mark-tile on bg-app']);
+    for (const exempt of LIGHT_THEME_EXEMPTIONS) {
+      expect(exempt.reason.trim().length, `${label(exempt)} says why it is exempt`).toBeGreaterThan(0);
+      // A real exemption: it falls under the minimum its dark pair keeps, so a stale one shows.
+      const dark = CONTRAST_PAIRS.find((p) => p.fg === exempt.fg && p.ground === exempt.ground && p.themes?.join() === 'dark');
+      expect(dark, `${label(exempt)} is listed for the dark theme`).toBeDefined();
+      expect(pairContrast(exempt, 'light'), label(exempt)).toBeLessThan(dark?.min ?? 0);
     }
   });
 

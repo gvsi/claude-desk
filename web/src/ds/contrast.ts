@@ -1,6 +1,7 @@
 // WCAG 2.2 contrast for the design tokens: every color pair the components use is
-// listed once in CONTRAST_PAIRS, with ratios computed from tokens.json, and every
-// color token is either in a pair or in DECORATIVE_COLORS with the reason.
+// listed once in CONTRAST_PAIRS, with ratios computed from tokens.json in each theme it is
+// drawn in, and every color token is either in a pair, in DECORATIVE_COLORS with the
+// reason, or in BRAND_TEXT_COLORS, checked on the owner's colour.
 
 import tokens from './tokens.json' with { type: 'json' };
 
@@ -20,9 +21,23 @@ export type ContrastPair = {
   /** 4.5:1 for text; 3:1 for focus edges, dots, the mark and text at 24 px and up. */
   readonly min: 4.5 | 3;
   readonly use: string;
+  /** The themes the pair is drawn in, when it isn't drawn in both. */
+  readonly themes?: readonly Theme[];
 };
 
-const COLORS: ReadonlyMap<string, string> = new Map(tokens.color.tokens.map((t) => [t.name, t.value.dark]));
+export type Theme = 'dark' | 'light';
+
+/** The themes every pair is checked in, unless it names its own. */
+export const THEMES: readonly Theme[] = Object.freeze(['dark', 'light']);
+
+/**
+ * Each theme's color values. Light takes a token's light value, or its dark one where it has none,
+ * as the CSS inherits it; an alias then resolves against the light values.
+ */
+const COLORS: Readonly<Record<Theme, ReadonlyMap<string, string>>> = {
+  dark: new Map(tokens.color.tokens.map((t) => [t.name, t.value.dark])),
+  light: new Map(tokens.color.tokens.map((t) => [t.name, t.value.light ?? t.value.dark])),
+};
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 const NUM = String.raw`\s*(\d+(?:\.\d+)?)\s*`;
@@ -30,16 +45,17 @@ const RGB = new RegExp(`^rgba?\\(${NUM},${NUM},${NUM}(?:,${NUM})?\\)$`, 'i');
 const ALIAS = /^\{([A-Za-z0-9][A-Za-z0-9_.-]{0,63})\}$/;
 const VAR = /^var\(\s*--([A-Za-z0-9][A-Za-z0-9_.-]{0,63})\s*\)$/;
 
-function parseColor(input: string, depth = 0): Rgba {
+function parseColor(input: string, theme: Theme, depth = 0): Rgba {
   if (depth > 16) throw new Error(`Color alias chain is too deep at ${input}`);
   const color = input.trim();
   // A ghost control's own ground: nothing, so only its label is drawn.
   if (color === 'transparent') return { r: 0, g: 0, b: 0, a: 0 };
-  const named = ALIAS.exec(color)?.[1] ?? VAR.exec(color)?.[1] ?? (COLORS.has(color) ? color : undefined);
+  const colors = COLORS[theme];
+  const named = ALIAS.exec(color)?.[1] ?? VAR.exec(color)?.[1] ?? (colors.has(color) ? color : undefined);
   if (named !== undefined) {
-    const value = COLORS.get(named);
+    const value = colors.get(named);
     if (value === undefined) throw new Error(`Unknown color token: ${input}`);
-    return parseColor(value, depth + 1);
+    return parseColor(value, theme, depth + 1);
   }
   const hex = HEX.exec(color)?.[1];
   if (hex !== undefined) {
@@ -62,7 +78,7 @@ function parseColor(input: string, depth = 0): Rgba {
  * to something that reads no CSS, such as the web app's QR code. Throws on a translucent token.
  */
 export function tokenHex(name: string): string {
-  const { r, g, b, a } = parseColor(name);
+  const { r, g, b, a } = parseColor(name, 'dark');
   if (a !== 1) throw new Error(`${name} is not an opaque color`);
   return `#${[r, g, b].map((channel) => Math.round(channel).toString(16).padStart(2, '0')).join('')}`;
 }
@@ -88,16 +104,19 @@ function luminance({ r, g, b }: Rgba): number {
  * `var(--token)`, a hex color, an `rgb()`/`rgba()` color or `transparent`. The ground sits on
  * `over`, and a translucent `over` on an opaque `under`; at an `opacity` under 1 the label and the
  * ground fade together over what is beneath them. Throws on anything it can't read, and on layers
- * that don't end on something opaque.
+ * that don't end on something opaque. Tokens read their values in `theme`, dark unless asked.
  */
-export function pairContrast({ fg, ground, over, under, opacity = 1 }: Omit<ContrastPair, 'min' | 'use'>): number {
+export function pairContrast(
+  { fg, ground, over, under, opacity = 1 }: Omit<ContrastPair, 'min' | 'use' | 'themes'>,
+  theme: Theme = 'dark',
+): number {
   if (under !== undefined && over === undefined) throw new Error(`${under} is under nothing; name the layer it sits under as over`);
   if (!(opacity > 0 && opacity <= 1)) throw new Error(`opacity ${opacity} is not in (0, 1]`);
   let beneath: Rgba | undefined;
   if (over !== undefined) {
-    beneath = parseColor(over);
+    beneath = parseColor(over, theme);
     if (under !== undefined) {
-      const base = parseColor(under);
+      const base = parseColor(under, theme);
       if (base.a !== 1) throw new Error(`${under} is translucent; contrast needs an opaque color underneath`);
       beneath = composite(beneath, base);
     }
@@ -105,9 +124,9 @@ export function pairContrast({ fg, ground, over, under, opacity = 1 }: Omit<Cont
   }
   if (opacity !== 1 && beneath === undefined) throw new Error(`a control at opacity ${opacity} needs what it sits on as over`);
 
-  const groundColor = parseColor(ground);
+  const groundColor = parseColor(ground, theme);
   const fade = (c: Rgba): Rgba => ({ ...c, a: c.a * opacity });
-  const label = fade(composite(parseColor(fg), groundColor));
+  const label = fade(composite(parseColor(fg, theme), groundColor));
   const fill = fade(groundColor);
   const back = beneath === undefined ? fill : composite(fill, beneath);
   if (back.a !== 1) throw new Error(`${ground} is translucent; pass the opaque color it sits over`);
@@ -119,8 +138,8 @@ export function pairContrast({ fg, ground, over, under, opacity = 1 }: Omit<Cont
 }
 
 /**
- * WCAG contrast ratio of `fg` on `ground`, as `pairContrast` measures it: a translucent `ground`
- * over `over`, and a translucent `over` over `under`.
+ * WCAG contrast ratio of `fg` on `ground`, as `pairContrast` measures it in the dark theme: a
+ * translucent `ground` over `over`, and a translucent `over` over `under`.
  */
 export function contrastRatio(fg: string, ground: string, over?: string, under?: string): number {
   return pairContrast({ fg, ground, over, under });
@@ -132,7 +151,7 @@ function pairs(
   min: 4.5 | 3,
   use: string,
   over?: string,
-  beneath: Pick<ContrastPair, 'under' | 'opacity'> = {},
+  beneath: Pick<ContrastPair, 'under' | 'opacity' | 'themes'> = {},
 ): ContrastPair[] {
   return fgs.flatMap((fg) =>
     grounds.map((ground) => ({ fg, ground, ...(over === undefined ? {} : { over }), ...beneath, min, use })),
@@ -143,6 +162,8 @@ const TEXT = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'] 
 
 const MARKS = ['accent-blue', 'line-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
 const SURFACES = ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'] as const;
+/** Where the mark sits without its tile: a page, the sidebar and the phone top bar, and the intro dialog. */
+const MARK_GROUNDS = ['bg-app', 'bg-panel', 'bg-surface'] as const;
 
 export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(TEXT, ['bg-app', 'bg-panel', 'bg-surface', 'bg-muted', 'bg-selected'], 4.5, 'Text and links on the app, panels, raised surfaces, quiet fills and the selected row.'),
@@ -176,12 +197,22 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['bg-app'], ['button-primary', 'button-primary-hover'], 3, "The primary button's focus edge, 2 px of the page's own dark just inside its fill, at rest and hovered."),
   ...pairs(
     ['mark-ink-light', 'mark-clay'],
-    ['bg-app', 'bg-panel', 'bg-surface'],
+    MARK_GROUNDS,
     3,
-    "The Claude Desk mark without its tile, its light ink and clay dome: on a page and in the public page's footer, in the sidebar and the phone top bar, and at the top of the first-visit intro dialog.",
+    "The Claude Desk mark without its tile, its light ink and clay dome: on a page and in the public page's footer, in the sidebar and the phone top bar, and at the top of the first-visit intro dialog. On the light theme's paper the ink is mark-ink, and the dome is exempt (LIGHT_THEME_EXEMPTIONS).",
+    undefined,
+    { themes: ['dark'] },
+  ),
+  ...pairs(
+    ['mark-ink'],
+    MARK_GROUNDS,
+    3,
+    "The same mark on the light theme's paper, where its ink is the drawing's dark ink.",
+    undefined,
+    { themes: ['light'] },
   ),
   ...pairs(['mark-ink'], ['illustration-card'], 3, "The mark's dark ink, without its tile, on the intro illustration's light reply card."),
-  ...pairs(['mark-tile'], ['bg-app'], 3, "The mark's white tile on the app's ground, as the design system's stories show it alone."),
+  ...pairs(['mark-tile'], ['bg-app'], 3, "The mark's white tile on the app's ground, as the design system's stories show it alone.", undefined, { themes: ['dark'] }),
   ...pairs(['mark-ink', 'mark-clay'], ['mark-tile'], 3, "The mark's drawing on its tile: the ink, and the clay dome."),
   ...pairs(['mark-ink'], ['mark-clay'], 3, "The mark's dark ink where it crosses the clay dome, on its tile and on the intro's light card."),
   ...pairs(['clay'], ['bg-app'], 3, "Claude's writing dots on the page, and the About pages' app icon: its clay field, the icon's edge, on the page."),
@@ -224,6 +255,24 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['text-primary', 'text-secondary'], ['fill-card'], 4.5, "An agent's signed limit in the agents page's \"Send an agent\" card: its amounts, their names and whose wallet signed it, on its own fill over the card's.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['button-danger-text'], ['bg-surface'], 4.5, "Deny's answers in its menu on a held request, This time and Always, in red words on the raised surface."),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),
+]);
+
+/**
+ * The pairs the light theme draws below their minimum, and why each is allowed: the mark is a logo,
+ * which WCAG exempts, so its clay dome and its lone tile are drawn as they are on the paper. Each
+ * is listed for the dark theme, where it holds.
+ */
+export const LIGHT_THEME_EXEMPTIONS: readonly { readonly fg: string; readonly ground: string; readonly reason: string }[] = Object.freeze([
+  ...MARK_GROUNDS.map((ground) => ({
+    fg: 'mark-clay',
+    ground,
+    reason: "The mark's clay dome on the paper, 2.6 to 3.0:1: the logo's own color, and its dark ink lines, 16.8:1 and up, set the bell off the ground.",
+  })),
+  {
+    fg: 'mark-tile',
+    ground: 'bg-app',
+    reason: "The mark's white tile alone on the paper, as only the design system's stories draw it: the app shows the tile inside the app icon, on its clay field, and the drawing on the tile carries its own contrast.",
+  },
 ]);
 
 /**
