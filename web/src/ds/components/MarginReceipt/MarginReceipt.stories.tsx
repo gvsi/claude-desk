@@ -83,7 +83,7 @@ function ownerReceipt(decision: Decision) {
 const OWNER_LINES = [
   { receipt: ownerReceipt(rivera.decisions.held), words: 'Held for you', tone: 'held' },
   { receipt: ownerReceipt(rivera.decisions.refused), words: 'Stopped', tone: 'refused' },
-  { receipt: { ...executed, reason: rivera.decisions.allowed.reason_plain }, words: 'Automatic', tone: 'handled' },
+  { receipt: { ...executed, reason: rivera.decisions.allowed.reason_plain }, words: 'Allowed', tone: 'handled' },
   { receipt: ownerReceipt(rivera.decisions.allowed), words: 'Running', tone: 'handled' },
 ] as const;
 

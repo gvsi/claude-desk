@@ -1937,9 +1937,9 @@ describe('Conversations', () => {
     expect(line.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
     expect(log(screen).getByRole('article', { name: 'Handed to a person', exact: true }).elements()).toHaveLength(0);
     const row = line.element().closest('.cd-transcript-row');
-    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    await expect.element(receipt(screen, `Allowed. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
     expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
-      `${VISITOR_PLAIN.en.reply_checked} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+      `${VISITOR_PLAIN.en.reply_checked} Open the full trace.`, `Allowed. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
     ]);
   });
 
@@ -1962,9 +1962,9 @@ describe('Conversations', () => {
     expect([...row!.querySelectorAll('article')].map((card) => card.getAttribute('aria-label'))).toEqual(['Quote', 'Handed to a person']);
     expect(line.element().querySelector('.cd-status-dot--held')).not.toBeNull();
     await expect.element(screen.getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
-    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    await expect.element(receipt(screen, `Allowed. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
     expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
-      `${VISITOR_PLAIN.en.reply_handed_off} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+      `${VISITOR_PLAIN.en.reply_handed_off} Open the full trace.`, `Allowed. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
     ]);
   });
 
@@ -1980,7 +1980,7 @@ describe('Conversations', () => {
     // The hold, answered so no card is under it, and the quote Claude ran on its own name their
     // state in the owner's words, then say why: the kernel's reason, read once by each decision.
     await expect.element(receipt(screen, `Held for you. ${REFUND_REASON}`)).toBeVisible();
-    await expect.element(receipt(screen, `Automatic. ${quote.reason_plain}`)).toBeVisible();
+    await expect.element(receipt(screen, `Allowed. ${quote.reason_plain}`)).toBeVisible();
     expect(decisionReads(refund.decision_id)).toHaveLength(1);
     expect(decisionReads(quote.decision_id)).toHaveLength(1);
 
@@ -2043,8 +2043,8 @@ describe('Conversations', () => {
 
     // The release's receipt, in the owner's words, sits under the invoice it explains, never under
     // the card that asked for the code, which keeps the receipt of the code it sent.
-    const released = receipt(screen, `Automatic. ${DECISIONS.releaseInvoice.reasonPlain}`);
-    const started = receipt(screen, `Automatic. ${DECISIONS.startVerification.reasonPlain}`);
+    const released = receipt(screen, `Allowed. ${DECISIONS.releaseInvoice.reasonPlain}`);
+    const started = receipt(screen, `Allowed. ${DECISIONS.startVerification.reasonPlain}`);
     await expect.element(released).toBeVisible();
     await expect.element(started).toBeVisible();
     expect(rowOf(invoice)?.contains(released.element())).toBe(true);
@@ -2174,7 +2174,7 @@ describe('Conversations', () => {
     // It shows the kernel's short line until the owner's read of its decision answers, then the
     // decision's state and reason: the line the owner reads.
     const shown = () => asked()?.querySelector('.cd-margin-receipt')?.textContent ?? '';
-    await expect.poll(shown).toMatch(/^Automatic\. /);
+    await expect.poll(shown).toMatch(/^Allowed\. /);
     const read = shown();
 
     // The reply comes, and the receipt moves under it, after the reply's own check. The reply is

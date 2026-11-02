@@ -22,7 +22,7 @@
 
 ## The line
 
-A `reply` receipt always shows `plain`, whatever `reason` and `cardBelow` say. So does a `decision` receipt whose state isn't in `OWNER_REASON_STATES`, even with a `reason`: the reason was written at decide time, and on a later state it could say something false ("Automatic" for a hold the owner later allowed). A decision receipt in one of those four states shows the first of these that applies:
+A `reply` receipt always shows `plain`, whatever `reason` and `cardBelow` say. So does a `decision` receipt whose state isn't in `OWNER_REASON_STATES`, even with a `reason`: the reason was written at decide time, and on a later state it could say something false ("Allowed" for a hold the owner later allowed). A decision receipt in one of those four states shows the first of these that applies:
 
 1. `cardBelow` and state `held`: the owner's words alone, "Held for you", with no period, like the kernel's lines. The card's headline already gives the reason. `cardBelow` on any other state is ignored.
 2. A `reason` that isn't empty after trimming: "{words}. {reason}", e.g. "Stopped. Someone asked for another customer's invoice."
@@ -34,7 +34,7 @@ The words are `OWNER_STATE_WORDS[state]`: the owner's words for the receipt that
 | --- | --- |
 | `held` | Held for you |
 | `refused` | Stopped |
-| `executed` | Automatic |
+| `executed` | Allowed |
 | `allowed` | Running |
 
 ## The dot (`receiptTone`)
