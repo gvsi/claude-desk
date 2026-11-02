@@ -849,6 +849,56 @@ describe('The preview behind the intro dialog', () => {
     });
   }
 
+  it.each([
+    ['the copy answers', false],
+    ['the copy is made but its answer is lost, so the copy this browser has answers', true],
+  ])('preview_is_redrawn_from_when_the_copy_opened: %s', async (_case, lost) => {
+    // Only Date is faked: the page's timers and polling stay real. The page is drawn a minute before
+    // midnight on Friday, on the business's clock.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    vi.setSystemTime(new Date('2026-10-30T23:59:00-07:00'));
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const preview = () => document.querySelector('.cd-today-preview');
+    const asDrawn = timesIn(preview());
+    expect(asDrawn.days.at(-1)).toMatch(/^Fri: .* \(today\)$/);
+
+    // The passcode goes in 20 minutes later, after midnight, and the copy opens then: the mock made
+    // its copy as the test began, where the API makes one as the passcode goes in, so it is made
+    // again now. Today's read ahead is held, so the dialog stays up, busy, over the preview.
+    vi.setSystemTime(new Date('2026-10-31T00:19:00-07:00'));
+    mockStore.reset('rivera', { signedIn: false });
+    if (lost) mockStore.inject({ route: 'copies', status: 'network', afterCommit: true });
+    const today = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    const pages = watchPages();
+    await startTheDemo(screen);
+    await expect.poll(today.held).toBe(1);
+
+    // The preview is drawn again from when the copy opened: Saturday's, with what came after midnight on it.
+    await expect.poll(() => timesIn(preview()).days.at(-1)).toMatch(/^Sat: .* \(today\)$/);
+    const redrawn = timesIn(preview());
+    expect(redrawn.briefing).not.toEqual(asDrawn.briefing);
+    const redrawnLayout = layoutOf(preview() ?? document.body);
+
+    // Today reads the copy a moment later and opens, already drawn, onto the same times and days,
+    // every part where the preview drew it.
+    vi.setSystemTime(new Date('2026-10-31T00:19:02-07:00'));
+    today.release();
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(timesIn(document.querySelector('.cd-today'))).toEqual(redrawn);
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    expect(pages()).toEqual(['preview', 'today']);
+    expect(misplaced(redrawnLayout, layoutOf(document.body))).toEqual([]);
+    // Since the copy was made again: only a lost answer asks for the copy this browser has.
+    expect(requests('me')).toHaveLength(lost ? 1 : 0);
+  });
+
   it('a_preview_that_throws_leaves_the_dialog_usable', async () => {
     // React reports the error on the console, as it should; only the page must not show it.
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -2622,6 +2672,21 @@ function layoutOf(root: ParentNode): Record<string, Placed> {
     for (const child of el?.children ?? []) out[`${column}: ${nameOf(child)}`] = rect(child, false);
   }
   return out;
+}
+
+/**
+ * The times and days Today draws under `root`: each held request's wait, each briefing row's time,
+ * Live now's clock times, and each of the last 7 days by name, today's marked.
+ */
+function timesIn(root: Element | null): { waiting: string[]; briefing: string[]; live: string[]; days: string[] } {
+  const all = (selector: string) => [...(root?.querySelectorAll(selector) ?? [])];
+  const texts = (selector: string) => all(selector).map((el) => el.textContent.trim());
+  return {
+    waiting: texts('.cd-approval-card__waiting'),
+    briefing: texts('.cd-briefing-row__when'),
+    live: texts('.cd-live .cd-conversation-item__time'),
+    days: all('.cd-week__day').map((day) => `${day.querySelector('.cd-sr-only')?.textContent ?? ''}${day.getAttribute('aria-current') === 'date' ? ' (today)' : ''}`),
+  };
 }
 
 /** Every measure in `after` more than 2 px from where `before` put it, as a line each. */
