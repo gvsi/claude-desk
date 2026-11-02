@@ -902,6 +902,7 @@ describe('OwnerLayout', () => {
       'Today',
       'Conversations',
       'Customers',
+      'Knowledge',
       'Rules',
       'Safety',
       'Share',
@@ -909,7 +910,7 @@ describe('OwnerLayout', () => {
     ]);
     const base = `/app/${RIVERA.deskId}`;
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'].map((page) => `${base}/${page}`),
+      ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'share', 'settings'].map((page) => `${base}/${page}`),
     );
     await expect.element(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
 
@@ -955,6 +956,7 @@ describe('OwnerLayout', () => {
       ['today/briefing', 'Since last night', 'Since last night'],
       ['conversations', 'Conversations', 'Conversations'],
       ['people', 'Customers', 'Customers'],
+      ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
       ['rules/all', 'All rules', 'All rules'],
       ['safety', 'Safety', 'Safety'],

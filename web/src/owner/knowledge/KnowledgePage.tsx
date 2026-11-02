@@ -1,5 +1,5 @@
 /**
- * Settings › Knowledge (N-Run2-Settings-Knowledge): what Claude answers from, which never changes
+ * Knowledge (N-Run2-Settings-Knowledge): what Claude answers from, which never changes
  * the owner's rules. "What I know now" lists what the owner may see, each item with when it was
  * added and who can see it; one the kernel forces owner-only comes with its title and text withheld
  * and reads "A note only you can see". Under it, a note or a text file is added for the owner only,
@@ -13,10 +13,13 @@ import { useRef, useState } from 'react';
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
 import type { KnowledgeRow } from '../../api/views.ts';
-import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, Notice, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
+import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, NAV_LABELS, Notice, PageHeader, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useReadFailure } from '../useReadFailure.ts';
+
+import './Knowledge.css';
 
 const LEAD = 'Knowledge is what I answer from. It never changes your rules.';
 
@@ -136,6 +139,7 @@ function sameItem(a: KnowledgeItem, b: Omit<KnowledgeItem, 'item_id'>): boolean 
 }
 
 export function KnowledgePage() {
+  useDocumentTitle(inApp(NAV_LABELS.knowledge));
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const queryClient = useQueryClient();
@@ -309,25 +313,28 @@ export function KnowledgePage() {
 
   return (
     <>
-      <p className="cd-type-summary">{LEAD}</p>
-      <WhatIKnow deskId={deskId} timeZone={business.timezone} />
-      <KnowledgeAdd
-        note={note}
-        onNoteChange={setNote}
-        onAddNote={addNote}
-        onAddFile={addFile}
-        {...(busy === undefined ? {} : { busy })}
-        {...(error === undefined ? {} : { error })}
-        {...(added === null
-          ? {}
-          : {
-              added: {
-                readers: added.label.readers ?? [],
-                onPublicChange: changeReaders,
-                ...(switchLine === undefined ? {} : { note: switchLine }),
-              },
-            })}
-      />
+      <PageHeader title={NAV_LABELS.knowledge} />
+      <div className="cd-knowledge">
+        <p className="cd-type-summary">{LEAD}</p>
+        <WhatIKnow deskId={deskId} timeZone={business.timezone} />
+        <KnowledgeAdd
+          note={note}
+          onNoteChange={setNote}
+          onAddNote={addNote}
+          onAddFile={addFile}
+          {...(busy === undefined ? {} : { busy })}
+          {...(error === undefined ? {} : { error })}
+          {...(added === null
+            ? {}
+            : {
+                added: {
+                  readers: added.label.readers ?? [],
+                  onPublicChange: changeReaders,
+                  ...(switchLine === undefined ? {} : { note: switchLine }),
+                },
+              })}
+        />
+      </div>
     </>
   );
 }

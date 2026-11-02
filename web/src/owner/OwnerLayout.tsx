@@ -110,7 +110,7 @@ export function useOwnerDesk(): OwnerDeskContext {
   return value;
 }
 
-const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'rules', 'safety', 'share', 'settings'];
+const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'share', 'settings'];
 
 /**
  * The pages that lay out their own columns across the main area (`AppShell` `fill`), each with the

@@ -45,6 +45,7 @@ export const VISION_SIDEBAR_HREFS: SidebarHrefs = {
   today: '#today',
   conversations: '#conversations',
   people: '#people',
+  knowledge: '#knowledge',
   rules: '#rules',
   connectors: '#connectors',
   safety: '#safety',

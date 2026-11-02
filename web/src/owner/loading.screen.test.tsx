@@ -572,7 +572,7 @@ const WIDE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'sidebar-mark', page: '.cd-sidebar__brand .cd-mark' },
   { name: 'business-row', page: '.cd-sidebar__business' },
   { name: 'page-row-0', page: '.cd-sidebar__nav > a:first-child' },
-  { name: 'page-row-6', page: '.cd-sidebar__nav > a:last-child' },
+  ...Array.from({ length: 7 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
   { name: 'owner-avatar', page: '.cd-sidebar__avatar' },
 ];
 const PHONE_ANCHORS: readonly SkeletonAnchor[] = [

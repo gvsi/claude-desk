@@ -10,7 +10,7 @@ import { ACTING_SWITCH_COPY } from '../Switch/copy.ts';
 import './Sidebar.css';
 
 /** The owner app's pages, in the sidebar's fixed order. */
-export type NavKey = 'today' | 'conversations' | 'people' | 'rules' | 'connectors' | 'safety' | 'share' | 'settings';
+export type NavKey = 'today' | 'conversations' | 'people' | 'knowledge' | 'rules' | 'connectors' | 'safety' | 'share' | 'settings';
 
 /**
  * Where each row goes. Every page needs its href but Connectors: an app without a Connectors page
@@ -88,6 +88,7 @@ export interface SidebarProps {
 export const NAV_LABELS = {
   today: 'Today',
   conversations: 'Conversations',
+  knowledge: 'Knowledge',
   rules: 'Rules',
   connectors: 'Connectors',
   safety: 'Safety',
@@ -99,6 +100,7 @@ const NAV_ROWS = [
   { key: 'today', icon: 'today', label: NAV_LABELS.today },
   { key: 'conversations', icon: 'conversations', label: NAV_LABELS.conversations },
   { key: 'people', icon: 'people', label: null },
+  { key: 'knowledge', icon: 'knowledge', label: NAV_LABELS.knowledge },
   { key: 'rules', icon: 'rules', label: NAV_LABELS.rules },
   { key: 'connectors', icon: 'connectors', label: NAV_LABELS.connectors },
   { key: 'safety', icon: 'safety', label: NAV_LABELS.safety },

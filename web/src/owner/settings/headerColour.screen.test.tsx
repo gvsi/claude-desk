@@ -281,7 +281,7 @@ it('keeps the server pick when an earlier response returns after leaving and com
   // The same-mount guard also prevents another write while Navy's response is held.
   (group.getByRole('radio', { name: 'Clay', exact: true }).element() as HTMLButtonElement).click();
   expect(mockStore.requests.filter(({ key }) => key === 'setBusiness')).toHaveLength(1);
-  await router.navigate(`/app/${RIVERA.deskId}/settings/knowledge`);
+  await router.navigate(`/app/${RIVERA.deskId}/knowledge`);
   await expect.element(group).not.toBeInTheDocument();
   await router.navigate(GENERAL);
   await expect.element(group).toBeVisible();

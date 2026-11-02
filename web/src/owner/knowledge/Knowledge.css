@@ -1,0 +1,20 @@
+/* Keep Knowledge's content measure and spacing from its former Settings column. */
+.cd-knowledge {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+  max-width: calc(var(--size-content) - var(--size-sub-nav) - var(--space-40));
+}
+
+.cd-knowledge p,
+.cd-knowledge h2 {
+  margin: 0;
+}
+
+@media (max-width: 767.98px) {
+  .cd-knowledge {
+    gap: var(--space-16);
+    max-width: none;
+  }
+}

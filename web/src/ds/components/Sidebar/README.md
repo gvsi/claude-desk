@@ -12,8 +12,8 @@
 - The lockup, on one line and centred (owner, 2026-10-30): the 36 px `Mark` with no tile, in its light ink; 10 px on, the "Claude Desk" wordmark; 8 px on, the "Preview" badge (`Wordmark preview`), a `Pill` drawn in capitals. It is not a link. The row is 50 px tall with its padding, as the stacked lockup was, so nothing under it moves.
 - The business row, "Switch business, current: {business}", which calls `onSwitchBusiness` (the screen opens `SwitcherMenu`, which lists businesses and "New business"). A name too long for the row is cut with an ellipsis, and its `title` holds it in full, so it can still be read.
 - The Desk picker, "Switch Desk, current: {name}", only when the business has two or more Desks. It is where the owner picks a Desk; `SwitcherMenu` lists none. It opens the business's Desks under it ("Desks in {business}"), the current one marked with a check and `aria-current`. Picking a Desk calls `onSwitchDesk(id)`; picking it, or Escape, closes the list and returns focus to the picker. Escape stops there, so a sheet the sidebar sits in stays open.
-- The pages, always in this order: Today, Conversations, {peopleLabel}, Rules, Connectors, Safety, Share, Settings. Each row is `size-nav-row` tall, `space-2` apart, with a 20 px line icon named for its page (Connectors' is a plug). The current page is on `bg-selected` with `aria-current="page"`; there are no accent bars.
-- Connectors only when the app has that page: without `hrefs.connectors` there is no Connectors row, and Safety follows Rules one row down, with no gap; nothing else moves. With it, there are eight rows.
+- The pages, always in this order: Today, Conversations, {peopleLabel}, Knowledge, Rules, Connectors, Safety, Share, Settings. Each row is `size-nav-row` tall, `space-2` apart, with a 20 px line icon named for its page (Connectors' is a plug). The current page is on `bg-selected` with `aria-current="page"`; there are no accent bars.
+- Connectors only when the app has that page: without `hrefs.connectors` there is no Connectors row, and Safety follows Rules one row down, with no gap; nothing else moves. With it, there are nine rows.
 - Counts only on Conversations and Safety, as `CountPill`s read by their `label` ("2 need you", "2 blocked"). Safety's `attention` adds a held dot beside its count.
 - With `about`, the "About this prototype" group, just above the Claude acts for you block behind its own hairline (14 px above its title):
   - the title in `caption` type and `text-secondary`, which also names the group's navigation ("About this prototype");
@@ -43,7 +43,7 @@
 | `desks` | `{ id: string; name: string }[]` | Required. The picker shows with two or more. |
 | `currentDeskId` | `string` | Required. |
 | `onSwitchDesk` | `(deskId: string) => void` | Required. Not called for the current Desk. |
-| `current` | `NavKey` | Required. `'today' \| 'conversations' \| 'people' \| 'rules' \| 'connectors' \| 'safety' \| 'share' \| 'settings'`. With no Connectors href, `'connectors'` marks no row. |
+| `current` | `NavKey` | Required. `'today' \| 'conversations' \| 'people' \| 'knowledge' \| 'rules' \| 'connectors' \| 'safety' \| 'share' \| 'settings'`. With no Connectors href, `'connectors'` marks no row. |
 | `hrefs` | `SidebarHrefs` | Required. An href for every `NavKey`; `connectors` is optional, and without it the row isn't drawn. |
 | `peopleLabel` | `string` | Required. The third row. |
 | `counts` | `{ conversations?: NavCount; safety?: NavCount & { attention?: boolean } }` | `NavCount` is `{ n: number; label: string }`. |
@@ -58,4 +58,4 @@
 
 ## Loading shapes
 
-`SidebarSkeleton({ rows, about })` draws the fresh copy's lockup, business row, page rows, About group and footer from the sidebar's own classes. The app passes seven page rows until Connectors is built and its actual About link count. It draws no words or controls; put it inside `SkeletonScreen`'s hidden, inert layer. A business with two Desks lands its picker in one accepted move. The companion stories compare the real column and shapes within 2 px at 1512 and 390.
+`SidebarSkeleton({ rows, about })` draws the fresh copy's lockup, business row, page rows, About group and footer from the sidebar's own classes. The app passes eight page rows until Connectors is built and its actual About link count. It draws no words or controls; put it inside `SkeletonScreen`'s hidden, inert layer. A business with two Desks lands its picker in one accepted move. The companion stories compare the real column and shapes within 2 px at 1512 and 390.

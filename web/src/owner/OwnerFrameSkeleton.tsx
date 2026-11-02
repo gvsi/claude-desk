@@ -41,7 +41,7 @@ export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
       skeleton
       business=""
       banner={<ReviewerBarSkeleton inbox />}
-      sidebar={<SidebarSkeleton rows={7} about={ABOUT_LINKS.links.length} />}
+      sidebar={<SidebarSkeleton rows={8} about={ABOUT_LINKS.links.length} />}
       fill={fill}
     >
       <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}${centered ? ' cd-owner-layout--centered' : ''}`}>

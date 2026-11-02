@@ -1,5 +1,5 @@
 /**
- * Settings › Knowledge in a real browser against the mock API: what the Desk knows, each item with
+ * Knowledge in a real browser against the mock API: what the Desk knows, each item with
  * when it was added and who can see it (one the kernel keeps to the owner shown without its words);
  * a note or a text file added for the owner only, then the "Customers can see this" switch, which
  * shows the readers the kernel returned and never the ones asked for.
@@ -21,7 +21,7 @@ import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 import { KNOWLEDGE_COPY, MAX_FILE_BYTES } from './KnowledgePage.tsx';
 
-const KNOWLEDGE = `/app/${RIVERA.deskId}/settings/knowledge`;
+const KNOWLEDGE = `/app/${RIVERA.deskId}/knowledge`;
 
 /** The note as the board writes it. */
 const NOTE = 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.';
@@ -98,6 +98,43 @@ function answered(item: KnowledgeItem, readers: string[]): KnowledgeItem {
 }
 
 describe('knowledge', () => {
+  it.each(['desktop', 'phone'] as const)('knowledge_has_its_own_sidebar_route_%s', async (viewport) => {
+    const path = `/app/${RIVERA.deskId}/knowledge`;
+    const { screen, router } = await renderRoute(`/app/${RIVERA.deskId}/settings/general`, { viewport });
+    if (viewport === 'phone') await screen.getByRole('button', { name: 'Menu', exact: true }).click();
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    await expect.element(nav).toBeVisible();
+    expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(8);
+    expect([...nav.element().querySelectorAll('.cd-sidebar__label')].map((row) => row.textContent)).toEqual([
+      'Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Share', 'Settings',
+    ]);
+    const link = nav.getByRole('link', { name: 'Knowledge', exact: true });
+    await expect.element(link).toHaveAttribute('href', path);
+    const icon = link.element().querySelector('svg');
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 24 24');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(Number(icon?.getAttribute('stroke-width'))).toBeCloseTo(1.8);
+    expect([...link.element().querySelectorAll('svg path')].map((part) => part.getAttribute('d'))).toEqual([
+      'M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z',
+      'M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z',
+    ]);
+    await link.click();
+    await expect.poll(() => router.state.location.pathname).toBe(path);
+    await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Knowledge' })).toBeVisible();
+    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toBeVisible();
+    expect(document.title).toBe('Knowledge · Claude Desk');
+    if (viewport === 'phone') await screen.getByRole('button', { name: 'Menu', exact: true }).click();
+    await expect.element(nav.getByRole('link', { name: 'Knowledge', exact: true })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('knowledge_old_settings_link_replaces_the_history_entry', async () => {
+    const { screen, router } = await renderRoute(`/app/${RIVERA.deskId}/settings/knowledge`);
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.deskId}/knowledge`);
+    expect(router.state.historyAction).toBe('REPLACE');
+    await expect.element(main(screen).getByRole('textbox', { name: 'A note' })).toBeVisible();
+    expect(main(screen).getByRole('navigation', { name: 'Settings' }).query()).toBeNull();
+  });
+
   it('knowledge_fresh_copy_lists_the_public_setup_items', async () => {
     freezeClock();
     const { screen } = await renderRoute(KNOWLEDGE, { seed: 'rivera' });
@@ -167,9 +204,9 @@ describe('knowledge', () => {
 
   it('knowledge_note_then_public', async () => {
     const { screen } = await renderRoute(KNOWLEDGE);
-    // Settings, on Knowledge, led by Claude's line.
-    await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
-    await expect.element(main(screen).getByRole('navigation', { name: 'Settings' }).getByRole('link', { name: 'Knowledge' })).toHaveAttribute('aria-current', 'page');
+    // Knowledge, led by Claude's line.
+    await expect.element(main(screen).getByRole('heading', { level: 1, name: 'Knowledge' })).toBeVisible();
+    await expect.element(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Knowledge' })).toHaveAttribute('aria-current', 'page');
     await expect.element(main(screen).getByText(LEAD, { exact: true })).toBeVisible();
     expect(switchOf(screen).query()).toBeNull();
 
@@ -692,14 +729,11 @@ describe('knowledge', () => {
     await settled(addNoteButton);
     expectComputed(addNoteButton, SPEC.primary);
 
-    // The frame with Settings current, every card in the card look, and Tab through Knowledge's
-    // SubNav row, the note, its two adds, then the switch: the list's rows hold no stop.
-    const nav = main(screen).getByRole('navigation', { name: 'Settings' });
+    // Knowledge current, every card in the card look, and Tab through the note, its two adds,
+    // then the switch: the list's rows hold no stop.
     await expectOwnerBoard(screen.container, {
-      current: 'Settings',
-      fill: true,
+      current: 'Knowledge',
       tabStops: [
-        nav.getByRole('link', { name: 'Knowledge' }).element() as HTMLElement,
         main(screen).getByRole('textbox', { name: 'A note' }).element() as HTMLElement,
         main(screen).getByRole('button', { name: 'Add a note' }).element() as HTMLElement,
         main(screen).getByRole('button', { name: 'Add a file' }).element() as HTMLElement,

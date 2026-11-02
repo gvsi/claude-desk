@@ -54,7 +54,7 @@ const PLUMBER = [
 ];
 
 /** The sections Settings ships with, in order. Channels joins when its page does. */
-const SECTIONS = ['General', 'Knowledge', 'Notifications', 'Billing'];
+const SECTIONS = ['General', 'Notifications', 'Billing'];
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
