@@ -9,6 +9,8 @@ what they leave is read with the visitor's own credential on the session's next 
 import asyncio
 import inspect
 import json
+import logging
+from dataclasses import replace
 from xml.etree import ElementTree
 from datetime import timedelta
 
@@ -39,9 +41,11 @@ from desk.api.jobs import (
     run_worker,
     surface_due_decisions,
 )
+from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.runner import TurnRunner
 from desk.api.loop import run_turn
 from desk.api.sse import append_control, unhandled_controls
+from desk.api.store import append_message
 from desk.api.tools import Caller
 from desk.contracts import Decision, ToolCall
 from desk.db.session import procrastinate_connector
@@ -539,6 +543,171 @@ async def test_an_abandoned_hold_is_read_once(copy, engine, fake, ro_schema, mon
     assert [decision_ids for decision_ids in asked if decision_ids] == [[held.decision_id]]
 
 
+# Settled by a call that ran -----------------------------------------------------------------------------------
+
+HALF_OFF = {**DRAIN, "requested_discount_bp": 5000}
+
+
+def reply(prose: str) -> dict:
+    return tool_use("send_reply", {"prose": prose, "clauses": []})
+
+
+def open_slots(fake, caller: Caller) -> list[str]:
+    """The Desk's open weekday slots, earliest first (in opening hours, so a booking is allowed)."""
+    slots = sorted(fake.desks[caller.desk_id].slots.values(), key=lambda slot: slot.starts_at)
+    return [slot.slot_id for slot in slots if slot.starts_at.weekday() < 5]
+
+
+def decisions(fake, caller: Caller, tool: str) -> list[Decision]:
+    """The session's decisions of `tool`, oldest first, as the kernel holds them now (no read refreshes them)."""
+    return [record.decision for record in fake.decisions.values()
+            if record.decision.session_id == caller.session_id and record.decision.action is not None
+            and record.decision.action.tool == tool]
+
+
+def reads(fake) -> list[str]:
+    """The decisions read by ID (`GET /decisions/{id}`) since the fake's calls were last cleared, in order."""
+    return [call.path.removeprefix("/decisions/") for call in fake.called("GET /decisions/{id}")]
+
+
+async def turn(engine, caller: Caller, words: str, *script) -> str:
+    """The visitor says `words`, and Claude answers in one turn, on `script`."""
+    async with engine.connect() as conn:
+        await append_message(conn, caller.ids, "visitor_text", text=words)
+        await conn.commit()
+        return await run_turn(conn, caller, ScriptedModel(list(script)))
+
+
+async def held_half_off(engine, fake, caller: Caller) -> Decision:
+    """The visitor asks for half off a drain clearing, and the kernel holds Claude's quote for the owner."""
+    assert await turn(engine, caller, "Can I get the drain clearing at half price?",
+                      response(tool_use("native__quote", HALF_OFF)), response(reply("I've asked Mike."))) == "done"
+    (quote,) = decisions(fake, caller, "native.quote")
+    assert quote.state == "held"
+    return quote
+
+
+def due_rows(found: dict) -> list[tuple]:
+    return [row for row in found["control"] if row[0] == "decision_due"]
+
+
+async def test_a_booking_turn_shows_the_held_quote_it_closed(copy, engine, fake):
+    """The visitor's half-price quote waits for the owner, then they book a time at list price in a later turn. The
+    kernel closes the stale quote only on a read through it, and the minute sweep reads kernel_ro, so the booking's
+    turn reads what its session waits on itself: right after it, with no owner read and no sweep, the quote has its
+    `decision_due` row, and handling the session's control rows shows it cancelled and wakes Claude."""
+    caller = await copy.visitor()
+    quote = await held_half_off(engine, fake, caller)
+
+    assert await turn(engine, caller, "Never mind, book me in at list price.",
+                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0]})),
+                      response(reply("You're booked."))) == "done"
+
+    assert fake.decisions[quote.decision_id].decision.state == "cancelled"
+    found = await session_rows(engine, caller.session_id)
+    assert due_rows(found) == [("decision_due", quote.decision_id, False)]
+    assert ("resolved", "cancelled") not in found["sse"] and found["action_update"] == []
+
+    runner = TurnRunner(ScriptedModel(), engine=engine, lock_engine=engine, production=False, clock=lambda: fake.now)
+    async with engine.connect() as conn:
+        await runner.handle_controls(conn, caller)
+    found = await session_rows(engine, caller.session_id)
+    assert found["sse"][-1] == ("resolved", "cancelled")
+    assert found["action_update"] == [(quote.decision_id, "Cancelled", True)]
+    assert all(handled for _, _, handled in found["control"])
+
+
+async def test_a_call_that_runs_leaves_what_it_didnt_settle_waiting(copy, engine, fake, ro_schema):
+    """A discount quote asked for after the session's booking, and a held booking, are still waiting after the next
+    call that runs: the turn reads them, finds them held, and writes no row (a `decision_due` row for a decision that
+    isn't final would keep the minute sweep from marking it again). Once the owner answers, the sweep picks each up."""
+    caller = await copy.visitor()
+    first, second = open_slots(fake, caller)[:2]
+    assert await turn(engine, caller, "Book me in, please.", response(tool_use("native__book", {"slot_id": first})),
+                      response(reply("You're booked."))) == "done"
+    quote = await held_half_off(engine, fake, caller)
+    fake.script("native.book", outcome="hold")                           # the owner looks at the next booking first
+    fake.calls.clear()
+
+    assert await turn(engine, caller, "Book a second visit too, and which times are free this week?",
+                      response(tool_use("native__book", {"slot_id": second}),
+                               tool_use("native__find_slots", {"days": 3})),
+                      response(reply("I've asked Mike about the second visit."))) == "done"
+
+    (_, held) = decisions(fake, caller, "native.book")
+    assert {quote.decision_id, held.decision_id} <= set(reads(fake))     # the turn looked at both
+    assert [fake.decisions[decision.decision_id].decision.state for decision in (quote, held)] == ["held", "held"]
+    assert due_rows(await session_rows(engine, caller.session_id)) == []
+    for decision in (quote, held):
+        await copy.answer(decision, "deny_once")
+    assert await surface_due_decisions(engine, now=fake.now, ro_schema=ro_schema) == 2
+    assert sorted(due_rows(await session_rows(engine, caller.session_id))) == sorted(
+        ("decision_due", decision.decision_id, False) for decision in (quote, held))
+
+
+async def test_a_call_that_runs_with_nothing_waiting_reads_no_other_decision(copy, engine, fake):
+    """A booking in a session with nothing waiting reads no decision but its own, though another session's discount
+    quote waits: a turn looks only at its own session's. The other session's own booking does read its quote."""
+    other, caller = await copy.visitor(), await copy.visitor()
+    first, second = open_slots(fake, caller)[:2]
+    quote = await held_half_off(engine, fake, other)
+    fake.calls.clear()
+
+    assert await turn(engine, caller, "Book me in, please.", response(tool_use("native__book", {"slot_id": first})),
+                      response(reply("You're booked."))) == "done"
+
+    (booking,) = decisions(fake, caller, "native.book")
+    assert reads(fake) == [booking.decision_id]
+    assert [due_rows(await session_rows(engine, visitor.session_id)) for visitor in (caller, other)] == [[], []]
+
+    fake.calls.clear()
+    assert await turn(engine, other, "Book me in at list price instead.",
+                      response(tool_use("native__book", {"slot_id": second})),
+                      response(reply("You're booked."))) == "done"
+    (booked,) = decisions(fake, other, "native.book")
+    assert reads(fake) == [booked.decision_id, quote.decision_id]
+
+
+class FailingRead:
+    """A session's kernel client whose read of one decision (`GET /decisions/{id}`) raises `error`; every other call
+    goes through."""
+
+    def __init__(self, kernel, decision_id: str, error: Exception):
+        self._kernel, self._decision_id, self._error = kernel, decision_id, error
+
+    async def call(self, route: str, body=None, *, path: dict | None = None, **options):
+        if route == "GET /decisions/{id}" and path == {"id": self._decision_id}:
+            raise self._error
+        return await self._kernel.call(route, body, path=path, **options)
+
+    def __getattr__(self, name: str):
+        return getattr(self._kernel, name)
+
+
+@pytest.mark.parametrize("error", [KernelUnavailable("GET /decisions/{id}"), KernelFailed(409, "closed"),
+                                   RuntimeError("dana@example.com")], ids=["unreachable", "closed", "anything"])
+async def test_a_waiting_decision_that_cant_be_read_is_left_for_later(copy, engine, fake, caplog, error):
+    """A waiting decision the kernel can't be read for, whatever the failure, changes nothing the turn does: the
+    booking is shown and answered as ever, nothing reaches the visitor about the read, no row is written, and the
+    failure is logged by its type alone. The minute sweep or the owner's reads settle the quote later."""
+    caller = await copy.visitor()
+    quote = await held_half_off(engine, fake, caller)
+    failing = replace(caller, kernel=FailingRead(caller.kernel, quote.decision_id, error))
+
+    assert await turn(engine, failing, "Never mind, book me in at list price.",
+                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0]})),
+                      response(reply("You're booked."))) == "done"
+
+    found = await session_rows(engine, caller.session_id)
+    assert [type for type, _ in found["sse"]][4:] == ["writing", "receipt", "message", "turn_end"]
+    assert found["sse"][5] == ("receipt", "executed")
+    assert due_rows(found) == []
+    logged = [record.getMessage() for record in caplog.records
+              if record.name == "desk.api.loop" and record.levelno >= logging.WARNING]
+    assert logged == [f"a waiting decision couldn't be read after a call ran ({type(error).__name__})"]
+    assert "dana@example.com" not in caplog.text
+
+
 # A run_events table as a running Desk fills it: mostly messages and receipts, a few held events and controls.
 REALISTIC_RUN_EVENTS = """
 INSERT INTO app.run_events (copy_id, desk_id, session_id, kind, seq, type, payload)
@@ -565,7 +734,7 @@ async def test_the_minute_scan_reads_held_events_through_their_own_index(db, eng
     Desk writes, and is analyzed: on a near-empty table the indexes cost about the same, and the planner's choice
     hung on the statistics earlier tests happened to leave."""
     db.execute(REALISTIC_RUN_EVENTS)
-    sql = jobs._waiting_decisions().compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
+    sql = jobs.waiting_decisions().compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})
     async with engine.connect() as conn:
         await conn.execute(text("SET LOCAL enable_seqscan = off"))
         plan = "\n".join((await conn.execute(text(f"EXPLAIN {sql}"))).scalars())
