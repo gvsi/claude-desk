@@ -165,10 +165,11 @@ export const Board: Story = {
 };
 
 export const Phone: Story = {
-  globals: { viewport: { value: 'phone', isRotated: false } },
+  // Drawn at a phone's width and the page's own 2000 px, its footer at the foot, as the board draws it.
+  globals: { viewport: { value: 'phone-2000', isRotated: false } },
   parameters: { canvas: 'N-R2-Agents-06-Phone' },
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 844]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 2000]);
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents phone fonts');
     await expectAgentsDisclosure(canvasElement);
     const column = one(canvas.getByRole('main'), '.board-agents__cards');
@@ -185,6 +186,7 @@ export const Phone: Story = {
     await expect(request.scrollWidth).toBeLessThanOrEqual(request.clientWidth);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
     await expectFooter(canvasElement);
+    await expectFooterAtFoot(canvasElement);
     await expectTabOrder(userEvent, [canvas.getByRole('link', { name: 'Back to the chat' }), copy]);
   },
 };
