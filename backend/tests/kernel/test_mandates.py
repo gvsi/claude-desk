@@ -1102,3 +1102,35 @@ async def test_a_rule_change_cancels_a_paid_quotes_link_with_no_chat_line(desk_p
     assert await cancelled_links(client, setup.desk, version.version) == []
     seen = await view(client, link.token)
     assert (seen.state, seen.cancel_reason) == ("cancelled", None)
+
+
+@pytest.mark.solver
+async def test_a_rule_change_leaves_a_started_completion_of_a_paid_quotes_link_to_its_c2(
+        desk_prove, app, client, frozen_clock, monkeypatch):
+    """A completion whose marker is set may be at the provider, so an activation that would move its link sends it
+    to `unknown` instead. A link whose quote another payment has paid needs no such move: its completion's C2
+    refuses it under the quote's row with nothing sent. So a rule change that lands between C1 and C2 leaves the
+    link `issued` with its marker, and C2 then cancels it, ledgered `quote_paid`, with no `cancel_reason`."""
+    setup = await agent_desk(app, client, frozen_clock)
+    signed = setup.turn()
+    link, charging = await link_and_charge(app, client, setup, signed)
+    assert (await executed(client, signed, charging)).state == "succeeded"
+    no_links = RuleCard(card_id="no-links", applies_to=LINK, mode="never", who="agent", agent_key_id=setup.agent.key_id,
+                        reason="This agent doesn't get payment links any more.")
+    between: list[tuple] = []
+
+    async def a_rule_change_meanwhile() -> None:
+        version = await draft_and_confirm(client, setup.desk.owner_token, setup.desk.desk_id, [*CARDS, no_links])
+        [row] = await rows_of(app, setup.desk.copy_id, select(PaymentLink).where(PaymentLink.link_id == link.link_id))
+        between.append((row.state, row.completion_started_at is not None, row.cancel_reason, version.version))
+
+    monkeypatch.setattr(payments, "_after_marker", a_rule_change_meanwhile)
+    response = await client.post(f"/payment_links/{link.token}/complete", json={})
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    [(state, marked, cancel_reason, version)] = between
+    assert (state, marked, cancel_reason) == ("issued", True, None)
+    assert payment_entries(await ledger_rows(app, setup.desk), link)[-1] == {
+        "link_id": link.link_id, "state": "cancelled", "reason": "quote_paid"}
+    assert await link_state(app, setup, link) == ("cancelled", None, (2_000, "released"))
+    assert await cancelled_links(client, setup.desk, version) == []
+    assert [(key, amount) for key, amount, _ in charges(setup.desk)] == [(charging.action.action_id, 2_000)]
