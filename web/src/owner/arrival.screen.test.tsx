@@ -1618,7 +1618,8 @@ describe('OwnerLayout', () => {
     // Safety's record. Each page is measured once every read on it is in, so nothing loads in above
     // a control, or below it, while the column is being scrolled. The built-in agent's charge over
     // its signed limit is refused first, so Safety's count of refused requests loads in above the
-    // record too.
+    // record too. From 1280 px Safety fits the window, so its column doesn't scroll there and
+    // nothing can pass under the bar: focus coming back is checked where the controls are.
     const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
@@ -1638,6 +1639,7 @@ describe('OwnerLayout', () => {
       },
       {
         path: SAFETY_ENTRIES,
+        fitsOnDesktop: true,
         settled: async (screen: RenderResult) => {
           await expect.element(screen.getByText(/^I turned down \d+ requests? this week\.$/)).toBeVisible();
           await expect.element(screen.getByRole('list', { name: 'Every entry, newest first' })).toBeVisible();
@@ -1648,13 +1650,19 @@ describe('OwnerLayout', () => {
         ],
       },
     ];
-    for (const { path, settled, controls } of pages) {
+    for (const { path, settled, controls, ...page } of pages) {
       const { screen } = await renderRoute(path, { viewport });
       await settled(screen);
       const found = controls(screen);
       for (const control of found) await expect.element(control).toBeVisible();
       expectTheColumnStartsBelowTheBar();
-      for (const control of found) await expectFocusComesBackBelowTheBar(control.element() as HTMLElement);
+      if ('fitsOnDesktop' in page && viewport === 'desktop') {
+        const { column } = ownerFrame();
+        expect(column.scrollHeight, 'the page fits the window').toBeLessThanOrEqual(column.clientHeight);
+        for (const control of found) await expectKeyboardFocusInSight(control.element() as HTMLElement, () => {});
+      } else {
+        for (const control of found) await expectFocusComesBackBelowTheBar(control.element() as HTMLElement);
+      }
     }
   });
 });

@@ -41,6 +41,13 @@ function frames(): Promise<void> {
   return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
+/** `el` shows whole inside `scroller`'s box. */
+function expectInView(el: Element | null, scroller: Element): void {
+  const shown = box(scroller);
+  expect(box(el).top).toBeGreaterThanOrEqual(shown.top);
+  expect(box(el).bottom).toBeLessThanOrEqual(shown.bottom);
+}
+
 /** The page fits its window: neither the main area nor the window scrolls. */
 function expectPageFits(main: HTMLElement): void {
   expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
@@ -515,9 +522,15 @@ describe('Safety', () => {
     expect(box(scroller).bottom).toBeLessThanOrEqual(box(main).bottom);
     expect(scroller.tabIndex).toBe(0);
 
+    // From the keyboard it scrolls: with the trace in focus, End takes it to its end, where its
+    // last line shows, and the page stays where it was.
+    expect(scroller.scrollTop).toBe(0);
+    await userEvent.keyboard('{End}');
+    await expect.poll(() => scroller.scrollTop).toBeGreaterThanOrEqual(scroller.scrollHeight - scroller.clientHeight - 1);
+    expect(main.scrollTop).toBe(before);
+    expectInView(scroller.lastElementChild, scroller);
+
     // Scrolled down, then another entry picked: its trace starts at its top.
-    scroller.scrollTop = scroller.scrollHeight;
-    expect(scroller.scrollTop).toBeGreaterThan(0);
     await recordRow(screen, 2).click();
     const next = region(screen, 'Full trace of entry 2');
     await expect.element(next).toBeVisible();
@@ -526,6 +539,8 @@ describe('Safety', () => {
   });
 
   it.each([
+    [1280, 600],
+    [1280, 650],
     [1440, 900],
     [1512, 945],
   ] as const)('an_open_entry_fits_the_window_at_%sx%s_and_its_card_scrolls', async (width, height) => {
@@ -573,6 +588,38 @@ describe('Safety', () => {
     expect(document.activeElement).toBe(card);
     const edge = getComputedStyle(card);
     expect([edge.borderTopColor, edge.boxShadow, edge.outlineStyle]).toEqual([tokenColor('--line-focus'), 'none', 'none']);
+
+    // From the keyboard it scrolls: from its top, End takes it to its end, where the link to the
+    // conversation shows, and the page stays where it was.
+    card.scrollTop = 0;
+    await frames();
+    await userEvent.keyboard('{End}');
+    await expect.poll(() => card.scrollTop).toBeGreaterThanOrEqual(card.scrollHeight - card.clientHeight - 1);
+    expect(main.scrollTop).toBe(0);
+    expectInView(open.getByRole('link', { name: 'Open conversation', exact: true }).element(), card);
+  });
+
+  it('a_long_stopped_list_scrolls_in_its_column_and_the_page_fits', async () => {
+    // A week with many stopped attempts: the list scrolls in its own column and the page still fits
+    // the window. Each row's checkpoint line has words only a screen reader reads, placed out of the
+    // flow; they stay inside the list's column rather than stretching the page under it.
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts(
+      Array.from({ length: 20 }, (_, i) =>
+        attempt({ ref_id: `dec-${i}`, created_at: `2026-10-20T16:${String(50 - i).padStart(2, '0')}:00.000000Z` }),
+      ),
+    );
+    const { screen } = await renderRoute(SAFETY, { viewport: { width: 1440, height: 900 } });
+    const list = screen.getByRole('list', { name: 'Stopped, newest first' });
+    await expect.element(list).toBeVisible();
+    expect(list.getByRole('link').elements()).toHaveLength(20);
+    await frames();
+    const main = list.element().closest<HTMLElement>('.cd-app-shell__main');
+    const column = list.element().closest<HTMLElement>('.cd-attempts');
+    if (!main || !column) throw new Error('the list in its column, in the main area');
+    expectPageFits(main);
+    expect(column.scrollHeight).toBeGreaterThan(column.clientHeight);
+    expect(box(column).bottom).toBeLessThanOrEqual(box(main).bottom);
   });
 
   it('an_open_entry_on_a_phone_scrolls_with_the_page', async () => {
