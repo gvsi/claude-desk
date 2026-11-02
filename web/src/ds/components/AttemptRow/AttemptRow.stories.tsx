@@ -148,7 +148,7 @@ export const RecordedNarrow: Story = {
   ),
   parameters: {
     canvas: 'N-History-Safety',
-    canvasNote: 'A replayed attempt in a list narrower than a phone’s, narrower than the board draws it, where where it came from gives way to the tag.',
+    canvasNote: 'A replayed attempt in a 240 px list, narrower than a phone’s and than the board draws it: the line saying where it came from gives way to the tag.',
   },
   play: async ({ canvas }) => {
     const link = canvas.getByRole('link', { name: /Recorded Stopped by: Reply checkpoint$/ });
