@@ -10,6 +10,7 @@ import { fn } from 'storybook/test';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
 import { rivera } from '../../fixtures';
+import { expectUserText } from '../../test/expectUserText.ts';
 import type { ChangeRowView } from './ChangeReview.tsx';
 import * as stories from './ChangeReview.stories.tsx';
 
@@ -104,4 +105,38 @@ it('a_shared_rule_on_tools_of_several_connectors_leads_with_shared_rule', () => 
   };
   act(() => root.render(<TurnOnPayments rows={[added]} />));
   expect(rowMeta()).toBe("Shared rule · Every tool that touches private data · The record's owner, verified");
+});
+
+/** A tool title that reads like the app's own sentence, as a business could name a job in setup. */
+const TITLE = 'Approved by your accountant';
+
+it('tool_titles_in_a_rows_title_and_its_targets_are_user_text', () => {
+  const side = { mode: 'ask', reason: 'Changes ask you first.', words: [{ field: 'who', text: 'Anyone' }] } as const;
+  const rows: ChangeRowView[] = [
+    // A shared rule that covers other tools after: its title and each side's target name the tools.
+    {
+      key: 'changes',
+      change: 'changed',
+      title: { titles: ['Quote', TITLE] },
+      shared: true,
+      before: { ...side, appliesTo: { titles: ['Quote'] } },
+      after: { ...side, appliesTo: { titles: ['Quote', TITLE] } },
+      changed: ['applies_to'],
+    },
+    // An added rule, with its target on the meta line, and a tool turned on.
+    { key: 'added', change: 'added', title: { titles: [TITLE] }, before: null, after: { ...side, appliesTo: { titles: [TITLE] } }, changed: [] },
+    { key: 'on', change: 'turned_on', title: { titles: [TITLE] }, before: null, after: side, changed: [] },
+    // A group's words are the app's own, so they stay plain.
+    { key: 'group', change: 'added', title: 'Every tool that charges money', shared: true, before: null, after: { ...side, appliesTo: 'Every tool that charges money' }, changed: [] },
+  ];
+  act(() => root.render(<TurnOnPayments rows={rows} />));
+  expect(expectUserText(container, TITLE)).toBe(6);
+  expectUserText(container, 'Quote');
+  const titles = [...container.querySelectorAll('.cd-change-review__title')].map((el) => el.textContent);
+  expect(titles).toEqual([`Quote and ${TITLE}`, TITLE, TITLE, 'Every tool that charges money']);
+  const targets = [...container.querySelectorAll('.cd-change-review__target')].map((el) => el.textContent);
+  expect(targets).toEqual(['Quote', `Quote and ${TITLE} Changed`, TITLE, 'Every tool that charges money']);
+  const metas = [...container.querySelectorAll('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta')].map((el) => el.textContent);
+  expect(metas).toEqual(['Shared rule', `${TITLE} · Anyone`, 'Anyone', 'Shared rule · Every tool that charges money · Anyone']);
+  expect(container.querySelector('.cd-change-review__row:last-child [data-copy="user"]')).toBeNull();
 });

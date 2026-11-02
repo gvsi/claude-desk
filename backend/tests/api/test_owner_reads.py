@@ -91,6 +91,33 @@ def test_reply_reason_names_a_markdown_cause(rule_id, why):
         f"A reply was stopped before it was shown, because {why}.")
 
 
+DEFAULT_QUOTES = RuleCard(card_id="default:native.quote", applies_to="native.quote", mode="ask", who="anyone",
+                          is_default=True, reason="Not covered by a rule yet, so it asks you.")
+VERIFIED_QUOTES = RuleCard(card_id="quotes", applies_to="native.quote", mode="auto", who="verified",
+                           reason="Quotes for verified customers, at list price.")
+ASK_QUOTES = RuleCard(card_id="quotes-ask", applies_to="native.quote", mode="ask", who="verified",
+                      reason="Quotes wait for your answer.")
+DANAS_QUOTES = RuleCard(card_id="quotes-for-dana", applies_to="native.quote", mode="auto", who="person",
+                        person_id="person-dana", max_discount_bp=1_000, reason="Dana's quotes, up to 10% off.")
+
+
+@pytest.mark.parametrize(("card_ids", "held_by"), [
+    # past an auto card's limit, with the default ask for anyone matching too and listed first
+    (["default:native.quote", "quotes"], VERIFIED_QUOTES),
+    (["quotes", "quotes-ask"], ASK_QUOTES),                                       # an ask card wins a tie
+    (["default:native.quote", "quotes-ask", "quotes-for-dana"], DANAS_QUOTES),    # one person's card outranks
+    (["default:native.quote"], DEFAULT_QUOTES),                                   # only the default ask decided
+    (["card-gone"], None),
+    ([], None),
+], ids=["limit_over_the_default", "ask_wins_a_tie", "a_persons_card_wins", "default_only", "unknown", "none"])
+def test_held_by_is_the_card_the_decision_quotes(card_ids, held_by):
+    """A hold's `card_ids` are every card behind its matching hold permits, sorted by ID (the kernel's
+    `decide._card_ids`); the one Needs you names is the one the decision's `reason_plain` quotes first, picked as
+    `decide.hold_decider` picks: the most specific, an ask card at a tie, then the first by ID."""
+    cards = {card.card_id: card for card in (DEFAULT_QUOTES, VERIFIED_QUOTES, ASK_QUOTES, DANAS_QUOTES)}
+    assert owner_reads.holding_card(cards, card_ids) == held_by
+
+
 OWNER = "x-owner-session"
 # A reply in another language: blocked for what no rewrite fixes, so the kernel shows the handoff card in its place
 # (a reply blocked only for its prose, with no card to keep, shows the call-back offer instead).

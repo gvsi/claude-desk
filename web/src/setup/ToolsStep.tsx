@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useLayoutEffect, useRef } from 'react';
 
 import type { RuleCard } from '../api/contracts.ts';
 import { ownerErrorCopy, request } from '../api/http.ts';
@@ -25,7 +26,7 @@ import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { MOCK_PAYMENTS, useConnectorFlow } from './connectorFlow.ts';
 import { SETUP_COPY } from './copy.ts';
-import { aroundBusiness } from './shared.ts';
+import { aroundBusiness, useOpensAtTop } from './shared.ts';
 import { ToolsListSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.tools;
@@ -131,6 +132,37 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const rules = useQuery({ ...rulesQuery(deskId), refetchOnWindowFocus: false });
   const flow = useConnectorFlow({ interviewId: id, deskId, tools: tools.data });
   const { view, connecting, listError, turningOn, reviewError } = flow;
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const rowRefs = useRef(new Map<string, HTMLLIElement>());
+  const returnTo = useRef<string | null>(null);
+  const focusRow = useRef(false);
+  const reviewReady = rules.data !== undefined && tools.data !== undefined;
+  const viewKey = view.kind === 'confirm' ? `confirm:${view.draft.version}` : view.kind;
+  useOpensAtTop(viewKey);
+  // View swaps announce their heading. Back and Cancel return to the opener; a confirm returns
+  // to its row immediately, so focus survives the refresh replacing its button with "On".
+  useLayoutEffect(() => {
+    if (viewKey !== 'list') {
+      titleRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (returnTo.current === null) return;
+    const row = rowRefs.current.get(returnTo.current);
+    if (row === undefined) return;
+    returnTo.current = null;
+    const button = focusRow.current ? null : row.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    focusRow.current = false;
+    if (button) button.focus({ preventScroll: true });
+    else {
+      row.setAttribute('tabindex', '-1');
+      row.addEventListener('blur', () => row.removeAttribute('tabindex'), { once: true });
+      row.focus({ preventScroll: true });
+    }
+  }, [viewKey, reviewReady]);
+  const open = (key: Parameters<typeof flow.open>[0]) => {
+    returnTo.current = key;
+    flow.open(key);
+  };
 
   const rows = (tools.data?.tools ?? []).filter((row) =>
     row !== null && typeof row === 'object' && typeof row.tool === 'string' && (row.source !== 'business' || isSetupJob(row)),
@@ -144,7 +176,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     // tools are asked for once more, and the new draft is shown to confirm (`confirmChange`).
     return (
       <div className="cd-setup-step">
-        <PageHeader title={copy.turnOnTitle(name)} subtitle={copy.turnOnSubtitle} />
+        <PageHeader titleRef={titleRef} title={copy.turnOnTitle(name)} subtitle={copy.turnOnSubtitle} />
         {view.changed ? <Notice tone="info">{copy.changedSince}</Notice> : null}
         <RuleDraftReview
           key={view.draft.version}
@@ -152,7 +184,10 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
           draft={view.draft}
           inline
           confirm={flow.confirm}
-          onDone={() => void flow.backToList()}
+          onDone={(outcome) => {
+            focusRow.current = outcome === 'confirmed';
+            void flow.backToList();
+          }}
         />
       </div>
     );
@@ -185,6 +220,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       if (glyph === null) return null;
       return (
         <ConnectorReview
+          titleRef={titleRef}
           job={{ title: tool.name, glyph, rows: businessRows(job.business, tool.mode) }}
           tools={[tool]}
           onTurnOn={() => void flow.turnOn(view.key, [job])}
@@ -201,6 +237,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     const app = connector.view.source.kind === 'external';
     return (
       <ConnectorReview
+        titleRef={titleRef}
         connector={connector.view}
         {...(app ? { connection: flow.mustConnect ? 'not_connected' : 'connected', onConnect: () => void flow.connect() } as const : {})}
         tools={turnedOn.map((row) => reviewTool(row, cards))}
@@ -236,10 +273,22 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       const title = toolDisplayName(row.tool, businessTools([row])) ?? 'A connected tool';
       const job = { key: row.tool, title, line, glyph };
       return [toolState(row) === 'on' ? { ...job, state: 'on' } : {
-        ...job, state: 'needs_review', onReview: () => flow.open(row.tool),
+        ...job, state: 'needs_review', onReview: () => open(row.tool),
       }];
     });
-    list = <SetupToolsList jobs={jobRows} {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => void flow.choose(key))} />;
+    list = (
+      <SetupToolsList
+        rowRef={(key, row) => {
+          if (row) rowRefs.current.set(key, row);
+          else rowRefs.current.delete(key);
+        }}
+        jobs={jobRows}
+        {...setupRows(rows, tools.data.connectable.includes('mock_payments'), (key) => {
+          returnTo.current = key;
+          flow.choose(key);
+        })}
+      />
+    );
   }
 
   return (

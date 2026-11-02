@@ -3929,14 +3929,43 @@ async def test_tool_review_refusals_and_disable_are_atomic(kernel, ro_read):
         desk_id=created.desk_id, enable=True, tools=pins))
     assert reviewed.draft is not None
     proved_or_skip(reviewed.draft)
-    await owner.call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
+
+    def mcp_rows() -> dict[str, dict]:
+        rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status, review_reason, definition_sha256, pending_sha256"
+                                                " FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'",
+                       (created.desk_id,))
+        return {row["tool"]: row for row in rows}
+
+    before = mcp_rows()
+    inbox = {entry.entry_id for entry in await owner.call("GET /demo_inbox")}
+    seq = max(entry.seq for entry in (await ledger_page(owner, created.desk_id)).entries)
+    changed = await owner.call("POST /tools/simulate_change", ToolsSimulateChangeRequest(
         desk_id=created.desk_id, tool=pins[-1].tool))
+    # A drift on a disabled tool leaves it disabled with its review reason, its changed definition pending, the drift
+    # ledgered and no owner alert (`mcp_pins.check_pin`).
+    after = mcp_rows()
+    drifted = after[pins[-1].tool]
+    assert re.fullmatch(r"[0-9a-f]{64}", drifted["pending_sha256"] or "")
+    assert drifted["pending_sha256"] != drifted["definition_sha256"]
+    assert drifted == {**before[pins[-1].tool], "pending_sha256": drifted["pending_sha256"]}
+    assert drifted["status"] == "disabled" and after[pins[0].tool] == before[pins[0].tool]
+    assert changed.status == "disabled" and changed.pending_sha256 == drifted["pending_sha256"]
+    # the pending text is the exact text hashed, so the owner reviews what the pin will hold
+    assert hashlib.sha256((changed.pending_definition_text or "").encode()).hexdigest() == changed.pending_sha256
+    drift = [entry.event.summary for entry in (await ledger_page(owner, created.desk_id)).entries
+             if entry.seq > seq and entry.event.kind == "tool_pin" and entry.event.summary.get("event") == "drift"]
+    assert drift == [{"tool": pins[-1].tool, "event": "drift", "status": "disabled",
+                      "definition_sha256": drifted["definition_sha256"], "pending_sha256": drifted["pending_sha256"]}]
+    assert [entry.body for entry in await owner.call("GET /demo_inbox") if entry.entry_id not in inbox] == []
+
+    # The draft enables the drifted tool, which is no longer at the hash it was proved with.
+    seq = max(entry.seq for entry in (await ledger_page(owner, created.desk_id)).entries)
     assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
         desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
-    rows = ro_read(ro_schema, copy.copy_id,
-                   "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s AND source = 'mcp'", (created.desk_id,))
-    # a drift on a disabled tool leaves it disabled, its changed definition pending (`mcp_pins.check_pin`)
-    assert {row["tool"]: row["status"] for row in rows} == {
+    policy = [entry.event.summary for entry in (await ledger_page(owner, created.desk_id)).entries
+              if entry.seq > seq and entry.event.kind == "policy"]
+    assert policy == [{"version": reviewed.draft.version, "refused": "pin_changed"}]
+    assert {tool: row["status"] for tool, row in mcp_rows().items()} == {
         pins[0].tool: "disabled", pins[-1].tool: "disabled"}
 
 
@@ -3961,8 +3990,13 @@ async def test_a_tool_review_draft_is_refused_once_the_desks_tools_change(kernel
         desk_id=created.desk_id, enable=False,
         tools=[ToolPin(tool=book["tool"], definition_sha256=book["definition_sha256"])]))
     assert disabled.draft is None and disabled.profiles[0].status == "disabled"
+    seq = max(entry.seq for entry in (await ledger_page(owner, created.desk_id)).entries)
     assert await refused(owner.call("POST /policy/confirm", PolicyConfirmRequest(
         desk_id=created.desk_id, version=reviewed.draft.version))) == (409, "conflict")
+    # Refused because the enabled tools it was proved against changed, not for any other conflict.
+    policy = [entry.event.summary for entry in (await ledger_page(owner, created.desk_id)).entries
+              if entry.seq > seq and entry.event.kind == "policy"]
+    assert policy == [{"version": reviewed.draft.version, "refused": "hash_changed"}]
     assert active_version(ro_read, ro_schema, copy.copy_id, created.desk_id)["version"] == active["version"]
     rows = ro_read(ro_schema, copy.copy_id, "SELECT tool, status FROM {ro}.tools WHERE desk_id = %s"
                                             " AND (source = 'mcp' OR tool = 'native.book')", (created.desk_id,))

@@ -1642,6 +1642,49 @@ def test_setup_plan_tells_an_unpriced_payment_code_settled_from_the_owners_own_n
     assert status == ("declined" if owner_says == "no" else setup.SETUP_PLAN_NO_AMOUNT)
 
 
+def test_setup_plan_tells_a_stored_yes_to_an_unpriced_payment_from_the_owners_own_no():
+    # An interview stored before the amount check may hold the owner's yes to a payment with no amount. Settling the
+    # plan voids that yes (`settle_plan`), and the setup plan says why, not that the owner turned it down.
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
+        "block": "purpose_payment", "purpose": "Retainer", "amount_cents": None})
+    entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
+    entries[0].card.state = "accepted"
+    entries[0].owner_decided = True
+    state = plan_state(entries)
+    payment_id = entries[0].card.proposal_id
+    setup.settle_plan(state)
+    status = next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == payment_id)
+    assert (entries[0].card.state, status) == ("declined", setup.SETUP_PLAN_NO_AMOUNT)
+    assert setup.owner_job_answers(state) == []
+
+
+@pytest.mark.parametrize("newer", ["declined", "priced"])
+def test_an_older_stored_yes_doesnt_clear_a_newer_decision_on_the_same_card(newer):
+    # A stored transcript can show the same card twice: an older accepted copy with no amount, then the owner's newer
+    # decision. Only the latest copy says whether code voided the owner's yes.
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
+        "block": "purpose_payment", "purpose": "Retainer", "amount_cents": None})
+    entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
+    entries[0].card.state = "accepted"
+    entries[0].owner_decided = True
+    state = plan_state(entries)
+    payment_id = entries[0].card.proposal_id
+    latest = entries[0].model_copy(deep=True)
+    if newer == "declined":
+        latest.card.state = "declined"
+    else:
+        latest.card.job.config.amount_cents = 2_500
+    state.transcript.append(latest)
+    setup.settle_plan(state)
+    status = next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == payment_id)
+    assert latest.owner_decided is True
+    if newer == "declined":
+        assert status == "declined"
+    else:
+        assert (status, [answer["title"] for answer in setup.owner_job_answers(state)]) == (
+            "accepted", ["Pay a retainer"])
+
+
 async def test_understanding_mints_hidden_proposals_with_code_owned_availability(monkeypatch):
     from tests.api.test_setup_questions import understanding
     answer = setup.SetupUnderstanding(**understanding(jobs=[
@@ -3214,6 +3257,19 @@ async def test_use_your_suggestions_accepts_the_unshown_planned_jobs(proposals, 
             [setup.Entry.model_validate(entry) for entry in transcript])) == []
 
 
+async def test_use_your_suggestions_keeps_the_closing_reply_before_the_plan(proposals, model, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    before = (await stored(engine, interview_id))["transcript"]
+    closing = "I'll go with my suggestions for the rest."
+    model.add(next_step("what_you_do", next={"kind": "done"}, reply=closing, plan="The closing plan."))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions?cards=1", json={})
+    assert reply.status_code == 200, reply.text
+    tail = (await stored(engine, interview_id))["transcript"][len(before):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        setup.PAYMENT_LINE, closing, "The closing plan."]
+
+
 async def test_a_decision_changes_the_card_and_claude_asks_the_next_thing(proposals, model, engine):
     owner, state, ids = proposals
     interview_id = state['interview_id']
@@ -3297,6 +3353,61 @@ async def test_a_decision_that_closes_setup_runs_after_finish_after_the_commit(p
     reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}", json=body)
     assert reply.status_code == 200, reply.text
     assert calls == [interview_id]
+
+
+async def show_last_card(engine, interview_id, ids, last):
+    """Decide every planned item but `last`, then show `last` as the one card left to ask."""
+    row = await stored(engine, interview_id)
+    for entry in row["transcript"]:
+        for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])]:
+            if card["proposal_id"] != last:
+                card["state"] = "declined"
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    await show_card(engine, interview_id, last)
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_declined_last_card_is_acknowledged_once_before_the_closing_plan(proposals, model, engine, typed):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_last_card(engine, interview_id, ids, ids[2])
+    before = await stored(engine, interview_id)
+    declined = "Understood, I'll leave Stripe out, so retainer links stay with you for now."
+    first = (card_answer("decline", reply=declined, next={"kind": "done"}, question="", skip=list(setup.QUESTION_KEYS))
+             if typed else next_step("what_you_do", reply=declined, next={"kind": "done"},
+                                     skip=list(setup.QUESTION_KEYS)))
+    # The closing call reads the declined card in the plan and says so again.
+    model.add(first, next_step("what_you_do", next={"kind": "done"}, reply="Understood, I'll leave payments out for now.",
+                               plan="The closing plan."))
+    endpoint, body = ("answer", {"card": ids[2], "text": "Not now"}) if typed else (f"proposals/{ids[2]}", {"accept": False})
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
+    assert reply.status_code == 200, reply.text
+    assert reply.json()["step"] == "tools"
+    tail = (await stored(engine, interview_id))["transcript"][len(before["transcript"]):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude"] == [declined, "The closing plan."]
+    assert [message["text"] for message in reply.json()["messages"][-2:]] == [declined, "The closing plan."]
+    stripe_card = next(card for card in shown(reply) if card["proposal_id"] == ids[2])
+    assert stripe_card["state"] == "declined"
+
+
+@pytest.mark.parametrize("typed", [False, True])
+async def test_a_last_card_decision_with_no_reply_keeps_the_closing_reply(proposals, model, engine, typed):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    await show_last_card(engine, interview_id, ids, ids[2])
+    before = await stored(engine, interview_id)
+    first = (card_answer("decline", reply="", next={"kind": "done"}, question="", skip=list(setup.QUESTION_KEYS))
+             if typed else next_step("what_you_do", reply="", next={"kind": "done"}, skip=list(setup.QUESTION_KEYS)))
+    closing = "Understood, I'll leave payments out for now."
+    model.add(first, next_step("what_you_do", next={"kind": "done"}, reply=closing, plan="The closing plan."))
+    endpoint, body = ("answer", {"card": ids[2], "text": "Not now"}) if typed else (f"proposals/{ids[2]}", {"accept": False})
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/{endpoint}?cards=1", json=body)
+    assert reply.status_code == 200, reply.text
+    tail = (await stored(engine, interview_id))["transcript"][len(before["transcript"]):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        closing, "The closing plan."]
 
 
 async def test_drafting_gets_only_jobs_decided_on_a_shown_card(proposals, model, engine):
@@ -3581,6 +3692,14 @@ async def test_stored_accepted_unpriced_payment_is_declined_and_excluded_from_ru
     finished = await owner.browser.post(path + "/suggestions?cards=1", json={})
     assert finished.status_code == 200, finished.text
     assert next(card for card in shown(finished) if card["proposal_id"] == ids[1])["state"] == "declined"
+    # What the closing call tells Claude: code voided the owner's stored yes for want of an amount, so the plan says
+    # why, not that the owner turned it down. With business tools off it is declined as no payment job can run.
+    closing = next(request for request in reversed(model.requests) if request.output_schema is setup.SetupNextStep)
+    text = closing.messages[0]["content"][0]["text"]
+    assert setup.SETUP_CLOSING_LINE in text
+    plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
+    status = next(item["status"] for item in plan["items"] if item["id"] == ids[1])
+    assert status == (setup.SETUP_PLAN_NO_AMOUNT if tools_enabled else "declined")
     assert PAYMENT_HOW not in ((await stored(engine, interview_id))["answers"]["how_we_help"] or "")
     reloaded = await owner.browser.get(path + "?cards=1")
     assert next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])["state"] == "declined"

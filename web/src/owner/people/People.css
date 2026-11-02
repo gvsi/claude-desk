@@ -6,12 +6,19 @@
    draws: while the list loads, its shapes (P12-01), built from these same classes. On a phone the
    sections are 16 px apart. */
 
-/* No size token is the board's 760 px column (the content tokens are 960 and 640). */
+/* The board's 760 px column, set once for the page and the footer under it. The design system's
+   only 760 px size, --size-agents-column, is named for the agents page, so Customers keeps its own
+   until a neutral column token exists (the content tokens are 960 and 640). */
+.cd-people,
+.cd-owner-layout:has(> .cd-people) {
+  --cd-people-column: 760px;
+}
+
 .cd-people {
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 760px;
+  max-width: var(--cd-people-column);
   min-width: 0;
   margin: 0 auto;
 }
@@ -21,7 +28,7 @@
 .cd-owner-layout:has(> .cd-people) > .cd-owner-layout__footer {
   box-sizing: border-box;
   width: 100%;
-  max-width: 760px;
+  max-width: var(--cd-people-column);
   margin-right: auto;
   margin-left: auto;
 }

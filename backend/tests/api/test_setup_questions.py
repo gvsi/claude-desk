@@ -4063,6 +4063,65 @@ async def test_every_close_ends_with_the_plan_or_the_fixed_line(monkeypatch, pat
         assert "setup answer gap filled (done, close)" in caplog.text
 
 
+@pytest.mark.parametrize("earlier", ["none", "blanked", "kept"])
+async def test_a_gap_closing_keeps_its_reply_unless_this_answer_already_has_one(monkeypatch, earlier, caplog):
+    plan = "Your Desk will take tax preparation requests."
+    closing = "Thanks, that's everything I need."
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."),
+        desk_setup.Entry(role="claude", text="", covered=list(QUESTION_KEYS)),
+    ])
+    replies = desk_setup._TurnReplies()
+    if earlier != "none":
+        reply = desk_setup.Entry(role="claude", text="Got it, I'll ask you first.")
+        interview.transcript.append(reply)
+        replies.track(reply)
+        if earlier == "blanked":
+            replies.before("quote_limit")      # blanked as before a limit question: it answers nothing now
+            assert reply.text == ""
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(return_value=SetupNextStep(
+        reply=closing, next=next_ask("done"), question="", choices=[], skip=[], drop=[], add_jobs=[], plan=plan)))
+    await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=replies)
+    assert "setup answer gap filled (done, close)" in caplog.text
+    assert interview.step == "tools"
+    assert [entry.text for entry in interview.transcript if entry.role == "claude" and entry.text] == (
+        ["Got it, I'll ask you first.", plan] if earlier == "kept" else [closing, plan])
+
+
+async def test_a_closing_retry_never_takes_back_the_reply_already_shown(monkeypatch):
+    from desk.api.owner_streaming import Display, displaying
+
+    plan = "Your Desk will take tax preparation requests."
+    said = "Understood, I'll leave Stripe out for now."
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."),
+        desk_setup.Entry(role="claude", text="", covered=list(QUESTION_KEYS)),
+    ])
+    reply = desk_setup.Entry(role="claude", text=said)
+    interview.transcript.append(reply)
+    replies = desk_setup._TurnReplies()
+    replies.track(reply)
+    # The decision's call was the run's first, so its reply is the text on the owner's display.
+    display = Display("r_1")
+    assert display.take()
+    display.begin("reply")(json.dumps({"reply": said}))
+    events = display.events()
+    assert await anext(events) == {"event": "delta", "data": json.dumps({"run": "r_1", "text": said},
+                                                                         separators=(",", ":"))}
+
+    def closing(reply, plan):
+        return SetupNextStep(reply=reply, next=next_ask("done"), question="", choices=[], skip=[], drop=[],
+                             add_jobs=[], plan=plan)
+
+    # No plan on the first try, with the same words as the decision's reply; the plan on the retry.
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(side_effect=[closing(said, ""), closing(said, plan)]))
+    with displaying(display):
+        await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=replies)
+    display.finish("done", {"run": "r_1"})
+    assert await anext(events) == {"event": "done", "data": '{"run":"r_1"}'}     # no reset: still shown
+    assert [entry.text for entry in interview.transcript if entry.role == "claude" and entry.text] == [said, plan]
+
+
 @pytest.mark.parametrize("typed", [True, False])
 @pytest.mark.parametrize("next_topic", ["what_you_do", "quote_limit"])
 async def test_a_card_answer_with_no_ask_uses_the_same_guard(monkeypatch, typed, next_topic, caplog):
@@ -4114,7 +4173,8 @@ async def test_a_gap_only_shows_cards_planned_before_this_turn(monkeypatch, capl
     if planned_on_this_turn:
         assert interview.pending_card is None
         assert not any(entry.card for entry in interview.transcript)
-        close.assert_awaited_once_with(None, None, None, interview)
+        # "Ready." already answers the owner, so the closing call's own reply isn't kept.
+        close.assert_awaited_once_with(None, None, None, interview, answered=True)
         assert "setup answer gap filled (done, close)" in caplog.text
     else:
         assert interview.pending_card == card.proposal_id
@@ -4278,6 +4338,39 @@ async def test_the_closing_plan_comes_from_the_plan_field(app, browser, kernel_h
     assert not any(message["text"] == desk_setup.QUESTIONS_DONE for message in response.json()["messages"])
     assert finished == [state["interview_id"]]
     assert sum(request.output_schema is SetupNextStep for request in model.requests) == 1
+
+
+@pytest.mark.parametrize("last", ["contact_and_after_hours", "documents_and_payments"])
+@pytest.mark.parametrize("acknowledged", [True, False])
+async def test_the_last_answer_is_acknowledged_once_before_the_closing_plan(
+    app, browser, kernel_http, model, engine, last, acknowledged,
+):
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, business_type="office")
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    others = [key for key in QUESTION_KEYS if key not in {"what_you_do", last}]
+    await answer(owner, model, interview_id, "We prepare tax returns.", turn(next=next_ask(last), skip=others))
+    assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["question"] == last
+    before = await stored(engine, interview_id)
+    own = "Got it, that's how the Desk will handle it." if acknowledged else ""
+    # The closing call reads the same answer (as <owner_answer>) and answers it again.
+    again = "Understood, that settles the last question."
+    closing = next_step("what_you_do", next={"kind": "done"}, reply=again, plan="The closing plan.")
+    if last in LIMIT_CHOICES:
+        said = LIMIT_CHOICES[last]("office")[0].text
+        items = (turn(own), next_step(last, next={"kind": "done"}), closing)
+    else:
+        said = "Take a message after hours."
+        items = (turn(own, next=next_ask("done")), closing)
+    response = await answer(owner, model, interview_id, said, *items)
+    assert response.status_code == 200, response.text
+    assert response.json()["step"] == "tools"
+    closing_request = model.requests[-1].messages[0]["content"][0]["text"]
+    assert "Write the closing plan" in closing_request and "<owner_answer>" in closing_request
+    tail = (await stored(engine, interview_id))["transcript"][len(before["transcript"]):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        own or again, "The closing plan."]
 
 
 async def test_a_follow_up_wins_over_next_topic(app, browser, kernel_http, model, engine):
