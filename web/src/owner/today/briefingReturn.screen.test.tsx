@@ -9,12 +9,19 @@ import { renderRoute } from '../../test/renderRoute.tsx';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
 
-async function openBriefing() {
+async function openBriefing(hash = '') {
   const world = mockStore.world;
   const desk = world.desk(RIVERA.deskId)!;
   const text = 'Do you work in Alameda?';
   world.replay(world.addSession(desk), world.now() - 10 * MINUTE, [{ text, steps: matchRule(text).steps }]);
-  const view = await renderRoute(TODAY, { viewport: { width: 1440, height: 900 } });
+  const held = [...world.decisions.values()].find(({ decision }) => decision.state === 'held')!.decision;
+  const landing = hash === 'request' ? `#request-${held.decision_id}` : hash;
+  const view = await renderRoute(`${TODAY}${landing}`, { viewport: { width: 1440, height: 900 } });
+  if (landing === '#needs-you') {
+    await expect.element(view.screen.getByRole('region', { name: 'Needs you', exact: true })).toHaveFocus();
+  } else if (hash === 'request') {
+    await expect.poll(() => document.activeElement?.textContent).toContain(held.reason_plain);
+  }
   const since = view.screen.getByRole('region', { name: 'Since last night', exact: true });
   const seeAll = since.getByRole('link', { name: /^See all/ });
   await expect.element(seeAll).toBeInTheDocument();
@@ -53,4 +60,21 @@ it('restores the briefing opener and scroll through Back to Today at 1440 by 900
   const beforeTab = main.scrollTop;
   await userEvent.tab();
   expect(main.scrollTop).toBe(beforeTab);
+});
+
+
+it.each(['#needs-you', 'request'])('restores the briefing opener after browser Back to a %s entry', async (hash) => {
+  const { router, seeAll, main, top } = await openBriefing(hash);
+  await router.navigate(-1);
+  await expect.element(seeAll).toBeInTheDocument();
+  await expect.element(seeAll).toHaveFocus();
+  await expect.poll(() => main.scrollTop).toBe(top);
+});
+
+it.each(['#needs-you', 'request'])('restores the briefing opener through Back to Today to a %s entry', async (hash) => {
+  const { screen, seeAll, main, top } = await openBriefing(hash);
+  await screen.getByRole('link', { name: 'Back to Today', exact: true }).click();
+  await expect.element(seeAll).toBeInTheDocument();
+  await expect.element(seeAll).toHaveFocus();
+  await expect.poll(() => main.scrollTop).toBe(top);
 });

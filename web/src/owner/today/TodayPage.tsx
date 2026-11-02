@@ -139,6 +139,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
   const [returning] = useState(() => briefingOpener?.deskId === deskId && briefingOpener.key === location.key ? briefingOpener : null);
+  // This return spends the hash landing for the entry that opened the briefing.
+  // Fresh hash entries and returns from other pages still land as usual.
+  const returningFromBriefing = returning?.key === location.key;
   const refocused = useRef(false);
   useLayoutEffect(() => {
     if (opening || returning === null || refocused.current || sinceLastNight.current === null) return;
@@ -148,8 +151,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     target.focus({ preventScroll: true });
   }, [opening, returning]);
   useEffect(() => {
-    if (!opening && location.hash === '#needs-you') needsYouSection.current?.focus();
-  }, [opening, location.key, location.hash]);
+    if (!opening && !returningFromBriefing && location.hash === '#needs-you') needsYouSection.current?.focus();
+  }, [opening, returningFromBriefing, location.key, location.hash]);
   const pendingFocus = useRef<PendingFocus | null>(null);
   const dismissAnswer = (id: string, next: string | undefined) => {
     pendingFocus.current = { kind: 'dismiss', next };
@@ -203,7 +206,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     rereadAfter: null,
   });
   if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
-  const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
+  const requested = !returningFromBriefing && visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
   const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused;
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
