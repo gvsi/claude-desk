@@ -1500,18 +1500,20 @@ describe('ReaderPage', () => {
   });
 
   it('contents_marks_a_short_last_section', async () => {
-    // A window tall enough that, scrolled to the page's end, the proposal's last heading is still below the line.
+    // A window tall enough that, scrolled to the page's end, the proposal's last heading is still below the line and the
+    // heading before it is still in the window, sized from the two sections as the document has them.
     const screen = await renderReader('proposal');
     const last = headingOf('the-prototype');
-    const belowLast = document.documentElement.scrollHeight - (last.getBoundingClientRect().top + window.scrollY);
-    const height = Math.max(1400, Math.ceil(belowLast / 0.6) + 100);
+    const before = headingOf('business-path');
+    const below = (heading: HTMLElement) =>
+      document.documentElement.scrollHeight - (heading.getBoundingClientRect().top + window.scrollY);
+    const height = Math.max(1400, Math.ceil(below(last) / 0.6) + 100, Math.ceil(below(before)) + 100);
     await page.viewport(DESKTOP.width, height);
     await expect.poll(() => window.innerHeight).toBe(height);
     const line = height * 0.4;
 
     // A little short of the end, the section before the last is the one being read.
     const end = document.documentElement.scrollHeight - height;
-    const before = headingOf('business-path');
     await jumpTo(end - 150);
     await expect.poll(marked).toEqual(['Business path (location)']);
 
@@ -1529,11 +1531,14 @@ describe('ReaderPage', () => {
     await expect.poll(marked, { message: 'before the scroll rests' }).toEqual(['The prototype (location)']);
     window.removeEventListener('scrollend', holdBack, { capture: true });
 
-    // A jump to a section, then a small scroll up that takes its heading back below the line: the mark is the
-    // section now above it.
+    // In a laptop's window, a jump to a section, then a small scroll up that takes its heading back below the line: the
+    // mark is the section now above it.
+    await page.viewport(DESKTOP.width, DESKTOP.height);
+    await expect.poll(() => window.innerHeight).toBe(DESKTOP.height);
+    const laptopLine = DESKTOP.height * 0.4;
     await jumpTo(placeOf('how-well-know-it-works'));
     await expect.poll(marked).toEqual(['How we’ll know it works (location)']);
-    await jumpTo(window.scrollY - (line - headingOf('how-well-know-it-works').getBoundingClientRect().top) - 40);
+    await jumpTo(window.scrollY - (laptopLine - headingOf('how-well-know-it-works').getBoundingClientRect().top) - 40);
     await expect.poll(marked).toEqual(['The first release (location)']);
     await screen.unmount();
   });
@@ -1556,9 +1561,12 @@ describe('ReaderPage', () => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     expect(marked(), 'a moment after the jump').toEqual(['Business path (location)']);
 
-    // The reader's own next scroll marks by the rule again.
+    // The reader's own next scroll marks by the rule again. The window is sized from Business path to the proposal's end,
+    // so at its top the rule may already name the first section.
     await jumpTo(0);
-    await expect.poll(marked, { message: 'back at the top' }).toEqual([]);
+    const top = byTheRule();
+    expect(top, 'the rule names another section at the top').not.toBe('Business path');
+    await expect.poll(marked, { message: 'back at the top' }).toEqual(top === '' ? [] : [`${top} (location)`]);
     await screen.unmount();
   });
 

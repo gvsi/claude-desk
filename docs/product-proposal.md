@@ -57,9 +57,15 @@ Limits: we wrote the scenarios, real attackers adapt, 24 held-out legitimate tas
 
 ## Business path
 
-A Desk comes with Claude's paid plans and a monthly conversation allowance; which plans, the allowance size and what happens above it are open. `estimate:` at the table's $0.20 per conversation, 100 conversations cost all of [Pro](https://claude.com/pricing)'s $20 monthly price ($20 ÷ $0.20), before the owner's own Claude use. So the allowance size decides the margin.
+**Who pays and why.** The owner, through their Claude plan; visitors and their agents never pay to ask. Owners already pay to have requests answered: [Ruby](https://www.ruby.com/pricing/)'s live receptionists start at $250 a month for 50 minutes. A Desk sells requests closed while the owner works.
 
-The main risks are a wrong answer under Claude's name, hostile traffic using up an owner's allowance, and owners who never let Claude act alone.
+**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: about $0.025 a Desk reply in the final eval pass, its checks included; `estimate:` a ten-reply conversation would cost about $0.25, so about 80 of them use all of [Pro](https://claude.com/pricing)'s $20 monthly price.
+
+**Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
+
+**Go-to-market.** Start with owners who already pay for Claude. The share kit puts a Desk where customers look: a link, a QR code, and words for a Google profile, an email signature and a voicemail. Try it at [desk.alcantara.xyz](https://desk.alcantara.xyz).
+
+**Risks.** A wrong answer under Claude's name: the reply check stops a made-up price, date or booking, not a wrong fact without one. Hostile traffic using up an owner's allowance: anyone can spend a public Desk, so a real Desk needs a spend cap per owner, and blocked attempts shouldn't count against it.
 
 ## The prototype
 
