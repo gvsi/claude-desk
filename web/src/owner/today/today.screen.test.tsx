@@ -3243,6 +3243,39 @@ describe("Today's unfinished setup", () => {
     await expectScreenBasics(phone.screen.container, { owner: true });
   });
 
+  it('back_to_an_unfinished_today_returns_to_its_place_once_drawn', async () => {
+    // Back to the Today of a Desk whose setup isn't finished, once Needs you has left the app's
+    // memory: Today opens on its own skeleton, with the "Not live yet" card's shape in it, and
+    // restores the owner's place once drawn, and keeps it.
+    const state = await deskAtRules();
+    const today = `/app/${state.desk_id}/today`;
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen, router } = await renderRoute(today, { viewport: { width: 1440, height: 600 } });
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    const column = document.querySelector('main')!;
+    column.scrollTop = 300;
+    await vi.waitFor(() => expect(column.scrollTop).toBe(300));
+    // Time for the place to be kept, as the owner's own scrolling is.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+
+    queryClient.removeQueries({ queryKey: needsYouKey(state.desk_id) });
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
+    onTestFinished(needsYou.release);
+    await router.navigate(-1);
+    await vi.waitFor(expectTodayOpening);
+    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer .cd-today__band > .cd-continue-setup')).not.toBeNull();
+    needsYou.release();
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio')).toBeVisible();
+    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    await vi.waitFor(() => expect(document.querySelector('main')!.scrollTop).toBe(300));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(document.querySelector('main')!.scrollTop).toBe(300);
+  });
+
   it('a_live_desk_has_no_setup_card', async () => {
     // The seeded copy's Desk is live and was made without setup: Today has no card, and Things to try stays.
     const { screen } = await renderRoute(TODAY);

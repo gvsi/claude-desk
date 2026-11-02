@@ -36,6 +36,8 @@ export type SetupToolsRow =
     };
 
 export interface SetupToolsListProps {
+  /** Rows by tool or connector key, for returning focus after a review. */
+  rowRef?: (key: string, row: HTMLLIElement | null) => void;
   /** The Desk's own jobs, in the order the API lists them. */
   jobs?: readonly SetupJobRow[];
   /** The connectors that are part of Claude Desk, Verification among them, under "Built in". */
@@ -61,17 +63,17 @@ const STATUS_WORDS = { on: 'On', always_on: 'Always on' } as const;
  * tools it brings). An app already connected, its tools waiting (N-Live-REV-560), says how many it
  * brings, then "Needs review" and "Review", as a job does. Rows are not links; nothing turns on from here.
  */
-export function SetupToolsList({ jobs = [], builtIn, external }: SetupToolsListProps) {
+export function SetupToolsList({ jobs = [], builtIn, external, rowRef }: SetupToolsListProps) {
   return (
     <div className="cd-setup-tools">
-      <Jobs rows={jobs} />
-      <Group title="Built in" verb="Add" rows={builtIn} />
-      <Group title="Connect your own" verb="Connect" rows={external} />
+      <Jobs rows={jobs} rowRef={rowRef} />
+      <Group title="Built in" verb="Add" rows={builtIn} rowRef={rowRef} />
+      <Group title="Connect your own" verb="Connect" rows={external} rowRef={rowRef} />
     </div>
   );
 }
 
-function Jobs({ rows }: { rows: readonly SetupJobRow[] }) {
+function Jobs({ rows, rowRef }: { rows: readonly SetupJobRow[]; rowRef: SetupToolsListProps['rowRef'] }) {
   const headingId = useId();
   if (rows.length === 0) return null;
   return (
@@ -79,7 +81,7 @@ function Jobs({ rows }: { rows: readonly SetupJobRow[] }) {
       <h2 id={headingId} className="cd-setup-tools__heading cd-type-control">{BUSINESS_WORDS.jobs}</h2>
       <ul role="list" className="cd-setup-tools__rows" aria-labelledby={headingId}>
         {rows.map((row) => (
-          <li key={row.key} className="cd-setup-tools__row cd-setup-tools__row--job">
+          <li key={row.key} ref={(el) => rowRef?.(row.key, el)} className="cd-setup-tools__row cd-setup-tools__row--job">
             <ConnectorIcon icon="quotes" glyph={row.glyph} size="section" />
             <span className="cd-connector-summary">
               <span className="cd-connector-summary__name cd-type-body">{row.title}</span>
@@ -99,7 +101,7 @@ function Jobs({ rows }: { rows: readonly SetupJobRow[] }) {
   );
 }
 
-function Group({ title, verb, rows }: { title: string; verb: 'Add' | 'Connect'; rows: readonly SetupToolsRow[] }) {
+function Group({ title, verb, rows, rowRef }: { title: string; verb: 'Add' | 'Connect'; rows: readonly SetupToolsRow[]; rowRef: SetupToolsListProps['rowRef'] }) {
   const headingId = useId();
   if (rows.length === 0) return null;
   return (
@@ -109,7 +111,7 @@ function Group({ title, verb, rows }: { title: string; verb: 'Add' | 'Connect'; 
       </h2>
       <ul role="list" className="cd-setup-tools__rows" aria-labelledby={headingId}>
         {rows.map((row) => (
-          <li key={row.connector.id} className="cd-setup-tools__row">
+          <li key={row.connector.id} ref={(el) => rowRef?.(row.connector.id, el)} className="cd-setup-tools__row">
             <ConnectorSummary connector={row.connector} hideBuiltIn />
             <End row={row} verb={verb} />
           </li>

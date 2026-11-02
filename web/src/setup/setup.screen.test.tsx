@@ -38,6 +38,7 @@ import type { DeskRecord } from '../mocks/world.ts';
 import { lineWords } from '../ds/test/lineWords.ts';
 import { ARROW_CHARACTERS } from '../ds/test/copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
+import { holdReads } from '../test/holdReads.ts';
 import { retryAfterMs } from '../app/poll.ts';
 import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 import { changeSomethingPath, useChangeSomething } from './shared.ts';
@@ -1930,6 +1931,50 @@ describe('setup', () => {
     }
   });
 
+  it('tool_back_returns_focus_before_the_tools_list_refresh_finishes', async () => {
+    const state = await interviewAtTools();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Add Payments' }).click();
+    await screen.getByRole('button', { name: 'Turn it on' }).click();
+    await expect.element(screen.getByRole('heading', { name: 'Turn on Payments' })).toHaveFocus();
+    const held = holdReads(`/api/owner/setup/${state.interview_id}/tools`);
+    await screen.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect.poll(held.held).toBe(1);
+    await expect.element(screen.getByRole('button', { name: 'Add Payments' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Confirm and turn on' }).elements()).toHaveLength(0);
+    held.release();
+  });
+
+  it('tool_confirm_returns_row_focus_before_the_tools_list_refresh_finishes', async () => {
+    const state = await interviewAtTools();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await screen.getByRole('button', { name: 'Add Payments' }).click();
+    await screen.getByRole('button', { name: 'Turn it on' }).click();
+    await expect.element(screen.getByRole('heading', { name: 'Turn on Payments' })).toHaveFocus();
+    const held = holdReads(`/api/owner/setup/${state.interview_id}/tools`);
+    const updates: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.addedNodes) updates.push(node.textContent ?? '');
+    });
+    observer.observe(screen.container, { childList: true, subtree: true });
+    onTestFinished(() => observer.disconnect());
+    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    await expect.poll(held.held).toBe(1);
+    const row = connectorRow(screen, 'Payments');
+    await expect.element(row).toHaveFocus();
+    expect(row.element().getAttribute('tabindex')).toBe('-1');
+    expect(row.getByRole('button', { name: 'Add Payments' }).elements()).toHaveLength(1);
+    expect(updates.join(' ')).not.toContain('Your rules are updated.');
+    expect(screen.getByRole('link', { name: 'See your rules' }).elements()).toHaveLength(0);
+    const before = row.element();
+    held.release();
+    await expect.element(row.getByText('On', { exact: true })).toBeVisible();
+    expect(row.element()).toBe(before);
+    await expect.element(row).toHaveFocus();
+    await userEvent.tab();
+    expect(row.element().hasAttribute('tabindex')).toBe(false);
+  });
+
   it('built_in_connector_turns_on_only_after_its_change_is_confirmed', async () => {
     const state = await interviewAtTools();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -2368,8 +2413,10 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Turn it on' }).click();
     await expect.element(screen.getByRole('button', { name: 'Confirm and turn on' })).toBeVisible();
     mockStore.inject({ route: 'confirmRules', status: 409, body: { error: 'rules_changed_since_draft' } });
-    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    (screen.getByRole('button', { name: 'Confirm and turn on' }).element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
     await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: 'Turn on Stripe', exact: true })).toHaveFocus();
     expect(requests('confirmTool', mark)).toHaveLength(3);
     expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
     const redrafted = [...deskOf(state).drafts.keys()].at(-1);

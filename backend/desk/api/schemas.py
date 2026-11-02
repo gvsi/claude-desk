@@ -636,8 +636,8 @@ class PaymentConflict(BaseModel):
 OWNER_NAME_CHARS = "A-Za-zÀ-ÿ' -"
 OWNER_NAME_PATTERN = rf"^[{OWNER_NAME_CHARS}]{{1,40}}$"
 # What setup can wait on: a topic (`QuestionKey`), then, once the plan is closed, whether to add the owner as a test
-# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads its answer with no model turn, so it is no topic and
-# no structured output names it.
+# client (`setup.TEST_CLIENT_OFFER`). Code asks that one and reads a yes or a no with no model turn (anything else goes
+# to setup's consultant as the owner's answer), so it is no topic and no structured output names it.
 TestClientQuestion = Literal["test_client"]
 SetupQuestion = Literal[QuestionKey, TestClientQuestion]
 
