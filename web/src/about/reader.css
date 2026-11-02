@@ -65,26 +65,27 @@
   white-space: nowrap;
 }
 
-/* The τ³-Banking chart: one series in primary ink, the rest in secondary ink and hairlines. */
+/* The τ³-Banking chart: one series in primary ink, the rest in secondary ink and hairlines. Its title, the line
+   under it and its key above the plot, which is drawn at the reading column's width, one unit to a pixel. */
 
 .cd-about-chart__frame {
   padding: var(--space-28) var(--space-32) var(--space-20);
 }
 
 .cd-about-chart__head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-16);
   margin-bottom: var(--space-14);
+}
+
+.cd-about-chart__subtitle {
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
 }
 
 .cd-about-chart__key {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4) var(--space-16);
-  margin: 0;
+  margin: var(--space-12) 0 0;
   color: var(--text-secondary);
 }
 
@@ -101,9 +102,26 @@
   background: var(--text-primary);
 }
 
+.cd-about-chart__key-ring {
+  box-sizing: border-box;
+  width: var(--space-10);
+  height: var(--space-10);
+  border: 2px solid var(--text-secondary);
+  border-radius: var(--radius-full);
+  background: var(--bg-panel);
+}
+
 .cd-about-chart__key-dash {
   width: var(--space-20);
   border-top: 2px dashed var(--text-secondary);
+}
+
+.cd-about-chart__key-band {
+  width: var(--space-16);
+  height: var(--space-10);
+  border-radius: calc(var(--radius-control) / 4);
+  background: var(--fill-count);
+  box-shadow: inset 0 0 0 1px var(--line-hairline);
 }
 
 .cd-about-chart__plot {
@@ -146,6 +164,21 @@
   stroke-linecap: round;
 }
 
+/* Through the scores, the trend is lighter than its run ahead of today, and still holds 3:1 on the card. */
+.cd-about-chart__fit--past {
+  stroke-opacity: 0.7;
+}
+
+.cd-about-chart__bracket {
+  fill: none;
+}
+
+/* A label's leader to its point, which says which point the label is for: secondary ink, which holds 3:1. */
+.cd-about-chart__leader {
+  stroke: var(--text-secondary);
+  stroke-width: 1;
+}
+
 .cd-about-chart__point {
   fill: var(--text-primary);
   stroke: var(--bg-panel);
@@ -177,28 +210,25 @@
   padding: var(--space-16);
 }
 
-.cd-about-chart--compact .cd-about-chart__head {
-  display: block;
-  margin-bottom: var(--space-14);
-}
-
 .cd-about-chart--compact .cd-about-chart__key {
-  margin-top: var(--space-6);
+  margin-top: var(--space-10);
 }
 
-/* The chart draws its argument once, the first time it is a third in view (`usePlayOnce` marks it): the frame and
-   the bar are there from the start; the seven Claude releases scale in one by one in date order; then the top
-   score, the ring and the point labels; then the fit draws towards the bar, over three motion-base (an explanatory
-   figure's signed exception to the motion range); then the band, the rule and the prediction date. Every rule here
-   is on screen with motion only, so unmarked, in print and under reduced motion the chart is drawn complete. Each
-   animation fills backwards: a part waits its turn hidden, and once played, nothing holds it. */
+/* The chart draws its argument once, the first time it is a third in view (`usePlayOnce` marks it): the frame, the
+   bar and today are there from the start; the Claude releases scale in one by one in date order; then the top
+   score, the ring, the point labels and the trend through the scores; then the trend's run ahead of today draws
+   towards the bar, over three motion-base (an explanatory figure's signed exception to the motion range); then the
+   band and the prediction's bracket. Every rule here is on screen with motion only, so unmarked, in print and under
+   reduced motion the chart is drawn complete. Each animation fills backwards: a part waits its turn hidden, and once
+   played, nothing holds it. */
 @media screen and (prefers-reduced-motion: no-preference) {
   .cd-about-chart {
     /* The beat between two releases; each one's place in date order (`--cd-tau3-i`) counts the beats it waits. */
     --cd-tau3-step: calc(var(--motion-base) * 0.4);
-    /* The top score, the ring and the point labels: one beat after the seventh release starts. */
-    --cd-tau3-late: calc(var(--cd-tau3-step) * 7);
-    /* The fit: once they are in. */
+    /* The top score, the ring, the labels and the trend: one beat after the last release starts (the chart sets
+       `--cd-tau3-count`, the number of releases). */
+    --cd-tau3-late: calc(var(--cd-tau3-step) * var(--cd-tau3-count, 10));
+    /* The run ahead of today: once they are in. */
     --cd-tau3-fit: calc(var(--cd-tau3-late) + var(--motion-base));
     /* The band and the prediction date: once the fit has drawn. */
     --cd-tau3-after: calc(var(--cd-tau3-fit) + var(--motion-base) * 3);
@@ -218,6 +248,7 @@
       [data-tau3-part='top'],
       [data-tau3-part='ring'],
       [data-tau3-part='point-label'],
+      [data-tau3-part='trend'],
       [data-tau3-part='band'],
       [data-tau3-part='rule'],
       [data-tau3-part='prediction-date'],
@@ -236,7 +267,12 @@
     animation-delay: calc(var(--cd-tau3-i) * var(--cd-tau3-step));
   }
 
-  .cd-about-chart[data-play='played'] :is([data-tau3-part='top'], [data-tau3-part='ring'], [data-tau3-part='point-label']) {
+  .cd-about-chart[data-play='played'] :is(
+      [data-tau3-part='top'],
+      [data-tau3-part='ring'],
+      [data-tau3-part='point-label'],
+      [data-tau3-part='trend']
+    ) {
     animation: cd-tau3-fade-in var(--motion-base) var(--motion-ease) var(--cd-tau3-late) backwards;
   }
 
@@ -266,7 +302,7 @@
     }
   }
 
-  /* Left to right, from Opus 5 towards the bar. */
+  /* Left to right, from today towards the bar. */
   @keyframes cd-tau3-draw {
     from {
       clip-path: inset(0 100% 0 0) stroke-box;
@@ -743,6 +779,16 @@
   color: var(--text-primary);
 }
 
+/* A table whose section sets its column widths (a colgroup, MeasuresTable's `widths`): those, and no others. */
+.cd-about-measures--set {
+  table-layout: fixed;
+}
+
+.cd-about-measures--set tbody th,
+.cd-about-measures--set td:nth-child(2) {
+  width: auto;
+}
+
 .cd-about-measures-list__items {
   margin: 0;
   border-top: 1px solid var(--line-control);
@@ -846,6 +892,38 @@
   margin-top: calc(var(--space-24) * 3);
 }
 
+/* The capability prediction's opening (ReaderPage's `column` layout): no app icon and no lead figure, and
+   "About this prototype", the title and the summary left-aligned on the article's edge. On a laptop they open the
+   article's column, level with the contents list and the details, 80 px under the top bar: 14 px from the kicker
+   to the title, 20 px to the summary and 40 px to the first section. On a phone they keep the hero's place above
+   the folded contents. */
+
+.cd-about-hero--column {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.cd-about-column > .cd-about-hero--column {
+  display: block;
+  padding: 0;
+}
+
+.cd-about-column > .cd-about-hero--column .cd-about-hero__kicker {
+  margin: 0;
+}
+
+.cd-about-page .cd-about-column > .cd-about-hero--column .cd-about-hero__title {
+  max-width: none;
+  margin-top: var(--space-14);
+  text-wrap: pretty;
+}
+
+.cd-about-column > .cd-about-hero--column .cd-about-hero__summary {
+  max-width: none;
+  margin: var(--space-20) 0 var(--space-40);
+  text-wrap: pretty;
+}
+
 /* The body: the contents list, the article and its details. The side columns grow with the window, so the
    article stays centered with the contents list and the details at the gutters. */
 
@@ -858,6 +936,10 @@
   max-width: calc(var(--size-article-measure) + 4 * var(--size-article-side) + 2 * var(--about-gutter));
   margin: 0 auto;
   padding: var(--about-step) var(--about-gutter) 0;
+}
+
+.cd-about-page--column:not(.cd-about-page--compact) .cd-about-body {
+  padding-top: calc(var(--space-40) * 2);
 }
 
 .cd-about-page .cd-about-side-label {
@@ -1011,6 +1093,62 @@
 .cd-about-article .cd-about-measures,
 .cd-about-article .cd-about-measures-list {
   margin: var(--space-8) 0 var(--space-32);
+}
+
+/* The prediction's claim, as a card at the top of its first section (ClaimCard): the bold lead, the reader's
+   bulleted list tightened (8 px under the lead, 4 px between items, 16 px over the caveat), the caveat, then the
+   prediction at a glance, a label column and a value column between hairlines. */
+.cd-about-article .cd-about-claim {
+  margin: var(--space-4) 0 var(--space-32);
+  padding: var(--space-28) var(--space-32) var(--space-20);
+}
+
+.cd-about-article .cd-about-claim--compact {
+  padding: var(--space-20);
+}
+
+.cd-about-claim > p {
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.cd-about-claim > ul {
+  margin: var(--space-8) 0 var(--space-16);
+  padding-left: calc(var(--space-20) + var(--space-2));
+}
+
+.cd-about-claim > ul > li {
+  padding-left: var(--space-4);
+}
+
+.cd-about-claim > ul > li + li {
+  margin-top: var(--space-4);
+}
+
+.cd-about-claim__glance {
+  margin: var(--space-20) 0 0;
+}
+
+.cd-about-claim__glance > div {
+  display: grid;
+  grid-template-columns: calc(var(--space-40) * 2 + var(--space-16)) minmax(0, 1fr);
+  gap: var(--space-12);
+  padding: var(--space-10) 0;
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-claim--compact .cd-about-claim__glance > div {
+  grid-template-columns: calc(var(--space-40) * 2 - var(--space-4)) minmax(0, 1fr);
+}
+
+.cd-about-claim__glance dt {
+  font-weight: 520;
+  color: var(--text-primary);
+}
+
+.cd-about-claim__glance dd {
+  margin: 0;
+  color: var(--text-secondary);
 }
 
 /* The pull quote, after the first section. */

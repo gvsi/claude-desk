@@ -783,8 +783,11 @@ describe('focus once a review Rules opened returns', () => {
     const { screen, main, place } = await reviewPaymentsLimit();
     await press(screen, 'Confirm change');
 
-    // The new limit lands on its line, in view where Rules was, and focus is on Payments' "Change".
+    // Rules keeps its reading line until its rules read has the confirmed version, which can take a
+    // loaded runner more than a second; then it draws Payments, with its "Change".
     const payments = screen.getByRole('region', { name: 'Payments' });
+    await expect.element(payments.getByRole('button', { name: 'Change' }), { timeout: 4_000 }).toBeVisible();
+    // The new limit lands on its line, in view where Rules was, and focus is on Payments' "Change".
     await expect.poll(() => payments.element().querySelector('[data-money-limit] .cd-pill')?.textContent).toBe('Updated');
     await expect.element(payments.getByRole('button', { name: 'Change' })).toHaveFocus();
     await pause(300);

@@ -867,23 +867,40 @@ export class MockWorld {
     return record.decision;
   }
 
-  /** The visitor cancels their held request, as the kernel records it: no answer can run it now. */
-  cancel(record: DecisionRecord): Decision {
+  /** A later confirmed booking closes this session's earlier held discount quotes, lazily as in the kernel. */
+  supersedeIfBooked(record: DecisionRecord): Decision {
+    const { decision } = record;
+    if (decision.state !== 'held' || decision.action?.tool !== 'native.quote' || !decision.action.discount_bp) return decision;
+    const booking = [...this.decisions.values()].find((candidate) =>
+      candidate.deskId === record.deskId && candidate.decision.session_id === decision.session_id &&
+      candidate.createdAt > record.createdAt && candidate.decision.state === 'executed' && candidate.decision.action?.tool === 'native.book',
+    );
+    return booking ? this.cancel(record, booking) : decision;
+  }
+
+  /** The visitor cancels their held request, or their booking replaces it: no answer can run it now. */
+  cancel(record: DecisionRecord, booking?: DecisionRecord): Decision {
     const desk = this.desk(record.deskId);
     const session = this.sessions.get(record.decision.session_id);
     if (!desk || !session) throw new Error(`decision ${record.decision.decision_id} has no Desk or session`);
     const { decision_id: decisionId, session_id: sessionId } = record.decision;
     const cancelled = this.appendLedger(desk, {
-      kind: 'approval',
+      kind: booking ? 'decide' : 'approval',
       origin: 'kernel',
       session_id: sessionId,
       ref_id: decisionId,
-      summary: { state: 'cancelled', by: 'visitor' },
+      summary: booking
+        ? { state: 'cancelled', cancelled_by: 'booking', booking_id: booking.decision.action?.action_id }
+        : { state: 'cancelled', by: 'visitor' },
     });
     record.decision = {
       ...record.decision,
       state: 'cancelled',
-      visitor_plain: statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null, deskOwner(desk)),
+      visitor_plain: booking
+        ? visitorLine(session.language, 'closed_by_booking', deskOwner(desk))
+        : statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null, deskOwner(desk)),
+      owner_plain: booking ? rivera.cancelledByBooking.owner_plain : null,
+      answers: [],
       inbox: [],
       ledger_seq: cancelled.seq,
       signature: sign(`${decisionId}:cancelled`),
