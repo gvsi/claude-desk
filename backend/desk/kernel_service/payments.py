@@ -1006,6 +1006,8 @@ async def cancel_disallowed_links(ctx: KernelCtx, desk_id: str, version: PolicyV
 
     - past its expiry: `expired` (reason `expired`);
     - an agent link whose mandate has expired: `cancelled`, `mandate_expired` (no chat line);
+    - a link whose quote another payment has paid: `cancelled`, `quote_paid` (no `cancel_reason`,
+      no chat line), as a read would cancel it;
     - an auto-allowed link `link_rules_allow` says `version` no longer allows: `cancelled`,
       `rules_changed`. A link the owner approved isn't evaluated again: that approval was single-use
       and bound to its call. Switching Answering off, or a change to another tool's rules, cancels
@@ -1037,7 +1039,11 @@ async def cancel_disallowed_links(ctx: KernelCtx, desk_id: str, version: PolicyV
 
 
 async def _activation_move(ctx: KernelCtx, link: PaymentLink, version: PolicyVersionRow) -> tuple[str, str] | None:
-    """The move an activation of `version` makes on an issued link, `(state, reason)`, or None."""
+    """The move an activation of `version` makes on an issued link, `(state, reason)`, or None. A
+    link whose quote another payment has paid can never be paid, whatever the rules say, so it is
+    cancelled for that (`quote_paid`, no `cancel_reason`, no chat line) before its rules are checked.
+    The quote is read without a lock: `quote_paid` never reverts, and the links are locked already,
+    so taking the quote's row now would come after them, against repo.py's order."""
     if link.expires_at is None or link.expires_at <= ctx.clock.now():
         return "expired", "expired"
     session_row = (await ctx.db.scalars(ctx.repo.scoped(select(SessionRow).where(
@@ -1045,6 +1051,10 @@ async def _activation_move(ctx: KernelCtx, link: PaymentLink, version: PolicyVer
     agent = link.mandate_id is not None or (session_row is not None and session_row.kind == "agent")
     if agent and not await mandate_live(ctx, link, session_row):
         return "cancelled", "mandate_expired"
+    quote_row = None if link.quote_id is None else (await ctx.db.scalars(ctx.repo.scoped(select(Quote).where(
+        Quote.quote_id == link.quote_id).execution_options(populate_existing=True)))).one_or_none()
+    if quote_row is not None and await quote_unpayable(ctx, quote_row, link_id=link.link_id) == "quote_paid":
+        return "cancelled", "quote_paid"
     decision = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
         DecisionRow.action_id == link.action_id)))).one_or_none()
     if decision is not None and await owner_approved(ctx, decision):
