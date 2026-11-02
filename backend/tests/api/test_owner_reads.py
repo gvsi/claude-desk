@@ -1347,6 +1347,29 @@ async def test_a_demo_visitors_booking_answer_and_lead_are_flagged_and_named_by_
     assert (leads[demo_lead], leads[real_lead]) == (True, False)
 
 
+async def test_today_reads_the_demo_visitors_marks_once_for_its_briefing_and_live_rows(scene, clock, monkeypatch):
+    demo = await scene.visitor(local(2026, 10, 30, 8, 58))
+    await write(scene.engine, scene.admin, demo.ids, "demo_visitor", local(2026, 10, 30, 8, 58), text="Riley",
+                ref_id="visitor-one")
+    await scene.text(demo, local(2026, 10, 30, 8, 58))
+    await scene.reply(demo, local(2026, 10, 30, 8, 59))
+    clock.now = local(2026, 10, 30, 9)
+    reads = []
+    real = owner_reads.demo_visitors
+
+    async def counted(*args, **kwargs):
+        reads.append(args[1:])
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(owner_reads, "demo_visitors", counted)
+    today = (await scene.owner.get(f"desks/{scene.owner.desk_id}/today")).json()
+    # Needs you reads them for itself, first; the briefing and Live now share one read.
+    assert len(reads) == 2
+    assert [(row["session_id"], row["demo_visitor"]) for row in today["live"]] == [(demo.session_id, True)]
+    assert (today["briefing"]["newest"]["lead_or_answer"]["demo_visitor"],
+            today["briefing"]["newest"]["lead_or_answer"]["display_name"]) == (True, "Riley")
+
+
 async def test_briefing_list_is_the_window_newest_first(scene, clock):
     early = await scene.visitor(local(2026, 10, 29, 17))
     await scene.lead(early, local(2026, 10, 29, 17), name="Before the window")       # before 18:00: not listed

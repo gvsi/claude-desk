@@ -1251,12 +1251,13 @@ async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
                  demo_visitor=row["session_id"] in demo) for row in rows]
 
 
-async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
+async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None,
+                        demo: dict[str, DemoMark] | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
     activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
     visitor typed (`visitor_line`); an agent's carries none, and instead its newest outcome's facts
-    (`agent_outcomes`). A demo visitor's is flagged (`demo_visitors`) and, with no other name, named by its
-    persona."""
+    (`agent_outcomes`). A demo visitor's is flagged (`demo_visitors`, or `demo` when the caller read them already)
+    and, with no other name, named by its persona."""
     who = who or await people(ctx, desk_id)
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
@@ -1277,7 +1278,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
     outcomes |= {session_id: Outcome(outcome)
                  for session_id, outcome in (await visitor_outcomes(ctx, desk_id, visitors, decisions)).items()}
     recorded, _ = await history_sessions(ctx, desk_id)
-    demo = await demo_visitors(ctx, desk_id)
+    demo = await demo_visitors(ctx, desk_id) if demo is None else demo
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
@@ -1306,7 +1307,7 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
     _, business = await desk_zone(ctx, desk_id)
     frame = windows(now, business["timezone"])
     done = await activity(ctx, desk_id, frame.start)
-    live = [summary for summary in await conversations(ctx, desk_id, done.people)
+    live = [summary for summary in await conversations(ctx, desk_id, done.people, done.demo)
             if summary.last_activity >= frame.now - LIVE_FOR]
     return Today(greeting_name=(business["owner_display_name"].split() or [""])[0], needs_you_count=len(held),
                  live=live, briefing=briefing(done, frame), this_week=this_week(done, frame),
