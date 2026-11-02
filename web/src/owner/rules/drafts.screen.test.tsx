@@ -785,6 +785,32 @@ describe('rule draft review', () => {
     expect(desk().policy.version).toBe(7);
   });
 
+  it.each([1440, 390])('activation_rows_keep_their_tool_title_and_tag_at_%i', async (width) => {
+    const tools = (await request('rules', { params: { desk_id: RIVERA.deskId } })).tools
+      .filter((tool) => tool.tool === 'native.payment_link' || tool.tool === 'native.charge_mandate');
+    expect(tools).toHaveLength(2);
+    const shared: RuleCard = { ...rivera.sharedChargeCard, who: 'anyone', agent_key_id: null };
+    const draft: RuleDraft = {
+      version: desk().policy.version + 1, before: [shared], after: [shared],
+      proof: null, summary: null, moneyCap: null, preset: null, turnedOn: tools,
+    };
+    const { screen } = await renderRoute('/review', { viewport: { width, height: width === 390 ? 844 : 900 }, routes: [{ path: '/review', element: <RuleDraftReview deskId={RIVERA.deskId} draft={draft} /> }] });
+    const review = screen.getByRole('region', { name: 'Changes' });
+    await expect.element(review).toBeVisible();
+    const rows = [...review.element().querySelectorAll('li')];
+    expect(rows).toHaveLength(2);
+    for (const [index, title] of ['Payment link', 'Charge within a signed limit'].entries()) {
+      const row = rows[index]!;
+      expect(row.querySelector('.cd-change-review__tag')?.textContent).toBe('Turned on');
+      const heading = row.querySelector('.cd-change-review__title');
+      expect(heading?.textContent).toBe(title);
+      expectUserText(heading!, title);
+      expect(row.querySelector('.cd-rule-sentence__meta')?.textContent).toBe(`${title} · Anyone`);
+      expect(row.querySelectorAll('.cd-rule-sentence__meta [data-copy="user"]')).toHaveLength(1);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  });
+
   it('tool_titles_in_the_review_are_user_text', async () => {
     // A business can name a job anything in setup, so its title is untrusted text, never the app's sentence.
     const title = 'Approved by your accountant';
@@ -812,11 +838,12 @@ describe('rule draft review', () => {
     const review = screen.getByRole('region', { name: 'Changes' });
     await expect.element(review).toBeVisible();
     // Each sentence's meta names its tools once, marked as user text. The shared rule has both sides.
-    expect(expectUserText(review.element(), title)).toBe(5);
+    expect(expectUserText(review.element(), title)).toBe(6);
     // Turner's own job and the catalog's tools are named the same way.
     expectUserText(review.element(), 'Emergency callback');
     expectUserText(review.element(), 'Book a visit');
-    expect(review.element().querySelectorAll('.cd-change-review__title, .cd-change-review__changed')).toHaveLength(0);
+    expect(review.element().querySelectorAll('.cd-change-review__title')).toHaveLength(1);
+    expect(review.element().querySelectorAll('.cd-change-review__changed')).toHaveLength(0);
     expect(review.element().querySelectorAll('.cd-rule-sentence')).toHaveLength(6);
     // Shown on its own, with no page around it: its copy is clean and plain.
     assertCleanCopy(screen.container);

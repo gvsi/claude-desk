@@ -256,11 +256,12 @@ function SentenceSide({ label, side }: { label: 'Before' | 'After'; side: Change
 }
 
 function SentenceRow({ row }: { row: ChangeRowView }) {
-  const tag = row.change === 'added' || row.change === 'turned_on' ? 'New' : TAGS[row.change];
+  const tag = row.change === 'added' ? 'New' : TAGS[row.change];
   return (
     <li className="cd-change-review__row cd-change-review__row--sentence">
       <span className="cd-change-review__tag cd-type-caption">{tag}</span>
       <div className="cd-change-review__body cd-change-review__sentence-sides">
+        {row.change === 'turned_on' ? <p className="cd-change-review__title cd-type-body"><Target target={row.title} /></p> : null}
         {row.before === null ? null : <SentenceSide label="Before" side={row.before} />}
         {row.after === null ? null : <SentenceSide label="After" side={row.after} />}
       </div>

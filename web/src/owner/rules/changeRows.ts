@@ -296,7 +296,8 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
       title,
       ...(connector === undefined ? {} : { connector }),
       before: null,
-      after: rule === undefined ? defaultSide(row.tool, { business, people, tools: sentenceTools }) : cardSide(rule, wordsFor(rule, draft.after), undefined),
+      // The governing rule may be shared, but this row activates only this tool.
+      after: rule === undefined ? defaultSide(row.tool, { business, people, tools: [row] }) : cardSide(rule, { business, people, tools: [row] }, undefined),
       changed: [],
     });
   }

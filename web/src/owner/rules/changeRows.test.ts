@@ -63,6 +63,20 @@ it('names a retargeted rule and a turned-on business tool', () => {
   expect(rows.find((row) => row.change === 'turned_on')?.connector).toBeUndefined();
 });
 
+it('limits each activation sentence meta to the tool being turned on', () => {
+  const shared = card('shared-charge', 'effect:charge');
+  const tools = (['native.payment_link', 'native.charge_mandate'] as const).map((tool) => ({
+    ...chenBusinessTools[0]!, tool, source: 'native' as const, business: null, effects: ['charge' as const],
+  }));
+  for (const turnedOn of [tools.slice(1), tools]) {
+    const rows = changeRowViews(draft([shared], [shared], turnedOn), null, tools);
+    expect(rows.map((row) => row.after?.sentence?.meta?.tools)).toEqual(
+      turnedOn.map((tool) => ({ titles: [tool.tool === 'native.payment_link' ? 'Payment link' : 'Charge within a signed limit'] })),
+    );
+    expect(rows.map((row) => row.title)).toEqual(rows.map((row) => row.after?.sentence?.meta?.tools));
+  }
+});
+
 it('an added rule follows the changed rows of its own tool', () => {
   // Weekday and Saturday bookings go to the default ask, and a 9-to-5 weekday booking rule comes in
   // beside them; Payment link's rule is reworded. The added booking rule reads with the booking rows
