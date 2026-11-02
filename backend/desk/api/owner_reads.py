@@ -584,6 +584,20 @@ def _stepped_in(decisions: list[dict], ledger: list[dict]) -> list[Timed]:
     return found
 
 
+async def block_tools(ctx: OwnerCtx, desk_id: str) -> dict[str, set[str]]:
+    """The tools that run as each block the owner's screens count: the native tool, and each of the Desk's business
+    tools whose current `business.config.block` names it (a malformed definition names none)."""
+    tools_by_block = {"urgent": {"native.request_callback"}, "typed_booking": {"native.book"},
+                      "intake": {"native.capture_lead"}}
+    for row in await ctx.ro.rows("tools", desk_id=desk_id, source="business"):
+        business = row["business"]
+        config = business.get("config") if isinstance(business, dict) else None
+        block = config.get("block") if isinstance(config, dict) else None
+        if isinstance(block, str) and block in tools_by_block:
+            tools_by_block[block].add(row["tool"])
+    return tools_by_block
+
+
 async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     """The Desk's activity in its visitor and agent sessions, their transcript rows from `start` on. Decisions are read
     before the ledger, so every decision's entry is there. A business tool's run counts under its tool's current block
@@ -595,13 +609,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     entries = {entry["seq"]: entry for entry in ledger}
     quotes = [row for row in await ctx.ro.rows("quotes", desk_id=desk_id) if row["session_id"] in who.sessions]
-    tools_by_block = {"urgent": {"native.request_callback"}, "typed_booking": {"native.book"}}
-    for row in await ctx.ro.rows("tools", desk_id=desk_id, source="business"):
-        business = row["business"]
-        config = business.get("config") if isinstance(business, dict) else None
-        block = config.get("block") if isinstance(config, dict) else None
-        if isinstance(block, str) and block in tools_by_block:
-            tools_by_block[block].add(row["tool"])
+    tools_by_block = await block_tools(ctx, desk_id)
 
     def executed(tools: set[str]) -> list[Timed]:
         return [Timed(at=entry_time(entry), session_id=row["session_id"], ref_id=row["decision_id"],
@@ -986,15 +994,16 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
     return {session: max(found)[-1] if found else None for session, found in events.items()}
 
 
-VISITOR_DONE = {"native.quote": "quoted", "native.book": "visit_booked", "native.capture_lead": "lead_captured",
-                "native.release_document": "document_sent"}
+VISITOR_DONE = {"native.quote": "quoted", "native.release_document": "document_sent"}
+VISITOR_DONE_BLOCKS = {"typed_booking": "visit_booked", "intake": "lead_captured"}
 
 
 async def visitor_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str],
                            decisions: list[dict]) -> dict[str, str | None]:
     """The newest outcome of each of these visitor sessions, read from the kernel's decisions, payment links,
     handoffs and ledger alone, never a transcript, a message or a link token: an executed quote, booking, lead or
-    document release (`VISITOR_DONE`) at its decision's current ledger entry, a refusal at decide or execution
+    document release (`VISITOR_DONE`, and a business tool built on a booking or intake block, by its current block:
+    `block_tools`, `VISITOR_DONE_BLOCKS`) at its decision's current ledger entry, a refusal at decide or execution
     (`turned_down`), the owner declining a held request (`owner_declined`), a link's move to `paid` (`paid_moves`,
     `deposit_paid`), and a call-back the owner marked done (`called_back`) at the entry that closed it (one a newer
     call-back replaced, or with no closing entry, gives none). A decision still held, expired or cancelled, or a
@@ -1004,6 +1013,8 @@ async def visitor_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str],
         return {}
     wanted = set(sessions)
     mine = [row for row in decisions if row["session_id"] in wanted]
+    blocks = await block_tools(ctx, desk_id)
+    done = VISITOR_DONE | {tool: outcome for block, outcome in VISITOR_DONE_BLOCKS.items() for tool in blocks[block]}
     links = {row["link_id"]: row["session_id"]
              for row in await ctx.ro.rows("payment_links", desk_id=desk_id, state="paid")
              if row["session_id"] in wanted}
@@ -1026,7 +1037,7 @@ async def visitor_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str],
     events: dict[str, list[tuple[datetime, int, str | None]]] = {session: [] for session in sessions}
     for row in mine:
         state, entry = row["state"], by_seq.get(row["ledger_seq"])
-        outcome = (VISITOR_DONE.get(row["tool"]) if state == "executed" else
+        outcome = (done.get(row["tool"]) if state == "executed" else
                    "turned_down" if state in {"refused", "refused_at_execution"} else
                    "owner_declined" if state == "denied" else None)
         if outcome is not None or state in {"held", "expired", "cancelled"}:
