@@ -173,18 +173,19 @@
   margin-top: var(--space-8);
 }
 
-/* Delete this Desk: its heading 28 px under Answering, then its line with the button at the right. */
-.cd-settings__delete {
+/* Appearance and Delete this Desk: each heading 28 px under what comes before it, then its line with
+   its control at the right. */
+.cd-settings__row-section {
   padding-top: var(--space-8);
 }
 
-.cd-settings__delete-row {
+.cd-settings__row {
   display: flex;
   align-items: center;
   gap: var(--space-16);
 }
 
-.cd-settings__delete-line {
+.cd-settings__row-line {
   flex: 1;
 }
 
@@ -208,11 +209,11 @@
     gap: var(--space-16);
   }
 
-  .cd-settings__delete {
+  .cd-settings__row-section {
     padding-top: 0;
   }
 
-  .cd-settings__delete-row {
+  .cd-settings__row {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-8);

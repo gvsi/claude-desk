@@ -32,6 +32,9 @@ const ANSWERING_LINE = 'Within your rules';
 /** What deleting a Desk does, beside its button and in the dialog that asks first. */
 const DELETE_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
 
+/** What the Appearance choice does, beside it. */
+const APPEARANCE_LINE = 'System follows your device. Your choice is saved in this browser.';
+
 /** The owner's line when a delete's answer and the read after it were both lost, as the Answering switch words its own. */
 const UNCONFIRMED = "We couldn't confirm that Main line was deleted. Reload to see where it stands.";
 
@@ -152,6 +155,54 @@ describe('Settings', () => {
       'Pacific Time (Los Angeles)',
       'Every day, all day',
     ]);
+  });
+
+  it('appearance_is_a_choice_kept_in_this_browser', async () => {
+    const root = document.documentElement;
+    onTestFinished(() => {
+      delete root.dataset.theme;
+    });
+    const { screen } = await renderRoute(GENERAL);
+    const appearance = main(screen).getByRole('region', { name: 'Appearance' });
+    await expect.element(appearance).toBeVisible();
+
+    // Between Claude acts for you and Delete this Desk, its line beside the choice, as Delete's is.
+    const regions = main(screen).getByRole('region').elements().map((region) => region.getAttribute('aria-label') ?? region.querySelector('h2')?.textContent);
+    expect(regions).toEqual(['Claude acts for you', 'Appearance', 'Delete this Desk']);
+    await expect.element(appearance.getByText(APPEARANCE_LINE, { exact: true })).toBeVisible();
+
+    // System is chosen until the owner picks: the device's own setting, so the root carries no mark.
+    const group = appearance.getByRole('radiogroup', { name: 'Appearance' });
+    const option = (name: string) => group.getByRole('radio', { name, exact: true });
+    expect(group.getByRole('radio').elements().map((radio) => [radio.textContent, radio.getAttribute('aria-checked')])).toEqual([
+      ['System', 'true'],
+      ['Light', 'false'],
+      ['Dark', 'false'],
+    ]);
+    expect(root.hasAttribute('data-theme')).toBe(false);
+
+    // Light applies at once and is kept in this browser.
+    await option('Light').click();
+    await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
+    expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['light', 'light']);
+    expectComputed(main(screen).element(), { color: 'rgba(28, 27, 25, 0.92)' });
+
+    // As radios from the keyboard: the arrow moves to Dark and chooses it.
+    await userEvent.keyboard('{ArrowRight}');
+    await expect.element(option('Dark')).toHaveAttribute('aria-checked', 'true');
+    await expect.element(option('Dark')).toHaveFocus();
+    expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['dark', 'dark']);
+
+    // System hands it back to the device: no mark, nothing stored.
+    await option('System').click();
+    await expect.element(option('System')).toHaveAttribute('aria-checked', 'true');
+    expect([root.hasAttribute('data-theme'), localStorage.getItem('claude-desk.theme')]).toEqual([false, null]);
+
+    // A choice kept from before is the one shown when the page opens again.
+    localStorage.setItem('claude-desk.theme', 'light');
+    const again = await renderRoute(GENERAL);
+    const kept = main(again.screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name: 'Light', exact: true });
+    await expect.element(kept).toHaveAttribute('aria-checked', 'true');
   });
 
   it('answering_is_one_switch', async () => {
@@ -437,15 +488,17 @@ describe('Settings', () => {
 describe('Settings against its boards', () => {
   it('settings_match_their_boards', async () => {
     // General as N-Run2-Settings-General draws it, at 1440 px: the page fills the main area and
-    // centers its column, and Tab goes through SubNav, then the selected header colour, Answering and Delete this Desk.
+    // centers its column, and Tab goes through SubNav, then Answering, the chosen Appearance and
+    // Delete this Desk. Appearance waits on its own board; it sits as Delete this Desk does.
     const { screen } = await renderRoute(GENERAL);
     const answering = main(screen).getByRole('switch', { name: 'Claude acts for you' });
     await expect.element(answering).toBeVisible();
+    const chosenTheme = main(screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name: 'System' });
     const remove = main(screen).getByRole('button', { name: 'Delete this Desk' });
     await expectOwnerBoard(screen.container, {
       current: 'Settings',
       fill: true,
-      tabStops: [...links(screen), answering.element() as HTMLElement, remove.element() as HTMLElement],
+      tabStops: [...links(screen), answering.element() as HTMLElement, chosenTheme.element() as HTMLElement, remove.element() as HTMLElement],
     });
     // Tabbing to Delete scrolls the now-longer General page. Measure its opening position.
     main(screen).element().scrollTop = 0;
@@ -453,15 +506,20 @@ describe('Settings against its boards', () => {
 
     // The details 8 px under their heading, as wide as the column, with no Change; Answering in its
     // own card below Header colour, the card's look with its switch row 20 px in from its top and
-    // bottom (the row pads its own sides, so its words line up with the details'); Delete this
-    // Desk's heading 28 px under that, its neutral button at the column's right.
+    // bottom (the row pads its own sides, so its words line up with the details'); Appearance's
+    // heading 28 px under that, its choice at the column's right; Delete this Desk's heading 28 px
+    // under Appearance, its neutral button at the column's right.
     const answeringCard = main(screen).getByRole('region', { name: 'Claude acts for you' }).element();
     expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
     const switchRow = answering.element();
     expect(round(top(switchRow) - top(answeringCard))).toBe(21);
     expect(round(bottom(answeringCard) - bottom(switchRow))).toBe(21);
+    const appearance = main(screen).getByRole('region', { name: 'Appearance' }).element();
+    const themes = one(appearance, '[role="radiogroup"]');
+    expect(round(top(one(appearance, 'h2')) - bottom(answeringCard))).toBe(28);
+    expect(round(themes.getBoundingClientRect().right)).toBe(round(content.getBoundingClientRect().right));
     const removal = main(screen).getByRole('region', { name: 'Delete this Desk' }).element();
-    expect(round(top(one(removal, 'h2')) - bottom(answeringCard))).toBe(28);
+    expect(round(top(one(removal, 'h2')) - bottom(appearance))).toBe(28);
     expectComputed(remove.element(), SPEC.secondaryMain);
     expect(round(remove.element().getBoundingClientRect().right)).toBe(round(content.getBoundingClientRect().right));
     main(screen).element().scrollTop = main(screen).element().scrollHeight;
@@ -518,11 +576,21 @@ describe('Settings against its boards', () => {
     expect(round((first as HTMLElement).getBoundingClientRect().left)).toBe(16);
     const switchCard = main(phone.screen).getByRole('region', { name: 'Claude acts for you' }).element();
     expect(round(top(switchCard) - bottom(nav))).toBe(16);
+    // Appearance as Delete this Desk lays out: heading, its line 8 px under it, its choice 8 px under
+    // that at the gutter.
+    const looks = main(phone.screen).getByRole('region', { name: 'Appearance' });
+    const looksHeading = looks.getByRole('heading', { name: 'Appearance' }).element();
+    const looksLine = looks.getByText(APPEARANCE_LINE, { exact: true }).element();
+    const looksChoice = looks.getByRole('radiogroup', { name: 'Appearance' }).element();
+    expect(round(top(looksHeading) - bottom(switchCard))).toBe(16);
+    expect(round(top(looksLine) - bottom(looksHeading))).toBe(8);
+    expect(round(top(looksChoice) - bottom(looksLine))).toBe(8);
+    expect(round(looksChoice.getBoundingClientRect().left)).toBe(16);
     const deleting = main(phone.screen).getByRole('region', { name: 'Delete this Desk' });
     const heading = deleting.getByRole('heading', { name: 'Delete this Desk' }).element();
     const line = deleting.getByText(DELETE_LINE, { exact: true }).element();
     const button = deleting.getByRole('button', { name: 'Delete this Desk' }).element();
-    expect(round(top(heading) - bottom(switchCard))).toBe(16);
+    expect(round(top(heading) - bottom(looksChoice))).toBe(16);
     expect(round(top(line) - bottom(heading))).toBe(8);
     expect(round(top(button) - bottom(line))).toBe(8);
     expect(round(button.getBoundingClientRect().left)).toBe(16);
