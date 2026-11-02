@@ -1,4 +1,4 @@
-import { Button, Card, CopyList, Pill, SHARE_CARD_QR_COLORS, ShareCard } from '../../ds/index.ts';
+import { Button, Card, ConnectorIcon, CopyList, Pill, SHARE_CARD_QR_COLORS, ShareCard } from '../../ds/index.ts';
 import { SHARE_CHANNELS } from '../../lib/channels.ts';
 import { CopyLink } from './CopyLink.tsx';
 import { QrCode } from './QrCode.tsx';
@@ -42,7 +42,7 @@ async function writeToClipboard(text: string): Promise<void> {
 /**
  * What an owner needs to put their Desk where customers already look (N-Run2-Share): the link with
  * Copy link and Open, a printable card with its QR code, the ready-made words with Copy for each,
- * and the channels coming later. Each is built from `publicUrl`; a link under the
+ * and the channels coming later, each with its line icon on a connector tile. Each is built from `publicUrl`; a link under the
  * API's paths, a document link among them, throws before anything shows.
  */
 export function ShareKit({ publicUrl, business, ownerName, urgentCallback }: ShareKitProps) {
@@ -76,6 +76,7 @@ export function ShareKit({ publicUrl, business, ownerName, urgentCallback }: Sha
               <ul role="list" className="cd-share-kit__channel-list">
                 {SHARE_CHANNELS.map((channel) => (
                   <li key={channel.key} className="cd-share-kit__later">
+                    <ConnectorIcon icon="quotes" glyph={channel.icon} size="section" />
                     <div className="cd-share-kit__later-text">
                       <p className="cd-share-kit__later-title cd-type-control">{channel.name}</p>
                       <p className="cd-share-kit__later-line cd-type-meta">{channel.line}</p>

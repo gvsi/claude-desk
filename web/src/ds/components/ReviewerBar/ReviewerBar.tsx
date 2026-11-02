@@ -18,7 +18,7 @@ export function reviewerBarWords(ownerName: string | null) {
     noOwner: 'the owner',
     afterName: ' today. ',
     disclosure: 'This is a concept prototype.',
-    startOver: 'Start over',
+    startOver: 'Reset demo',
   };
 }
 
@@ -31,7 +31,7 @@ export interface ReviewerBarProps {
   /** Asks for a fresh copy of the demo; the screen confirms first. */
   onStartOver: () => void;
   /**
-   * The screen's own controls, just before Start over and in its style, as TOD-04 drew the Demo inbox.
+   * The screen's own controls, just before Reset demo and in its style, as TOD-04 drew the Demo inbox.
    * With them, on a phone the words take the first line and the controls the next.
    */
   actions?: ReactNode;

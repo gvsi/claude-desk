@@ -7,10 +7,10 @@ import { SEED_OWNER_NAME, reviewerBarWords } from './ReviewerBar.tsx';
 import '../Button/Button.css';
 import './ReviewerBar.css';
 
-/** The real bar's Start over: an inline ghost `Button`. */
+/** The real bar's Reset demo: an inline ghost `Button`. */
 const START_OVER_CLASS = 'cd-button cd-button--ghost cd-button--inline cd-type-control';
 
-/** The demo bar's naturally wrapped line boxes and its Start over control. */
+/** The demo bar's naturally wrapped line boxes and its Reset demo control. */
 export function ReviewerBarSkeleton({ ownerName = SEED_OWNER_NAME }: { ownerName?: string | null } = {}) {
   const text = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState({ lines: 1, controlWidth: 0 });

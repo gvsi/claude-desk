@@ -185,8 +185,13 @@ export function ConversationsPage() {
       </nav>
       <div className="cd-conversations__open">
         {sessionId === undefined ? (
-          // Nothing to choose from yet: the list says how a conversation starts.
-          items.length > 0 ? <p className="cd-conversations__quiet cd-conversations__pick cd-type-meta">Choose a conversation to read it.</p> : null
+          // Nothing to choose from yet: the list says how a conversation starts. With chats to
+          // choose from, the pane says what opens in it (board REV-CNVW), centred in it.
+          items.length > 0 ? (
+            <div className="cd-conversations__empty">
+              <EmptyState title="Choose a conversation to read it." body="Its chat opens here, where you can take over or whisper to Claude." />
+            </div>
+          ) : null
         ) : (
           <>
             {/* Under 1024 px the list, and its title, step aside for the conversation: the page keeps

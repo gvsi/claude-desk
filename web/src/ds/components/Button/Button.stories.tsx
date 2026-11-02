@@ -38,7 +38,7 @@ export const Primary: Story = {
 export const Secondary: Story = {};
 
 export const Ghost: Story = {
-  args: { variant: 'ghost', children: 'Start over' },
+  args: { variant: 'ghost', children: 'Reset demo' },
 };
 
 export const Main: Story = {
@@ -95,10 +95,10 @@ export const BusySecondary: Story = {
 };
 
 export const BusyGhost: Story = {
-  args: { variant: 'ghost', busy: true, children: 'Start over' },
+  args: { variant: 'ghost', busy: true, children: 'Reset demo' },
   parameters: { canvasNote: 'The board shows no button mid-request; this is a ghost button while its request is in flight.' },
   play: async ({ canvas }) => {
-    const button = canvas.getByRole('button', { name: 'Start over' });
+    const button = canvas.getByRole('button', { name: 'Reset demo' });
     expectComputed(button, { opacity: '1', backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' });
   },
 };
@@ -107,7 +107,7 @@ export const BusyGhost: Story = {
 const BUSY_LOOKS = [
   { variant: 'primary', children: 'Send counter-offer', backgroundColor: 'rgb(221, 217, 207)', color: 'rgb(28, 27, 25)' },
   { variant: 'secondary', children: 'Keep it', backgroundColor: 'rgba(250, 249, 245, 0.1)', color: 'rgba(250, 249, 245, 0.64)' },
-  { variant: 'ghost', children: 'Start over', backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' },
+  { variant: 'ghost', children: 'Reset demo', backgroundColor: 'rgba(0, 0, 0, 0)', color: 'rgba(250, 249, 245, 0.64)' },
   { variant: 'danger', children: 'Deny this time', backgroundColor: 'rgba(220, 130, 144, 0.24)', color: DANGER_TEXT },
   { variant: 'danger-ghost', children: 'Deny always', backgroundColor: 'rgba(250, 249, 245, 0.06)', color: DANGER_TEXT },
 ] as const;
