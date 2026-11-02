@@ -267,6 +267,23 @@ async def test_only_a_code_entry_names_its_challenge(app):
     assert await rows_of(app, rows.copy_id, select(DemoInboxEntry)) == []
 
 
+def test_only_an_alert_to_the_owner_is_titled_and_only_for_the_owner():
+    """The owner reads an alert to them under its preview line; every other entry, and every entry a session reads,
+    has no title, whatever preview the row holds."""
+    def row(to: str, kind: str, preview: str) -> DemoInboxEntry:
+        return DemoInboxEntry(entry_id=new_id("inbox"), copy_id="copy-1", desk_id="desk-1", to=to, person_id=None,
+                              kind=kind, body="Dana asked for 15% off a drain clearing.", preview=preview,
+                              created_at=datetime(2026, 11, 1, 9, tzinfo=UTC))
+
+    alert = row("owner", "alert", "Urgent callback requested")
+    others = [row("d•••@example.com", "verification_code", "New verification code"),
+              row("owner", "head_checkpoint", "Ledger checkpoint"),
+              row("d•••@example.com", "alert", "Callback requested")]
+    assert demo_inbox.owner_entry(alert).title == "Urgent callback requested"
+    assert [demo_inbox.owner_entry(other).title for other in others] == [None] * 3
+    assert [demo_inbox.session_entry(entry).title for entry in [alert, *others]] == [None] * 4
+
+
 def test_one_check_says_what_text_the_database_holds():
     # valid UTF-8 without NUL; the same check wherever an ID, a contact or a body is taken in
     assert repo.storable("Dana Whitfield, café ☕") and repo.storable("")

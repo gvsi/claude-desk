@@ -28,6 +28,8 @@ function entryOf(entryId: string): DemoInboxEntry {
 const CODE_ID = 'inbox-code-raj';
 /** Linda's alert about the held consultation, which names that decision. */
 const HOLD_ID = 'inbox-hold-consultation';
+/** The kernel's title for that alert: its preview line, as the owner reads it. */
+const HOLD_TITLE = 'A request needs your answer';
 
 /** Raj's code, opened: the notice and the entry fetched for it. */
 const codeOpened: DemoInboxItem = { notice: noticeOf(CODE_ID), entry: entryOf(CODE_ID) };
@@ -187,10 +189,12 @@ export const OpenFailed: Story = {
 export const OwnerAlerts: Story = {
   args: { viewer: 'owner', items: everythingArrived },
   parameters: {
-    canvasNote: `No board shows the owner's Demo inbox; this is ${BOARD}'s panel holding Linda's code, hold alert and ledger checkpoint, with the times her screen passes in.`,
+    canvasNote: `No board shows the owner's Demo inbox; this is ${BOARD}'s panel holding Linda's code, hold alert and ledger checkpoint, with the times her screen passes in. The alert reads under the title the kernel gives it, its preview line.`,
   },
   play: async ({ canvasElement }) => {
     // inbox_newest_first: the items came oldest first; the panel shows the newest at the top.
+    // owner_alert_reads_under_its_title: the hold's alert shows its preview line where a code or a
+    // checkpoint shows its kind.
     const items = itemsOf(canvasElement);
     const newestFirst = [...everythingArrived].reverse();
     await expect(items).toHaveLength(newestFirst.length);
@@ -204,7 +208,7 @@ export const OwnerAlerts: Story = {
     }
     await expect(items.map((item) => item.querySelector('.cd-demo-inbox__kind')?.textContent)).toEqual([
       'Verification code',
-      'Alert',
+      HOLD_TITLE,
       'Ledger checkpoint',
     ]);
     await expect(items.map((item) => item.querySelector('.cd-demo-inbox__time')?.textContent)).toEqual(['2:14 pm', '11:12 am', '9:30 am']);
@@ -264,7 +268,7 @@ export const ReplayedNotice: Story = {
     await expect(items).toHaveLength(everythingArrived.length);
     await expect(items.map((item) => item.querySelector('.cd-demo-inbox__kind')?.textContent)).toEqual([
       'Verification code',
-      'Alert',
+      HOLD_TITLE,
       'Ledger checkpoint',
     ]);
     const [code] = items as [HTMLElement];
@@ -310,6 +314,7 @@ export const VisitorGivenAlert: Story = {
     for (const hidden of entries.filter((entry) => entry.kind !== 'verification_code')) {
       await expect(text).not.toContain(hidden.body);
       await expect(text).not.toContain(noticeOf(hidden.entry_id).preview);
+      if (hidden.title) await expect(text).not.toContain(hidden.title);
     }
     for (const { notice } of [ownerStillOpening, ownerFailedToOpen]) await expect(text).not.toContain(notice.preview);
     await expect(canvas.queryByRole('status')).toBeNull();
@@ -391,6 +396,21 @@ export const OwnerAlertInSpanish: Story = {
   play: async ({ canvas }) => {
     await expect(canvas.getByRole('link', { name: 'Abrir la solicitud' })).toHaveAttribute('href', REQUEST_HREF);
     await expect(canvas.queryByRole('link', { name: 'Open the request' })).toBeNull();
+  },
+};
+
+export const OwnerAlertWithoutTitle: Story = {
+  args: { viewer: 'owner', items: [{ ...holdAlert, entry: { ...entryOf(HOLD_ID), title: null }, requestHref: REQUEST_HREF }] },
+  parameters: {
+    canvasNote: `${BOARD}'s owner panel with an alert the kernel sent no title for, which no board shows: it reads as its kind, "Alert".`,
+  },
+  play: async ({ canvasElement }) => {
+    // untitled_alert_reads_as_its_kind: without a title, an alert's line is its kind, as before.
+    const [alert] = itemsOf(canvasElement) as [HTMLElement];
+    await expect(alert.querySelector('.cd-demo-inbox__kind')).toHaveTextContent(/^Alert$/);
+    await expect(within(alert).getByText(entryOf(HOLD_ID).body)).toBeVisible();
+    await expect(within(alert).getByRole('link', { name: 'Open the request' })).toHaveAttribute('href', REQUEST_HREF);
+    await expect(alert.textContent).not.toContain(HOLD_TITLE);
   },
 };
 

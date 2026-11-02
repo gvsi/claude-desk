@@ -13,7 +13,7 @@ the code sent to it, and never a code another session asked for, which may have 
 the owner has since changed. A session never reads an owner alert or a head checkpoint, nor the
 codes of agents another session or the owner minted, and no entry it reads names a decision
 (`session_entry`). The owner reads every entry of the copy, a held request's alert with the
-decision it is about (`owner_entry`).
+decision it is about and each alert to them under its preview line (`owner_entry`).
 """
 
 from typing import get_args
@@ -73,16 +73,21 @@ async def alert_owner(ctx: KernelCtx, desk_id: str, event_kind: str, preview: st
 
 
 def owner_entry(row: DemoInboxRow) -> DemoInboxEntry:
-    """An entry as the owner reads it: a held request's alert names its decision."""
+    """An entry as the owner reads it: a held request's alert names its decision, and an alert to the
+    owner is titled with its fixed preview line (`render.owner_preview`; a preview never holds a code),
+    never with anything from its body. Every other entry has no title: a code, a checkpoint, an alert
+    to a contact."""
+    owner_alert = row.kind == "alert" and row.to == "owner"
     return DemoInboxEntry(entry_id=row.entry_id, to=row.to, kind=row.kind, body=row.body, created_at=row.created_at,
-                          decision_id=row.decision_id)
+                          decision_id=row.decision_id, title=row.preview if owner_alert else None)
 
 
 def session_entry(row: DemoInboxRow) -> DemoInboxEntry:
     """An entry as a session reads it: naming no decision, whatever the row holds, since the link to
-    a held request is the owner's alone."""
+    a held request is the owner's alone, and with no title, since the preview lines are English and
+    a visitor's panel stays in their own language."""
     return DemoInboxEntry(entry_id=row.entry_id, to=row.to, kind=row.kind, body=row.body, created_at=row.created_at,
-                          decision_id=None)
+                          decision_id=None, title=None)
 
 
 def _ordered(stmt):

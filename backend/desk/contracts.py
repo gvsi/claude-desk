@@ -456,6 +456,7 @@ class DemoInboxEntry(BaseModel):          # only from GET /demo_inbox; never sto
     body: str                             # may contain a code
     created_at: AwareDatetime
     decision_id: str | None = None        # only on the owner's alert for a held request: that decision's own id
+    title: str | None = None              # only on the owner's own alerts: the alert's fixed preview line, never a code
 
 class ExecResult(BaseModel):
     action_id: str

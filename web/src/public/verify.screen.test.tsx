@@ -476,7 +476,8 @@ describe('Demo inbox', () => {
   });
 
   it('owner_inbox_shows_alerts', async () => {
-    // The seeded hold alerted the owner: the kernel's line for it, word for word.
+    // The seeded hold alerted the owner: the kernel's line for it, word for word, under the alert's
+    // preview line.
     const alert = mockStore.world.inbox.find((record) => record.entry.kind === 'alert')?.entry;
     if (!alert) throw new Error('the seed holds a request, which alerts the owner');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
@@ -494,7 +495,7 @@ describe('Demo inbox', () => {
     // It opens as a sheet at the right, over Today, focus on Close.
     await open.click();
     await expect.element(sheet.getByText(alert.body)).toBeVisible();
-    await expect.element(sheet.getByText('Alert', { exact: true }).first()).toBeVisible();
+    await expect.element(sheet.getByText('A request needs your answer', { exact: true }).first()).toBeVisible();
     await expect.element(sheet.getByText('To owner').first()).toBeVisible();
     await expect.element(sheet.getByText(OWNER_SUBTITLE)).toBeVisible();
     await expect.element(sheet.getByRole('button', { name: 'Close' })).toHaveFocus();

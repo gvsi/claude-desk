@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
+import type { DemoInboxEntry } from '../../../api/contracts.ts';
 import { chen } from '../../fixtures/index.ts';
 import { DemoInboxPanel, type DemoInboxPanelProps } from './DemoInboxPanel.tsx';
 
@@ -48,6 +49,31 @@ describe('DemoInboxPanel', () => {
     expect(rows(owner)).toBe(2);
     // Newest first: the code's latest arrival is the newest, so it leads.
     expect(owner.indexOf('482913')).toBeLessThan(owner.indexOf('A request needs your answer'));
+  });
+
+  it('an_owner_alert_reads_under_its_title_or_else_its_kind', () => {
+    // The kernel titles the owner's alerts with their preview line; one without a title, or with a
+    // blank one, reads as its kind, as every entry did before.
+    const alert: DemoInboxEntry = {
+      entry_id: 'inbox-urgent',
+      to: 'owner',
+      kind: 'alert',
+      body: 'Reported as urgent through “Emergency callback”. Sam Lee · (510) 555-0100 · My pipes have burst',
+      created_at: '2026-11-01T09:00:00Z',
+      decision_id: null,
+    };
+    const alertNotice = { entry_id: alert.entry_id, to: 'owner', preview: 'Urgent callback requested' };
+    const kindOf = (html: string) => html.match(/cd-demo-inbox__kind[^>]*>([^<]*)</)?.[1];
+    const owner = (entry: DemoInboxEntry) => render({ viewer: 'owner', items: [{ notice: alertNotice, entry }] });
+    expect(kindOf(owner({ ...alert, title: 'Urgent callback requested' }))).toBe('Urgent callback requested');
+    for (const untitled of [alert, { ...alert, title: null }, { ...alert, title: '' }, { ...alert, title: '   ' }]) {
+      expect(kindOf(owner(untitled)), JSON.stringify(untitled.title)).toBe('Alert');
+    }
+    // A visitor's panel reads in their own language, so its rows keep their kind: the kernel titles
+    // no entry a session reads, and a title the screen passes anyway doesn't show.
+    if (!codeEntry || !notice) throw new Error('the Chen fixture has no code entry');
+    const visitor = render({ items: [{ notice, entry: { ...codeEntry, title: 'New verification code' } }] });
+    expect(kindOf(visitor)).toBe('Verification code');
   });
 
   it('a_visitor_sees_a_row_before_its_entry_only_for_a_contact', () => {

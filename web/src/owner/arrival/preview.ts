@@ -190,7 +190,15 @@ export function stillToday(now: Date): StillToday {
   ];
 
   const inbox: DemoInboxEntry[] = [
-    { entry_id: 'preview-alert', to: 'owner', kind: 'alert', body: held.reason_plain, created_at: heldAt, decision_id: held.decision_id },
+    {
+      entry_id: 'preview-alert',
+      to: 'owner',
+      kind: 'alert',
+      body: held.reason_plain,
+      created_at: heldAt,
+      decision_id: held.decision_id,
+      title: 'A request needs your answer',
+    },
   ];
 
   return {
