@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { UnfinishedSetupStep } from '../../api/views.ts';
+import type { DeskSummary, UnfinishedSetupStep } from '../../api/views.ts';
 import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
@@ -8,6 +8,7 @@ import { THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
+import { isLive } from '../useDesks.ts';
 import {
   CONTINUE_SETUP_COPY,
   continueSetupLine,
@@ -171,6 +172,15 @@ export interface SkeletonSetup {
   answering: boolean;
   /** The business's name, in the card's title. */
   business: string;
+}
+
+/**
+ * What Today's shapes draw the "Not live yet" card from: the Desk's unfinished setup, or nothing
+ * once it is live. Today's own skeleton and the loading page both take it from here, so they agree.
+ */
+export function skeletonSetupOf(desk: DeskSummary): SkeletonSetup | undefined {
+  if (isLive(desk) || !desk.setup) return undefined;
+  return { step: desk.setup.step, answering: desk.answering, business: desk.business_name };
 }
 
 /**

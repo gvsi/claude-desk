@@ -22,7 +22,7 @@ import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
 import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
-import { TodaySkeleton } from './TodaySkeleton.tsx';
+import { skeletonSetupOf, TodaySkeleton } from './TodaySkeleton.tsx';
 
 import './Today.css';
 
@@ -101,7 +101,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // and for a Desk listed without it (an API from before it).
   const setup = isLive(desk) ? null : desk.setup;
   // Today's skeleton draws the "Not live yet" card where it will land.
-  const skeletonSetup = setup === null ? undefined : { step: setup.step, answering: desk.answering, business: desk.business_name };
+  const skeletonSetup = skeletonSetupOf(desk);
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
