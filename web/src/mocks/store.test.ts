@@ -1961,6 +1961,28 @@ describe('rules and tools', () => {
     expect((await confirm(8)).status).toBe(401);
   });
 
+  it.each(['ask_first', 'auto'] as const)('preset_%s_keeps_the_desks_job_cards', async (preset) => {
+    const before = await rules();
+    const urgent = before.active.cards.find((card) => card.card_id === 'rv-urgent');
+    expect(urgent).toMatchObject({ applies_to: 'desk.emergency-callback', mode: 'auto', reason: 'Anyone can ask for an urgent callback, which alerts you at once.' });
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    expect(draft.cards).toEqual([...presetCards(preset, RIVERA_HOURS), urgent]);
+    expect(new Set(draft.cards.map((card) => card.card_id)).size).toBe(draft.cards.length);
+    expect(draft.diff?.removed).not.toContainEqual(urgent);
+    const was = new Map(before.active.cards.map((card) => [card.card_id, card]));
+    const now = new Map(draft.cards.map((card) => [card.card_id, card]));
+    for (const card of draft.diff?.added ?? []) expect(was.has(card.card_id)).toBe(false);
+    for (const card of draft.diff?.removed ?? []) expect(now.has(card.card_id)).toBe(false);
+    for (const [old, next] of draft.diff?.changed ?? []) expect(old).not.toEqual(next);
+    expect((await rules()).active).toEqual(before.active);
+    expect((await confirm(draft.version)).status).toBe(200);
+    const after = await rules();
+    expect(after.preset).toBe(preset);
+    expect(after.tools.find((row) => row.tool === 'desk.emergency-callback')).toEqual(before.tools.find((row) => row.tool === 'desk.emergency-callback'));
+  });
+
   it('preset_drafts_recommended_rules_in_the_desks_own_hours', async () => {
     // Turner's Desk keeps 8:00 to 18:00 on weekdays and 9:00 to 13:00 on Saturdays: its "Recommended
     // rules" book weekdays 8 to 6, as the API drafts them, and Saturday bookings ask first.
@@ -1972,7 +1994,8 @@ describe('rules and tools', () => {
     // Its weekday card is Turner's own weekday rule, words included, in all but its id.
     const reason = 'Weekday bookings in opening hours, checked by the reviewer.';
     expect(bookings(draft.cards)).toEqual([{ ...shipped, hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' }, reason }]);
-    expect(draft.cards).toEqual(PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)));
+    const urgent = (await rules()).active.cards.find((card) => card.card_id === 'rv-urgent');
+    expect(draft.cards).toEqual([...PRESETS.auto.map((card) => (card === shipped ? { ...shipped, hours: RIVERA_HOURS[0], reason } : card)), urgent]);
     expect(bookings(draft.cards)).toEqual([{ ...rivera.ruleCards['rv-book-wk'], card_id: 'preset-book-weekday' }]);
     expect((await confirm(draft.version)).status).toBe(200);
     expect((await rules()).preset).toBe('auto');
@@ -1984,7 +2007,7 @@ describe('rules and tools', () => {
     desk.summary.hours = [];
     expect((await rules()).preset).toBeNull();
     const fallback = await preset();
-    expect(fallback.cards).toEqual(PRESETS.auto);
+    expect(fallback.cards).toEqual([...PRESETS.auto, urgent]);
     expect((await confirm(fallback.version)).status).toBe(200);
     expect((await rules()).preset).toBe('auto');
   });

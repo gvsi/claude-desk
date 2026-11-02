@@ -2,7 +2,14 @@
 import type { JobProposal, ToolRow } from '../api/views.ts';
 import { placeholderHex } from '../ds/fixtures/index.ts';
 import { isBusinessDef } from '../owner/connectors/businessWords.ts';
+import { isBusinessToolName, toolState } from '../owner/connectors/catalog.ts';
 import type { DeskRecord, ToolRecord } from './world.ts';
+
+/** The business tools shown under Rules' "Your Desk's jobs", as BusinessJobs groups them. */
+export function deskJobTools(rows: readonly ToolRow[]): ReadonlySet<string> {
+  return new Set(rows.filter((row) => row.source === 'business' && isBusinessToolName(row.tool)
+    && (toolState(row) === 'on' || toolState(row) === 'changed')).map((row) => row.tool));
+}
 
 // Claude-facing, third-person drafts of the kernel's fixed block sentences (adapters/blocks.py),
 // and the blocks' capabilities. The owner sees BUSINESS_OWNER_LINES instead.

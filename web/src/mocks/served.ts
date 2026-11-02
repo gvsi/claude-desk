@@ -24,6 +24,7 @@ import type {
   VisitorSession,
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
+import { deskJobTools } from './businessTools.ts';
 import { idempotencyKeyOf } from './keys.ts';
 import { OWNER_LANGUAGE, loweredReason } from './moneyCap.ts';
 import {
@@ -720,9 +721,11 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const preset = isRecord(req.body) ? req.body.preset : undefined;
     if (req.malformed || !isPreset(preset)) return INVALID;
-    // The preset's cards for the Desk's hours in place of every owner card, personal ones included:
-    // its diff lists each one it removes.
-    return ok(sv.world.draftCards(desk, presetCards(preset, desk.summary.hours)));
+    // Keep only the current cards for "Your Desk's jobs", merged by ID into the preset's cards.
+    const jobs = deskJobTools(rulesView(desk).tools);
+    const kept = desk.policy.cards.filter((card) => !card.is_default && jobs.has(card.applies_to));
+    const cards = new Map([...presetCards(preset, desk.summary.hours), ...kept].map((card) => [card.card_id, card]));
+    return ok(sv.world.draftCards(desk, [...cards.values()]));
   },
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);

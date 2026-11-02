@@ -49,6 +49,7 @@ from desk.api.schemas import (
     Suggestion,
     ToolDecisionRow,
     ToolDecisions,
+    ToolRow,
 )
 from desk.api.setup import ask_model, recorder
 from desk.api.versions import (
@@ -61,7 +62,9 @@ from desk.api.versions import (
     version_cap,
     version_from_row,
 )
-from desk.contracts import AUTO_MONEY_NEEDS_LIMIT, MONEY_TOOLS, Effect, HoursWindow, PolicyVersion, RuleCard, money_tools_of
+from desk.contracts import (
+    AUTO_MONEY_NEEDS_LIMIT, MONEY_TOOLS, Effect, HoursWindow, PolicyVersion, RuleCard, is_business_tool, money_tools_of,
+)
 from desk.kernel_api import PolicyConfirmRequest
 from desk.money_cap import Language, auto_money, lower_to_cap
 from desk.presets import PRESETS, PresetName, preset_cards
@@ -117,10 +120,17 @@ def card_diff(before: list[RuleCard], after: list[RuleCard]) -> CardDiff:
                              if card.card_id in old and old[card.card_id] != card])
 
 
-def preset_of(cards: Iterable[RuleCard], hours: list[HoursWindow]) -> PresetName | None:
+def desk_job_tools(rows: Iterable[ToolRow]) -> frozenset[str]:
+    """The business tools shown under Rules' "Your Desk's jobs": enabled or awaiting review of a changed pin."""
+    return frozenset(row.tool for row in rows if row.source == "business" and is_business_tool(row.tool)
+                     and (row.status == "enabled" or row.status == "needs_review" and row.review_reason == "changed"))
+
+
+def preset_of(cards: Iterable[RuleCard], hours: list[HoursWindow], jobs: Collection[str] = ()) -> PresetName | None:
     """The preset the owner cards are, exactly (default asks aside, in any order), as a Desk with these opening hours
-    drafts it (`preset_cards`), else None."""
-    owned = sorted((card for card in cards if not card.is_default), key=lambda card: card.card_id)
+    drafts it (`preset_cards`), apart from the Desk's own job cards, else None."""
+    owned = sorted((card for card in cards if not card.is_default and card.applies_to not in jobs),
+                   key=lambda card: card.card_id)
     for name in PRESETS:
         if owned == sorted(preset_cards(name, hours), key=lambda card: card.card_id):
             return name
@@ -144,8 +154,9 @@ async def desk_hours(owner: OwnerCtx, desk_id: str) -> list[HoursWindow]:
 async def rules_view(owner: OwnerCtx, desk_id: str) -> RulesView:
     """The Rules page: the active version, each tool with the cards that cover it, and its preset, if any."""
     active = version_from_row(await active_row(owner, desk_id))
-    return RulesView(active=active, tools=await tool_rows(owner, desk_id, active.cards),
-                     preset=preset_of(active.cards, await desk_hours(owner, desk_id)))
+    tools = await tool_rows(owner, desk_id, active.cards)
+    return RulesView(active=active, tools=tools,
+                     preset=preset_of(active.cards, await desk_hours(owner, desk_id), desk_job_tools(tools)))
 
 
 def _money_tools(rows: Iterable[Mapping[str, Any]]) -> frozenset[str]:
@@ -239,11 +250,14 @@ async def draft_added(owner: OwnerCtx, desk_id: str, add: list[RuleCard]) -> Rul
 
 async def draft_preset(owner: OwnerCtx, desk_id: str, name: PresetName) -> RulesDraft:
     """The preset's cards for the Desk's opening hours (`preset_cards`: "Recommended rules" books weekdays in them) in
-    place of every owner card, cards for one person and "never" cards included, so the draft's diff lists each card it
-    removes. A Desk with no hours, or with Monday to Friday 09:00 to 17:00, drafts the preset's cards as they are,
-    which hit the proofs shipped for them; one whose hours have no weekday gets no booking card. Presets carry no auto
-    money card."""
-    return await draft(owner, desk_id, preset_cards(name, await desk_hours(owner, desk_id)))
+    place of the owner cards, keeping only the current cards for "Your Desk's jobs" unchanged. Cards for one person
+    and "never" cards on other tools go, each listed in the diff. The combined cards follow the normal kernel draft,
+    proof and confirm path on the active version read here."""
+    active = version_from_row(await active_row(owner, desk_id))
+    jobs = desk_job_tools(await tool_rows(owner, desk_id, active.cards))
+    kept = [card for card in active.cards if not card.is_default and card.applies_to in jobs]
+    cards = merged(preset_cards(name, await desk_hours(owner, desk_id)), kept)
+    return await draft(owner, desk_id, cards, expected_parent=active.version)
 
 
 async def confirm(owner: OwnerCtx, engine: AsyncEngine, desk_id: str, version: int) -> PolicyVersion:
