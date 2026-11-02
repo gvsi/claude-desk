@@ -87,11 +87,12 @@ describe('design tokens', () => {
     expect(tokenValue('line-field-focus')).toBe('{text-tertiary}');
   });
 
-  test('focus_ring_is_the_secondary_ink', () => {
-    // Keyboard focus shows a warm ring, never the link blue: the secondary ink, which the About pages' paper
-    // points at its own (owner, 2026-11-01). Text entry draws no ring at all, so no other ring token exists.
-    expect(tokenValue('ring-focus')).toBe('{text-secondary}');
-    expect(colorNames.filter((name) => name.startsWith('ring-'))).toEqual(['ring-focus']);
+  test('focus_edge_is_the_secondary_ink', () => {
+    // Keyboard focus changes a control's own edge, never the link blue and never a ring outside it
+    // (owner, 2026-11-01): line-focus, the secondary ink, which the About pages' paper points at its own.
+    // No ring token is left.
+    expect(tokenValue('line-focus')).toBe('{text-secondary}');
+    expect(colorNames.filter((name) => name.startsWith('ring-'))).toEqual([]);
   });
 
   test('intro_dialog_tokens_match_the_board', () => {
@@ -340,12 +341,19 @@ describe('design tokens', () => {
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-app');
     add(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'bg-surface');
     add(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5);
-    const marks = ['accent-blue', 'ring-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'];
+    const marks = ['accent-blue', 'line-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'];
     add(marks, ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'], 3);
     add(marks, ['fill-card'], 3, 'bg-app');
-    // The focus ring on the reviewer bar, and just inside a menu item that has focus.
-    add(['ring-focus'], ['bg-muted'], 3);
-    add(['ring-focus'], ['fill-hover'], 3, 'bg-surface');
+    // The focus edge on the reviewer bar, and inside a menu item or a sidebar row that has focus.
+    add(['line-focus'], ['bg-muted'], 3);
+    add(['line-focus'], ['fill-hover'], 3, 'bg-surface');
+    add(['line-focus'], ['fill-hover'], 3, 'bg-panel');
+    // The focus edge inside a secondary or danger button, at rest and hovered, on a page, a dialog and a
+    // card; and the primary's, drawn in bg-app on its fill, at rest and hovered.
+    add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'bg-app');
+    add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'fill-card', 'bg-app');
+    add(['line-focus'], ['fill-secondary', 'fill-secondary-hover'], 3, 'bg-surface');
+    add(['bg-app'], ['button-primary', 'button-primary-hover'], 3);
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
     // top bar, and the intro dialog's surface; its dark ink on the intro illustration's light card.
     add(['mark-ink-light', 'mark-clay'], ['bg-app', 'bg-panel', 'bg-surface'], 3);

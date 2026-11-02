@@ -270,11 +270,6 @@
   overflow-y: auto;
 }
 
-/* Its focus ring inside its edges, where nothing around it clips the ring. */
-.cd-public-shell__scroll:focus-visible {
-  outline-offset: calc(-1 * var(--space-2));
-}
-
 /* The conversation runs down to the composer area however short it is, so the end of a short chat
    is right above the composer. */
 .cd-public-shell__conversation {

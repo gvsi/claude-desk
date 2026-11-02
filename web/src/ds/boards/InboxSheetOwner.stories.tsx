@@ -65,7 +65,7 @@ const meta = {
     canvasNote: [
       'Built against the board in review; sign-off pending.',
       'The owner’s Demo inbox on Today: DemoInboxSheet as a 400 px side sheet over the dimmed, inert page, opened from its button under the greeting, which the board doesn’t draw; Today behind it is only its header, as the board draws it.',
-      'Close keeps its focus ring, since focus moves to it when the sheet opens; the board draws it at rest.',
+      'Close keeps its focus edge, since focus moves to it when the sheet opens; the board draws it at rest.',
       'Each alert reads as DemoInboxPanel draws an entry, “To owner”, the time, “Alert” and the kernel’s body, then “Open the request” as the board draws it; the board’s held dot and headline aren’t drawn, since a DemoInboxEntry carries only its kind and body.',
       'The sidebar’s Connectors row belongs to another change.',
     ].join(' '),

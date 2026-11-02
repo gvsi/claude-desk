@@ -17,6 +17,7 @@
   --line-control-hover: rgba(250,249,245,0.30);
   --line-field: rgba(250,249,245,0.36);
   --line-field-focus: var(--text-tertiary);
+  --line-focus: var(--text-secondary);
   --fill-card: rgba(250,249,245,0.03);
   --fill-count: rgba(250,249,245,0.05);
   --fill-hover: rgba(250,249,245,0.06);
@@ -30,7 +31,6 @@
   --button-danger-fill-hover: rgba(220,130,144,0.24);
   --button-danger-text: #eba3ae;
   --accent-blue: #7eaeda;
-  --ring-focus: var(--text-secondary);
   --status-handled: #6fa859;
   --status-held: #dabe4a;
   --status-refused: #dc8290;

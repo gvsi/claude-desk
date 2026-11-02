@@ -1231,6 +1231,42 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
+  it('keyboard_focus_on_the_paper_draws_no_ring', async () => {
+    // Keyboard focus changes a control's own edge, never a ring outside it (owner, 2026-11-01), in the paper's
+    // secondary ink: the link in the bar shows 1 px inside its pill, "Read next" 1 px over its card's own
+    // border, and a link in the text turns its words and a 2 px underline the paper's ink.
+    const screen = await renderReader('proposal', { size: DESKTOP });
+    const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
+    const edge = `${tokenColor('--line-focus', root)} 0px 0px 0px 1px inset`;
+    expect(tokenColor('--line-focus', root)).toBe('rgb(92, 88, 80)');
+    const keyboardFocus = async (el: HTMLElement) => {
+      await userEvent.keyboard('{Shift}');
+      el.focus();
+      expect(el.matches(':focus-visible')).toBe(true);
+    };
+
+    const tryIt = screen.container.querySelector('.cd-about-try') as HTMLElement;
+    await keyboardFocus(tryIt);
+    expect([getComputedStyle(tryIt).outlineStyle, getComputedStyle(tryIt).boxShadow]).toEqual(['none', edge]);
+
+    const inText = screen.container.querySelector('article a.cd-text-link') as HTMLElement;
+    await keyboardFocus(inText);
+    const ink = tokenColor('--text-primary', root);
+    const text = getComputedStyle(inText);
+    expect([text.color, text.textDecorationLine, text.textDecorationThickness, text.textDecorationColor, text.boxShadow]).toEqual([ink, 'underline', '2px', ink, 'none']);
+
+    const next = screen.container.querySelector('.cd-about-next__link') as HTMLElement;
+    await keyboardFocus(next);
+    const card = next.closest('.cd-card') as HTMLElement;
+    const overlay = getComputedStyle(next, '::after');
+    expect([getComputedStyle(next).outlineStyle, getComputedStyle(next).boxShadow, overlay.outlineStyle, overlay.boxShadow]).toEqual(['none', 'none', 'none', edge]);
+    expect(overlay.borderTopLeftRadius).toBe(getComputedStyle(card).borderTopLeftRadius);
+    // The overlay lies over the card's border box, so its edge is the card's border.
+    const over = next.closest('.cd-about-next') as HTMLElement;
+    expect(over.getBoundingClientRect().toJSON()).toEqual(card.getBoundingClientRect().toJSON());
+    await screen.unmount();
+  });
+
   it('tabbing_backwards_stays_clear_of_the_top_bar', async () => {
     const screen = await renderReader('proposal', { size: DESKTOP });
     const bar = screen.container.querySelector('header') as HTMLElement;
@@ -1467,7 +1503,7 @@ describe('ReaderPage', () => {
     expect(document.activeElement).toBe(heading);
     expect(heading.getAttribute('tabindex')).toBe('-1');
     expect(heading.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
-    expect(getComputedStyle(heading).outlineStyle).toBe('none');
+    expect([getComputedStyle(heading).outlineStyle, getComputedStyle(heading).boxShadow]).toEqual(['none', 'none']);
     // The router draws the new address in a transition, which a busy machine may not have drawn yet.
     await expect.poll(() => at.path).toBe('/about/prediction#limitations');
     // The next Tab goes on from the section, not from the top of the page.

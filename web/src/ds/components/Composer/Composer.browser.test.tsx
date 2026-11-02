@@ -62,9 +62,8 @@ it('long_failed_answer_story_is_keyboard_scrollable_and_axe_clean_at_390', async
   expect(kept.scrollHeight).toBeGreaterThan(kept.clientHeight);
   await userEvent.keyboard('{Tab}');
   await expect.element(region).toHaveFocus();
-  expect(getComputedStyle(kept).outlineColor).toBe('rgba(250, 249, 245, 0.64)');
-  expect(getComputedStyle(kept).outlineWidth).toBe('2px');
-  expect(getComputedStyle(kept).outlineOffset).toBe('2px');
+  // The focus edge inside the region, 1 px of line-focus, and no ring outside it.
+  expect([getComputedStyle(kept).outlineStyle, getComputedStyle(kept).boxShadow]).toEqual(['none', 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset']);
   const before = kept.scrollTop;
   await scrollByKey(kept, '{ArrowDown}');
   await expect.poll(() => kept.scrollTop).toBeGreaterThan(before);

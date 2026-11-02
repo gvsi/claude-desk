@@ -18,11 +18,6 @@
   text-decoration: none;
 }
 
-/* The header fills the card to its edges, so its focus ring sits just inside it. */
-.cd-connector-section__header:focus-visible {
-  outline-offset: -2px;
-}
-
 .cd-connector-section__identity {
   flex: 1;
   min-width: 0;
@@ -72,7 +67,7 @@
 }
 
 /* A tool: its name over its line, then its words, its outcome and a chevron, each centered across
-   both lines. The name is the link, and its overlay covers the row, with the row's focus ring. */
+   both lines. The name is the link, and its overlay covers the row, with the row's focus edge. */
 .cd-connector-section__tool {
   position: relative;
   isolation: isolate;
@@ -124,13 +119,14 @@
   border-radius: 0 0 calc(var(--radius-card) - 1px) calc(var(--radius-card) - 1px);
 }
 
+/* With keyboard focus the row's overlay draws the focus edge, 1 px of line-focus just inside the row
+   at its corners, and the name's own link draws nothing around its words. */
 .cd-connector-section__tool-link:focus-visible {
-  outline: none;
+  box-shadow: none;
 }
 
 .cd-connector-section__tool-link:focus-visible::after {
-  outline: 2px solid var(--ring-focus);
-  outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px var(--line-focus);
 }
 
 .cd-connector-section__tool-description {

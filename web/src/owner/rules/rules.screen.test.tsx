@@ -24,7 +24,7 @@ import { mockStore } from '../../mocks/store.ts';
 import { EXTRA_RULES, type DeskRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard, expectTabOrderFromTop } from '../../test/boards.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../../test/screen.ts';
 import { watchTop } from '../../test/watch.ts';
 import { REVIEWER_LINE } from './copy.ts';
 
@@ -251,15 +251,21 @@ describe('rules page', () => {
     await expect.element(button).toHaveFocus();
   });
 
-  it('rules_header_link_has_a_rounded_keyboard_focus_ring', async () => {
+  it('rules_header_link_shows_keyboard_focus_in_its_words', async () => {
+    // A text link shows keyboard focus in its words and underline, both the primary ink, the underline
+    // 2 px; no ring and no edge around it.
     const { screen } = await renderRoute(`${DESK}/rules`);
     await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
     const link = screen.container.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
     await expectTabOrderFromTop([link]);
     link.focus();
     expect(link.matches(':focus-visible')).toBe(true);
-    expect(getComputedStyle(link).outlineStyle).toBe('solid');
-    expect(getComputedStyle(link).borderRadius).toBe('8px');
+    const style = getComputedStyle(link);
+    const primary = tokenColor('--text-primary');
+    // The underline's color eases in over motion-instant, as it does on hover.
+    await expect.poll(() => style.textDecorationColor).toBe(primary);
+    expect([style.color, style.textDecorationLine, style.textDecorationThickness]).toEqual([primary, 'underline', '2px']);
+    expect([style.outlineStyle, style.boxShadow]).toEqual(['none', 'none']);
   });
 
   it('rules_header_actions_share_the_phone_row_with_a_full_height_link', async () => {

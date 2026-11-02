@@ -531,6 +531,7 @@ describe('Conversations', () => {
     const heading = screen.getByRole('heading', { level: 2, name: DANA });
     await expect.poll(() => document.activeElement).toBe(heading.element());
     expect(getComputedStyle(heading.element()).outlineStyle).toBe('none');
+    expect(getComputedStyle(heading.element()).boxShadow).toBe('none');
   });
 
   it('conversation_matches_its_board', async () => {

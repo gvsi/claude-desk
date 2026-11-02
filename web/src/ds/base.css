@@ -30,20 +30,38 @@ a {
   text-underline-offset: 2px;
 }
 
-/* Keyboard focus on a control: a warm 2 px ring, 2 px out. A click shows none. */
+/* Keyboard focus changes the control's own edge, never a ring outside it (owner, 2026-11-01). A
+   control with no border (a ghost, secondary or danger button, an icon button, a sidebar or menu row,
+   a row that is a link, anything else focusable) shows a 1 px line-focus edge just inside its own
+   box, so nothing moves. A bordered control turns its own border line-focus instead, in its own
+   stylesheet, and the primary button, whose cream fill hides the warm line, shows 2 px of the page's
+   dark (Button.css). A click shows none. */
 :focus-visible {
-  outline: 2px solid var(--ring-focus);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--line-focus);
+}
+
+/* A link in running text with no class of its own, as a reply's links are, shows focus in its words:
+   they and a 2 px underline turn the primary ink (TextLink draws the same). A link with a class, such
+   as a button or a row drawn as a link, keeps its own kind's edge. */
+a:not([class]):focus-visible {
+  box-shadow: none;
+  color: var(--text-primary);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--text-primary);
 }
 
 /* Text entry (a text field, a text area, a composer's text box) with focus, by pointer or keyboard,
-   shows its caret and its own edge one step stronger (below, and Composer.css), never a ring
-   (owner, 2026-11-01, WCAG 2.4.7). Browsers match :focus-visible on a text field even when it was
-   clicked, so the ring is turned off here. Only a field that can be typed in (`:read-write`) has a
-   caret: a held, read-only field, and every checkbox, radio, range or button input, keeps the ring. */
+   shows its caret and its own edge one step stronger (below, and Composer.css), never a ring and no
+   focus edge of its own (owner, 2026-11-01, WCAG 2.4.7). Browsers match :focus-visible on a text field
+   even when it was clicked, so the edge is turned off here. Only a field that can be typed in
+   (`:read-write`) has a caret: a held, read-only field, and every checkbox, radio, range or button
+   input, shows the focus edge. */
 :is(input, textarea):read-write:focus-visible {
   outline: none;
   outline-offset: 0;
+  box-shadow: none;
 }
 
 /* Its edge one step stronger: a field's own border (TextField, the intro's passcode, the verify code,
