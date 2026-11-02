@@ -17,10 +17,10 @@ import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, er
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { startingDeskFor } from '../arrival/keptCopy.ts';
 import { VisionNote } from '../settings/VisionNote.tsx';
 import { KnowledgeListSkeleton } from './KnowledgeSkeleton.tsx';
 import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS } from './previewSources.ts';
+import { isStartingSampleDesk } from './sampleDesk.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { useDesks } from '../useDesks.ts';
 
@@ -106,12 +106,10 @@ function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowV
 }
 
 /** "What Claude knows": the list once read, matching source-list shapes while it is, and a failed read with Try again over it. */
-function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
+function WhatIKnow({ deskId, timeZone, isStartingDesk }: { deskId: string; timeZone: string; isStartingDesk: boolean }) {
   const list = useQuery(knowledgeQuery(deskId));
   const failure = useReadFailure(list);
-  const desks = useDesks(deskId, { passive: true });
-  const queryClient = useQueryClient();
-  const samples = desks.data !== undefined && startingDeskFor(queryClient, desks.data) === deskId ? MOCK_SOURCES : [];
+  const samples = isStartingDesk ? MOCK_SOURCES : [];
   const rows = [...rowsOf(list.data ?? [], timeZone), ...samples];
   const publicCount = rows.filter((item) => item.title !== null && item.readers.includes('public')).length;
   return (
@@ -175,6 +173,8 @@ export function KnowledgePage() {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const queryClient = useQueryClient();
+  const desks = useDesks(deskId, { passive: true });
+  const isStartingDesk = desks.data !== undefined && isStartingSampleDesk(queryClient, desks.data, deskId);
   /** The list is read again after anything is added or changed. */
   const listChanged = async () => {
     await queryClient.cancelQueries({ queryKey: knowledgeKey(deskId) });
@@ -183,6 +183,7 @@ export function KnowledgePage() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<Busy | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [noteError, setNoteError] = useState<string | undefined>(undefined);
   // The item as the kernel last returned it: what the "Added" card and its switch show.
   const [added, setAdded] = useState<KnowledgeItem | null>(null);
   const [switchLine, setSwitchLine] = useState<string | undefined>(undefined);
@@ -230,7 +231,6 @@ export function KnowledgePage() {
     const ownerOnly = { ...fields, label: { readers: ['owner'] } };
     const item: KnowledgeItem = { item_id: posted !== null && sameItem(posted, ownerOnly) ? posted.item_id : newId(kind), ...ownerOnly };
     setPosted(item);
-    setError(undefined);
     try {
       const stored = await post(item);
       setPosted(null);
@@ -259,19 +259,23 @@ export function KnowledgePage() {
   };
 
   const addNote = () => {
+    setError(undefined);
+    setNoteError(undefined);
     const text = note.trim();
     if (text === '') {
-      setError(KNOWLEDGE_COPY.emptyNote);
+      setNoteError(KNOWLEDGE_COPY.emptyNote);
       return;
     }
     if (new TextEncoder().encode(text).length > MAX_FILE_BYTES) {
-      setError(errorCopy('invalid'));
+      setNoteError(errorCopy('invalid'));
       return;
     }
     void exclusive('note', () => add('note', { source: 'setup', title: titleOf(text), text }));
   };
 
   const addFile = (file: File) => {
+    setError(undefined);
+    setNoteError(undefined);
     if (!TEXT_FILE.test(file.name)) {
       setError(KNOWLEDGE_COPY.notText);
       return;
@@ -347,14 +351,19 @@ export function KnowledgePage() {
     <>
       <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} />
       <div className="cd-knowledge">
-        <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} /></div>
+        <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} isStartingDesk={isStartingDesk} /></div>
         <div className="cd-knowledge__add">
         <KnowledgeAdd
+          {...(isStartingDesk ? { websitePlaceholder: 'turner-plumbing.example/blog' } : {})}
           note={note}
-          onNoteChange={setNote}
+          onNoteChange={(text) => {
+            setNote(text);
+            if (text.trim() !== '') setNoteError(undefined);
+          }}
           onAddNote={addNote}
           onAddFile={addFile}
           {...(busy === undefined ? {} : { busy })}
+          {...(noteError === undefined ? {} : { noteError })}
           {...(error === undefined ? {} : { error })}
           {...(added === null
             ? {}
@@ -367,16 +376,16 @@ export function KnowledgePage() {
               })}
         />
         </div>
-        <KnowledgePreviews />
+        <KnowledgePreviews showSampleQuestions={isStartingDesk} />
       </div>
     </>
   );
 }
 
 /** Static examples share the real source list’s card and row markup. */
-export function KnowledgePreviews() {
+export function KnowledgePreviews({ showSampleQuestions = true }: { showSampleQuestions?: boolean } = {}) {
   return <div className="cd-knowledge__previews">
-    <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} />
+    {showSampleQuestions ? <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} /> : null}
     <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
   </div>;
 }
