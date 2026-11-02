@@ -727,3 +727,63 @@ async def test_your_suggestions_never_accept_a_job_the_owner_asked_to_drop(
     assert [job.title for job in setup.accepted_jobs(current)] == [jobs[1].title, jobs[3].title]
     (write,) = fake.called(TOOLS)[writes:]
     assert [tool["title"] for tool in write.body["tools"]] == [jobs[1].title]
+
+
+NEW_SUMMARY = "Turner Plumbing fixes leaks and water heaters and installs water softeners around Oakland."
+NEW_AREA = "Oakland, Berkeley and Brooklyn"
+TWO_FACTS = "We install water softeners now, and cover Brooklyn too."
+
+
+async def test_each_fact_a_change_gives_off_its_question_is_asked_in_turn(app, browser, kernel_http, model, engine):
+    # One change, two facts the contact question can't record: the summary's question is asked, then the service
+    # area's, and the questions close only once both have landed.
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(turn("Noted, both of those.", summary=NEW_SUMMARY, service_area=NEW_AREA, next={"kind": "done"}))
+    changed = await reopen(owner, state, TWO_FACTS)
+    assert changed.status_code == 200, changed.text
+    assert (changed.json()["step"], changed.json()["question"]) == ("questions", "what_you_do")
+
+    first = await answer(owner, model, state["interview_id"], "We install water softeners too.",
+                         turn(summary=NEW_SUMMARY, next={"kind": "done"}))
+    assert first.status_code == 200, first.text
+    assert (first.json()["step"], first.json()["question"]) == ("questions", "hours_and_area")
+    assert first.json()["messages"][-1]["text"] == question_text("hours_and_area", "trade")
+    assert (await stored(engine, state["interview_id"]))["answers"]["summary"] == NEW_SUMMARY
+
+    # A follow-up on that question keeps the rest waiting; none is left here, so its answer closes the questions.
+    second = await answer(owner, model, state["interview_id"], "Brooklyn too.",
+                          turn(service_area=NEW_AREA, next={"kind": "done"}))
+    assert second.status_code == 200, second.text
+    assert second.json()["step"] == "tools"
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert (answers["summary"], answers["service_area"]) == (NEW_SUMMARY, NEW_AREA)
+
+
+async def test_a_follow_up_keeps_the_facts_still_to_ask(app, browser, kernel_http, model, engine):
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(turn("Noted, both of those.", summary=NEW_SUMMARY, service_area=NEW_AREA, next={"kind": "done"}))
+    assert (await reopen(owner, state, TWO_FACTS)).status_code == 200
+    # Claude asks a follow-up on the summary's question first: the service area still waits.
+    follow_up = await answer(owner, model, state["interview_id"], "Water softeners.",
+                             turn("Do you install them, or service them too?", step_done=False))
+    assert follow_up.status_code == 200 and follow_up.json()["question"] == "what_you_do", follow_up.text
+    after = await answer(owner, model, state["interview_id"], "Install only.",
+                         turn(summary=NEW_SUMMARY, next={"kind": "done"}))
+    assert after.status_code == 200 and after.json()["question"] == "hours_and_area", after.text
+
+
+async def test_your_suggestions_clear_the_facts_still_to_ask(app, browser, kernel_http, model, engine):
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(turn("Noted, both of those.", summary=NEW_SUMMARY, service_area=NEW_AREA, next={"kind": "done"}))
+    assert (await reopen(owner, state, TWO_FACTS)).status_code == 200
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan="Your Desk books weekday visits."))
+    closed = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions", json={})
+    assert closed.status_code == 200 and closed.json()["step"] == "tools", closed.text
+    current = await setup._read(engine, owner, state["interview_id"])
+    assert not any(entry.asks_after for entry in current.transcript)
+
+    # The next change starts with nothing waiting: Claude has nothing more to ask, so the questions close again.
+    model.add(turn("Closed on Saturdays, noted.", next={"kind": "done"}))
+    model.add(next_step("contact_and_after_hours", next={"kind": "done"}, plan="Your Desk books weekday visits."))
+    again = await reopen(owner, state)
+    assert again.status_code == 200 and again.json()["step"] == "tools", again.text

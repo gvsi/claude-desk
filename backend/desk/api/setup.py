@@ -558,6 +558,9 @@ class Entry(BaseModel):
     # idempotency key and its body's hash, which a repeat must match.
     reopen_key: str | None = None
     reopen_sha256: str | None = None
+    # On a question code asks for a fact a change gave off its own question (`_held_off_topic`): the other such facts'
+    # questions, asked in turn after it, before the questions close.
+    asks_after: list[QuestionKey] = []
 
 
 class ConnectedApp(BaseModel):
@@ -748,7 +751,7 @@ def _stored(interview: Interview) -> dict:
             "transcript": [entry.model_dump(mode="json", exclude={name for name, value in entry
                                                                  if value is None or
                                                                  (name in {"choices", "covered", "planned", "dropped", "cards", "owner_fields",
-                                                                           "owner_decided",
+                                                                           "owner_decided", "asks_after",
                                                                            "connector_connect_attempted"}
                                                                   and not value)})
                            for entry in interview.transcript],
@@ -2705,6 +2708,8 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     model: the patch merged into the answers, Claude's reply, and the next ask or the close."""
     since = len(interview.transcript)
     desk_id = interview.desk_id
+    # The questions still to ask for facts a change gave off their own questions, waiting on the one answered.
+    waiting = list(interview.latest_ask.asks_after) if interview.latest_ask is not None else []
     _hold_unless_kept(interview, key)
     turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                             [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
@@ -2743,17 +2748,20 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             updated.suggested_fields.append(name)
     # Once "Change something" reopened the questions, a change to a fact this question doesn't record, which
     # `merged` kept out of the answers (free text is never taken off its topic), is asked on the question that records
-    # it, right after Claude's reply: the owner's words then land there instead of being dropped.
+    # it, right after Claude's reply: the owner's words then land there instead of being dropped. Each such question
+    # is asked in turn, the rest waiting on the one asked (`asks_after`), and the questions close only after the last.
     held = _held_off_topic(interview.answers, updated, patch, key) if interview.reopens else []
+    homes = [home for home in dict.fromkeys([*held, *waiting]) if home != key]
     interview.answers = updated
     interview.transcript += entries
-    if held:
+    if held or (turn.step_done and homes):
         if turn.step_done:
             interview.cover([key])
         if not any(entry is reply for entry in interview.transcript):
             interview.transcript.append(reply)
         _record_plan(interview, turn, reply)
-        asked = _ask(interview, held[0])
+        asked = _ask(interview, homes[0])
+        asked.asks_after = homes[1:]
         replies.before(asked.question)
         interview.transcript.append(asked)
     elif turn.step_done:
@@ -2773,6 +2781,9 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         _record_plan(interview, turn, reply)
     await _ensure_answerable(ctx, engine, model, interview, since=since, replies=replies, key=key,
                              follow_up=turn if not turn.step_done else None)
+    asked = interview.latest_ask
+    if homes and not held and not turn.step_done and asked is not None and asked.question == key:
+        asked.asks_after = homes             # a follow-up on this question: the rest still wait on it
 
 
 # "Change something": the chat again, from a later step ------------------------------------------------------------
@@ -2913,6 +2924,8 @@ async def close_setup(owner, engine, model, interview: Interview, *, answered: b
     if interview.offering:
         interview.step = "tools"
         return
+    for entry in interview.transcript:
+        entry.asks_after = []                # closing ("Use your suggestions", say) asks no fact a change left
     settle_plan(interview)
     plan = ""
     for attempt in range(2):
