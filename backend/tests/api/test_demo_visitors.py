@@ -7,6 +7,10 @@ an in-process transport that streams (`StreamingLoopback`: httpx's own in-proces
 which an event stream never ends). The model is scripted per route (`ByRoute`): the demo visitor's structured steps,
 and the Desk's conversation turns on its session. Its sleep is the test's (`Sleeps`): a human pause passes at once,
 and a longer wait (a timer) holds until the test lets it pass, which moves the clock by its length.
+
+Timing regressions control the event boundary or block the operation under test; they never call a real model.
+For each runner fix, first run its regression against the unchanged runner and record RED, then change the runner
+and record GREEN in a separate run. Repeat this file five times after the final change to check async timing.
 """
 
 import asyncio
