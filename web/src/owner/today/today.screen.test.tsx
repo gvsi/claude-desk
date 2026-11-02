@@ -757,12 +757,12 @@ describe('Today', () => {
 
   it('notifications_are_counted_in_the_sidebar_on_every_page', async () => {
     // Notifications is the sidebar's, under Safety, on every page of a Desk: read once as the frame
-    // first draws, and not again as the owner moves between pages. The demo bar keeps Start over alone.
+    // first draws, and not again as the owner moves between pages. The demo bar keeps Reset demo alone.
     const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
     const row = mainNav(screen).getByRole('link', { name: 'Notifications 1 unread', exact: true });
     await expect.element(row).toBeVisible();
-    expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Start over']);
+    expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Reset demo']);
     expect(requests('ownerInbox')).toHaveLength(1);
 
     // On to Today, which opens without reading them again; the sidebar keeps the count.
@@ -786,6 +786,9 @@ describe('Today', () => {
     await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
 
+    // Dropped between Conversations' polls: a poll still out would reach the hold below, though
+    // sent before it, and be counted as Today's read.
+    await expect.poll(() => queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('idle');
     queryClient.removeQueries({ queryKey: needsYouKey(RIVERA.deskId) });
     const needsYou = holdReads(needsYouPath);
     await mainNav(screen).getByRole('link', { name: 'Today' }).click();

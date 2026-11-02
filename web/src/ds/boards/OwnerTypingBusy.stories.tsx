@@ -37,7 +37,7 @@ function DanaSeesMaria({ landed }: { landed: boolean }) {
 const BUSY_ROWS = [
   { variant: 'primary', label: 'Start the demo' },
   { variant: 'secondary', label: 'Allow this time' },
-  { variant: 'ghost', label: 'Start over' },
+  { variant: 'ghost', label: 'Reset demo' },
 ] as const;
 
 function OwnerTypingBusy() {
