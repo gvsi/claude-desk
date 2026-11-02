@@ -1,6 +1,6 @@
 # Claude Desk
 
-Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes payments under the owner's rules, and it can't be talked around.
+Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes payments under the owner's rules.
 
 The demo business is Turner Plumbing. You play Mike Turner, its owner, while Claude answers his customers and their agents.
 
@@ -47,6 +47,10 @@ The kernel, API, web app, eval suites and AWS deployment are implemented on `mai
 
 Connector management screens and the Channels settings page are not built. The built-in tools do not provide client document upload, staff scheduling, recurring bookings or an external calendar connection. Real payment processing, verification by possession of a contact and delivery of email, text or push notifications remain outside this prototype.
 
+## What we left out on purpose
+
+Real payments and real delivery of verification codes, so the safety boundary could be shown end to end without a provider; phone and email channels; staff scheduling and external calendars; connector management. Each would widen the surface without changing the one idea: a public Claude that acts for its owner and can't act past the owner's rules.
+
 ## Security model
 
 The [threat model's controls table](docs/threat-model.md#controls) names the implementation and tests for each control, with the prototype's limits.
@@ -92,6 +96,8 @@ Then open the address Vite prints. Model features need an Anthropic API key: add
 
 Claude Desk was built with Claude Code. Claude Opus 5.5 agents wrote the plans and the code, test first and one task at a time, and each task was reviewed before it was committed. Every plan and pull request went to a review panel of models at extra-high reasoning (Claude Opus 5.5 and GPT-6.1 Sol, with other seats on some rounds); each plan's Review Ledger names its seats and what they found, and [docs/reviews/](docs/reviews/) holds the reviews of the first master plan. [AGENTS.md](AGENTS.md) holds the rules every agent works under, including the safety invariants no change may weaken.
 
+Three calls I made against what the agents or reviewers pushed for: a Desk resolves what it can and asks the visitor before involving the owner, instead of handing off by default; payments are fully mocked, with no provider keys, so the safety boundary shows without one; and every screen was designed and signed off before any interface code.
+
 ## Documents
 
 - [Capability prediction](docs/capability-prediction.md)
@@ -106,4 +112,4 @@ Claude Desk was built with Claude Code. Claude Opus 5.5 agents wrote the plans a
 
 ---
 
-Concept prototype by Giovanni Alcantara, not an Anthropic product
+Concept prototype by [Giovanni Alcantara](https://www.linkedin.com/in/giovannialcantara/), not an Anthropic product
