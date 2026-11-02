@@ -316,7 +316,7 @@ it('reload_opens_today_without_waiting_for_the_notifications', async () => {
 
 it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_desks at %s', async (viewport) => {
   // The notifications are read with the Desks, so once they are in before them, the frame lands
-  // where its shapes drew it, the demo bar with Start over alone, and reads them only the once.
+  // where its shapes drew it, the demo bar with Reset demo alone, and reads them only the once.
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   await expectSkeletonLoad({
@@ -330,7 +330,7 @@ it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_
     },
     release: desks.release,
   });
-  expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Start over']);
+  expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Reset demo']);
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 

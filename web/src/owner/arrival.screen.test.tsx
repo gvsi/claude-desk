@@ -1,7 +1,7 @@
 /**
  * The first visit and the owner's frame in a real browser against the mock API: the intro dialog
  * over a still preview of Turner's Today, the passcode that opens a fresh copy, and the owner
- * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, start over),
+ * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, Reset demo),
  * with the public page always a new tab away and never opened on Today itself.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
@@ -565,7 +565,7 @@ describe('Arrival', () => {
     const tryAgain = screen.getByRole('button', { name: 'Try again' });
 
     // The Desks reads since the demo last started. A count from the mock's reset would also hold
-    // Start over's own reads, which can reach the mock after it.
+    // Reset demo's own reads, which can reach the mock after it.
     let desksBefore = 0;
     const desksReadSinceStart = () => requests('desks').length - desksBefore;
     /** Starts the demo with the copy's Desks lost on the network `lost` times, and watches the way to Today. */
@@ -577,10 +577,10 @@ describe('Arrival', () => {
       await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
       return pages;
     };
-    /** Start over, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
+    /** Reset demo, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
     const startOverThenEnd = async () => {
-      await screen.getByRole('button', { name: 'Start over' }).click();
-      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('button', { name: 'Reset demo' }).click();
+      await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
       await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
       // The new copy's own Today drawn (the greeting alone could be the old Today's), and its Desks
       // reads over: a read still on its way would otherwise land after the reset, in the next
@@ -1463,9 +1463,9 @@ describe('OwnerLayout', () => {
 
   it('start_over_confirms_first', async () => {
     const { screen, router } = await renderRoute(TODAY);
-    const startOver = screen.getByRole('button', { name: 'Start over' });
+    const startOver = screen.getByRole('button', { name: 'Reset demo' });
     await startOver.click();
-    const dialog = screen.getByRole('dialog', { name: 'Start over with a fresh copy?' });
+    const dialog = screen.getByRole('dialog', { name: 'Reset demo?' });
     await expect.element(dialog).toBeVisible();
     await expect
       .element(dialog.getByText("You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind.", { exact: true }))
@@ -1474,7 +1474,7 @@ describe('OwnerLayout', () => {
 
     // Escape keeps this copy.
     await userEvent.keyboard('{Escape}');
-    await expect.element(screen.getByRole('dialog', { name: 'Start over with a fresh copy?' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('dialog', { name: 'Reset demo?' })).not.toBeInTheDocument();
     await expect.element(startOver).toHaveFocus();
     expect(requests('startOver')).toEqual([]);
 
@@ -1486,7 +1486,7 @@ describe('OwnerLayout', () => {
     // Confirmed: one start over, and the new copy's first Today, with no "not found" on the way.
     const sawNotFound = watchFor("This page doesn't exist");
     await startOver.click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     const fresh = mockStore.world.ids.deskId;
     expect(fresh).not.toBe(RIVERA.deskId);
@@ -1508,8 +1508,8 @@ describe('OwnerLayout', () => {
     expect(requests('ownerInbox')).toHaveLength(1);
 
     // Straight away, while this copy's inbox was just read: the new copy's Today reads its own.
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${mockStore.world.ids.deskId}/today`);
     await expect.element(heldCard(screen)).toBeVisible();
     await expect.element(notificationsRow(screen)).toBeVisible();
@@ -1533,11 +1533,11 @@ describe('OwnerLayout', () => {
     // Today opens without it; the sidebar counts the notifications once their read is in.
     await expectTodayOpensWithoutItsInbox();
 
-    // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    // Reset demo while this copy's first inbox read is out, and hold the new copy's Desks.
     const newInbox = holdReads(ROUTES.ownerInbox.path);
     const newDesks = holdReads(ROUTES.desks.path);
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     const fresh = `/app/${mockStore.world.ids.deskId}/today`;
     expect(router.state.location.pathname).toBe(fresh);
@@ -1577,7 +1577,7 @@ describe('OwnerLayout', () => {
     const heading = screen.getByRole('heading', { level: 1, name: /, Mike$/ });
     const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
 
-    // An Answering change is still out when Start over opens a fresh copy, and fails after it:
+    // An Answering change is still out when Reset demo opens a fresh copy, and fails after it:
     // refused (the old copy's Desk is gone), then with its answer lost.
     for (const status of [404, 'network'] as const) {
       await expect.element(heading).toBeVisible();
@@ -1589,8 +1589,8 @@ describe('OwnerLayout', () => {
       await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
       await expect.element(answering).toHaveAttribute('aria-checked', 'false');
 
-      await screen.getByRole('button', { name: 'Start over' }).click();
-      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('button', { name: 'Reset demo' }).click();
+      await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
       await expect.poll(() => router.state.location.pathname).not.toBe(before);
       const fresh = `/app/${mockStore.world.ids.deskId}/today`;
       expect(router.state.location.pathname).toBe(fresh);
@@ -2028,8 +2028,8 @@ describe('Things to try ticks off', () => {
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
     await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     // The new copy's list has nothing done, and its held request waits.
     await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
