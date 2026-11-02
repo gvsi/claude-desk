@@ -44,7 +44,8 @@ function doneIn(items: readonly OwnerTranscriptItem[], index: number, message: E
  * a hold or refusal after the action isn't hidden behind it. A draft the check stopped and Claude
  * rewrote stays in the turn, so the scan steps over it. A reply that hands the chat to the owner
  * names no action: the handoff is what happened last. The owner's and the Desk's own messages are
- * theirs, not an action's.
+ * theirs, not an action's. The turn is read from the items the owner's transcript shows: a status
+ * counts when nothing shown comes between it and the reply.
  */
 function actionBefore(items: readonly OwnerTranscriptItem[], index: number, message: EvMessage): string | null {
   if (message.author !== 'claude') return null;

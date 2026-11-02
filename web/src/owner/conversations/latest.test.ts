@@ -107,6 +107,10 @@ describe('latestOf', () => {
     }
     // A later hold in the same turn isn't hidden behind the action before it.
     expect(latestOf(chat(words('visitor_text', 'Quote it with 15% off.'), status('executed', { plain: QUOTED }), status('held'), reply([blocks.quote.en])))).toBe(REPLY_CHECKED);
+    // An earlier hold in the turn, then an action that ran: the line names that action, the last
+    // thing done before the reply. The hold still shows where held requests do: the list's "Needs
+    // you" and Today.
+    expect(latestOf(chat(words('visitor_text', '15% off, and what times are open?'), status('held'), status('executed', { plain: TIMES_READ }), reply([blocks.booking_options.en])))).toBe(TIMES_READ);
     // What ran in an earlier turn isn't this reply's.
     expect(latestOf(chat(status('executed', { plain: QUOTED }), reply([blocks.quote.en]), words('visitor_text', 'Thanks!'), reply([blocks.prose.details.en])))).toBe(REPLY_CHECKED);
     // A reply that hands the chat to the owner is what happened last, whatever ran before it.
