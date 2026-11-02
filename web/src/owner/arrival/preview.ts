@@ -74,8 +74,6 @@ const DESK_ID = 'preview-desk';
 export interface StillToday {
   business: BusinessOut;
   desk: DeskSummary;
-  /** The conversations live now, which the sidebar counts beside Conversations. */
-  liveCount: number;
   /** The notifications the owner hasn't seen, which the sidebar counts beside Notifications. */
   unreadCount: number;
   /** What each of Today's reads answers, by the read's key. */
@@ -225,7 +223,6 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
   return {
     business,
     desk,
-    liveCount: todayRead.live.length,
     // A new copy's notifications, all unread: nothing in it has been seen.
     unreadCount: inbox.length,
     reads: [

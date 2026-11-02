@@ -48,6 +48,7 @@ import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { nameOf, whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
+import { useConversationRead } from './useConversationRead.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
 
 /** Plan 02's limit on the owner's words. */
@@ -265,6 +266,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
   // way the pane ends up draws inside the one region, so it stays mounted as they change.
   const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
+  // The owner's own preview is never unread, and the API answers 404 for its marker, so it isn't marked.
+  useConversationRead(deskId, sessionId, !loading && readSinceOpened && summary?.owner_preview !== true
+    ? chat.data.items.reduce((max, item) => Math.max(max, item.n), 0)
+    : undefined);
   const opened = useRef(false);
   useLayoutEffect(() => {
     if (loading || chat.data === undefined || opened.current) return;
