@@ -53,7 +53,7 @@ Before scaling, load-test three things: slow and reconnecting readers of the liv
 
 ## Latency and cost per conversation
 
-Each source names its report, pass, date and latency run. Full turns come from the latency run's scripted turns, 20 each of questions, quotes and bookings, not from the eval conversations; its slowest turns are bookings, which wait on a decision and on a second Opus call after the tool. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column shows an estimate where the [master plan](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) gives one, beside local measurements, with the conversation size it assumed.
+Each source names its report, pass, date and latency run. Full turns come from the latency run's scripted turns, 20 each of questions, quotes and bookings, not from the eval conversations; its slowest turns are mostly bookings. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column shows an estimate where the [master plan](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) gives one, beside local measurements, with the conversation size it assumed.
 
 | Metric | Environment | Value | Source | Planned estimate |
 |---|---|---|---|---|
