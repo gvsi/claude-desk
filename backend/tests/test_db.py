@@ -1387,19 +1387,26 @@ def test_handoff_kinds_come_back_from_their_rows_under_forced_row_security(scrat
 
 
 def test_the_previous_release_writes_call_backs_as_it_did(scratch):
-    """During a deploy the previous release's kernel serves beside the migrated database, and it
-    writes a call-back's handoff naming no kind, beside any other open handoff of the session's, as
-    it always has: each insert still succeeds, as a call-back. One open handoff per session is kept
-    by this release's code, under the session row, not by the table."""
+    """During a deploy the previous release's kernel serves beside the migrated database. A
+    call-back's handoff written naming no kind is still a call-back, and a call-back request that
+    closes the session's open handoff, then writes its own in the same transaction, as the kernel
+    has since #238, still succeeds: the table's one open handoff per session
+    (kernel_one_open_handoff) admits it, and refuses only a second open one beside the first."""
     admin = scratch.conn
+
+    def insert(handoff_id: str) -> None:
+        admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
+                      " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
+                      (handoff_id, f"act-{handoff_id}"))
+
     try:
-        for handoff_id in ("handoff-old-a", "handoff-old-b"):
-            admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
-                          " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
-                          (handoff_id, f"act-{handoff_id}"))
+        insert("handoff-old-a")
+        with admin.transaction():
+            admin.execute("UPDATE kernel.handoffs SET status = 'done' WHERE handoff_id = 'handoff-old-a'")
+            insert("handoff-old-b")
         rows = admin.execute("SELECT handoff_id, kind, status, created_at FROM kernel.handoffs"
                              " WHERE copy_id = 'copy-old' ORDER BY handoff_id").fetchall()
-        assert rows == [("handoff-old-a", "callback", "open", None), ("handoff-old-b", "callback", "open", None)]
+        assert rows == [("handoff-old-a", "callback", "done", None), ("handoff-old-b", "callback", "open", None)]
     finally:
         admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-old'")
 
