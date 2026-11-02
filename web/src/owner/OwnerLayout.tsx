@@ -41,7 +41,7 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { skeletonSetupOf } from './today/TodaySkeleton.tsx';
-import { rememberedSetup, rememberSetup } from './today/todaySetupMemory.ts';
+import { rememberedSetup, rememberSetups } from './today/todaySetupMemory.ts';
 import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
 import { InboxOpenContext } from './inbox/inboxOpen.ts';
 import { OwnerInbox } from './inbox/OwnerInbox.tsx';
@@ -208,10 +208,11 @@ function DeskGate({ deskId }: { deskId: string }) {
   // draws the card from its first frame instead of dropping everything under it when the Desks arrive.
   const [remembered] = useState(() => rememberedSetup(deskId));
   const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk);
-  const listedShape = found === null ? null : JSON.stringify(skeletonSetupOf(found.desk) ?? null);
+  // Each settled read of the Desks rewrites the record: their unfinished Desks only.
+  const settledDesks = desks.data !== undefined && !desks.isFetching ? desks.data : null;
   useEffect(() => {
-    if (listedShape !== null) rememberSetup(deskId, JSON.parse(listedShape) ?? undefined);
-  }, [deskId, listedShape]);
+    if (settledDesks !== null) rememberSetups(settledDesks);
+  }, [settledDesks]);
 
   const titleId = useId();
   const failed = desks.isError && !desks.isFetching;

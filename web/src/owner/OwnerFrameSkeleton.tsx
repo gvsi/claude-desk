@@ -42,7 +42,8 @@ function pageShapes(
 
 /**
  * Exact routes only: later tasks add their pages here, while detail pages keep an empty area.
- * `setup` is the Desk's unfinished setup once the copy's Desks say so, which Today draws first.
+ * `setup` is the Desk's unfinished setup as the copy's Desks say, or, until they are read, as this
+ * browser last saw it (`todaySetupMemory.ts`), which Today draws first.
  */
 export function pageSkeletonFor(
   pathname: string,
@@ -60,7 +61,8 @@ export function pageSkeletonFor(
 
 /**
  * The owner's frame at the current address, with the same gutters and footer as the landed frame.
- * `setup`: the Desk's unfinished setup, once the copy's Desks are read and say it isn't live.
+ * `setup`: the Desk's unfinished setup as the copy's Desks say, or, until they are read, as this
+ * browser last saw it (`todaySetupMemory.ts`).
  */
 export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setup?: SkeletonSetup }) {
   const { search } = useLocation();

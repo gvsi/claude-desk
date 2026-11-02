@@ -342,6 +342,24 @@ it.each([
   expect(Math.max(...howTops) - Math.min(...howTops), 'How your Desk works never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });
 
+it('a_desk_no_longer_in_the_copy_is_forgotten_once_the_desks_are_read', async () => {
+  // A Desk deleted, or from an earlier copy, leaves the record when a read of the Desks doesn't list it;
+  // an unreadable record is no record at all.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
+  const gone = await renderRoute('/app/desk-gone/today');
+  await expect.element(gone.screen.getByRole('heading', { level: 1 })).toBeVisible();
+  await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+  await cleanup();
+  for (const bad of ['not json', '[1]', JSON.stringify({ [RIVERA.deskId]: { step: 'live', answering: true, business: 'x' } })]) {
+    writeLocal('todaySetup', bad);
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+    expect(document.querySelector('.cd-continue-setup'), bad).toBeNull();
+    await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+    await cleanup();
+  }
+});
+
 it('a_desk_that_went_live_is_forgotten_and_draws_no_card_on_a_reload', async () => {
   // A Desk remembered unfinished that is live when the Desks are read leaves the record.
   writeLocal('todaySetup', JSON.stringify({ [RIVERA.deskId]: { step: 'rules', answering: true, business: 'Turner Plumbing' } }));
