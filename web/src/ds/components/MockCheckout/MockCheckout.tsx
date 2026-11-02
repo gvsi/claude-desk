@@ -66,10 +66,10 @@ export interface MockCheckoutProps {
    */
   customerName?: string;
   /**
-   * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Once paid
-   * or cancelled for any reason but a rule change, "Go back to the chat" links there, in the same
-   * tab. Anything but a public chat's path is ignored, and the line keeps its original words with
-   * no link.
+   * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Paid and
+   * cancelled lines link "Go back to the chat"; expired and rule-change lines link "the chat",
+   * in the same tab. Anything but a public chat's path is ignored, and the line keeps its
+   * original words with no link.
    */
   chatHref?: string;
   /** A request to pay or cancel is in flight. The pressed button spins; Pay does when none was pressed here. */
@@ -146,10 +146,9 @@ export function MockCheckout({
   const final: FinalPaymentState = isFinal(state) ? state : 'unknown';
   // A blank name is no name: the card then asks for one.
   const nameOnCard = customerName?.trim();
-  // The visitor's completed or cancelled checkout uses the same link back to a known chat.
-  const parts = copy.returnLine[final];
-  const canReturn = parts !== undefined && !(final === 'cancelled' && cancelReason === 'rules_changed');
-  const back = canReturn && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
+  // Each line that sends the visitor to the chat uses the same validated, same-tab link.
+  const parts = copy.returnLine[final === 'cancelled' && cancelReason === 'rules_changed' ? 'rules_changed' : final];
+  const back = parts !== undefined && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
   const finalLine =
     back !== null && parts !== undefined ? (
       <span>
