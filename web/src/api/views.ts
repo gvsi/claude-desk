@@ -79,6 +79,11 @@ export interface ConversationSummary {
   /** The verified person's name, else the session's lead's, else null. Untrusted. */
   display_name: string | null;
   verified: boolean;
+  /**
+   * The person on record a visitor's chat was verified as, which their page under People lists it
+   * by; null for an unverified visitor, an agent and the owner's preview. Absent is null.
+   */
+  person_id?: string | null;
   mode: SessionMode;
   last_activity: string;
   outcome_counts: Partial<Record<DecisionState, number>>;
@@ -365,6 +370,14 @@ export interface Attempt {
    * refusal the API can't place. The API sends it on every entry, and only a refused one may have one.
    */
   cause: RefusalCause | null;
+  /**
+   * What the visitor (or visiting agent) wrote in the turn that made a refused request: at most two
+   * of their lines since Claude's last reply before the refusal's receipt in the chat, each with
+   * whitespace collapsed and, past 200 characters, cut to 199 and "…", joined with " · "; if that
+   * window is empty, the newest line before the receipt. Null for a held request, a stopped draft,
+   * and a refusal whose receipt isn't in the chat. Untrusted.
+   */
+  from_the_visitor: string | null;
 }
 
 /** `GET /api/health`. */

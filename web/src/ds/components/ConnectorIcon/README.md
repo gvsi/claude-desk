@@ -5,6 +5,7 @@
 ## When to use
 
 - Beside a `ConnectorName` wherever a connector is named with its icon: a section on the Rules hub, a connector's page, a tool's source line, the picker, an offer card in the Ask Claude panel.
+- With `glyph`, beside a name that isn't a connector's, as a line icon on the same tile: Share's More channels draws each channel's (`app-window` for the website embed, `message-circle` for WhatsApp, `message-square` for iMessage, `phone` for phone calls; board REV-CHAN A), never a brand's mark.
 - Never on its own: the icon is `aria-hidden`, and the name beside it says what it is.
 
 ## What it shows

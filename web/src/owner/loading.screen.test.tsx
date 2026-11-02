@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
 import { useRef } from 'react';
 import { useTextLines } from '../lib/useTextLines.ts';
+import { readLocal, writeLocal } from '../lib/storage.ts';
 import { page } from 'vitest/browser';
 
 import type { LedgerPage } from '../api/contracts.ts';
@@ -299,6 +300,85 @@ it.each([
   await expectSetupCardLands(width, height, 'navigation');
 });
 
+it.each([
+  [390, 844],
+  [1440, 900],
+])('a_reload_draws_the_setup_card_before_the_desks_are_read_again at %i by %i', async (width, height) => {
+  // A reload reads the copy's Desks again. For a Desk this browser has seen unfinished, the loading
+  // page draws the "Not live yet" card's shape from its first frame, so nothing under it drops when
+  // the Desks arrive; the card then lands where its shape was.
+  const state = await deskLeftAtRules();
+  const today = `/app/${state.desk_id}/today`;
+  // A Desk this browser saw that the copy no longer has is dropped as the unfinished one is kept.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
+  const first = await renderRoute(today, { viewport: { width, height } });
+  await expect.element(first.screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true })).toBeVisible();
+  expect(JSON.parse(readLocal('todaySetup') ?? '{}'), 'only the unfinished Desk is remembered').toEqual({
+    [state.desk_id]: { step: 'rules', answering: expect.any(Boolean), business: 'Okafor Plumbing' },
+  });
+  await cleanup();
+
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  const tops = watchTop(() => document.querySelector(`${FRAME_LAYER} .cd-how`) ?? landedElement('.cd-how'));
+  const { screen } = await renderRoute(today, { viewport: { width, height } });
+  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+  await document.fonts.ready;
+  await nextFrames();
+  // Drawn from the loading page's first frame, before it is shown, while the Desks are still out.
+  expect(setupShapeIn('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer'), 'the first frame draws the card').not.toBeNull();
+  await vi.waitFor(() => expect(setupShapeIn(FRAME_LAYER)).not.toBeNull());
+  expect(desks.held(), 'the Desks are still being read').toBeGreaterThan(0);
+  await nextFrames();
+  const shape = setupShapeIn(FRAME_LAYER);
+  expect(shape, "the card's shape is drawn while the Desks are read").not.toBeNull();
+  const shapeTop = shape!.getBoundingClientRect().top;
+
+  desks.release();
+  const card = screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true });
+  await expect.element(card).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await nextFrames();
+  expect(Math.abs(card.element().getBoundingClientRect().top - shapeTop), "the card lands at its shape's top").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  const howTops = tops();
+  expect(Math.max(...howTops) - Math.min(...howTops), 'How your Desk works never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+});
+
+it('a_desk_no_longer_in_the_copy_is_forgotten_once_the_desks_are_read', async () => {
+  // A Desk deleted, or from an earlier copy, leaves the record when a read of the Desks doesn't list it;
+  // an unreadable record is no record at all.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
+  const gone = await renderRoute('/app/desk-gone/today');
+  await expect.element(gone.screen.getByRole('heading', { level: 1 })).toBeVisible();
+  await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+  await cleanup();
+  for (const bad of ['not json', '[1]', JSON.stringify({ [RIVERA.deskId]: { step: 'live', answering: true, business: 'x' } })]) {
+    writeLocal('todaySetup', bad);
+    // While the Desks are read, an unreadable record draws no card on the loading page.
+    const desks = holdReads(ROUTES.desks.path);
+    onTestFinished(desks.release);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+    await nextFrames();
+    expect(document.querySelector('.cd-owner-opening'), bad).not.toBeNull();
+    expect(document.querySelector('.cd-owner-opening .cd-continue-setup'), bad).toBeNull();
+    desks.release();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+    expect(document.querySelector('.cd-continue-setup'), bad).toBeNull();
+    await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+    await cleanup();
+  }
+});
+
+it('a_desk_that_went_live_is_forgotten_and_draws_no_card_on_a_reload', async () => {
+  // A Desk remembered unfinished that is live when the Desks are read leaves the record.
+  writeLocal('todaySetup', JSON.stringify({ [RIVERA.deskId]: { step: 'rules', answering: true, business: 'Turner Plumbing' } }));
+  const { screen } = await renderRoute(TODAY);
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+  await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+  expect(document.querySelector('.cd-continue-setup')).toBeNull();
+});
+
 it('reload_opens_today_without_waiting_for_the_notifications', async () => {
   // The notifications are the sidebar's count: Today opens with their read still out, the sidebar
   // counts none meanwhile, then counts them once the read is in.
@@ -316,7 +396,7 @@ it('reload_opens_today_without_waiting_for_the_notifications', async () => {
 
 it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_desks at %s', async (viewport) => {
   // The notifications are read with the Desks, so once they are in before them, the frame lands
-  // where its shapes drew it, the demo bar with Start over alone, and reads them only the once.
+  // where its shapes drew it, the demo bar with Reset demo alone, and reads them only the once.
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   await expectSkeletonLoad({
@@ -330,7 +410,7 @@ it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_
     },
     release: desks.release,
   });
-  expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Start over']);
+  expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Reset demo']);
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
@@ -504,7 +584,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
   // Each card's line wraps in its quarter of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 3, 1, 3] : [2, 4, 2, 3]).forEach((count, i) => {
+  (viewport === 'phone' ? [2, 3, 1, 3] : [2, 3, 2, 3]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -1942,7 +2022,9 @@ const SAFETY_ANCHORS: readonly SkeletonAnchor[] = [
     ['safety-detail-status', '.cd-attempt__status'], ['safety-detail-title', '.cd-attempt__reason'],
     ['safety-claim', '.cd-attempt__claim'], ['safety-origin', '.cd-attempt__origin'],
     ['safety-replayed', '.cd-attempt__what .cd-attempt__origin:last-child'],
-    ['safety-summary-label', '.cd-attempt__label'], ['safety-summary', '.cd-attempt__summary'],
+    // Claude's summary label, not the visitor's words' label above it on a refused request.
+    ['safety-summary-label', '.cd-attempt__part:has(> .cd-attempt__summary) > .cd-attempt__label'],
+    ['safety-summary', '.cd-attempt__summary'],
     ['safety-toggle-0', '.cd-attempt__toggle:first-child'], ['safety-toggle-1', '.cd-attempt__toggle:nth-of-type(2)'],
     ['safety-conversation', '.cd-attempt__conversation'],
   ].map(([name, page]) => ({ name: name!, page: page!, dimensions: ['bottom', 'height'] as const })),

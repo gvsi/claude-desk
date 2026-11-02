@@ -4,7 +4,7 @@
 
 ## When to use
 
-- On Settings › Alerts, under the `SectionHeader` "Set for a plumber" with its caption "From your business type", as N-Run2-Settings-Notifications draws it.
+- On Settings › Alerts, under the business type's `SectionHeader` ("Set for a plumber" on the sample business) with its caption "From your business type", as N-Run2-Settings-Notifications draws it.
 - Not for the alerts themselves, which are the Notifications page's, and not for anything the owner changes: the prototype sets alerts from the business type and offers no control.
 
 ## What the consumer provides

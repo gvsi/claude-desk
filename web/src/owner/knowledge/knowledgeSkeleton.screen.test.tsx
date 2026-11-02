@@ -10,9 +10,10 @@ import { OwnerFrameSkeleton } from '../OwnerFrameSkeleton.tsx';
 import { DESKS_KEY } from '../useDesks.ts';
 
 it.each([
+  // Every Desk shows its business's sample questions and more sources.
   { cache: 'starting', deskId: RIVERA.deskId, previews: 2 },
-  { cache: 'other desk', deskId: RIVERA.emergenciesDeskId, previews: 1 },
-  { cache: 'other business', deskId: RIVERA.deskId, previews: 1 },
+  { cache: 'other desk', deskId: RIVERA.emergenciesDeskId, previews: 2 },
+  { cache: 'other business', deskId: RIVERA.deskId, previews: 2 },
   { cache: 'none', deskId: RIVERA.emergenciesDeskId, previews: 2 },
 ])('knowledge_skeleton_with_$cache: $previews previews', async ({ cache, deskId, previews }) => {
   const queryClient = new QueryClient();

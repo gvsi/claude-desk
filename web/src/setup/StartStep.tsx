@@ -219,6 +219,7 @@ export function StartStep() {
         <TextField
           label={copy.field}
           multiline
+          placeholder={copy.placeholder}
           value={description}
           onChange={(next) => {
             setDescription(next);

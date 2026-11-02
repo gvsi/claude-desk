@@ -55,6 +55,24 @@ describe('ask claude', () => {
     expectNoHorizontalScroll();
   });
 
+  it('the_panels_box_shows_an_example_question', async () => {
+    // Once the panel is open, its own box shows an example of what to ask, under the same name;
+    // the Rules page's box keeps its own words.
+    const { screen } = await renderRoute(RULES);
+    const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule', exact: true });
+    await expect.element(composer).toHaveAttribute('placeholder', 'Ask Claude to change a rule');
+    await composer.fill(ASK);
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('complementary', { name: 'Ask Claude', exact: true });
+    await expect.element(panel.getByRole('heading', { level: 2, name: 'Ask Claude', exact: true })).toBeVisible();
+    const box = panel.getByRole('textbox', { name: 'Ask Claude', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', 'What happens if someone asks for a discount?');
+    // One line in the empty box, clipped nowhere: the panel's 400 px hold the whole example.
+    await expect.element(box).toHaveValue('');
+    expect(box.element().scrollWidth).toBeLessThanOrEqual(box.element().clientWidth);
+    expect(box.element().scrollHeight).toBeLessThanOrEqual(box.element().clientHeight);
+  });
+
   it('the_page_under_the_header_has_no_vertical_jump', async () => {
     // Beside the panel at 1440 px, the header's subtitle takes a second line, so everything under
     // the header sits 20 px lower; closing, it goes back up. That move is a glide too: on the first

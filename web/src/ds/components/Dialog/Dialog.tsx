@@ -6,15 +6,17 @@ import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import './Dialog.css';
 
 export interface DialogProps {
-  /** The question, which names the dialog: "Delete Emergencies for Turner Plumbing?", "Start over with a fresh copy?". */
+  /** The question, which names the dialog: "Delete “Emergencies” for Turner Plumbing?", "Reset demo?". */
   title: ReactNode;
   /** What happens, in plain words, which describes the dialog. */
   body: ReactNode;
-  /** The button that does it: "Delete Desk", "Start over". */
+  /** The button that does it: "Delete Desk", "Reset demo". */
   confirmLabel: string;
+  /** The confirm button look: primary by default, or danger for a delete that cannot be undone. */
+  confirmVariant?: 'primary' | 'danger';
   /** The button that leaves things as they are: "Keep it", "Keep this copy". */
   cancelLabel: string;
-  /** `danger` adds a refused dot beside the title, for something that can't be undone; the buttons stay neutral. */
+  /** `danger` adds only a refused dot beside the title; no signed screen uses it. Use the danger value of `confirmVariant` for the delete look. */
   tone?: 'default' | 'danger';
   /** The confirmation is being sent: both buttons wait with `aria-busy`, and Escape does nothing. */
   pending?: boolean;
@@ -32,7 +34,7 @@ const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]), select
  * button, the least destructive answer, and stays inside until it closes; Escape cancels; focus
  * then returns to whatever opened it.
  */
-export function Dialog({ title, body, confirmLabel, cancelLabel, tone = 'default', pending = false, onConfirm, onCancel }: DialogProps) {
+export function Dialog({ title, body, confirmLabel, cancelLabel, confirmVariant = 'primary', tone = 'default', pending = false, onConfirm, onCancel }: DialogProps) {
   const ref = useRef<HTMLDialogElement>(null);
   // Set while the screen removes the dialog, so the close that removal causes isn't reported back.
   const removing = useRef(false);
@@ -126,7 +128,7 @@ export function Dialog({ title, body, confirmLabel, cancelLabel, tone = 'default
         <Button variant="secondary" size="main" waiting={pending} onClick={onCancel}>
           {cancelLabel}
         </Button>
-        <Button variant="primary" size="main" busy={pending} onClick={onConfirm}>
+        <Button variant={confirmVariant} size="main" busy={pending} onClick={onConfirm}>
           {confirmLabel}
         </Button>
       </div>

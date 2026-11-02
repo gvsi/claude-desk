@@ -145,7 +145,7 @@ export function GeneralPage() {
           <p className="cd-settings__row-line cd-settings__quiet cd-type-meta">{DELETE_LINE}</p>
           {/* Never a second delete while the first one's outcome is unknown. */}
           {unconfirmed ? null : (
-            <Button id={removeButtonId} variant="secondary" size="main" onClick={() => setConfirming(true)}>
+            <Button id={removeButtonId} variant="danger" size="main" onClick={() => setConfirming(true)}>
               Delete this Desk
             </Button>
           )}
@@ -169,11 +169,12 @@ export function GeneralPage() {
         <Dialog
           title={
             <>
-              Delete <bdi data-copy="user">{desk.name}</bdi> for <bdi data-copy="user">{business.name}</bdi>?
+              Delete “<bdi data-copy="user">{desk.name}</bdi>” for <bdi data-copy="user">{business.name}</bdi>?
             </>
           }
           body={DELETE_LINE}
           confirmLabel="Delete Desk"
+          confirmVariant="danger"
           cancelLabel="Keep it"
           pending={remove.isPending}
           onConfirm={() => remove.mutate()}
