@@ -23,7 +23,7 @@ export const ABOUT_PAGES: Record<AboutId, AboutPage> = {
   prediction: {
     route: '/about/prediction',
     title: 'Capability prediction',
-    summary: 'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
+    summary: 'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
   },
   proposal: {
     route: '/about/proposal',

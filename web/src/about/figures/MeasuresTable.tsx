@@ -21,16 +21,25 @@ export interface MeasuresTableProps {
    * cells counted as `documentText` lists them: the header's, then each row's.
    */
   block?: number;
+  /** Set column widths, in percent, for the table on a laptop (a colgroup on a fixed layout); none sizes them to its words. */
+  widths?: readonly number[];
 }
 
-export function MeasuresTable({ table, compact = false, block }: MeasuresTableProps) {
+export function MeasuresTable({ table, compact = false, block, widths }: MeasuresTableProps) {
   const columns = table.head.length;
   const docText = (cell: number) => (block === undefined ? {} : { 'data-doc-text': `${block}.${cell}` });
   const cellOf = (r: number, c: number) => docText(columns + r * columns + c);
 
   if (!compact) {
     return (
-      <table className="cd-about-measures cd-type-body">
+      <table className={`cd-about-measures${widths ? ' cd-about-measures--set' : ''} cd-type-body`}>
+        {widths ? (
+          <colgroup>
+            {widths.map((width, c) => (
+              <col key={c} style={{ width: `${width}%` }} />
+            ))}
+          </colgroup>
+        ) : null}
         <thead>
           <tr>
             {table.head.map((cell, c) => (
