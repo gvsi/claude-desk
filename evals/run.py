@@ -209,7 +209,7 @@ def _print_gate(judged: Any) -> None:
     """The gate's summary line, which counts the runs that skipped checks while a plan hadn't landed, then a
     line for each check they skipped and one for each reason the gate failed. A pass in which no run was
     judged reads "not evaluated", with nothing counted, then its other reasons."""
-    from evals.gate import not_evaluated, skipped_summary, violation_summary
+    from evals.gate import not_evaluated, refused_summary, skipped_summary, violation_summary
 
     if (why := not_evaluated(judged)) is not None:
         print(f"gate: not evaluated; {why}")
@@ -226,6 +226,8 @@ def _print_gate(judged: Any) -> None:
           f"{violation_summary(judged)}{skipped}")
     for check, runs in judged.skipped_checks.items():
         print(f"gate: in {runs} runs, {check}")
+    if judged.refused_runs:
+        print(f"gate: {refused_summary(judged.refused_runs)}")
     for reason in judged.reasons:
         print(f"gate: {reason}")
 
@@ -527,7 +529,8 @@ def report_inputs(pass_id: str, *, root: Path, null_baseline_id: str | None = No
             served_models=result.served_models, runs_per_scenario=config.runs, external=config.base_url is not None,
             dry_run=config.dry_run, null_baseline=config.null_baseline, stopped_by_budget=result.stopped_by_budget,
             pending=result.pending, heldout_sha256=result.heldout_sha256, spend=own[0],
-            simulator_fallbacks=result.simulator_fallbacks, runs=runs, uncovered=selection_problems(result, root),
+            simulator_fallbacks=result.simulator_fallbacks, runs=runs,
+            uncovered=selection_problems(result, root, excuse_refused=True),
             unchecked=unchecked_refusal(result, root))
     except ValidationError as error:
         raise ReportRefused(f"pass {pass_id} doesn't read as a report's pass ({error.error_count()} problems: "
@@ -551,7 +554,7 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
     """Each run of the pass as the report reads it, from its row and its transcript, and the artifacts of
     its judged legitimate runs. A transcript that is missing, unreadable, another run's, or holds another
     verdict than its row refuses."""
-    from evals.report import ReportRun, desk_turn_times
+    from evals.report import ReportRun, desk_calls_before_error, desk_turn_times
     from evals.tier2.passes import pass_dir
     from evals.tier2.runner import RunOutcome
 
@@ -583,7 +586,9 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
                 # An incomplete run keeps its error's kind; one with no error had a verdict that didn't fit a
                 # row, which the pass recorded as a harness (infra) error.
                 kind = outcome.error.kind if outcome.error is not None else "infra"
-                runs.append(ReportRun.from_run(scenario, row.split, error=kind, **common))
+                runs.append(ReportRun.from_run(scenario, row.split, error=kind,
+                                               desk_model_calls_before_error=desk_calls_before_error(outcome),
+                                               **common))
                 continue
             if verdict is None or artifact is None or outcome.error is not None or (
                     row.violations, row.success, row.false_holds, row.expected_allow, row.skipped) != (

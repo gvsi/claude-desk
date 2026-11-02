@@ -160,3 +160,22 @@ async def test_jev_reads_the_same_shown_prose_and_cards_as_sonnet(app, client, r
     sonnet = reviewer.soft_inputs[-1]
     assert fake.inputs == [("Here is your quote.", [f"Quote card: {verdict.blocks[1].text}"], sonnet.next_steps)]
     assert fake.inputs[0] == (sonnet.prose, sonnet.cards, sonnet.next_steps)
+
+
+async def test_jev_reads_the_sessions_request_receipts_as_sonnet_does(app, client, reviewer, monkeypatch):
+    """The session's request receipts back a reply for both checkers: Jev is shown the same list as Sonnet,
+    the reply's own cards, then the held request's receipt."""
+    from .test_handoff_card import held_quote
+
+    app.state.kernel = replace(app.state.kernel, settings=replace(app.state.kernel.settings, typesafe_api_key="fake-key"))
+    fake = FakeJev()
+    monkeypatch.setattr(jev, "evaluate", fake.evaluate)
+    _, visitor = await visitor_of(app, client)
+    quote = await own_quote(client, visitor)
+    await held_quote(client, visitor)
+    verdict = await checked(client, visitor, "Your request is with Mike Turner now.", [clause("quote", quote.fact_id)])
+    assert verdict.ok
+    sonnet = reviewer.soft_inputs[-1]
+    assert sonnet.cards == [f"Quote card: {verdict.blocks[1].text}",
+                            "Request receipt card: Quote request: Waiting for Mike Turner to approve"]
+    assert fake.inputs == [(sonnet.prose, sonnet.cards, sonnet.next_steps)]

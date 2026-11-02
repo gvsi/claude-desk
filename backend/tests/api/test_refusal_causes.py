@@ -25,7 +25,7 @@ from desk.kernel_service import decide
         ("no_such_quote", "quote_unpayable"), ("quote_paid", "quote_unpayable"), ("quote_paying", "quote_unpayable"),
         ("no_such_charge", "no_such_charge"), ("not_refundable", "not_refundable"),
         ("no_such_document", "no_such_document"), ("not_verified", None),
-        ("answer_count", "incomplete_request"),
+        ("answer_count", "incomplete_request"), ("contact_needed", "incomplete_request"),
         ("no_mandate", None), ("mandate_exhausted", None),
         ("not_an_agent_with_a_mandate", None),
     ]],

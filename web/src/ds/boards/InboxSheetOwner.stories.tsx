@@ -10,13 +10,14 @@ import { RiveraFrame } from './parts.tsx';
 import { expectOwnerFrame } from './spec.ts';
 
 /**
- * Two alerts about held requests, as the kernel writes them to the owner, newest last, each with
- * the request link the screen builds from the decision it names.
+ * Two alerts about held requests, as the kernel writes them to the owner, newest last, each titled
+ * with the alert's preview line and with the request link the screen builds from the decision it
+ * names.
  */
 const ALERTS: DemoInboxItem[] = (
   [
     {
-      notice: { entry_id: 'inbox-alert-saturday', to: 'owner', preview: 'A Saturday booking is waiting' },
+      notice: { entry_id: 'inbox-alert-saturday', to: 'owner', preview: 'A request needs your answer' },
       entry: {
         entry_id: 'inbox-alert-saturday',
         to: 'owner',
@@ -24,11 +25,12 @@ const ALERTS: DemoInboxItem[] = (
         body: 'A visitor asked for Saturday morning. Held by your rule: Saturday bookings ask you first.',
         created_at: '2026-10-30T09:58:00Z',
         decision_id: 'dec-rivera-saturday',
+        title: 'A request needs your answer',
       },
       time: 'Today, 9:58 am',
     },
     {
-      notice: { entry_id: 'inbox-alert-discount', to: 'owner', preview: 'A request is waiting for your answer' },
+      notice: { entry_id: 'inbox-alert-discount', to: 'owner', preview: 'A request needs your answer' },
       entry: {
         entry_id: 'inbox-alert-discount',
         to: 'owner',
@@ -36,6 +38,7 @@ const ALERTS: DemoInboxItem[] = (
         body: 'Dana Whitfield asked for 10% off a drain clearing. Held by your rule: Quotes from your price list, at list price.',
         created_at: '2026-10-30T10:46:00Z',
         decision_id: 'dec-rivera-discount',
+        title: 'A request needs your answer',
       },
       time: 'Today, 10:46 am',
     },
@@ -66,7 +69,7 @@ const meta = {
       'Built against the board in review; sign-off pending.',
       'The owner’s Demo inbox on Today: DemoInboxSheet as a 400 px side sheet over the dimmed, inert page, opened from its button under the greeting, which the board doesn’t draw; Today behind it is only its header, as the board draws it.',
       'Close keeps its focus edge, since focus moves to it when the sheet opens; the board draws it at rest.',
-      'Each alert reads as DemoInboxPanel draws an entry, “To owner”, the time, “Alert” and the kernel’s body, then “Open the request” as the board draws it; the board’s held dot and headline aren’t drawn, since a DemoInboxEntry carries only its kind and body.',
+      'Each alert reads as DemoInboxPanel draws an owner’s alert, “To owner”, the time, the alert’s title (its preview line, “A request needs your answer”) and the kernel’s body, then “Open the request” as the board draws it; the board’s held dot and its own headline aren’t drawn, since a DemoInboxEntry carries only its kind, title and body.',
       'The sidebar’s Connectors row belongs to another change.',
     ].join(' '),
   },
@@ -89,6 +92,11 @@ export const Board: Story = {
     const entries = within(sheet).getAllByRole('listitem');
     await expect(Math.round(entries[0]!.getBoundingClientRect().left)).toBe(1137);
     await expect(entries.map((entry) => entry.querySelector('.cd-demo-inbox__time')?.textContent)).toEqual(['Today, 10:46 am', 'Today, 9:58 am']);
+    // Each alert reads under the kernel's title for it, its preview line.
+    await expect(entries.map((entry) => entry.querySelector('.cd-demo-inbox__kind')?.textContent)).toEqual([
+      'A request needs your answer',
+      'A request needs your answer',
+    ]);
     // Each alert opens the held request it is about, as the board draws it.
     await expect(entries.map((entry) => within(entry).getByRole('link', { name: 'Open the request' }).getAttribute('href'))).toEqual([
       '#request-dec-rivera-discount',

@@ -41,6 +41,9 @@ import type {
   ConversationSummary,
   CopyOut,
   DemoAgentRun,
+  DemoVisitorIn,
+  DemoVisitorRun,
+  DemoVisitorStarted,
   DraftAddBody,
   GenerationBody,
   HealthOut,
@@ -123,6 +126,10 @@ export const ROUTES = {
   ownerMessage: { method: 'POST', path: '/api/owner/conversations/{session_id}/messages', owner: true },
   ownerTyping: { method: 'POST', path: '/api/owner/conversations/{session_id}/typing', owner: true },
   decision: { method: 'GET', path: '/api/owner/decisions/{decision_id}', owner: true },
+  startDemoVisitor: { method: 'POST', path: '/api/owner/desks/{desk_id}/demo_visitor', owner: true },
+  demoVisitor: { method: 'GET', path: '/api/owner/desks/{desk_id}/demo_visitor', owner: true },
+  demoVisitorRun: { method: 'GET', path: '/api/owner/desks/{desk_id}/demo_visitor/{run_id}', owner: true },
+  stopDemoVisitor: { method: 'POST', path: '/api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop', owner: true },
 
   // Safety
   safety: { method: 'GET', path: '/api/owner/desks/{desk_id}/safety', owner: true },
@@ -220,6 +227,10 @@ interface RouteShapes {
   ownerMessage: { body: OwnerMessageBody; response: OwnerMessageResult };
   ownerTyping: { body: GenerationBody; response: undefined };
   decision: { body: undefined; response: Decision };
+  startDemoVisitor: { body: DemoVisitorIn; response: DemoVisitorStarted };
+  demoVisitor: { body: undefined; response: DemoVisitorRun };
+  demoVisitorRun: { body: undefined; response: DemoVisitorRun };
+  stopDemoVisitor: { body: undefined; response: DemoVisitorRun };
 
   safety: { body: undefined; response: Attempt[] };
   ledger: { body: undefined; response: LedgerPage };

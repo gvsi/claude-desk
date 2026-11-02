@@ -4,7 +4,7 @@ import type { LedgerEntry, LedgerPage } from '../../api/contracts.ts';
 import { EmptyState, FullTrace } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { REPLAYED_LABEL, entryCopy, entryTime, originCopy, replayedOf } from './copy.ts';
-import { focusTrace } from './focusTrace.ts';
+import { focusTrace, useSideBySide } from './focusTrace.ts';
 
 export interface RecordListProps {
   page: LedgerPage;
@@ -53,6 +53,8 @@ export function RecordList({ page, devKey, timezone }: RecordListProps) {
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const trace = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
+  // Beside the list the trace scrolls inside itself, so Tab reaches it (Safety.css).
+  const scrollsItself = useSideBySide();
   const entries = [...page.entries].sort((a, b) => b.seq - a.seq);
   const open = openSeq === null ? null : (entries.find((e) => e.seq === openSeq) ?? null);
 
@@ -95,7 +97,13 @@ export function RecordList({ page, devKey, timezone }: RecordListProps) {
       </div>
       <div className="cd-safety__beside" ref={trace}>
         {open ? (
-          <FullTrace entry={open} chain={{ chain_ok: page.chain_ok, first_bad_seq: page.first_bad_seq }} devKey={devKey} onClose={close} />
+          <FullTrace
+            entry={open}
+            chain={{ chain_ok: page.chain_ok, first_bad_seq: page.first_bad_seq }}
+            devKey={devKey}
+            onClose={close}
+            tabIndex={scrollsItself ? 0 : -1}
+          />
         ) : (
           <p className="cd-safety__hint cd-type-meta">Choose an entry to see its full trace.</p>
         )}

@@ -472,7 +472,8 @@ async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, ke
                                                          jobs_connector, monkeypatch):
     # The visitor's discount waits for Mike, then they book a time at list price: the kernel closes the stale request,
     # and Mike's late answer reads why. Only his reads carry that line; the visitor's own read, the resume job, the
-    # chat's events and stored rows, and what Claude reads carry the signed state's line ("Cancelled") alone.
+    # chat's events and stored rows, and what Claude reads carry the signed visitor line alone ("Closed: your booking
+    # replaced this request").
     from desk.api import jobs
     from desk.api.routes import owner
 
@@ -482,7 +483,7 @@ async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, ke
     slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
     booking = await visitor.call("POST /decide", DecideRequest(
         session_id=held.session_id, generation=0,
-        call=ToolCall(call_id="book-1", tool="native.book", args={"slot_id": slot})))
+        call=ToolCall(call_id="book-1", tool="native.book", args={"slot_id": slot, "name": "Jane Doe", "contact": "jane@example.com"})))
     assert booking.state == "allowed", booking.reason_plain
     await visitor.call("POST /execute", ExecuteRequest(decision_id=booking.decision_id, session_id=held.session_id,
                                                        generation=0))
@@ -533,7 +534,7 @@ async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, ke
         updates = (await conn.execute(text(
             "SELECT text FROM app.messages WHERE session_id = :s AND kind = 'action_update'"),
             {"s": held.session_id})).scalars().all()
-    assert updates == ["Cancelled"]
+    assert updates == ["Closed: your booking replaced this request"]
     for serialized in (transcript.text, json.dumps([event.model_dump(mode="json") for _, event in events]),
                        json.dumps(rows), json.dumps(model.requests[-1].messages)):
         assert BOOKED_LINE not in serialized

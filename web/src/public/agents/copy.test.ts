@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 
 import { rivera } from '../../ds/fixtures/index.ts';
 import { AGENT_START_LOST_COPY, AGENT_START_RETRY_COPY } from '../../ds/index.ts';
-import { AGENTS_COPY, agentStartLostLine } from './copy.ts';
+import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASK_ROWS, DEMO_TASKS, agentStartLostLine } from './copy.ts';
 
 /** The words a node reads as, its elements' children included. */
 function textOf(node: ReactNode): string {
@@ -23,6 +23,27 @@ function centsIn(line: string): number[] {
 }
 
 describe('agents page copy', () => {
+  it('task_rows_include_every_task_once_in_order', () => {
+    expect(DEMO_TASK_ROWS.flat()).toEqual([...DEMO_TASKS]);
+  });
+
+  it('question_chips_match_each_business_type', () => {
+    expect(Object.values(DEMO_TASK_COPY.en).map((tasks) => tasks.ask_question)).toEqual([
+      'Ask about heater flushes',
+      'Ask about small repairs',
+      'Ask what to bring',
+      'Ask about pets',
+      'Ask what to know first',
+    ]);
+    expect(Object.values(DEMO_TASK_COPY.es).map((tasks) => tasks.ask_question)).toEqual([
+      'Preguntar por el lavado de calentadores',
+      'Preguntar por reparaciones pequeñas',
+      'Preguntar qué llevar',
+      'Preguntar por mascotas',
+      'Preguntar qué saber antes de la primera cita',
+    ]);
+  });
+
   it('lost_start_line_says_trying_again_is_safe', () => {
     // A lost start is retried with its key, so its line is the design system's retry-safe one, never
     // the reload line, which says a retry may run the agent twice and stays the reload fallback's.

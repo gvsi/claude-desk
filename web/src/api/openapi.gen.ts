@@ -22,7 +22,7 @@ export interface AboveMoneyCap {
 }
 /**
  * `GET /api/public/desks/{slug}/agent_card`: built by code from `PUBLIC_ORIGIN` and the slug, with no model
- * text; what agents may do here, and the AI disclosure, are the kernel's `PublicDesk.agent_card`.
+ * text; what agents may do here, one block per ability, is the kernel's `PublicDesk.agent_card`.
  */
 export interface AgentCardOut {
   endpoint: string;
@@ -53,7 +53,7 @@ export interface AgentRunStarted {
  */
 export interface AgentTasks {
   task_set: "rivera" | "trade" | "office" | "landlord" | "other";
-  tasks: ("book_visit" | "quote_and_deposit" | "push_the_limit")[];
+  tasks: ("book_visit" | "ask_question" | "quote_and_deposit" | "push_the_limit")[];
 }
 /**
  * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
@@ -208,7 +208,9 @@ export interface BriefingNewest {
  * the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
  * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
  * and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
- * refusals. Stopped drafts stay on Safety and out of the briefing.
+ * refusals. Stopped drafts stay on Safety and out of the briefing. `demo_visitor` is true for a thing in a demo
+ * visitor's chat (`owner_reads.demo_visitors`), whose `display_name` is then its persona's first name when the chat
+ * gave no name of its own.
  */
 export interface BriefingItem {
   kind: "turned_down" | "booking" | "lead" | "answer";
@@ -242,6 +244,7 @@ export interface BriefingItem {
         | "no_rule"
       )
     | null;
+  demo_visitor?: boolean;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/briefing`: every item since last night, newest first.
@@ -365,6 +368,11 @@ export interface ConnectorProposal {
  * payment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide
  * (`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its
  * outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview.
+ *
+ * `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
+ * `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
+ * persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
+ * runs were recorded there.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -419,6 +427,8 @@ export interface ConversationSummary {
         | "no_rule"
       )
     | null;
+  demo_visitor?: boolean;
+  demo_visitor_run_id?: string | null;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -448,9 +458,38 @@ export interface DemoAgentRun {
   run_id: string;
   launcher_session_id: string;
   slug: string;
-  task: "book_visit" | "quote_and_deposit" | "push_the_limit";
+  task: "book_visit" | "ask_question" | "quote_and_deposit" | "push_the_limit";
   state: "running" | "done" | "failed";
   turns: AgentTurn[];
+}
+export interface DemoVisitorIn {
+  idempotency_key: string;
+}
+/**
+ * A demo visitor's run: an AI that plays a customer in a visitor chat on the owner's own Desk
+ * (`demo_visitors.py`), kept in the process's memory for an hour. `first_name` is its persona's, fixed text;
+ * `session_id` is its visitor session, None until it is open; `messages_sent` counts the messages it sent the Desk;
+ * `ended` says how a run that is no longer `running` ended (`done`: finished, limit or owner_silent; `stopped`:
+ * stopped_by_owner or chat_ended; `failed`: budget or failed).
+ */
+export interface DemoVisitorRun {
+  run_id: string;
+  desk_id: string;
+  first_name: string;
+  session_id: string | null;
+  state: "running" | "done" | "stopped" | "failed";
+  messages_sent: number;
+  ended: ("finished" | "stopped_by_owner" | "chat_ended" | "limit" | "owner_silent" | "budget" | "failed") | null;
+}
+/**
+ * 202 from `POST /api/owner/desks/{desk_id}/demo_visitor`: the demo visitor's run and its open visitor session,
+ * on `desk_id`. While one runs in the copy, starting another answers that one, so `desk_id` can be another of the
+ * copy's Desks. Poll `GET /api/owner/desks/{desk_id}/demo_visitor` for how it stands.
+ */
+export interface DemoVisitorStarted {
+  run_id: string;
+  desk_id: string;
+  session_id: string;
 }
 /**
  * `POST /api/owner/desks/{desk_id}/documents`: a document for the Desk, the owner's alone or a customer's on
@@ -617,6 +656,7 @@ export interface Lead {
   note: string | null;
   created_at: string;
   replayed?: boolean;
+  demo_visitor?: boolean;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.
@@ -664,7 +704,9 @@ export interface NeedsYouItem {
 }
 /**
  * Who a held request or a callback request came from. `display_name` is the verified person's, else the name
- * the session's lead gave (untrusted text), else None.
+ * the session's lead gave (untrusted text), else a demo visitor's persona's first name, else None. `demo_visitor`
+ * is true for a demo visitor's chat (`owner_reads.demo_visitors`), so Needs you never passes it off as a real
+ * customer's.
  */
 export interface NeedsYouSession {
   session_id: string;
@@ -672,6 +714,7 @@ export interface NeedsYouSession {
   display_name: string | null;
   verified: boolean;
   assurance: "none" | "demo_code" | "owner_session";
+  demo_visitor?: boolean;
 }
 /**
  * `POST /api/owner/conversations/{session_id}/messages`: the owner's words, said to the visitor once the owner has
@@ -692,6 +735,8 @@ export interface OwnerTranscript {
   items: OwnerTranscriptItem[];
   typing_until: string | null;
   replayed?: boolean;
+  demo_visitor?: boolean;
+  demo_visitor_run_id?: string | null;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
@@ -915,12 +960,14 @@ export interface SafetyRow {
   blocked: boolean;
 }
 export interface SendAgentIn {
-  task: "book_visit" | "quote_and_deposit" | "push_the_limit";
+  task: "book_visit" | "ask_question" | "quote_and_deposit" | "push_the_limit";
   idempotency_key: string;
 }
 /**
- * `POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
- * Naming the ask prevents a repeated answer from answering the next one.
+ * `POST /api/owner/setup/{id}/answer`: the owner's answer to exactly one waiting question or card id, typed
+ * (`text`), picked from the question's choices (`picks`) or both, never neither. Naming the ask prevents a repeated
+ * answer from answering the next one. Picks answer a question, never a card: each is the exact text of one of its
+ * choices, once, and more than one only when the question has `several` (422 `invalid` otherwise).
  */
 export interface SetupAnswerIn {
   question?:
@@ -936,7 +983,11 @@ export interface SetupAnswerIn {
       )
     | null;
   card?: string | null;
-  text: string;
+  text?: string;
+  /**
+   * @maxItems 4
+   */
+  picks?: [] | [string] | [string, string] | [string, string, string] | [string, string, string, string];
 }
 /**
  * `POST /api/owner/setup/{id}/consent`: whether Claude may read the owner's Claude memory and website.
@@ -946,8 +997,9 @@ export interface SetupConsentIn {
 }
 /**
  * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
- * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
- * only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+ * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices, and `several`
+ * marks one whose choices the owner may pick more than one of (`SetupAnswerIn.picks`); a card belongs only to a
+ * card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
  * themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
  * false. Read-only: it only says what happened.
  */
@@ -955,6 +1007,7 @@ export interface SetupMessage {
   role: "claude" | "owner" | "tool_label";
   text: string;
   choices?: Choice[];
+  several?: boolean;
   card?: ProposalCard | null;
   owner_decided?: boolean;
 }
@@ -1316,6 +1369,10 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/resume": { 200: "SessionState" },
   "POST /api/owner/conversations/{session_id}/messages": { 200: "OwnerMessageResult" },
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
+  "POST /api/owner/desks/{desk_id}/demo_visitor": { 202: "DemoVisitorStarted" },
+  "GET /api/owner/desks/{desk_id}/demo_visitor": { 200: "DemoVisitorRun" },
+  "GET /api/owner/desks/{desk_id}/demo_visitor/{run_id}": { 200: "DemoVisitorRun" },
+  "POST /api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop": { 200: "DemoVisitorRun" },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
   "GET /api/owner/setup/{id}/events": { 200: null },

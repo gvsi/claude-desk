@@ -33,7 +33,7 @@
   gap: var(--space-8);
 }
 
-/* Paused offers two answers: full width, one above the other, as on Today's handoff card. */
+/* Paused controls fill the width, stacked when both are offered, as on Today's handoff card. */
 .cd-take-over__buttons--stacked {
   flex-direction: column;
   flex-wrap: nowrap;
