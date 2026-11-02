@@ -46,6 +46,7 @@ A title that wraps balances its lines (`text-wrap: balance`), as `PageHeader`'s 
 | --- | --- | --- |
 | `connector` | `ConnectorView` | Required for a connector review; mutually exclusive with `job`. |
 | `job` | `ReviewJobView` | Required for a business job review; mutually exclusive with `connector`. |
+| `titleRef` | `Ref<HTMLHeadingElement>` | Optional. Makes the review heading programmatically focusable so the screen can announce a view change. |
 | `intro` | `string` | An app's promise, after "Nothing runs until you turn it on." |
 | `tools` | `ReviewToolView[]` | Required. `{ key; name; description; mode: RuleMode; coveredBy: { text; mode: RuleMode \| 'always_on'; limit? }[] }`. |
 | `onChangeOutcome` | `(key: string, mode: RuleMode) => void` | Makes each outcome a menu. |

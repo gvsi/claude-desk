@@ -23,7 +23,7 @@
 
     When `{name}` already ends in '.', '!' or '?', the period after it is left out (`afterName`), so 'Chen & Co.' reads 'Chen & Co. Ask for …'.
 
-  - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`.
+  - A secondary "Ask for {ownerName}" / "Pedir hablar con {ownerName}" button, which calls `onAskForOwner`. Ask is disabled while the chat can't be written in.
   - **When the owner gave no name** (`ownerName` is null), the disclosure and the button ask for a person instead, and name no one:
     - "You're chatting with Claude, an AI answering for {name}. Ask for a person anytime."
     - "Estás hablando con Claude, una IA que responde por {name}. Puedes pedir hablar con una persona cuando quieras."
@@ -166,6 +166,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
 | `askWaits` | `boolean` | A reply is coming in: "Ask for {ownerName}" waits (`aria-disabled`, focus kept, presses do nothing), as the composer's Send does. `false` by default. |
+| `askDisabled` | `boolean` | The chat can't be written in: Ask is disabled like the composer and Send. If it had focus, focus moves to the available composer or the conversation's scroll region. `false` by default. |
 | `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. `PublicChat` passes `chat.ownerInChat`, derived by `PublicChatProvider` through `ownerInChatNow`; it is false while the stream is disconnected or catching up, or the mode is not confirmed. `false` by default. |
 | `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |
