@@ -1,0 +1,356 @@
+/**
+ * Each rule as one sentence led by Claude, in the REV-RULES-C boards' words, with its key values set
+ * off: "Claude can send payment links up to **$300**". `ruleSentence` builds it from the card's
+ * own fields and a phrase per tool (`TOOL_PHRASES`); `ruleMeta` gives the line under it, the tools
+ * it covers and who; `holdLine`, `holdSentence`, `discountHoldSentence` and `moneyCapSentence` word
+ * what asks the owner first beyond an automatic rule; `ALWAYS_ON_SENTENCES` are the always-on rules.
+ * `RuleSentence` in the design system draws them. They read the rules and decide nothing: the
+ * kernel decides every request.
+ */
+import { MONEY_EFFECTS, type Effect, type RuleCard } from '../../api/contracts.ts';
+import type { PeopleOut, ToolRow } from '../../api/views.ts';
+import type { RuleMeta, SentencePart } from '../../ds/index.ts';
+import { formatCents, hoursParts, listWords } from '../../lib/format.ts';
+import { TOOL_NAMES, isBusinessToolName, toolDisplayName, type BusinessTools } from '../connectors/catalog.ts';
+import { percent, targetWords, whoWords, type AgentNames } from './ruleWords.ts';
+
+export type { RuleMeta, SentencePart };
+
+/** What a sentence needs besides the card: the Desk's business tools by name, and who its people and agents are. */
+export interface SentenceWords {
+  business: BusinessTools;
+  people?: PeopleOut | null;
+  agents?: AgentNames;
+  /**
+   * The Desk's tools, in the order the screen lists them, so a rule on an effect group names the
+   * tools it covers ("Payment link and Charge within a signed limit"). Without them it names its
+   * group in the app's words ("Every tool that charges money").
+   */
+  tools?: readonly Pick<ToolRow, 'tool' | 'effects'>[];
+}
+
+/** A phrase: plain words, or runs with key values set off. */
+type Phrase = string | readonly SentencePart[];
+
+/**
+ * A tool's words inside a rule's sentence:
+ * - `can`: what Claude does, after "Claude can " ("send payment links"); after "Claude never " its
+ *   first word takes an s ("sends payment links");
+ * - `before`: what Claude asks about, after "Claude asks you before " ("any refund");
+ * - `after`: words that follow the rule's limit ("Claude can take agent payments up to $20 from a signed limit");
+ * - `over`: its requests, plural, past an automatic rule's limit ("payment links over $300").
+ */
+export interface ToolPhrase {
+  can: Phrase;
+  before: Phrase;
+  after?: string;
+  over?: string;
+}
+
+const key = (text: string): SentencePart => ({ text, key: true });
+
+/**
+ * Each built-in tool's and effect group's phrase, in the REV-RULES-C boards' words where a board
+ * draws the tool, and in their pattern where none does.
+ */
+export const TOOL_PHRASES: Readonly<Record<string, ToolPhrase>> = {
+  'native.quote': { can: 'send quotes from your price list', before: [key('any quote')], over: 'quotes' },
+  'native.find_slots': { can: 'show your open times', before: 'showing your open times' },
+  'native.book': { can: 'book visits', before: [key('any booking')], over: 'bookings' },
+  'native.capture_lead': { can: 'take leads', before: 'saving a lead' },
+  'native.request_callback': { can: 'take callbacks', before: 'asking you to call someone back' },
+  'native.start_verification': { can: 'send codes to the contact on record', before: 'sending a code' },
+  'native.release_document': { can: "share customers' own documents", before: 'sharing a document' },
+  'native.payment_link': { can: 'send payment links', before: [key('any payment link')], over: 'payment links' },
+  'native.charge_mandate': { can: 'take agent payments', before: [key('any agent payment')], after: ' from a signed limit', over: 'agent payments' },
+  'payments.list_charges': { can: [{ text: 'show customers ' }, key('their own charges')], before: "showing a customer's charges" },
+  'payments.create_refund': { can: 'send refunds', before: [key('any refund')], over: 'refunds' },
+  'native.fetch_website': { can: 'read your website', before: 'reading your website' },
+  'native.read_memory': { can: 'read the notes you brought in', before: 'reading your notes' },
+  'native.web_search': { can: 'search the web', before: 'searching the web' },
+  'effect:charge': { can: 'take payments', before: [key('any payment')], over: 'payments' },
+  'effect:pay_out': { can: 'send money out', before: 'sending money out', over: 'payments out' },
+  'effect:private_data': { can: 'share private data', before: 'sharing private data' },
+  'effect:send_message': { can: 'send messages', before: 'sending a message' },
+  'effect:change': { can: 'make changes', before: 'making a change' },
+  'effect:read': { can: 'look things up', before: 'looking anything up' },
+};
+
+/**
+ * Phrases for the rows the C1 board joins: one rule over several tools that read as one. A
+ * business tool joins by its block (`desk:urgent`, a Desk's urgent callback), since its name is
+ * the Desk's own.
+ */
+export const JOINED_PHRASES: readonly { targets: readonly string[]; phrase: ToolPhrase }[] = [
+  { targets: ['native.find_slots', 'native.book'], phrase: { can: 'book visits', before: [key('any booking')], over: 'bookings' } },
+  { targets: ['native.capture_lead', 'native.request_callback'], phrase: { can: 'take leads and callbacks', before: 'saving a lead or a callback' } },
+  {
+    targets: ['native.capture_lead', 'native.request_callback', 'desk:urgent'],
+    phrase: { can: 'take leads and callbacks, urgent ones too', before: 'saving a lead or a callback' },
+  },
+  {
+    targets: ['native.release_document', 'payments.list_charges'],
+    phrase: { can: "share customers' own documents and charges", before: 'sharing a document or a charge' },
+  },
+];
+
+/** A phrase as runs. */
+function runs(phrase: Phrase): SentencePart[] {
+  return typeof phrase === 'string' ? [{ text: phrase }] : phrase.map((part) => ({ ...part }));
+}
+
+/** A title after "use", its first letter lowercased unless the title starts with an acronym ("SMS reminder"). */
+function lowerFirst(title: string): string {
+  const [first = '', second = ''] = title;
+  if (second !== '' && second === second.toUpperCase() && second !== second.toLowerCase()) return title;
+  return `${first.toLowerCase()}${title.slice(first.length)}`;
+}
+
+/**
+ * A target's phrase: the table's; a listed business tool's own title, set off as user text, "use
+ * {title}"; else the app's words for it ("use a connected tool"), never its raw name.
+ */
+function targetPhrase(target: string, business: BusinessTools): ToolPhrase {
+  const phrase = Object.hasOwn(TOOL_PHRASES, target) ? TOOL_PHRASES[target] : undefined;
+  if (phrase !== undefined) return phrase;
+  const title = isBusinessToolName(target) ? toolDisplayName(target, business) : null;
+  if (title !== null && title.trim() !== '') {
+    const named: SentencePart = { text: lowerFirst(title.trim()), user: true };
+    return { can: [{ text: 'use ' }, named], before: [{ text: 'using ' }, named] };
+  }
+  const words = lowerFirst(targetWords(target, business));
+  return { can: `use ${words}`, before: `using ${words}` };
+}
+
+/** The key a target joins a row by: a business tool by its block, any other by its name. */
+function joinKey(target: string, business: BusinessTools): string {
+  const def = isBusinessToolName(target) ? business.get(target) : undefined;
+  return def === undefined ? target : `desk:${def.config.block}`;
+}
+
+/** Runs joined as a list: "a, b and c" (or "or"). */
+function joinRuns(phrases: readonly SentencePart[][], last: 'and' | 'or'): SentencePart[] {
+  return phrases.flatMap((phrase, index) => {
+    if (index === 0) return phrase;
+    return [{ text: index === phrases.length - 1 ? ` ${last} ` : ', ' }, ...phrase];
+  });
+}
+
+/** The phrase for a row's targets: one target's, a joined row's from `JOINED_PHRASES`, else each target's joined. */
+function rowPhrase(targets: readonly string[], business: BusinessTools): ToolPhrase {
+  const [only] = targets;
+  if (only !== undefined && targets.length === 1) return targetPhrase(only, business);
+  const keys = new Set(targets.map((target) => joinKey(target, business)));
+  const joined = JOINED_PHRASES.find((row) => row.targets.length === keys.size && row.targets.every((target) => keys.has(target)));
+  if (joined !== undefined) return joined.phrase;
+  const phrases = targets.map((target) => targetPhrase(target, business));
+  return { can: joinRuns(phrases.map((phrase) => runs(phrase.can)), 'and'), before: joinRuns(phrases.map((phrase) => runs(phrase.before)), 'or') };
+}
+
+/** Runs with their first word in the third person, after "Claude never ": "send" → "sends", "search" → "searches". */
+function thirdPerson(parts: SentencePart[]): SentencePart[] {
+  const [first, ...rest] = parts;
+  if (first === undefined) return parts;
+  const match = /^(\S+)(.*)$/s.exec(first.text);
+  if (match === null) return parts;
+  const [, verb = '', tail = ''] = match;
+  const conjugated = /(s|sh|ch|x|z)$/.test(verb) ? `${verb}es` : /[^aeiou]y$/.test(verb) ? `${verb.slice(0, -1)}ies` : `${verb}s`;
+  return [{ ...first, text: `${conjugated}${tail}` }, ...rest];
+}
+
+/** The cards of one row, at least one. */
+function asCards(card: RuleCard | readonly RuleCard[]): [RuleCard, ...RuleCard[]] {
+  const cards: readonly RuleCard[] = Array.isArray(card) ? card : [card as RuleCard];
+  const [first, ...rest] = cards;
+  if (first === undefined) throw new Error('a rule sentence needs a card');
+  return [first, ...rest];
+}
+
+/** Each target once, in card order. */
+function targetsOf(cards: readonly RuleCard[]): string[] {
+  return [...new Set(cards.map((card) => card.applies_to))];
+}
+
+/**
+ * Hours in the sentence: " on **weekdays, 8:00 am to 6:00 pm**", " on **Saturdays, 9:00 am to 1:00
+ * pm**", " **every day, all day**". Weekdays, weekends and every day are lowercased; a day keeps its capital.
+ */
+function hoursRuns(hours: NonNullable<RuleCard['hours']>): SentencePart[] {
+  const { days, times } = hoursParts(hours);
+  const lowered = /^(Weekdays|Weekends|Every day)\b/.test(days) ? `${days.charAt(0).toLowerCase()}${days.slice(1)}` : days;
+  const when = `${lowered}, ${times}`;
+  return lowered.startsWith('every day') ? [{ text: ' ' }, key(when)] : [{ text: ' on ' }, key(when)];
+}
+
+/** Whether any of the row's cards is for people who confirmed it's them. */
+const forVerified = (cards: readonly RuleCard[]) => cards.some((card) => card.who === 'verified' || card.who === 'record_owner');
+
+/**
+ * A rule's sentence, from its card (or the cards of one row that reads as one, as C1 joins Find
+ * open times with Book a visit; each condition then comes from the first card that has it):
+ * - led by its mode: `auto` "Claude can ", `ask` "Claude asks you before ", `never` "Claude never ";
+ * - then its tool's phrase (`TOOL_PHRASES`, `JOINED_PHRASES`; a business tool "use {title}");
+ * - then its conditions, each value set off: " up to **$300**"; on an automatic quote ", at **list
+ *   price**" or " with up to **10%** off"; " on **weekdays, 8:00 am to 6:00 pm**"; and on an
+ *   automatic rule for verified people or the record's owner, ", once they've confirmed it's them".
+ */
+export function ruleSentence(card: RuleCard | readonly RuleCard[], words: SentenceWords): SentencePart[] {
+  const cards = asCards(card);
+  const [first] = cards;
+  const targets = targetsOf(cards);
+  const phrase = rowPhrase(targets, words.business);
+  const parts: SentencePart[] = [];
+  if (first.mode === 'auto') parts.push({ text: 'Claude can ' }, ...runs(phrase.can));
+  else if (first.mode === 'ask') parts.push({ text: 'Claude asks you before ' }, ...runs(phrase.before));
+  else parts.push({ text: 'Claude never ' }, ...thirdPerson(runs(phrase.can)));
+
+  const amount = cards.find((c) => c.max_amount_cents != null)?.max_amount_cents;
+  if (amount != null) parts.push({ text: ' up to ' }, key(formatCents(amount)));
+  if (phrase.after !== undefined) parts.push({ text: phrase.after });
+  if (first.mode === 'auto') {
+    const discount = cards.find((c) => (c.max_discount_bp ?? 0) > 0)?.max_discount_bp ?? 0;
+    if (discount > 0) parts.push({ text: ' with up to ' }, key(percent(discount)), { text: ' off' });
+    else if (targets.includes('native.quote')) parts.push({ text: ', at ' }, key('list price'));
+  }
+  const hours = cards.find((c) => c.hours != null)?.hours;
+  if (hours != null) parts.push(...hoursRuns(hours));
+  if (first.mode === 'auto' && forVerified(cards)) parts.push({ text: ", once they've confirmed it's them" });
+  return merged(parts);
+}
+
+/** Adjacent plain runs as one, so a sentence's plain words read as one run of text. */
+function merged(parts: readonly SentencePart[]): SentencePart[] {
+  const out: SentencePart[] = [];
+  for (const part of parts) {
+    const last = out.at(-1);
+    if (last !== undefined && last.key !== true && last.user !== true && part.key !== true && part.user !== true) last.text += part.text;
+    else out.push({ ...part });
+  }
+  return out;
+}
+
+/** The titles of the Desk's tools with this effect, in the screen's order. */
+function toolsWithEffect(effect: string, tools: SentenceWords['tools'], business: BusinessTools): string[] {
+  return (tools ?? [])
+    .filter((row) => row.effects.includes(effect as Effect))
+    .map((row) => toolDisplayName(row.tool, business))
+    .filter((title): title is string => title !== null && title.trim() !== '');
+}
+
+/** Who a card is for, in one line: "Anyone", "The record's owner, verified", "Dana Whitfield, verified". */
+function whoLine(card: RuleCard, words: SentenceWords): string {
+  return whoWords(card, words.people, words.agents)
+    .map((word, index) => (index === 0 ? word.text : lowerFirst(word.text)))
+    .join(', ');
+}
+
+/**
+ * The line under a rule's sentence (`RuleMeta`): the tools it covers by their titles, "Find open
+ * times and Book a visit", or for a rule on an effect group the Desk's tools with that effect
+ * (`words.tools`), else the group in the app's words; then who it is for, from its (first) card,
+ * as Rules has always said it ("Anyone", "Signed agents", "The record's owner, verified").
+ */
+export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWords): RuleMeta {
+  const cards = asCards(card);
+  const named: { titles: string[]; words: string }[] = targetsOf(cards).map((target) => {
+    if (target.startsWith('effect:')) {
+      const titles = toolsWithEffect(target.slice('effect:'.length), words.tools, words.business);
+      return { titles, words: targetWords(target, words.business) };
+    }
+    const title = toolDisplayName(target, words.business);
+    return { titles: title === null ? [] : [title], words: targetWords(target, words.business) };
+  });
+  const who = whoLine(cards[0], words);
+  if (named.every((target) => target.titles.length > 0)) return { tools: { titles: [...new Set(named.flatMap((target) => target.titles))] }, who };
+  return { tools: listWords(named.map((target) => (target.titles.length > 0 ? listWords(target.titles) : target.words))), who };
+}
+
+/** An automatic card's amount limit: the one an amount past it asks the owner first about. */
+const limitOf = (card: RuleCard): number | null => (card.mode === 'auto' && card.max_amount_cents != null ? card.max_amount_cents : null);
+
+/** An automatic card's hold line under it, as C4 draws it: "Over **$300**, Claude asks you first". Null without a limit. */
+export function holdLine(card: RuleCard): SentencePart[] | null {
+  const limit = limitOf(card);
+  if (limit === null) return null;
+  return [{ text: 'Over ' }, key(formatCents(limit)), { text: ', Claude asks you first' }];
+}
+
+/**
+ * One Ask me first sentence for every automatic card with an amount limit, joined as C1 joins them:
+ * "Claude asks you before payment links over **$300** or agent payments over **$20**". A tool the
+ * table has no requests for reads as payments, since only a rule that moves money takes a limit.
+ * Null when none has a limit.
+ */
+export function holdSentence(cards: readonly RuleCard[]): SentencePart[] | null {
+  const each = cards.flatMap((card): SentencePart[][] => {
+    const limit = limitOf(card);
+    if (limit === null) return [];
+    const over = Object.hasOwn(TOOL_PHRASES, card.applies_to) ? TOOL_PHRASES[card.applies_to]?.over : undefined;
+    return [[{ text: `${over ?? 'payments'} over ` }, key(formatCents(limit))]];
+  });
+  if (each.length === 0) return null;
+  return merged([{ text: 'Claude asks you before ' }, ...joinRuns(each, 'or')]);
+}
+
+/**
+ * What asks the owner first past an automatic quote rule's discount, as C1 and B5 word it:
+ * "Claude asks you before **any discount**" at list price, "Claude asks you before discounts over
+ * **10%**" with one. Null for any other card.
+ */
+export function discountHoldSentence(card: RuleCard): SentencePart[] | null {
+  if (card.mode !== 'auto' || card.applies_to !== 'native.quote') return null;
+  const discount = card.max_discount_bp ?? 0;
+  if (discount <= 0) return [{ text: 'Claude asks you before ' }, key('any discount')];
+  return [{ text: 'Claude asks you before discounts over ' }, key(percent(discount))];
+}
+
+/**
+ * The payment limit as a rule, over every rule that moves money: "Claude asks you before any
+ * payment over **$500**, whatever the other rules say"; at 0, "Claude asks you before any payment".
+ */
+export function moneyCapSentence(cents: number): SentencePart[] {
+  if (cents <= 0) return [{ text: 'Claude asks you before any payment' }];
+  return [{ text: 'Claude asks you before any payment over ' }, key(formatCents(cents)), { text: ', whatever the other rules say' }];
+}
+
+/**
+ * The payment limit's line: the Desk's tools that move money (`words.tools`, in the screen's order),
+ * else the app's words for them; for anyone.
+ */
+export function moneyCapMeta(words: SentenceWords): RuleMeta {
+  const titles = (words.tools ?? [])
+    .filter((row) => row.effects.some((effect) => MONEY_EFFECTS.has(effect)))
+    .map((row) => toolDisplayName(row.tool, words.business))
+    .filter((title): title is string => title !== null && title.trim() !== '');
+  return { tools: titles.length > 0 ? { titles } : 'Every tool that moves money', who: 'Anyone' };
+}
+
+/** One always-on rule as a sentence: its key (`ai`, `private_data`, `codes`, `money`), its words and its line. */
+export interface AlwaysOnSentence {
+  key: 'ai' | 'private_data' | 'codes' | 'money';
+  parts: readonly SentencePart[];
+  meta: RuleMeta;
+}
+
+/** The catalog's titles for these tools, as the always-on rows name them. */
+const titles = (...tools: (keyof typeof TOOL_NAMES)[]): { titles: string[] } => ({ titles: tools.map((tool) => TOOL_NAMES[tool].name) });
+
+/** The always-on rules as C1's Never rows, each with the tools it covers and "Everyone". */
+export const ALWAYS_ON_SENTENCES: readonly AlwaysOnSentence[] = [
+  { key: 'ai', parts: [{ text: "Claude never says it's anything but an AI" }], meta: { tools: 'Every tool', who: 'Everyone' } },
+  {
+    key: 'private_data',
+    parts: [{ text: 'Claude never shows private data to anyone but its verified owner' }],
+    meta: { tools: titles('native.release_document', 'payments.list_charges'), who: 'Everyone' },
+  },
+  {
+    key: 'codes',
+    parts: [{ text: 'Claude never sends a code anywhere but the contact on record' }],
+    meta: { tools: titles('native.start_verification'), who: 'Everyone' },
+  },
+  {
+    key: 'money',
+    parts: [{ text: 'Claude never moves money without your rule or a signed limit' }],
+    meta: { tools: titles('native.payment_link', 'native.charge_mandate', 'payments.create_refund'), who: 'Everyone' },
+  },
+];
