@@ -20,7 +20,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE } from '../../mocks/world.ts';
-import { SPEC, expectTabOrder } from '../../ds/boards/spec.ts';
+import { SPEC, expectTabOrder, footerLink } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { holdReads } from '../../test/holdReads.ts';
@@ -352,7 +352,7 @@ describe('customers', () => {
     expect(screen.getByRole('list', { name: 'Leads' }).getByRole('link').elements()).toEqual([]);
     await expectOwnerBoard(screen.container, { current: 'Customers', cards: false });
     const reached = await expectTabOrder(userEvent, [...people, caption]);
-    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption]);
+    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption, footerLink(screen.container)]);
   });
 
   it('empty_people_is_kind', async () => {

@@ -216,6 +216,13 @@ export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<nu
   return rows.length;
 }
 
+/** The footer's one link, the author's name, under `root`. */
+export function footerLink(root: ParentNode): HTMLElement {
+  const link = root.querySelector<HTMLElement>('[data-ds="concept-footer"] a');
+  if (!link) throw new Error('the footer draws the author\'s name as a link');
+  return link;
+}
+
 /**
  * focus_order_is_logical: Tab from the top of the page reaches each of `stops` in this order
  * (other stops may come between them). Returns every stop Tab reached, in order.

@@ -39,13 +39,19 @@ it('tab_stays_inside_even_inside_an_inert_wrapper', async () => {
     const field = host.querySelector('input');
     const button = host.querySelector('button');
     expect(dialog?.open).toBe(true);
+    const author = host.querySelector('[data-ds="concept-footer"] a');
     expect(document.activeElement).toBe(field);
     await userEvent.keyboard('rivera-demo');
     expect(button?.disabled).toBe(false);
     await userEvent.keyboard('{Tab}');
     expect(document.activeElement).toBe(button);
+    // The footer's author link, inside the dialog, then round to the field.
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).toBe(author);
     await userEvent.keyboard('{Tab}');
     expect(document.activeElement).toBe(field);
+    await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(document.activeElement).toBe(author);
     await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
     expect(document.activeElement).toBe(button);
   } finally {
@@ -78,13 +84,18 @@ it('escape_never_closes_it_with_a_real_keyboard', async () => {
 });
 
 it('tab_stays_inside_with_a_real_keyboard', async () => {
-  const { field, button } = await openDialog();
+  const { dialog, field, button } = await openDialog();
+  const author = dialog.querySelector('[data-ds="concept-footer"] a');
   await userEvent.keyboard('rivera-demo');
   expect(button.disabled).toBe(false);
   await userEvent.keyboard('{Tab}');
   expect(document.activeElement).toBe(button);
   await userEvent.keyboard('{Tab}');
+  expect(document.activeElement).toBe(author);
+  await userEvent.keyboard('{Tab}');
   expect(document.activeElement).toBe(field);
+  await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
+  expect(document.activeElement).toBe(author);
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
   expect(document.activeElement).toBe(button);
   await userEvent.keyboard('{Shift>}{Tab}{/Shift}');

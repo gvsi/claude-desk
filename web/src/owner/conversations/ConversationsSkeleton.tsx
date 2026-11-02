@@ -373,7 +373,7 @@ export function ConversationsSkeleton({ withHeader, open }: { withHeader: boolea
         ) : null}
       </div>
       <div className="cd-conversations__footer">
-        <ConceptFooter />
+        <ConceptFooter skeleton />
       </div>
     </div>
   );
