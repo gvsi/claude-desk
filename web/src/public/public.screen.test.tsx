@@ -5159,13 +5159,16 @@ describe('a Desk whose owner gave no name', () => {
     await turnEndedOn(slug, before);
     const session = mockStore.visitorSession(slug);
     if (!session) throw new Error('the visitor has a chat');
-    const call = async (key: 'takeover' | 'ownerMessage', body: unknown) => {
+    const call = async (key: 'takeover' | 'ownerTyping' | 'ownerMessage', body: unknown) => {
       const reply = await mockStore.dispatch(key, { params: { session_id: session.state.session_id }, body });
-      if ('network' in reply || reply.status !== 200) throw new Error(`the mock takes ${key}`);
+      if ('network' in reply || ![200, 204].includes(reply.status)) throw new Error(`the mock takes ${key}`);
     };
     await call('takeover', { generation: session.state.generation });
-    await call('ownerMessage', { text: 'Yes, we do. When suits you?', kind: 'say' });
     await expect.element(screen.getByText('Fenster & Fenster joined the chat', { exact: true })).toBeVisible();
+    // Typing, the business is the one writing.
+    await call('ownerTyping', { generation: mockStore.visitorSession(slug)?.state.generation });
+    await vi.waitFor(() => expect(document.querySelector('.cd-writing-indicator .cd-user-name')?.textContent).toBe('Fenster & Fenster'));
+    await call('ownerMessage', { text: 'Yes, we do. When suits you?', kind: 'say' });
     const words = screen.getByText('Yes, we do. When suits you?', { exact: true });
     await expect.element(words).toBeVisible();
     // Their message is the business's, by name, as the owner's own messages are.

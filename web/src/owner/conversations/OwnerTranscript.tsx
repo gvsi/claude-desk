@@ -56,13 +56,12 @@ export interface OwnerTranscriptProps {
   focusTarget: RefObject<HTMLElement | null>;
   /** Who an agent's requests come from, as the owner's screens name them. */
   agentName: string;
-  /** The owner's display name: Claude's messages name them. */
-  ownerName: string;
   /**
-   * Whose initials the owner's own messages show: their name, or the business's when they gave none,
-   * as the sidebar's owner row shows them.
+   * Who the owner is in the chat: Claude's messages name them, and their own messages show these
+   * initials. Their display name, or the business's when they gave none, as the sidebar's owner row
+   * shows it.
    */
-  avatarName: string;
+  ownerName: string;
   /** The business's time zone, which a whisper's time is read in. */
   timezone: string;
   /** The Desk whose signed record a receipt's trace is read from. */
@@ -228,12 +227,11 @@ interface RowViewProps {
   shown: ReadonlySet<number>;
   agentName: string;
   ownerName: string;
-  avatarName: string;
   timezone: string;
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
-function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, avatarName, timezone, onOpenTrace }: RowViewProps) {
+function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
   const { item } = row;
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
   const margin = row.receipts.map((source, index) => (
@@ -260,7 +258,7 @@ function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, 
     case 'message':
       message =
         item.ev.author === 'owner' ? (
-          <PersonMessage name="You" initials={initialsOf(avatarName)} blocks={item.ev.blocks} language={item.ev.language} />
+          <PersonMessage name="You" initials={initialsOf(ownerName)} blocks={item.ev.blocks} language={item.ev.language} />
         ) : (
           <ClaudeMessage blocks={item.ev.blocks.map(paymentBlock)} language={item.ev.language} ownerName={ownerName} reveal={live} />
         );
@@ -285,7 +283,6 @@ export function OwnerTranscript({
   focusTarget,
   agentName,
   ownerName,
-  avatarName,
   timezone,
   deskId,
   heldIds,
@@ -399,7 +396,6 @@ export function OwnerTranscript({
           shown={shown}
           agentName={agentName}
           ownerName={ownerName}
-          avatarName={avatarName}
           timezone={timezone}
           onOpenTrace={openTrace}
         />

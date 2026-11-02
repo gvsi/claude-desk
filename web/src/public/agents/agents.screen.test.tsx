@@ -13,7 +13,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
-import type { EvReceipt, PublicDesk } from '../../api/contracts.ts';
+import type { CardBlock, EvReceipt, PublicDesk } from '../../api/contracts.ts';
 import type { DemoAgentRun } from '../../api/views.ts';
 import { App } from '../../app/App.tsx';
 import { setPollScale } from '../../app/poll.ts';
@@ -1851,5 +1851,32 @@ describe('agents page', () => {
     await until(() => expect(esLead()?.textContent).toBe('Un agente integrado visita ACME! en nombre de Alex Kim. Es simulado.'));
     expect(esLead()?.querySelector('[data-copy="user"]')?.textContent).toBe('ACME!');
     await expectScreenBasics(es.screen.container, { owner: false });
+  });
+});
+
+describe('an owner who gave no name', () => {
+  it('their_words_in_a_run_go_by_the_business', async () => {
+    // A run in which the owner wrote: their card is "Turner Plumbing said", never setup's
+    // fallback name, "Owner" (owner, 2026-11-02).
+    // Turner's Desk, whose agents page offers the booking run, read as setup leaves a nameless owner.
+    const slug = RIVERA.slug;
+    const desk = await mockStore.dispatch('publicDesk', { params: { slug }, query: { lang: 'en' } });
+    if ('network' in desk || desk.status !== 200) throw new Error('the mock reads the Desk');
+    mockStore.inject({ route: 'publicDesk', status: 200, times: 100, body: { ...(desk.body as PublicDesk), owner_display_name: 'Owner' } });
+    const said: CardBlock = { kind: 'card', template: 'owner_said', text: 'Yes, we can come on Tuesday.', fact_id: 'owner:said-1', title: 'Yes, we can come on Tuesday.' };
+    const run: DemoAgentRun = {
+      run_id: 'run-said', launcher_session_id: 'ses-any', slug, task: 'book_visit', state: 'done',
+      turns: [
+        { author: 'agent', n: 1, blocks: [], receipts: [], text: 'Can someone come on Tuesday?' },
+        { author: 'desk', n: 2, blocks: [said], receipts: [], text: null },
+      ],
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, times: 100, body: run });
+    const { screen } = await renderRoute(`/d/${slug}/agents`);
+    await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    const log = screen.getByRole('region', { name: 'Send an agent' }).getByRole('log');
+    await expect.element(log.getByText('Yes, we can come on Tuesday.', { exact: true })).toBeVisible();
+    await expect.element(log.getByText('Turner Plumbing said', { exact: true })).toBeVisible();
+    expect(log.element().textContent).not.toMatch(/\bOwner\b/);
   });
 });

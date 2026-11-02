@@ -412,7 +412,6 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
             focusTarget={transcriptRef}
             agentName={who}
             ownerName={ownerShown}
-            avatarName={ownerShown}
             timezone={business.timezone}
             deskId={deskId}
             heldIds={heldIds}

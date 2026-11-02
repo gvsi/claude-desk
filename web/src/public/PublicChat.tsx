@@ -138,12 +138,15 @@ interface RowProps {
   after?: ReactNode[];
 }
 
-/** One row: the message and its visible receipts, exactly as the kernel wrote them. */
-/** The name an `owner_joined` line shows: the event's, unless it is setup's fallback, which names no one. */
-function joinedName(name: string, ownerName: string): string {
+/**
+ * The owner's name as a stream event carries it (`owner_joined`, `owner_typing`): the event's, unless
+ * it is setup's fallback, which names no one, and then `ownerName`, the business's.
+ */
+function streamOwnerName(name: string, ownerName: string): string {
   return givenOwnerName(name) ?? ownerName;
 }
 
+/** One row: the message and its visible receipts, exactly as the kernel wrote them. */
 function ChatRowView({ row, ownerPreview, ownerName, language, onResend, composer, resendHeld = false, paymentBlock, after = [] }: RowProps) {
   const retryButton = useRef<HTMLButtonElement>(null);
   const [restoreRetryFocus, setRestoreRetryFocus] = useState<{ posted: boolean; composer: boolean } | null>(null);
@@ -208,7 +211,7 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, compose
   if (item.kind === 'system') {
     const line =
       item.ev.type === 'owner_joined' ? (
-        <SystemLine text={copy.joined(joinedName(item.ev.name, ownerName))} initials={initialsOf(joinedName(item.ev.name, ownerName))} />
+        <SystemLine text={copy.joined(streamOwnerName(item.ev.name, ownerName))} initials={initialsOf(streamOwnerName(item.ev.name, ownerName))} />
       ) : (
         <SystemLine text={copy.claudeIsBack} />
       );
@@ -968,6 +971,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
       </PublicState>
     );
   }
+  // Who the owner is in the chat: their name, or the business's when they gave none (owner, 2026-11-02).
+  const shownOwner = givenOwnerName(desk.owner_display_name) ?? desk.business_name;
 
   const { brand, ownerName } = brandFrom(desk);
   const { state } = chat;
@@ -1189,7 +1194,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               row={row}
               paymentBlock={paymentBlock}
               ownerPreview={ownerPreview}
-              ownerName={givenOwnerName(desk.owner_display_name) ?? desk.business_name}
+              ownerName={shownOwner}
               language={language}
               onResend={resend}
               composer={composerRef}
@@ -1201,7 +1206,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
           {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
           {state.ownerTyping !== null ? (
             <TranscriptRow>
-              <WritingIndicator language={language} variant="person" who={state.ownerTyping.name} />
+              <WritingIndicator language={language} variant="person" who={streamOwnerName(state.ownerTyping.name, shownOwner)} />
             </TranscriptRow>
           ) : null}
         </Transcript>
