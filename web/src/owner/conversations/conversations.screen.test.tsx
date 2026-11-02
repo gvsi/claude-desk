@@ -1974,7 +1974,9 @@ describe('Conversations', () => {
     // came while the owner was away.
     await router.navigate(LIST);
     await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
+    const eventsBefore = chat.events.length;
     priceTurn(chat, 'How much is drain clearing?');
+    await expect.poll(() => chat.events.slice(eventsBefore).at(-1)?.ev.type).toBe('turn_end');
     await router.navigate(conversation(DANA_LIVE));
     await expect.poll(() => quotes().length).toBe(before + 1);
     await readsMore('conversation', 1);
