@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { ApiError, isUncertain, request } from '../api/http.ts';
 import type { CopyOut } from '../api/views.ts';
 import type { SessionEndedState } from '../app/providers.tsx';
+import { useLeavingSignal } from '../app/useLeavingSignal.ts';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
 import { THINGS_TO_TRY } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
@@ -55,26 +56,33 @@ export function Arrival() {
   const [opening, setOpening] = useState(false);
   // One `me` per visit, kept across a development remount, so the page asks once.
   const asked = useRef<Promise<CopyOut> | null>(null);
-  // Whether this page is still shown: the owner may leave it while Today is read ahead.
-  const shown = useRef(true);
+  // Counts the visits to this page while it stays on screen: the owner may come back to it (with
+  // Back, say) before the page they went to has drawn.
+  const [visit, setVisit] = useState(0);
+  // Aborted once the owner leaves the page, which may be while Today is read ahead, before the page
+  // they went to has drawn and this one has gone. Back before it went, the visit starts over: what
+  // it was doing stopped as they left, and the copy this browser has may have changed meanwhile.
+  const leaving = useLeavingSignal(() => {
+    asked.current = null;
+    setOpening(false);
+    setVisit((n) => n + 1);
+  });
   // The Desk whose Today this page has read ahead, if any. Left before that Today opened, the page
   // forgets the read ahead, so a later Today of that Desk isn't taken for this visit's.
   const readAheadFor = useRef<string | null>(null);
   useEffect(() => {
-    shown.current = true;
     return () => {
-      shown.current = false;
       if (readAheadFor.current !== null) forgetReadAhead(queryClient, readAheadFor.current);
     };
   }, [queryClient]);
 
   useEffect(() => {
-    let live = true;
+    const signal = leaving();
     asked.current ??= request('me');
     asked.current.then(
       async (copy) => {
         // Gone from this page: its reads, Desks included, belong to the page the owner went to.
-        if (!live) return;
+        if (signal.aborted) return;
         // The last Desk opened when it is still the copy's, else its first.
         const deskId = lastOrFirst(copy.desks);
         if (deskId === null) {
@@ -84,16 +92,13 @@ export function Arrival() {
         setOpening(true);
         readAheadFor.current = deskId;
         await readAhead(queryClient, deskId);
-        if (live) void navigate(todayPath(deskId), { replace: true });
+        if (!signal.aborted) void navigate(todayPath(deskId), { replace: true });
       },
       () => {
-        if (live) setOpen(true);
+        if (!signal.aborted) setOpen(true);
       },
     );
-    return () => {
-      live = false;
-    };
-  }, [navigate, queryClient]);
+  }, [leaving, navigate, queryClient, visit]);
 
   /**
    * The new copy's first Today, which takes the dialog away. The dialog stays up, busy over the
@@ -102,35 +107,38 @@ export function Arrival() {
    * page they went to, which already shows them: dropping its Desks would leave it watching a read
    * nothing updates.
    */
-  const openCopy = async (copy: CopyOut): Promise<boolean> => {
+  const openCopy = async (copy: CopyOut, signal: AbortSignal): Promise<boolean> => {
     const first = copy.desks[0];
     if (!first) return false;
-    if (!shown.current) return true;
+    if (signal.aborted) return true;
     await dropTheOldInbox(queryClient);
     await invalidateCopy(queryClient);
-    if (!shown.current) return true;
+    if (signal.aborted) return true;
     readAheadFor.current = first.desk_id;
     await readAhead(queryClient, first.desk_id);
-    if (shown.current) setLeavingTo(first.desk_id);
+    if (!signal.aborted) setLeavingTo(first.desk_id);
     return true;
   };
 
   /** The dialog has left: on to the Today it left onto, unless the owner has gone elsewhere. */
   const onClosed = () => {
-    if (leavingTo !== null && shown.current) void navigate(todayPath(leavingTo), { replace: true });
+    if (leavingTo !== null && !leaving().aborted) void navigate(todayPath(leavingTo), { replace: true });
   };
 
   const onSubmit = async (passcode: string): Promise<void> => {
+    const signal = leaving();
+    // Nothing is sent once the owner has left, even while this page is still on screen.
+    if (signal.aborted) return;
     setBusy(true);
     setError(undefined);
     try {
       const copy = await request('copies', { body: { passcode } });
-      if (!(await openCopy(copy))) setError('unreachable');
+      if (!(await openCopy(copy, signal))) setError('unreachable');
     } catch (err) {
       // A lost answer may still have made the copy: the copy this browser now has says.
       if (isUncertain(err)) {
         const made = await request('me').catch(() => null);
-        if (made !== null && (await openCopy(made))) return;
+        if (made !== null && (await openCopy(made, signal))) return;
       }
       setError(introErrorFor(err));
     } finally {

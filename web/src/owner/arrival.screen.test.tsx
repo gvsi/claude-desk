@@ -5,11 +5,13 @@
  * with the public page always a new tab away and never opened on Today itself.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
+import type { RouteObject } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { newIdempotencyKey, observeRequests } from '../api/http.ts';
+import { routes } from '../app/routes.tsx';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
@@ -278,6 +280,95 @@ describe('Arrival', () => {
     expect(requests('needsYou')).toHaveLength(1);
     // Past the read-ahead's 3 s cap, by when the page would have gone on to Today.
     await new Promise((resolve) => setTimeout(resolve, 3_500));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('returning_owner_going_back_while_today_is_read_stays_back', async () => {
+    // Mike Turner opens the first visit's page from Turner Plumbing's public page, and goes Back while
+    // his Today is still read ahead. The read's answer comes before the public page has drawn: the
+    // router has moved on, but it draws a navigation in a transition, so the first visit's page is
+    // still on screen. It doesn't take him on to Today.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { routes: publicPage.routes });
+    const welcome = screen.getByRole('heading', { name: 'How can Turner Plumbing help?' });
+    await expect.element(welcome).toBeVisible();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await router.navigate('/');
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, still on screen').not.toBeNull();
+
+    const answered = nextAnswerTo('needsYou');
+    needsYou.release();
+    await answered.settled;
+    // The page's own code after the answer runs in the microtasks that follow it: a task later, it has.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, still on screen when the answer comes').not.toBeNull();
+    publicPage.draw();
+    await expect.element(welcome).toBeVisible();
+    expect(document.querySelector('.cd-today-preview')).toBeNull();
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('returning_owner_back_again_before_the_page_went_opens_today', async () => {
+    // Mike Turner goes Back while his Today is read ahead, and Forward again before Turner Plumbing's
+    // public page has drawn, so the first visit's page never went. It opens his Today, drawn.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { routes: publicPage.routes });
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await router.navigate('/');
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    const preview = document.querySelector('.cd-today-preview');
+    expect(preview).not.toBeNull();
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, never gone').toBe(preview);
+
+    needsYou.release();
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    // Back doesn't return to the first visit's page, which would only send him on again.
+    expect(router.state.historyAction).toBe('REPLACE');
+  });
+
+  it('going_back_while_the_new_copy_is_read_stays_back', async () => {
+    // Mike Turner opens the first visit's page from Turner Plumbing's public page, starts the demo,
+    // and goes Back while the new copy's Today is read ahead. The read's answer comes before the
+    // public page has drawn, with the first visit's page still on screen: its dialog doesn't leave
+    // onto Today, and nothing takes him there.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+    const welcome = screen.getByRole('heading', { name: 'How can Turner Plumbing help?' });
+    await expect.element(welcome).toBeVisible();
+    await router.navigate('/');
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(dialog.elements(), 'the first visit’s dialog, still on screen').toHaveLength(1);
+
+    const answered = nextAnswerTo('needsYou');
+    needsYou.release();
+    await answered.settled;
+    // Well after the dialog's exit would have ended, had it started to leave.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(handOff.steps()).toEqual(['open']);
+    publicPage.draw();
+    await expect.element(welcome).toBeVisible();
+    await expect.element(dialog).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
   });
 
@@ -2729,6 +2820,38 @@ function holdTheAnswerTo(key: RouteKey): { sent: () => boolean; release: () => v
     }),
   );
   return { sent: () => sent, release };
+}
+
+/**
+ * The app's routes with the page at `path` able to wait before it draws: from `hold()` until
+ * `draw()`, a navigation to it isn't drawn, and the page before it stays on screen (the router draws
+ * a navigation in a transition). Before `hold()` it draws as the app has it.
+ */
+function holdingRoutes(path: string): { routes: RouteObject[]; hold: () => void; draw: () => void } {
+  let held: Promise<void> | null = null;
+  let draw = () => {};
+  onTestFinished(() => draw());
+  const swap = (route: RouteObject): RouteObject => {
+    if (route.path !== path) return route;
+    const own = route.element;
+    function HeldPage() {
+      if (held !== null) throw held;
+      return <>{own}</>;
+    }
+    return { ...route, element: <HeldPage /> };
+  };
+  return {
+    routes: routes.map(swap),
+    hold: () => {
+      held = new Promise<void>((resolve) => {
+        draw = () => {
+          held = null;
+          resolve();
+        };
+      });
+    },
+    draw: () => draw(),
+  };
 }
 
 /** Links to the owner's preview of Turner's public page. */
