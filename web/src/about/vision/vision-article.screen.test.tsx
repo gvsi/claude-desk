@@ -257,7 +257,7 @@ describe('The Vision article', () => {
       const parts = [...picture.querySelectorAll('[data-part]')].map((part) => [
         part.getAttribute('data-part'),
         part.getAttribute('data-tone') ?? '',
-        part.getAttribute('data-part') === 'card' ? [...part.children].map(flat).join(' / ') : flat(part),
+        part.getAttribute('data-part') === 'card' ? [...part.children].map(flat).reduce((all, line) => `${all} / ${line}`) : flat(part),
       ]);
       expect(parts, viewport).toEqual(WORK.parts);
 
