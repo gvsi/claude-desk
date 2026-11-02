@@ -618,6 +618,26 @@ describe('Today', () => {
     await expect.poll(() => needs.getByRole('alert').elements().length).toBe(0);
   });
 
+  it('a_failed_refresh_of_read_rules_says_so_over_the_held_card', async () => {
+    // The rules were read, then a later read of them fails: Needs you says so, with Try again, over
+    // the card's rule as it was last read, so an earlier read never passes for current.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    onTestFinished(() => mounted.mockRestore());
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera', retryScale: 0 });
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    expect(needs.getByRole('alert').elements()).toHaveLength(0);
+
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    await queryClient.refetchQueries({ queryKey: ['rules', RIVERA.deskId, 'requests'] });
+    await expect.element(needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await needs.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => needs.getByRole('alert').elements().length).toBe(0);
+  });
+
   it('reload_waits_for_the_rules_a_held_card_names', async () => {
     // A held card names the rule that held it, so with a request held, a reload's loading page
     // stays until the rules are read too: Today then opens with the card's "Your rule" box drawn,

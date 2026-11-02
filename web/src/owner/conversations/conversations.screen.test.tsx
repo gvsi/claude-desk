@@ -4,6 +4,7 @@
  * words, held requests answered in place, take-over with the owner's own words, whispers, the
  * typing both ways, and recorded history.
  */
+import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -695,6 +696,25 @@ describe('Conversations', () => {
     expect(held.getByRole('group', { name: 'Your rule', exact: true }).elements()).toHaveLength(0);
     await screen.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(held.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await expect.poll(() => screen.getByRole('alert').elements().length).toBe(0);
+  });
+
+  it('a_failed_refresh_of_read_rules_says_so_over_the_held_card', async () => {
+    // The rules were read, then a later read of them fails: the chat says so, with Try again, over
+    // the card's rule as it was last read.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    onTestFinished(() => mounted.mockRestore());
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { retryScale: 0 });
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    expect(screen.getByRole('alert').elements()).toHaveLength(0);
+
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    await queryClient.refetchQueries({ queryKey: ['rules', RIVERA.deskId, 'requests'] });
+    await expect.element(screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(held.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await screen.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.poll(() => screen.getByRole('alert').elements().length).toBe(0);
   });
 

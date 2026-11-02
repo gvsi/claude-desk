@@ -3,6 +3,7 @@
  * each one, an attempt's detail in tiers, and every entry of the signed record with its chain,
  * each saying where it came from and when it happened.
  */
+import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -1030,6 +1031,47 @@ describe('Safety', () => {
       'The rule that turned it downClaude never sends refundsRefund · AnyoneNever',
     );
     expect(open.getByRole('alert').elements()).toHaveLength(0);
+  });
+
+  it('a_failed_refresh_of_read_rules_says_so_for_an_owners_rule', async () => {
+    // The rules were read, then a later read of them fails: a request the owner's own Never rule
+    // turned down says the read failed, with Try again, over the rule as it was last read, so an
+    // earlier read never passes for current. An always-on rule needs no read and says nothing.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    onTestFinished(() => mounted.mockRestore());
+    const never = { ...rivera.ruleCards['rv-refund'], card_id: 'rv-no-refunds', mode: 'never' as const, who: 'anyone' as const, reason: 'Refunds never go out.' };
+    mockStore.world.desk(RIVERA.deskId)?.policy.cards.push(never);
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts([attempt({ ref_id: 'dec-never', cause: 'owner_rule', card_ids: ['rv-no-refunds'] }), attempt({ ref_id: 'dec-private', cause: 'not_verified' })]);
+    const { screen } = await renderRoute(`${SAFETY}/dec-never`, { retryScale: 0 });
+    const open = detail(screen);
+    const rule = () => open.getByRole('group', { name: 'The rule that turned it down', exact: true });
+    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · AnyoneNever');
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    await queryClient.refetchQueries({ queryKey: ['rules', RIVERA.deskId, 'requests'] });
+    const failed = open.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    // Said first, over the rule as last read.
+    const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
+    const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
+    expect(at(failed.element())).toBe(at(open.getByText(REFUND_REASON, { exact: true }).element()) + 1);
+    expect(at(rule().element())).toBe(at(failed.element()) + 1);
+
+    // An always-on rule's request says nothing of the failed read.
+    await screen.getByRole('link', { name: /Not verified yet/ }).click();
+    await expect.element(rule()).toHaveTextContent(
+      'The rule that turned it downClaude never shows private data to anyone but its verified ownerShare a document and See charges · EveryoneNever',
+    );
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+
+    // Try again reads them, and the line goes.
+    await screen.getByRole('link', { name: /Your rule says no/ }).click();
+    await open.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => open.getByRole('alert').elements().length).toBe(0);
+    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · AnyoneNever');
   });
 
   it.each(['missing', 'empty'] as const)('an_entry_with_its_visitor_words_%s_shows_none', async (words) => {
