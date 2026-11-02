@@ -425,7 +425,10 @@ INPUT_SCHEMAS = {
                                   "days": {"type": "integer", "minimum": 1, "maximum": 14}}),
     "native.book": _closed({"slot_id": {"type": "string", "pattern": SLOT_ID_PATTERN},
                              "note": {"type": ["string", "null"], "maxLength": 200,
-                                      "description": "Optional details for the owner only."}}, ("slot_id",)),
+                                      "description": "Optional details for the owner only."},
+                             "name": {"type": ["string", "null"], "maxLength": 80},
+                             "contact": {"type": ["string", "null"], "maxLength": 120},
+                             "address": {"type": ["string", "null"], "maxLength": 200}}, ("slot_id",)),
     "native.release_document": _closed({"document_id": {**TEXT, "maxLength": 64}}, ("document_id",)),
     "native.payment_link": _closed({"quote_id": TEXT}, ("quote_id",)),
     "native.charge_mandate": _closed({"quote_id": TEXT}, ("quote_id",)),
@@ -488,11 +491,13 @@ HOLD_FOR = timedelta(hours=24)          # a hold waits this long for the owner
 STATUS_TEXT = {
     "en": {"allowed": "Checked against {owner}'s rules", "held": "Waiting for {owner} to approve",
            "refused": "Not something I can do here", "approved": "{owner} approved this",
+           "refused_contact_needed": "To book, I need your name and a phone number or email",
            "denied": "{owner} decided not to go ahead", "expired": "This request timed out", "cancelled": "Cancelled",
            "executed": "Done", "failed": "That didn't go through", "unknown": "Still confirming this",
            "refused_at_execution": "The rules changed, so this didn't go ahead"},
     "es": {"allowed": "Revisado con las reglas de {owner}", "held": "Esperando la aprobación de {owner}",
            "refused": "No es algo que pueda hacer aquí", "approved": "{owner} lo aprobó",
+           "refused_contact_needed": "Para reservar, necesito tu nombre y un teléfono o correo",
            "denied": "{owner} decidió no seguir adelante", "expired": "Esta solicitud venció", "cancelled": "Cancelado",
            "executed": "Hecho", "failed": "No se pudo completar", "unknown": "Todavía lo estamos confirmando",
            "refused_at_execution": "Las reglas cambiaron, así que no se hizo"},
@@ -1515,6 +1520,7 @@ class FakeKernelState:
         self.document_links: dict[str, DocumentLink] = {}   # link_id -> its link, tokens in memory only
         self.payment_links: dict[str, PaymentLink] = {}     # link_id -> its link, tokens in memory only
         self.quotes: dict[str, dict] = {}               # quote_id -> its kernel_ro row
+        self.lead_contacts: dict[str, list[tuple[str | None, str | None]]] = {}   # session_id -> (name, contact) saved
         self.bookings: dict[str, dict] = {}             # booking_id -> its Desk, session, action and status
         self._by_call: dict[tuple[str, int, str], str] = {}   # (session_id, generation, call_id) -> decision_id
         self._token_hashes: dict[str, str] = {}        # sha256(token) -> session_id
@@ -2346,6 +2352,9 @@ class FakeKernelState:
             slot = min((slot for slot in desk.slots.values() if slot.starts_at > real_now
                         and slot.slot_id not in desk.booked), key=lambda slot: slot.starts_at)
             call = ToolCall(call_id=new_id("call"), tool="native.book", args={"slot_id": slot.slot_id})
+            # the recorded visitor gave their details first, as a booking needs (#740); the kernel's sample week
+            # writes its booking without a call, so the replay keeps no lead row or owner note either
+            self.lead_contacts.setdefault(session.session_id, []).append(("Visitor", "visitor@example.com"))
         elif kind == "refused":
             document = next(iter(desk.documents.values()))
             call = ToolCall(call_id=new_id("call"), tool="native.release_document",
@@ -2620,6 +2629,17 @@ class FakeKernelState:
         return self._new_decision(session, desk, call, digest, action, outcome, card_ids, scripted=scripted,
                                   baseline=baseline)
 
+    def _can_reach(self, session: Session, book) -> bool:
+        """A booking's name and way to reach the person (the kernel's `book.can_reach`): the session's verified
+        person, the call's own `name` and a phone number or email, or a lead the session saved with both."""
+        from desk.kernel_service.adapters.book import reachable
+        if book.contact is not None and not reachable(book.contact):
+            return False
+        if session.person_id is not None or (book.name is not None and book.contact is not None):
+            return True
+        return any(name and name.strip() and contact and reachable(contact)
+                   for name, contact in self.lead_contacts.get(session.session_id, []))
+
     def _normalize(self, session: Session, desk: Desk, call: ToolCall) -> NormalizedAction | None:
         """The adapter's step: resolve the resource and compute amounts from the Desk's records, never from
         args; a known adapter refusal carries its check code, otherwise None refuses."""
@@ -2637,18 +2657,21 @@ class FakeKernelState:
             discount_bp = args.get("requested_discount_bp", 0)
             amount_cents = list_cents - list_cents * discount_bp // 10_000
         elif tool == "native.book" or block == 'typed_booking':
-            from desk.kernel_service.adapters.book import BookArgs
+            from desk.kernel_service.adapters.book import BookArgs, owner_details
             from desk.kernel_service.labels import find_canaries
             try:
-                note = BookArgs.model_validate(args).note
+                book = BookArgs.model_validate(args)
             except ValidationError:
                 raise AdapterCheckRefused('invalid_args') from None
-            if note and find_canaries(note, {document.document_id: document.canary
+            texts = owner_details(book)
+            if texts and find_canaries(" ".join(texts), {document.document_id: document.canary
                     for each in self.desks.values() if each.copy_id == desk.copy_id for document in each.documents.values()}):
                 raise AdapterCheckRefused('note_canary')
             slot = desk.slots.get(args["slot_id"])
             if slot is None or slot.starts_at <= self.now:
                 raise AdapterCheckRefused("no_such_slot")
+            if not self._can_reach(session, book):         # a name and a phone number or email (#740)
+                raise AdapterCheckRefused("contact_needed")
             resource, starts_at = ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None), slot.starts_at
         elif tool == "native.release_document":
             # named bare or by its fact ID, as Claude's context shows it (`adapters.base.fact_ref`)
@@ -2810,7 +2833,8 @@ class FakeKernelState:
             policy_ids=self._policy_ids(desk, outcome, card_ids, baseline=baseline, scripted=scripted),
             card_ids=card_ids,
             reason_plain=self._reason(session, desk, call, action, card_ids),
-            visitor_plain=status_line(state, tool=tool, session_kind=session.kind, language=session.last_language,
+            visitor_plain=status_line("refused_contact_needed" if check == "contact_needed" else state, tool=tool,
+                                      session_kind=session.kind, language=session.last_language,
                                       owner=desk.owner_display_name),
             answers=answers, expires_at=expires_at, ledger_seq=entry.seq, signature=""))
         # the alerts travel once, on this answer: the record every read answers from carries none
@@ -2872,9 +2896,15 @@ class FakeKernelState:
         cards = [card.reason for card in desk.cards if card.card_id in card_ids]
         if cards:
             reason += " " + cards[0]
-        note = call.args.get("note") if action is not None else None
-        if isinstance(note, str) and note.strip():
-            reason += f" Claude's note: “{note[:200]}”"
+        profile = desk.tools.get(call.tool)
+        booking = call.tool == "native.book" or (profile is not None and profile.business is not None
+                                                 and profile.business.config.block == "typed_booking")
+        # a booking's free text, in the kernel's order (`decide.free_text`, by field name); any other call's note
+        fields = ("address", "contact", "name", "note") if booking else ("note",)
+        texts = [call.args.get(name) for name in fields] if action is not None else []
+        texts = [text for text in texts if isinstance(text, str) and text.strip()]
+        if texts:
+            reason += " Claude's note: " + ", ".join(f"“{text[:200]}”" for text in texts)
         return reason
 
     @staticmethod
@@ -3114,7 +3144,7 @@ class FakeKernelState:
         elif tool == "native.book" or block == 'typed_booking':
             from desk.kernel_service.adapters.book import BookArgs
 
-            note = BookArgs.model_validate(args).note
+            book = BookArgs.model_validate(args)
             slot = desk.slots[action.resource.id]
             if slot.slot_id in desk.booked:
                 return [], None, []
@@ -3135,10 +3165,12 @@ class FakeKernelState:
                 config = profile.business.config
                 facts[0].claims.extend([Claim(key='appointment_type', kind='text', value=config.appointment_type),
                                         Claim(key='appointment_minutes', kind='text', value=str(config.minutes))])
-            if note:
+            given = [(key, getattr(book, key)) for key in ('name', 'contact', 'address', 'note') if getattr(book, key)]
+            if given:
                 self._put_fact(desk, Fact(fact_id=f'booking_note:{booking_id}', kind='knowledge', status='committed',
                     source='kernel', label=Label(readers=['owner']), claims=[
-                        Claim(key='booking', kind='ref', value=booking_id), Claim(key='note', kind='text', value=note)]))
+                        Claim(key='booking', kind='ref', value=booking_id),
+                        *(Claim(key=key, kind='text', value=text) for key, text in given)]))
             view = {"fact_id": facts[0].fact_id, "booking_id": booking_id, "status": "confirmed"}
         elif tool == "native.find_slots":
             open_slots = sorted((slot for slot in desk.slots.values()
@@ -3199,6 +3231,7 @@ class FakeKernelState:
             view = {'fact_id': link_fact.fact_id, 'title': config.purpose, 'amount_cents': action.amount_cents}
         elif tool == "native.capture_lead" or (block == 'intake' and self._business_profile(desk, tool) is not None):
             lead_id = new_id("lead")
+            self.lead_contacts.setdefault(session.session_id, []).append((args["name"], args.get("contact")))
             self._put("leads", (lead_id,), {"lead_id": lead_id, **ids, "session_id": session.session_id,
                                             "display_name": args["name"],
                                             "note": args.get('contact') if tool.startswith('desk.') else args.get("note"),

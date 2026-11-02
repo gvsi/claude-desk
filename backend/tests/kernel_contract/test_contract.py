@@ -1705,6 +1705,56 @@ async def bookable_outright(owner: CredentialView, ro_read, ro_schema: str, copy
     return slot
 
 
+CONTACT_NEEDED_LINE = "To book, I need your name and a phone number or email"
+WHO = {"name": "Jane Doe", "contact": "jane@example.com"}     # who a stranger's booking is for (#740)
+
+
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("booking", ["native", "typed"])
+async def test_a_booking_needs_a_name_and_a_way_to_reach_the_person(kernel, ro_read, booking):
+    """A booking needs a name and a way to reach the person (#740). A stranger's booking with neither, or with a contact
+    that is no phone number or email, is refused at step 1, ledgered `adapter_refused` `contact_needed`, with a status
+    line that tells Claude what to ask for. The same booking goes through once the session saved a lead with a name and
+    contact, once the call passes `name` and `contact` itself, or once the session is verified as a person on record."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    tool = await booking_tool(owner, ro_read, ro_schema, copy, booking)
+    slot = await bookable_outright(owner, ro_read, ro_schema, copy, tool)
+    book = {"slot_id": slot["slot_id"]}
+
+    async def booked(args: dict, *, before=None) -> Decision:
+        created = await new_visitor(http, slug)
+        view = http.session(created.session_token)
+        if before is not None:
+            await before(view, created.state.session_id)
+        return await decide(view, created.state.session_id, 0, "book-1", tool, args)
+
+    async def saved_lead(view: CredentialView, session_id: str) -> None:
+        lead = await decide(view, session_id, 0, "lead-1", "native.capture_lead",
+                            {"name": "Jane Doe", "contact": "jane@example.com"})
+        assert lead.outcome == "allow", lead.reason_plain
+        assert (await execute(view, lead, 0)).state == "succeeded"
+
+    async def verified(view: CredentialView, session_id: str) -> None:
+        started = await verify_start(view, session_id, DANA)
+        assert started is not None
+        (entry,) = await session_inbox(view, session_id)
+        (code,) = SIX_DIGITS.findall(entry.body)
+        assert (await verify_check(view, session_id, code)).verified
+
+    for args in (book, {**book, "name": "Jane Doe"}, {**book, "name": "Jane Doe", "contact": "call me later"}):
+        refused_booking = await booked(args)
+        assert (refused_booking.outcome, refused_booking.action) == ("refuse", None)
+        assert refused_booking.visitor_plain == CONTACT_NEEDED_LINE
+        (entry,) = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
+                    if entry.event.kind == "decide" and entry.event.ref_id == refused_booking.decision_id]
+        assert (entry["reason"], entry["check"]) == ("adapter_refused", "contact_needed")
+    for decision in (await booked(book, before=saved_lead), await booked(book, before=verified),
+                     await booked({**book, "name": "Jane Doe", "contact": "(510) 555-0123", "address": "12 Elm St"})):
+        assert decision.outcome == "allow", decision.reason_plain
+
+
 @pytest.mark.kernel_plan("01c")
 @pytest.mark.parametrize("booking", ["native", "typed"])
 async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booking):
@@ -1725,7 +1775,7 @@ async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booki
     ((card_id, kind, status),) = session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id)
     assert (kind, status) == ("card", "open")
     view = http.session(visitor.session_token)
-    allowed = await decide(view, visitor.state.session_id, 0, "book-1", tool, {"slot_id": slot["slot_id"]})
+    allowed = await decide(view, visitor.state.session_id, 0, "book-1", tool, {"slot_id": slot["slot_id"], **WHO})
     assert allowed.outcome == "allow", allowed.reason_plain
     assert (await execute(view, allowed, 0)).state == "succeeded"
     assert session_handoffs(ro_read, ro_schema, copy, visitor.state.session_id) == [(card_id, "card", "done")]
@@ -1758,7 +1808,7 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(kernel
     kept = await decide(http.session(other.session_token), other.state.session_id, 0, "quote-1", "native.quote",
                         quote_args(drain, 5000))
     assert held.state == kept.state == "held"
-    booked = await decide(view, visitor.state.session_id, 0, "book-1", tool, {"slot_id": slot["slot_id"]})
+    booked = await decide(view, visitor.state.session_id, 0, "book-1", tool, {"slot_id": slot["slot_id"], **WHO})
     assert booked.outcome == "allow", booked.reason_plain
     assert (await execute(view, booked, 0)).state == "succeeded"
 

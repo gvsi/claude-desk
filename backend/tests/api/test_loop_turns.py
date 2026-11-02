@@ -849,7 +849,7 @@ async def test_reply_waits_for_parallel_tool_calls(api_conn, caller, visitor, fa
     agent = replace(caller, kind="agent")
     await append_message(api_conn, agent.ids, "agent_text", text="Book the earliest visit for Alex Kim.")
     await api_conn.commit()
-    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"),
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"),
                                     reply("You're booked.", id="toolu_done"))])
     async with KernelHttp("http://fake-kernel", transport=Watching(fake, {"/execute"}, slow)) as http:
         outcome = await run_turn(api_conn, replace(agent, kernel=http.session(visitor.token)), model,
@@ -1230,7 +1230,7 @@ async def test_other_stop_reasons_and_empty_end_turn_hand_off(api_conn, kernel_h
 
 async def test_truncated_tool_call_never_runs(api_conn, caller, fake):
     await said(api_conn, caller, "Book me in for the earliest slot.")
-    cut = tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_cut")
+    cut = tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_cut")
     model = ScriptedModel([response(thinking(), cut, stop_reason="max_tokens")])
 
     assert await run_turn(api_conn, caller, model) == "handoff"

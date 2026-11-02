@@ -36,7 +36,7 @@ from desk.kernel_service import adapters, execute, ledger, reply_check
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
-from .test_adapters import Rivera, book, quote_args, rivera, run, visitor_of
+from .test_adapters import WHO_NOTE, Rivera, book, quote_args, rivera, run, visitor_of
 from .test_approvals import answered, post_cancel
 from .test_context import context_of, fact_ids, owner_session_id
 from .test_decide import PASS, Visitor, decided, open_visitor, set_mode, set_session
@@ -1099,7 +1099,7 @@ async def test_the_owner_handling_the_conversation_leaves_a_call_back_open(app, 
 # ---- A booking closes the card's handoff (the owner's decision of 2026-11-01) --------------------------
 
 SLOT = "S-20261102-1000"                    # Monday 10:00 to 12:00, inside rv-book-wk's hours
-BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm."
+BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm." + WHO_NOTE
 
 
 async def preview_of(client, copy: Rivera) -> Visitor:

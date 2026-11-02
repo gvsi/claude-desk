@@ -163,6 +163,7 @@ async def new_owner(app, browser, fake, kernel_http) -> Owner:
 
 # Activity, made as the kernel and the API make it ------------------------------------------------------------
 
+WHO = {"name": "Jane Doe", "contact": "jane@example.com"}    # who a stranger's booking is for (#740)
 _CALL_IDS = itertools.count(1)
 
 
@@ -282,7 +283,7 @@ class Scene:
         self.fake.now = when
         desk = self.fake.desks[self.owner.desk_id]
         slot = max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)
-        decision, result = await who.run("native.book", {"slot_id": slot})
+        decision, result = await who.run("native.book", {"slot_id": slot, **WHO})
         assert result.state == "succeeded"
         return decision
 
@@ -829,7 +830,7 @@ async def test_a_booking_takes_its_sessions_earlier_discount_quote_off_needs_you
     fake.now += timedelta(minutes=2)
     desk = fake.desks[owner.desk_id]
     slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
-    await neighbour.run("native.book", {"slot_id": slot})
+    await neighbour.run("native.book", {"slot_id": slot, **WHO})
 
     listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
 
@@ -1272,7 +1273,7 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     visitor = await scene.visitor(when)
     await scene.text(visitor, when, 'Book a consult, using the side entrance.')
     slot = max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)
-    decision, result = await visitor.run(tool.tool, {'slot_id': slot, 'note': 'Use the side entrance.'})
+    decision, result = await visitor.run(tool.tool, {'slot_id': slot, 'note': 'Use the side entrance.', **WHO})
     assert result.state == 'succeeded'
     await scene.reply(visitor, when + timedelta(seconds=30))
     clock.now = local(2026, 10, 30, 9)
@@ -1282,7 +1283,7 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     assert today['briefing']['newest']['lead_or_answer'] is None
     [item] = (await owner.get(f'desks/{owner.desk_id}/briefing')).json()['items']
     assert (item['kind'], item['ref_id']) == ('booking', decision.decision_id)
-    assert 'Claude\'s note: “Use the side entrance.”' in item['line']
+    assert 'Claude\'s note: “jane@example.com”, “Jane Doe”, “Use the side entrance.”' in item['line']
     listed = (await owner.get(f'desks/{owner.desk_id}/conversations')).json()
     assert [row['latest_outcome'] for row in listed if row['session_id'] == visitor.session_id] == ['visit_booked']
 
@@ -1497,7 +1498,7 @@ async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     scene.fake.now = local(2026, 10, 29, 17)
     desk = scene.fake.desks[scene.owner.desk_id]
     held = await held_chat.decide("native.book", {
-        "slot_id": max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)})
+        "slot_id": max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked), **WHO})
     scene.fake.script("native.book")                         # back to the seed's rule
     assert held.state == "held"
     await scene.answer(held.decision_id, local(2026, 10, 29, 19))

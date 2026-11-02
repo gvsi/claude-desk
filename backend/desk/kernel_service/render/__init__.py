@@ -2,9 +2,11 @@
 
 Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
 (an owner's say has its own two: written by the owner, or not sent, which only the owner sees)
-and two variants: `tool_unavailable`, the line a `refused_at_execution` takes when a connected
-tool's server can't be reached, and `refused_over_mandate`, the line a refusal takes when the
-baseline's mandate rule alone refused an agent's charge above what its mandate has left; a
+and three variants: `tool_unavailable`, the line a `refused_at_execution` takes when a connected
+tool's server can't be reached, `refused_over_mandate`, the line a refusal takes when the
+baseline's mandate rule alone refused an agent's charge above what its mandate has left, and
+`refused_contact_needed`, the line a booking refused for want of a name and a phone number or
+email takes (`adapters.book`), which tells Claude, and the visitor, what to give before booking; a
 decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they name the business's
 owner and nothing else, so they never carry an amount, a date or a limit's value. An action a
 visitor or agent asked for that ran says what was done, one line per tool

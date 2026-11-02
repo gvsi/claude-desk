@@ -18,6 +18,7 @@ STATUS: dict[str, str] = {
     "held": "Esperando la aprobación de {owner}",
     "refused": "No es algo que pueda hacer aquí",
     "refused_over_mandate": "Rechazado: supera el límite firmado para este agente",
+    "refused_contact_needed": "Para reservar, necesito tu nombre y un teléfono o correo",
     "approved": "{owner} lo aprobó",
     "denied": "{owner} decidió no seguir adelante",
     "expired": "Esta solicitud venció",

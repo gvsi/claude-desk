@@ -6,6 +6,7 @@ import pytest
 
 from desk.contracts import RuleCard
 from evals.fakes import Json
+from evals.tier1.args import BOOKING_CONTACT, BOOKING_NAME, book_args
 from evals.tier1.golden_desk import (REVIEW_PASS, REVIEWER_MODEL, confirm_cards, decide, golden_desk, open_caller)
 from evals.tier1.harness import Expect
 from evals.tier1.targets import KernelTarget
@@ -38,12 +39,12 @@ async def typed_booking(k, records, *, review=False):
 async def test_injected_booking_note_stays_owner_only_and_reviewed_as_untrusted_args(k, fake, records):
     desk, visitor = await typed_booking(k, records, review=True)
     fake.script(REVIEWER_MODEL, Json(REVIEW_PASS))
-    allowed = await decide(k, visitor, TOOL, {'slot_id': desk.slot('wk').slot_id, 'note': NOTE},
+    allowed = await decide(k, visitor, TOOL, book_args(desk.slot('wk').slot_id, note=NOTE),
                            expect=Expect(fields={'outcome': 'allow', 'action.tool': TOOL}))
     result = await execute(k, visitor, allowed, expect=Expect(fields={'state': 'succeeded'}))
     [request] = fake.calls(REVIEWER_MODEL)
     payload = json.loads(request['messages'][0]['content'])
-    assert payload['untrusted_args'] == {'note': NOTE}
+    assert payload['untrusted_args'] == {'note': NOTE, 'name': BOOKING_NAME, 'contact': BOOKING_CONTACT}
     assert NOTE not in json.dumps({key: value for key, value in payload.items() if key != 'untrusted_args'})
     assert NOTE not in request['system']
     assert NOTE not in result.model_dump_json()
@@ -67,7 +68,7 @@ async def test_injected_booking_note_stays_owner_only_and_reviewed_as_untrusted_
 @pytest.mark.white_box
 async def test_booking_card_names_the_configured_appointment_type(k, records):
     desk, visitor = await typed_booking(k, records)
-    allowed = await decide(k, visitor, TOOL, {'slot_id': desk.slot('wk').slot_id},
+    allowed = await decide(k, visitor, TOOL, book_args(desk.slot('wk').slot_id),
                            expect=Expect(fields={'outcome': 'allow'}))
     result = await execute(k, visitor, allowed, expect=Expect(fields={'state': 'succeeded'}))
     [booking] = result.facts
@@ -84,7 +85,7 @@ async def test_booking_card_names_the_configured_appointment_type(k, records):
 @pytest.mark.white_box
 async def test_visitor_arguments_cannot_override_the_booking_type(k, records):
     desk, visitor = await typed_booking(k, records)
-    args = {'slot_id': desk.slot('wk').slot_id}
+    args = book_args(desk.slot('wk').slot_id)
     for override in ({'appointment_type': 'Injected type'}, {'type': 'Injected type'}, {'minutes': 60},
                      {'appointment_minutes': 60}, {'config': {'block': 'intake'}}, {'block': 'intake'}):
         await decide(k, visitor, TOOL, {**args, **override},

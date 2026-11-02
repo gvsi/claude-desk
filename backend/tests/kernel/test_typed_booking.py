@@ -10,7 +10,7 @@ from desk.db.models import ActorSession, Booking, CalendarSlot, DemoInboxEntry, 
 from desk.kernel_service import render
 from desk.kernel_service.render.cards import DeskInfo
 
-from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of
+from .helpers import activate_cards, kernel_ctx, ledger_rows, rows_of, save_lead
 from .test_adapters import rivera
 from .test_business_tools import put
 from .test_decide import decided, open_visitor
@@ -70,7 +70,9 @@ def typed_booking(**config):
             'config': {'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 20, **config}}
 
 
-async def configured(app, client, *, cards=None, config=None):
+async def configured(app, client, *, cards=None, config=None, lead=True):
+    """A Turner copy with the typed booking enabled and auto-allowed (or `cards`), and a stranger on its Desk who has
+    saved a lead with a name and email, as a booking needs (#740), unless `lead` is False."""
     copy = await rivera(app, client)
     response = await put(client, copy, [typed_booking(**(config or {}))])
     assert response.status_code == 200, response.text
@@ -87,7 +89,10 @@ async def configured(app, client, *, cards=None, config=None):
         prefs.now = [*prefs.now, 'booking']
         await activate_cards(ctx, copy.desk_id, cards if cards is not None else [RuleCard(
             card_id='consult-auto', applies_to=TOOL, mode='auto', who='anyone', reason='Book consultations.')])
-    return copy, await open_visitor(client, copy)
+    visitor = await open_visitor(client, copy)
+    if lead:
+        await save_lead(app, copy, visitor.session_id)
+    return copy, visitor
 
 
 async def test_typed_booking_executes_from_config_and_renders_both_languages(app, client):
@@ -248,8 +253,9 @@ async def test_visitor_cannot_override_the_config_in_args(app, client, extra):
         ctx.bind(copy.copy_id)
         from desk.kernel_service import adapters
         adapter = await adapters.resolve(ctx, copy.desk_id, TOOL)
-        # The optional owner-only note is shared with native.book; appointment config stays row-only.
-        assert set(adapter.Args.model_fields) == {'slot_id', 'note'}
+        # The optional owner-only note, name, contact and address are shared with native.book; appointment
+        # config stays row-only.
+        assert set(adapter.Args.model_fields) == {'slot_id', 'note', 'name', 'contact', 'address'}
 
 
 async def test_typed_booking_uses_the_slot_time_for_weekday_hours(app, client, reviewer):
@@ -324,7 +330,7 @@ async def test_typed_and_native_booking_race_for_the_same_slot(app, client, monk
     copy, first = await configured(app, client, cards=cards)
     second = await open_visitor(client, copy)
     typed = await decided(client, first, TOOL, {'slot_id': SLOT})
-    native = await decided(client, second, 'native.book', {'slot_id': SLOT})
+    native = await decided(client, second, 'native.book', {'slot_id': SLOT, 'name': 'Sam Lee', 'contact': '510 555 0199'})
     assert [typed.outcome, native.outcome] == ['allow', 'allow']
     original = book.commit_booking
     arrivals, both = [], asyncio.Event()
@@ -365,7 +371,9 @@ async def test_typed_tool_requires_answering_and_an_enabled_row(app, client, fro
         return {profile.tool for profile in seen.tools}
 
     assert {TOOL, 'native.book', 'native.find_slots'} <= await names()
-    decision = await decided(client, visitor, TOOL, {'slot_id': SLOT})
+    # an agent's session has no lead, so it names who the booking is for (#740)
+    who = {'name': 'Alex Kim', 'contact': 'alex.kim@example.com'} if kind == 'agent' else {}
+    decision = await decided(client, visitor, TOOL, {'slot_id': SLOT, **who})
     assert decision.outcome == 'allow'
     assert (await executed(client, visitor, decision)).state == 'succeeded'
     response = await client.put(f'/desks/{copy.desk_id}/answering', headers=copy.owner, json={'on': False})

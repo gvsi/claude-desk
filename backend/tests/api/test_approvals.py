@@ -482,7 +482,7 @@ async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, ke
     slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
     booking = await visitor.call("POST /decide", DecideRequest(
         session_id=held.session_id, generation=0,
-        call=ToolCall(call_id="book-1", tool="native.book", args={"slot_id": slot})))
+        call=ToolCall(call_id="book-1", tool="native.book", args={"slot_id": slot, "name": "Jane Doe", "contact": "jane@example.com"})))
     assert booking.state == "allowed", booking.reason_plain
     await visitor.call("POST /execute", ExecuteRequest(decision_id=booking.decision_id, session_id=held.session_id,
                                                        generation=0))

@@ -109,7 +109,7 @@ async def test_an_approved_booking_is_shown_with_its_result_card(copy, engine):
     copy.fake.script("native.book", outcome="hold")
     held = await caller.kernel.call("POST /decide", DecideRequest(
         session_id=caller.session_id, generation=0,
-        call=ToolCall(call_id="approved-booking", tool="native.book", args={"slot_id": slot})))
+        call=ToolCall(call_id="approved-booking", tool="native.book", args={"slot_id": slot, "name": "Jane Doe", "contact": "jane@example.com"})))
     assert held.state == "held"
     executed = await copy.answer(held)
     result = copy.fake.decisions[held.decision_id].result
