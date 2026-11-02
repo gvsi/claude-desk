@@ -2,15 +2,15 @@
  * Answering a held request from an owner screen. An answer is sent once per click and never
  * retried on its own: a lost answer may have gone through, so it is never called "still held",
  * and asking again can't run the action twice (the API answers a repeat with a 409 and the
- * request's final state). A 409 without that final state means the request changed while the
+ * request's state as it then stands). A 409 without that state means the request changed while the
  * owner was looking: the answer is never sent again, since an approval is bound to the exact call
  * the owner saw. Needs you is read again first, and the screen offers answers only from that read.
- * What was answered stays on the screen with its final line while the screen is open, whatever
- * Needs you reads next. An answer can settle while its action is still under way (allowed and not
- * yet run, or run with its outcome not yet known): its request is then read again a few times, more
- * slowly each time, and its card shows each read, until one is final. The reads stop there, after
- * the last of them (`ANSWER_REREAD_MS`), on Dismiss, and when the screen goes; a read that fails is
- * one of them and shows no error, since the answer went through.
+ * What was answered stays on the screen with the line for its state as last read while the screen
+ * is open, whatever Needs you reads next. An answer can settle while its action is still under way
+ * (allowed and not yet run, or run with its outcome not yet known): its request is then read again
+ * a few times, more slowly each time, and its card shows each read, until one is final. The reads
+ * stop there, after the last of them (`ANSWER_REREAD_MS`), on Dismiss, and when the screen goes; a
+ * read that fails is one of them and shows no error, since the answer went through.
  */
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -40,7 +40,7 @@ export interface AnswerDraftState {
 
 /**
  * An answer the API turned back because the request changed while the owner was looking (a 409
- * without the request's final state): the owner's line for it, shown above the request, and when
+ * without the request's state): the owner's line for it, shown above the request, and when
  * it came back. Only a read of Needs you that lands after `at` shows the request as it stands.
  */
 export interface AnswerConflict {
@@ -95,20 +95,20 @@ const UNDER_WAY: ReadonlySet<DecisionState> = new Set<DecisionState>(['allowed',
  * The 409 that says the request was answered already, with its state then: `already_resolved`.
  * The kernel's own 409 (`{error: "kernel", code}`) carries no decision and leaves the request held.
  */
-function finalStateOf(err: unknown, decisionId: string): Decision | null {
+function answeredStateOf(err: unknown, decisionId: string): Decision | null {
   if (!(err instanceof ApiError) || err.kind !== 'conflict' || err.code !== 'already_resolved') return null;
   return err.decision !== null && err.decision.decision_id === decisionId ? err.decision : null;
 }
 
 /**
- * A 409 without the request's final state: the kernel's own conflict (`{error: "kernel", code}`,
+ * A 409 without the request's state: the kernel's own conflict (`{error: "kernel", code}`,
  * the request still held but changed), or `already_resolved` without a decision to show.
  */
 function isConflict(err: unknown): err is ApiError {
   return err instanceof ApiError && err.kind === 'conflict';
 }
 
-/** The owner's line for a conflict: the kernel's code in the owner's words, or, answered already without a final state to show, that it moved on. */
+/** The owner's line for a conflict: the kernel's code in the owner's words, or, answered already without a state to show, that it moved on. */
 function conflictLine(err: ApiError): string {
   return err.code === 'already_resolved' ? CHANGED_LINE : ownerErrorCopy(err);
 }
@@ -189,6 +189,8 @@ export function useAnswer(deskId: string): UseAnswer {
         try {
           read = await request('decision', { params: { decision_id: id }, signal });
         } catch {
+          // Cut off by Dismiss or the screen going: no wait follows.
+          if (signal.aborted) return;
           continue;
         }
         if (signal.aborted) return;
@@ -246,9 +248,9 @@ export function useAnswer(deskId: string): UseAnswer {
       } catch (err) {
         // Answered already (a repeat of an answer that went through, or one that came too late):
         // the request's state then is the answer, read again while it is under way.
-        const final = finalStateOf(err, id);
-        if (final !== null) {
-          settle(item, final, null);
+        const already = answeredStateOf(err, id);
+        if (already !== null) {
+          settle(item, already, null);
           return;
         }
         // The request changed while the owner was looking: the answer isn't sent again. Its card

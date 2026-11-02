@@ -60,9 +60,16 @@ export function retryAfterMs(seconds: number): number {
   return Math.max(1, Math.round(seconds * 1_000 * scale));
 }
 
-/** Resolves after `ms`, or at once when `signal` aborts: a wait between tries that ends with the page. */
+/**
+ * Resolves after `ms`, or at once when `signal` aborts or already has: a wait between tries that
+ * ends with the page.
+ */
 export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
     const done = () => {
       clearTimeout(timer);
       signal.removeEventListener('abort', done);

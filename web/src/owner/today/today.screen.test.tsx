@@ -1800,6 +1800,103 @@ describe('Today', () => {
       expect(requests('decision')).toHaveLength(reads);
       expect(reads).toBeLessThan(ANSWER_REREAD_MS.length);
     });
+
+    it.each(['dismissed', 'left'] as const)('a_read_still_out_when_the_answer_is_%s_ends_the_reads_at_once', async (how) => {
+      // A read is still out when the owner dismisses the card, or leaves Today: it's dropped, and
+      // nothing waits to read again. At this pace no other timer on the page runs as long as the wait
+      // after that read, so a timer of that length means the reads went on.
+      const { screen, router } = await renderRoute(TODAY, { pollScale: 0.0533 });
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      let answerRead = () => {};
+      const out = new Promise<void>((resolve) => {
+        answerRead = resolve;
+      });
+      onTestFinished(() => answerRead());
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, until: out });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBe(2);
+
+      const nextWait = answerRereadMs()[2];
+      const timers = vi.spyOn(window, 'setTimeout');
+      if (how === 'dismissed') {
+        await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
+        await expect.element(card).not.toBeInTheDocument();
+      } else {
+        await router.navigate(CONVERSATIONS);
+        await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+      }
+      answerRead();
+      await pause(wholeSchedule());
+      expect(requests('decision')).toHaveLength(2);
+      expect(timers.mock.calls.filter(([, ms]) => ms === nextWait)).toEqual([]);
+    });
+
+    it('a_read_from_before_the_answer_never_brings_the_answers_back', async () => {
+      // The answer comes back allowed and not yet run, and the first read is from before it, still
+      // held with its answers: the card keeps its line and offers nothing, then ends done.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      expect(held.answers?.length).toBeGreaterThan(0);
+      let finish = () => {};
+      const running = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      onTestFinished(() => finish());
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: { ...held, state: 'approved', answers: [] }, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: held });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'executed', answers: [] }, until: running });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      // The held read has landed, since the next one is out.
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBe(2);
+      await nextFrames();
+      expect(card.getByRole('button', { name: /Allow|Deny/ }).elements()).toHaveLength(0);
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      finish();
+      await expect.element(card.getByText(DONE, { exact: true })).toBeVisible();
+      expect(card.getByRole('button', { name: /Allow|Deny/ }).elements()).toHaveLength(0);
+    });
+
+    it('an_answer_that_lands_after_today_has_gone_is_never_read_again', async () => {
+      // The owner allows, and leaves Today before the answer comes back allowed and not yet run:
+      // nothing is left on screen to show a read, so none is made.
+      const { screen, router } = await renderRoute(TODAY);
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      let land = () => {};
+      const landing = new Promise<void>((resolve) => {
+        land = resolve;
+      });
+      onTestFinished(() => land());
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, until: landing, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.poll(() => requests('answer').length, { timeout: 5_000 }).toBe(1);
+
+      await router.navigate(CONVERSATIONS);
+      await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+      const answered = new Promise<void>((resolve) => {
+        onTestFinished(
+          observeRequests((outcome) => {
+            if (outcome.key === 'answer') resolve();
+          }),
+        );
+      });
+      land();
+      await answered;
+      await pause(wholeSchedule());
+      expect(requests('decision')).toEqual([]);
+    });
   });
 
   it('answer_lands_in_its_slot', async () => {
