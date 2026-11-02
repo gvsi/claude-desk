@@ -324,6 +324,18 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     )
 
 
+def test_a_held_request_is_left_to_its_receipt_and_never_called_waiting_once_closed():
+    """A held request's receipt shows it waiting, with its own caption beside it. Claude restating that caption in its
+    own sentence duplicated it, and repeating it on later turns left "waiting for approval" above the receipt that says
+    the request closed. So the rule names the caption only so Claude knows not to restate it."""
+    text = conversation_system(RIVERA)[0]["text"]
+    held = next(line for line in text.splitlines() if line.startswith('- "held_for_owner":'))
+    assert "so you can say" not in held
+    assert "Its receipt in the chat already shows it waiting for Mike Turner, so don't restate that or say " in held
+    assert (", in this reply or a later one; if they ask where it stands, point them to its receipt in the chat. Once "
+            "the request has closed, its receipt says how, so never call it waiting." in held)
+
+
 def test_a_booking_refused_for_missing_details_is_asked_for_them_and_tried_once_more():
     """The kernel refuses a booking with no name and way to reach the person, with a line that says what it needs:
     the general "refused" rule must not tell Claude to give up on it."""
