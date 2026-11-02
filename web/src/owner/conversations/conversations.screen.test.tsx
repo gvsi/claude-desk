@@ -22,6 +22,7 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
 import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.ts';
+import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
@@ -44,6 +45,9 @@ const SEEDED_HOLD = 'ses-visitor-web';
 const conversation = (sessionId: string) => `${LIST}/${sessionId}`;
 
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
+
+/** The line under the take-over box: what was its placeholder before it gave an example. */
+const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';
 
 /** A held card's slot in the conversation: the card and what follows it there. */
 function slotOf(card: Element): Element {
@@ -1439,6 +1443,45 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('take_over_box_gives_an_example_in_the_owners_first_name_and_keeps_its_warning_under_it', async () => {
+    // In a chat Mike Turner took over, the empty box shows what he might write, as himself; the
+    // warning that was its placeholder stays in sight as the box's helper line, and still describes it.
+    const chat = named(DANA_LIVE, DANA);
+    chat.state = { ...chat.state, mode: 'owner' };
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Mike. Can you send me a photo?");
+    await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveAccessibleDescription(TAKE_OVER_HELPER);
+  });
+
+  it('take_over_box_on_a_desk_whose_owner_gave_no_name_speaks_as_the_business', async () => {
+    // Setup gave the Desk its fallback owner, "Owner": the example speaks as the business instead.
+    const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has the new Desk');
+    const chat = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(chat, 'Do you fit sash windows?');
+    chat.state = { ...chat.state, mode: 'owner' };
+    const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
+    const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Fenster & Fenster. Can you send me a photo?");
+    await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
+  });
+
+  it('whisper_box_on_another_desk_asks_for_a_photo', async () => {
+    // Off the plumbing demo, the whisper's example is one that fits any business.
+    const { deskId } = await liveSetupDeskIds('A hair salon in Oakland');
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has the new Desk');
+    const chat = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(chat, 'Can you fix a bad dye job?');
+    const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', 'Ask for a photo of the problem');
+    expect(box.element().hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('whisper_in_ai_mode', async () => {
     const chat = session(DANA_LIVE);
     const streamed = chat.events.length;
@@ -1446,7 +1489,7 @@ describe('Conversations', () => {
 
     // While Claude answers, the owner's words go to Claude only.
     const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
-    await expect.element(box).toHaveAttribute('placeholder', "Whisper to Claude. They won't see it.");
+    await expect.element(box).toHaveAttribute('placeholder', 'Ask if the leak is under the sink');
     const words = 'mention the Thursday 8 am opening';
     await box.fill(words);
     await userEvent.keyboard('{Enter}');

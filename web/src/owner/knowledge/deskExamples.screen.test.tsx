@@ -10,6 +10,9 @@ import { MOCK_SOURCES } from './previewSources.ts';
 const QUESTIONS = 'Questions Claude couldn’t answer';
 const QUESTION_NOTE = 'Sample questions, to show what this will do. It doesn’t work in this prototype yet.';
 const MORE_NOTE = 'Connecting these doesn’t work in this prototype yet.';
+/** The note's example on the plumbing demo, and the hint under the note on every Desk. */
+const NOTE_EXAMPLE = "We don't work on gas lines or septic tanks.";
+const NOTE_HINT = 'Up to a few paragraphs. Only you can see it until you make it public.';
 
 it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_starting_desk_%s', async (viewport) => {
   const starting = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { viewport, pollScale: 100 });
@@ -21,6 +24,10 @@ it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_st
     'Do you take credit cards on site?',
   ]);
   expect.soft(starting.screen.getByRole('textbox', { name: 'A website', exact: true }).element().getAttribute('placeholder')).toBe('turner-plumbing.example/blog');
+  // The note's example is the plumbing demo's too, under the note's own label and hint.
+  const startingNote = starting.screen.getByRole('textbox', { name: 'A note', exact: true });
+  expect.soft(startingNote.element().getAttribute('placeholder')).toBe(NOTE_EXAMPLE);
+  await expect.element(startingNote).toHaveAccessibleDescription(NOTE_HINT);
 
   const salon = await liveSetupDeskIds('A hair salon in Oakland');
   const { screen } = await renderRoute(`/app/${salon.deskId}/knowledge`, { viewport, pollScale: 100 });
@@ -30,6 +37,9 @@ it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_st
   expect.soft(screen.getByRole('heading', { name: QUESTIONS, exact: true }).query()).toBeNull();
   expect.soft(screen.getByText(QUESTION_NOTE, { exact: true }).query()).toBeNull();
   expect.soft(screen.getByRole('textbox', { name: 'A website', exact: true }).element().hasAttribute('placeholder')).toBe(false);
+  const salonNote = screen.getByRole('textbox', { name: 'A note', exact: true });
+  expect.soft(salonNote.element().hasAttribute('placeholder')).toBe(false);
+  await expect.element(salonNote).toHaveAccessibleDescription(NOTE_HINT);
   const more = screen.getByRole('region', { name: 'More sources', exact: true });
   await expect.element(more.getByText(MORE_NOTE, { exact: true })).toBeVisible();
   await expect.element(more.getByText('Mock', { exact: true })).toBeVisible();
@@ -56,5 +66,6 @@ it('deleting_the_starting_desk_and_reloading_keeps_samples_off_other_businesses'
   expect.soft(screen.getByText(QUESTION_NOTE, { exact: true }).query()).toBeNull();
   for (const sample of MOCK_SOURCES) expect.soft(screen.getByText(sample.title!, { exact: true }).query()).toBeNull();
   expect.soft(website.element().hasAttribute('placeholder')).toBe(false);
+  expect.soft(screen.getByRole('textbox', { name: 'A note', exact: true }).element().hasAttribute('placeholder')).toBe(false);
   await expect.element(screen.getByRole('region', { name: 'More sources', exact: true })).toBeVisible();
 });

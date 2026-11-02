@@ -62,6 +62,12 @@ export const KNOWLEDGE_COPY = {
 
 type Busy = 'note' | 'file' | 'switch';
 
+/** The examples "Add something" shows in its empty fields on the copy's starting sample Desk, the plumbing demo; other Desks show none. */
+const SAMPLE_EXAMPLES = {
+  websitePlaceholder: 'turner-plumbing.example/blog',
+  notePlaceholder: "We don't work on gas lines or septic tanks.",
+} as const;
+
 /** A Desk's knowledge, as the owner may see it. Query keys start with the route key. */
 const knowledgeKey = (deskId: string) => ['knowledge', deskId] as const;
 const knowledgeQuery = (deskId: string) =>
@@ -354,7 +360,7 @@ export function KnowledgePage() {
         <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} isStartingDesk={isStartingDesk} /></div>
         <div className="cd-knowledge__add">
         <KnowledgeAdd
-          {...(isStartingDesk ? { websitePlaceholder: 'turner-plumbing.example/blog' } : {})}
+          {...(isStartingDesk ? SAMPLE_EXAMPLES : {})}
           note={note}
           onNoteChange={(text) => {
             setNote(text);

@@ -20,7 +20,7 @@
 - If the window widens to 1024 px or more while it is open, it is a panel beside the page again, the page is live, and focus stays where it is; narrowing again makes it a sheet again. It is the same element at every width, so crossing 1024 px keeps the composer's draft.
 - A header: "Ask Claude" (`h2`, `.cd-type-section`) and an `IconButton` "Close" calling `onClose`.
 - The conversation in a `role="log"` region with `aria-live="polite"`, so replies are announced: the owner's words (a `VisitorMessage` bubble, `text-primary` on `fill-bubble` over `bg-panel`, 11.0:1), Claude's serif replies (`ClaudeMessage`) and their cards, 16 px apart. It scrolls between the header and the composer. While `busy`, Claude's writing dots (`WritingIndicator`) show at its end, with "Claude is writing" for screen readers; no draft is ever shown. The composer holds Send meanwhile (`Composer`'s `sendHeld`): the owner can type the next question and keeps focus, and it sends once the answer has come in.
-- An owner `Composer` at the bottom, labelled "Ask Claude", with the placeholder "Ask Claude"; it calls `onSend` with the trimmed words.
+- An owner `Composer` at the bottom, labelled "Ask Claude", with an example question as its placeholder, "What happens if someone asks for a discount?" (`ASK_CLAUDE_PLACEHOLDER`); it calls `onSend` with the trimmed words. The example is a question, not a rule change, so it can't be taken for a change waiting to apply.
 - Escape anywhere inside the panel calls `onClose`, unless something inside (an open menu) handled it first. Beside the page, the screen returns focus to what opened the panel; as a sheet, the panel and the shell do.
 
 ## Props
@@ -40,4 +40,5 @@ As a sheet, the panel notes what opened it when it appears: the control that had
 
 | Export | What it is |
 | --- | --- |
+| `ASK_CLAUDE_PLACEHOLDER` | The composer's placeholder, "What happens if someone asks for a discount?". |
 | `useAskClaudeIsSheet()` | Whether the panel is a modal sheet over the page at this window's width (under 1024 px), rather than beside it, kept up to date as the width crosses that breakpoint. The panel uses it to choose; a page uses it to wait for the sheet to close before showing something the sheet would cover, as Rules does with a confirmed change. |

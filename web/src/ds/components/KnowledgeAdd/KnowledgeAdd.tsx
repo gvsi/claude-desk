@@ -35,6 +35,8 @@ export interface KnowledgeAddedView {
 export interface KnowledgeAddProps {
   /** The Desk's website example, supplied by the screen. */
   websitePlaceholder?: string;
+  /** The Desk's note example, supplied by the screen; it must hold no price, hours or promise, since a note can be made public. */
+  notePlaceholder?: string;
   /** The note, as typed. */
   note: string;
   /** Each change to the note, with the raw text. */
@@ -68,7 +70,7 @@ const FILE_TYPES = '.txt,.md,text/plain,text/markdown';
  * switch, and the line above it, show the readers the kernel returned. Nothing here reads, checks or
  * sends anything: the screen does, and passes back what came of it.
  */
-export function KnowledgeAdd({ websitePlaceholder, note, onNoteChange, onAddNote, onAddFile, busy, error, noteError, added }: KnowledgeAddProps) {
+export function KnowledgeAdd({ websitePlaceholder, notePlaceholder, note, onNoteChange, onAddNote, onAddFile, busy, error, noteError, added }: KnowledgeAddProps) {
   const [website, setWebsite] = useState('');
   const ids = useId();
   const headingId = `${ids}-heading`;
@@ -87,7 +89,7 @@ export function KnowledgeAdd({ websitePlaceholder, note, onNoteChange, onAddNote
     <div className="cd-knowledge-add">
       <section className="cd-knowledge-add__form" aria-labelledby={headingId}>
         <SectionHeader id={headingId} title="Add something" />
-        <TextField label="A note" value={note} onChange={onNoteChange} multiline hint="Up to a few paragraphs. Only you can see it until you make it public." {...(noteError === undefined ? {} : { error: noteError })} />
+        <TextField label="A note" {...(notePlaceholder === undefined ? {} : { placeholder: notePlaceholder })} value={note} onChange={onNoteChange} multiline hint="Up to a few paragraphs. Only you can see it until you make it public." {...(noteError === undefined ? {} : { error: noteError })} />
         <div className="cd-knowledge-add__actions">
           <Button variant="primary" size="main" busy={busy === 'note'} waiting={inFlight} onClick={() => onAddNote()}>
             Add a note

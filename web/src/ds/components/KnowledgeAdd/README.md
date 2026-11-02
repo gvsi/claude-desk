@@ -15,6 +15,7 @@
 - `busy` while something is in flight: `'note'` or `'file'` for an add, `'switch'` for the switch's change.
 - `noteError`: validation shown under the note, marking it `aria-invalid` and associating the line with `aria-describedby`. The line is announced politely.
 - `websitePlaceholder`: the website example supplied by the screen; none by default.
+- `notePlaceholder`: the note example supplied by the screen; none by default. A note can be made public and Claude then quotes it, so the example holds no price, hours or promise.
 - `error`: what went wrong, in plain words, never a code ("That file is too big. Add files up to 100 KB."). With none, no line is drawn.
 - `added`, once the kernel has answered with the stored item:
   - `readers`: the returned item's `label.readers`, never the ones asked for. The switch is on only when they include "public", so an item the kernel keeps to the owner stays off.
@@ -24,7 +25,7 @@
 ## What it shows
 
 - The section's heading, "Add something" (`SectionHeader`, an `h2` that names the section), then 12 px apart:
-  - A `TextField` with `multiline`, labelled "A note", with the hint "Up to a few paragraphs. Only you can see it until you make it public."
+  - A `TextField` with `multiline`, labelled "A note", with the hint "Up to a few paragraphs. Only you can see it until you make it public." Its placeholder is the screen's `notePlaceholder`; without it, the field has none.
   - "Add a note", the view's one primary button, and "Add a file", secondary, both at a screen's main size, 8 px apart.
   - "Text or Markdown files, up to 100 KB." in `caption` type, `text-secondary`, which describes "Add a file".
   - With `error`, the screen's words as an error `Notice`.
@@ -58,6 +59,7 @@
 | `busy` | `'note' \| 'file' \| 'switch'` | What is in flight: an add, or the switch's change. |
 | `noteError` | `string` | Validation under the note, associated with its field and announced politely. |
 | `websitePlaceholder` | `string` | The screen’s website example. None by default. |
+| `notePlaceholder` | `string` | The screen’s note example. None by default. |
 | `error` | `string` | What went wrong, in plain words. |
 | `added` | `KnowledgeAddedView` | The item just added: the "Added" card and its switch. |
 
