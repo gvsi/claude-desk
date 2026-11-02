@@ -189,7 +189,7 @@ export const Lockup: Story = {
     const name = brand.querySelector('.cd-type-wordmark') as HTMLElement;
     const badge = brand.querySelector(CAPS_BADGE.selector) as HTMLElement;
     await expect(mark).not.toBeNull();
-    await expect(brand.textContent).toBe('Claude DeskPreview');
+    await expect(brand.textContent).toBe('Claude Desk Preview');
     await expect([mark.getAttribute('width'), mark.getAttribute('height')]).toEqual(['36', '36']);
     // The bell with no tile, in its light ink on the panel.
     await expect(mark.querySelector('rect')).toBeNull();

@@ -64,7 +64,7 @@ export const Board: Story = {
 
     // The brand row: the mark and the Wordmark with its Preview badge, as in the sidebar's lockup
     // (owner, 2026-10-30), where the board draws a "Demo" pill.
-    await expect(one(dialog, '.cd-intro__brand').textContent).toBe('Claude DeskPreview');
+    await expect(one(dialog, '.cd-intro__brand').textContent).toBe('Claude Desk Preview');
 
     // At this width the illustration fills the dialog's right side, 400 px of its 880, once the
     // panel has arrived and the illustration has played.

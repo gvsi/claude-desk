@@ -103,7 +103,7 @@ it('setup_bar_keeps_the_badge_from_the_about_bars_breakpoint_up', async () => {
     [1512, 982],
   ] as const) {
     const bar = await barAt(width, height);
-    expect(bar.querySelector('.cd-wordmark')?.textContent, `at ${width}`).toBe('Claude DeskPreview');
+    expect(bar.querySelector('.cd-wordmark')?.textContent, `at ${width}`).toBe('Claude Desk Preview');
     expect(bar.querySelector('.cd-pill')?.textContent, `at ${width}`).toBe('Preview');
   }
 });
