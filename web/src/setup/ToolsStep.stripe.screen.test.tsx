@@ -116,3 +116,40 @@ it.each([1440, 390])('at %i px, a setup whose chat did not connect Stripe still 
   expect(screen.getByRole('button', { name: 'Review Stripe' }).elements()).toHaveLength(0);
   expectNoHorizontalScroll();
 });
+
+/** The CPA setup at Tools with Stripe's two tools turned on, as its review's "Turn it on" leaves them. */
+async function cpaWithStripeOn(): Promise<SetupState> {
+  const state = await cpaAtTools();
+  const desk = mockStore.world.desk(state.desk_id);
+  if (!desk) throw new Error('Setup has a Desk');
+  desk.tools = desk.tools.map((row) => (row.tool.startsWith('payments.') ? { ...row, status: 'enabled', review_reason: null } : row));
+  return state;
+}
+
+it.each([1440, 390])('at %i px, Your rules starts Stripe with its money rules and keeps private data always on under See charges', async (width) => {
+  const state = await cpaWithStripeOn();
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+  await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+  const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
+  await expect.element(stripe).toBeVisible();
+  const draft = [...(mockStore.world.desk(state.desk_id)?.drafts.values() ?? [])].at(-1)?.draft;
+  const cap = draft?.auto_money_cap_cents ?? 0;
+  // Its card starts with the payment limit and the always-on money rule, each naming Refund.
+  const band = stripe.element().querySelector('[data-money-band]');
+  expect([...(band?.querySelectorAll('.cd-house-rules__rule') ?? [])].map((row) => row.textContent)).toEqual([
+    `${cap > 0 ? `Claude asks you before any payment over $${cap / 100}, whatever the rules below say` : 'Claude asks you before any payment'}Refund`,
+    'Claude never moves money without your rule or a signed limitRefundAlways on',
+  ]);
+  // See charges: the ask it starts at, as Rules shows a tool no card covers, then private data, always on.
+  const charges = stripe.getByRole('region', { name: 'See charges', exact: true });
+  expect([...charges.element().querySelectorAll('.cd-house-rules__rule')].map((row) => row.textContent)).toEqual([
+    'Claude asks you before showing customers their own chargesAnyone',
+    'Claude never shows private data to anyone but its verified ownerAlways on',
+  ]);
+  await expect.element(stripe.getByRole('region', { name: 'Refund', exact: true })).toBeVisible();
+  // Nothing is on yet: no Details, no Change, no effect tags.
+  expect(stripe.getByRole('button').elements()).toHaveLength(0);
+  expect(stripe.getByText('Private data', { exact: true }).elements()).toHaveLength(0);
+  expectNoHorizontalScroll();
+  await expectScreenBasics(screen.container, { owner: true });
+});

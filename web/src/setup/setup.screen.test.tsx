@@ -16,7 +16,7 @@ import { routes } from '../app/routes.tsx';
 import type { RouteObject } from 'react-router';
 import type { RuleCard } from '../api/contracts.ts';
 import type { BusinessOut, JobKind, ProposalCard as Proposal, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { framesWithin } from '../ds/test/framesWithin.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { settled } from '../ds/test/settled.ts';
@@ -25,7 +25,6 @@ import { pairContrast } from '../ds/contrast.ts';
 import { faintestOpacity, paintedGroundOf } from '../ds/test/breath.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
-import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
@@ -2479,21 +2478,32 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Continue' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
     await expect.element(screen.getByText("What I'll do on my own, what I'll ask you about, and what I never do.", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Tool by tool', exact: true })).toBeVisible();
 
-    // The payment limit first, in its signed words, at the answered $500; never the retired words.
-    await expect.element(screen.getByText(moneyLimitLine(50_000), { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Change' }).elements()).toHaveLength(0);
     expect(requests('setupRules')).toHaveLength(1);
     const draft = [...deskOf(state).drafts.values()].at(-1)?.draft;
     expect(draft?.auto_money_cap_cents).toBe(50_000);
     expect(screen.getByText(/Most I take without asking/).elements()).toHaveLength(0);
 
-    // The rules by what Claude does, each with who it's for, then what is always on and the check.
-    const group = (mode: 'auto' | 'ask' | 'never') => screen.getByRole('region', { name: OUTCOME_GROUP_WORDS[mode] });
-    await expect.element(group('auto').getByText('Quotes from your price list, at list price', { exact: true })).toBeVisible();
-    await expect.element(group('ask').getByText('Saturday bookings ask you first', { exact: true })).toBeVisible();
-    await expect.element(group('never').getByText('Refunds never go out on their own', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('heading', { name: 'Always on' })).toBeVisible();
+    // Across your Desk: the two always-on rules over every tool, and what anything unlisted does.
+    const across = screen.getByRole('region', { name: 'Across your Desk', exact: true });
+    await expect.element(across.getByText('These cover everything Claude does, whatever the tool.', { exact: true })).toBeVisible();
+    expect([...across.element().querySelectorAll('li')].map((row) => row.textContent)).toEqual([
+      'Claude always says it’s an AIIn every replyAlways on',
+      'Claude logs every request, allowed or not, and shows it to you in SafetyAlways on',
+      'Anything not listed here, Claude asks you first',
+    ]);
+    // Tool by tool: each tool the owner turned on, with the rules it starts under, as Rules reads them.
+    const tools = screen.getByRole('region', { name: 'Tool by tool', exact: true });
+    await expect.element(tools.getByText('What you turned on, with the rules each tool starts under.', { exact: true })).toBeVisible();
+    const tool = (name: string) => tools.getByRole('region', { name, exact: true });
+    await expect.element(tool('Quote').getByText('Claude can send quotes from your price list, at list price', { exact: true })).toBeVisible();
+    await expect.element(tool('Book a visit').getByText('Claude asks you before booking on Saturdays, 9:00 am to 1:00 pm', { exact: true })).toBeVisible();
+    await expect.element(tool('Confirm it’s them').getByText('Claude never sends a code anywhere but the contact on record', { exact: true })).toBeVisible();
+    // Nothing is on yet, so no effect tags, Details or Change.
+    expect(tools.getByText('Money', { exact: true }).elements()).toHaveLength(0);
+    expect(tools.getByRole('button').elements()).toHaveLength(0);
     for (const line of checkStatus(draft?.proof).lines) await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
   });
@@ -2515,7 +2525,7 @@ describe('setup', () => {
     record.draft = { ...record.draft, proof: { ...record.draft.proof, method: 'bounded', cases: 120 } };
     const bounded = (await renderRoute(`/app/setup/${other.interview_id}`)).screen;
     await expect.element(bounded.getByText(CANT_CHECK, { exact: true })).toBeVisible();
-    await expect.element(bounded.getByText(moneyLimitLine(50_000), { exact: true })).toBeVisible();
+    await expect.element(bounded.getByRole('region', { name: 'Tool by tool', exact: true })).toBeVisible();
     expect(bounded.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     expect(bounded.getByText(/didn't pass/).elements()).toHaveLength(0);
     await expect.element(bounded.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
@@ -3537,7 +3547,7 @@ describe('setup', () => {
       { name: 'start', path: '/app/setup', ready: 'Tell me about your business' },
       { name: 'questions', path: `/app/setup/${questions.interview_id}`, ready: `Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}` },
       { name: 'tools', path: `/app/setup/${tools.interview_id}`, ready: 'Stripe' },
-      { name: 'rules', path: `/app/setup/${rules.interview_id}`, ready: moneyLimitLine(50_000) },
+      { name: 'rules', path: `/app/setup/${rules.interview_id}`, ready: 'What you turned on, with the rules each tool starts under.' },
       { name: 'safety', path: `/app/setup/${safety.interview_id}`, ready: '6 of 6 stopped' },
       { name: 'preview', path: `/app/setup/${preview.interview_id}`, ready: DISCLOSURE },
       { name: 'live', path: `/app/setup/${live.interview_id}`, ready: 'Customers and their agents can reach your Desk at this link, day or night.' },
