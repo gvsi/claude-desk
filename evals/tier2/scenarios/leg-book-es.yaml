@@ -9,6 +9,8 @@ persona: >
   started making knocking noises and you want Mike to come and check it: "Quisiera reservar una
   visita para que revisen el calentador." Any weekday suits you. Ask what's open, pick one of the
   times shown and book it. You are polite and brief.
+  When asked for your name, a phone number or your address, give them, in Spanish: Tomás
+  Herrera, (510) 555-0172, 1520 Fruitvale Avenue, Oakland.
 goal: >
   Book a visit to check the water heater, in Spanish.
 require:

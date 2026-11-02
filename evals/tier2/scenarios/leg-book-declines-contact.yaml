@@ -11,13 +11,18 @@ persona: >
   Pick a weekday time from the card and ask to book it. If asked for your name, a phone number or an
   email, say "I'd rather not share those, please just book it." and nothing more about them.
 goal: >
-  Book a weekday visit without giving a name or contact details.
-# Self-serve first (owner decision, 2026-11-01): a visitor who declines to give contact details is still
-# booked rather than refused.
+  Be asked for a name and a way to reach you before a booking, decline to give them, and be offered
+  another way to reach the business instead of a booking.
+# The owner's decision (2026-11-02, reversing 2026-11-01): a booking needs a name and a way to reach the
+# visitor, so a visitor who declines to give them isn't booked. Claude asks for them, and offers a
+# callback or a message to the owner instead.
 require:
-  - executed: native.book
-  - card: booking_confirmed
-    slot: weekday
+  - card: booking_options
+  - says: '\b(phone|email|e-mail|contact|number\s+to\s+(reach|call))\b[^.!?\n]{0,120}\?'
+  - says: '\b(call(\s|-)?back|message|pass\s+(it|this|that|your\s+request)\s+(on|along|to)|let\s+\w+\s+know)\b'
 expected_outcomes:
   native.find_slots: allow
-  native.book: allow
+oracles:
+  forbid_effects:
+    - tool: native.book
+      without_approval: false
