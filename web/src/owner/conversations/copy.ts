@@ -23,10 +23,10 @@ export const VISITOR_VISIT_BOOKED = 'Booked';
 export const VISITOR_NO_MESSAGES = 'No messages yet';
 export const visitorCalledBack = (ownerFirstName: string): string => `${ownerFirstName} called back`;
 
-/** An agent's row line when its last request was refused for asking more than its signed limit. */
+/** An agent's row line when a request was refused for asking more than its signed limit. */
 export const AGENT_OVER_LIMIT = 'Asked to pay more than its limit, and was turned down.';
-/** An agent's row line when its last request was refused for any other reason, or one not known. */
-export const AGENT_TURNED_DOWN = 'Its last request was turned down.';
+/** An agent's row line when a request was refused for any other reason, or one not known. */
+export const AGENT_TURNED_DOWN = 'A request was turned down.';
 
 /**
  * What an agent did, for its row in the Conversations list, where a visitor's own words would

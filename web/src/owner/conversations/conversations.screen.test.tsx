@@ -325,7 +325,7 @@ describe('Conversations', () => {
     expect(lineOf('agent-booked')?.textContent).toBe('Booked Monday, November 2 at 10:00 am.');
     expect(lineOf('agent-paid')?.textContent).toBe('Paid $20 up front.');
     expect(lineOf('agent-limit')?.textContent).toBe('Asked to pay more than its limit, and was turned down.');
-    expect(lineOf('agent-refused')?.textContent).toBe('Its last request was turned down.');
+    expect(lineOf('agent-refused')?.textContent).toBe('A request was turned down.');
     // An agent without an outcome or its required fact has no line, even if it wrote a message.
     for (const id of ['agent-quiet', 'agent-booking-missing', 'agent-payment-missing']) {
       expect(lineOf(id)).toBeNull();

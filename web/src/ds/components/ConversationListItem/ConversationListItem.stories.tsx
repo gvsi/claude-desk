@@ -261,11 +261,11 @@ export const AgentLine: Story = {
 };
 
 export const QuoteOverLine: Story = {
-  args: { name: 'Visitor', time: '1:55 am', status: undefined, quote: 'Tuesday at 2 works.', line: 'Its last request was turned down.' },
+  args: { name: 'Visitor', time: '1:55 am', status: undefined, quote: 'Tuesday at 2 works.', line: 'A request was turned down.' },
   parameters: { canvas: 'none', canvasNote: 'Given both, the person’s own words win: the row has one preview line.' },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByRole('link', { name: 'Visitor 1:55 am “Tuesday at 2 works.”' })).toBeVisible();
-    await expect(canvas.queryByText('Its last request was turned down.')).toBeNull();
+    await expect(canvas.queryByText('A request was turned down.')).toBeNull();
     await expect(canvasElement.querySelectorAll('.cd-conversation-item__quote')).toHaveLength(1);
   },
 };

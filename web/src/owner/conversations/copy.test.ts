@@ -31,9 +31,9 @@ describe('agentLine', () => {
     expect(agentLine({ ...none, latest_outcome: 'turned_down', latest_outcome_cause: 'agent_limit' }, LA))
       .toBe('Asked to pay more than its limit, and was turned down.');
     for (const cause of ['owner_rule', 'no_rule', null] as const) {
-      expect(agentLine({ ...none, latest_outcome: 'turned_down', latest_outcome_cause: cause }, LA)).toBe('Its last request was turned down.');
+      expect(agentLine({ ...none, latest_outcome: 'turned_down', latest_outcome_cause: cause }, LA)).toBe('A request was turned down.');
     }
-    expect(agentLine({ latest_outcome: 'turned_down' }, LA)).toBe('Its last request was turned down.');
+    expect(agentLine({ latest_outcome: 'turned_down' }, LA)).toBe('A request was turned down.');
   });
 
   it('has_no_line_without_an_outcome_or_a_fact_it_needs', () => {
