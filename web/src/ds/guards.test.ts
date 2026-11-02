@@ -118,9 +118,9 @@ function rawColors(text: string, file: string): string[] {
   return [...matches(RAW_COLOR)(text), ...(file.endsWith('.css') ? namedColorsInCss(text) : [])];
 }
 
-// Clay: its token, its hex and its RGB triplet. The mark's
+// Clay: its token, and its dark and light themes' hex and RGB triplets. The mark's
 // own clay is guarded with its other fixed colors (MARK_COLOR).
-const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
+const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104|#c4673f\b|196\s*,\s*103\s*,\s*63/gi;
 
 // The only folders that may use clay: the field behind the first-visit intro's illustration, and the
 // field of the About pages' app icon in the mark's folder, which counts as part of the mark (owner,
@@ -480,6 +480,8 @@ describe('design system source guards', () => {
     // A token derived from clay ("--clay-soft") counts as clay; an unrelated name doesn't.
     expect(matches(CLAY)('color: var(--clay-soft)')).toEqual(['--clay']);
     expect(matches(CLAY)('--clayton: 1')).toEqual([]);
+    // The light theme's clay is clay too, as hex and as RGB.
+    expect(matches(CLAY)('color: #C4673F; fill: rgb(196, 103, 63)')).toHaveLength(2);
     // The allowlist is whole folders: a sibling whose name only starts the same way is outside it.
     expect(mayUseClay('components/IntroDialog/IntroDialog.css')).toBe(true);
     expect(mayUseClay('components/IntroDialogBanner/IntroDialogBanner.css')).toBe(false);
@@ -494,10 +496,12 @@ describe('design system source guards', () => {
     const planted: Source[] = [
       { file: 'components/Sidebar/Sidebar.css', text: '.cd-sidebar__brand { background: var(--clay); }' },
       { file: 'boards/boards.css', text: '.board-hero { background: var(--clay); }' },
+      { file: 'components/Card/Card.stories.tsx', text: "const field = 'rgb(196, 103, 63)';" },
     ];
     expect(findAll(planted.filter(({ file }) => !mayUseClay(file)), matches(CLAY))).toEqual([
       'components/Sidebar/Sidebar.css: --clay',
       'boards/boards.css: --clay',
+      'components/Card/Card.stories.tsx: 196, 103, 63',
     ]);
     // The canvas boards are drawn screens, so they're held to it too.
     const scanned = [...sources, ...boardSources()];

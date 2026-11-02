@@ -261,7 +261,8 @@ function everyFileButThisOne(): string[] {
 // text file under `src/`, the design system included, but the token sources and the tables and tests
 // that list every token or prove the design system's own guards.
 const MARK_PARTS = /(?<![\w-])--mark-[a-z-]*[a-z]|\bcd-mark__[a-z-]*|#d97757\b|217\s*,\s*119\s*,\s*87/i;
-const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/i;
+// Clay's token, and its dark and light themes' colors as hex and as RGB.
+const CLAY_PARTS = /(?<![\w-])--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104|#c4673f\b|196\s*,\s*103\s*,\s*63/i;
 const MARK_FOLDER = 'ds/components/Mark/';
 // Clay is the intro illustration's field and the field of the About pages' app icon, which counts as
 // part of the mark (owner, 2026-10-30), plus Claude's writing dots and their story's computed color check.
@@ -1325,6 +1326,8 @@ describe('app source guards', () => {
     expect(hits(MARK_PARTS, sample('.cd-mark { display: block } --bookmark-tile: 1; --marked: 1'))).toEqual([]);
     expect(hits(CLAY_PARTS, sample('background: var(--clay-soft); color: #E08968; rgb(224, 137, 104)'))).toHaveLength(3);
     expect(hits(CLAY_PARTS, sample('--clayton: 1; --mark-clay: 1'))).toEqual([]);
+    // The light theme's clay is clay too, as hex and as RGB.
+    expect(hits(CLAY_PARTS, sample('color: #C4673F; fill: rgb(196, 103, 63)'))).toHaveLength(2);
 
     // Every text file under src/, the design system's stories, boards and docs included.
     const everything = everyTextFile().map(withoutHeaderPalette);
@@ -1339,8 +1342,12 @@ describe('app source guards', () => {
     expect(mayUseClay('ds/components/WritingIndicator/Other.css')).toBe(false);
     expect(mayUseClay('ds/components/MarkBanner/MarkBanner.css')).toBe(false);
     expect(mayUseClay('about/reader.css')).toBe(false);
-    const plantedClay: Source[] = [{ file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' }];
-    expect(hits(CLAY_PARTS, plantedClay.filter(({ file }) => !mayUseClay(file)))).toEqual(['about/reader.css: --clay']);
+    const plantedClay: Source[] = [
+      { file: 'about/reader.css', text: '.cd-about-hero__icon { background: var(--clay); }' },
+      { file: 'owner/settings/Settings.css', text: '.cd-settings__accent { color: #c4673f; }' },
+      { file: 'ds/components/IntroDialog/IntroDialog.css', text: '.cd-intro__field { background: #c4673f; }' },
+    ];
+    expect(hits(CLAY_PARTS, plantedClay.filter(({ file }) => !mayUseClay(file)))).toEqual(['about/reader.css: --clay', 'owner/settings/Settings.css: #c4673f']);
     // The matchers find the real uses in their own folders, and nothing anywhere else.
     expect(hits(MARK_PARTS, everything.filter(({ file }) => file.startsWith(MARK_FOLDER))).length).toBeGreaterThan(0);
     for (const folder of CLAY_FOLDERS) {
