@@ -28,7 +28,7 @@ import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 import { OWNER_NAME_FALLBACK } from './brand.ts';
-import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
+import { CAUGHT_UP_AFTER_MS, REOPEN_DELAYS_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
 import { PublicPage } from './PublicPage.tsx';
 
 const PAGE = `/d/${RIVERA.slug}`;
@@ -2615,6 +2615,94 @@ describe('public chat page', () => {
     expect(chatHead()).toEqual(withClaude(HEAD.en));
   });
 
+  it.each(['network', 'stale'] as const)('an_unconfirmed_owner_read_retries_after_a_replayed_join (%s)', async (answer) => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    mockStore.world.takeOver(chat);
+    const current = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    let release = () => {};
+    mockStore.inject(answer === 'network' ? { route: 'visitorSession', status: 'network' } : { route: 'visitorSession', status: 200, body: older });
+    mockStore.inject({ route: 'visitorSession', status: 200, body: current, until: new Promise<void>((resolve) => (release = resolve)) });
+    onTestFinished(() => release());
+    const reads = requests('visitorSession').length;
+    const disclosure = watchHeadDisclosure();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(systemLines()).toEqual(['Mike Turner joined the chat']));
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await settle();
+    await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS);
+    await settle();
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+
+    // The stream stays open: the failed confirming read retries on its backoff, with the AI
+    // disclosure still present while the next read is pending.
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[0] - CAUGHT_UP_AFTER_MS);
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 2));
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+    release();
+    await until(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    disclosure.assert();
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    await settle();
+    expect(requests('visitorSession'), 'confirmation stops further retries').toHaveLength(reads + 2);
+    disclosure.assert();
+  });
+
+  it('an_older_cursorless_verify_answer_reconfirms_the_owner', async () => {
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const disclosure = watchHeadDisclosure();
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    await say(screen, 'Can you send my invoice?');
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const verified = { ...chat.state, verified: true, assurance: 'demo_code' as const };
+    let releaseVerify = () => {};
+    mockStore.inject({ route: 'verifyCheck', status: 200, body: { state: verified }, until: new Promise<void>((resolve) => (releaseVerify = resolve)) });
+    onTestFinished(() => releaseVerify());
+    const checks = requests('verifyCheck').length;
+    await screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+    await screen.getByRole('button', { name: 'Confirm' }).click();
+    await vi.waitFor(() => expect(requests('verifyCheck')).toHaveLength(checks + 1));
+    disclosure.assert();
+
+    // The verification answer was taken in Claude's mode. Mike Turner joins before it lands.
+    chat.state = verified;
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    disclosure.assert();
+    const current = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    let releaseRead = () => {};
+    mockStore.inject({ route: 'visitorSession', status: 200, body: current, until: new Promise<void>((resolve) => (releaseRead = resolve)) });
+    onTestFinished(() => releaseRead());
+    const reads = requests('visitorSession').length;
+    useTimers();
+    releaseVerify();
+    await until(() => expect(screen.getByText('Verified with a code. Simulated verification').element()).toBeVisible());
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+
+    // Only a fresh session read can restore the owner's line; it still discloses Claude as an AI.
+    releaseRead();
+    await until(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    disclosure.assert();
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    await settle();
+    expect(requests('visitorSession'), 'one read confirms the cursorless answer').toHaveLength(reads + 1);
+    disclosure.assert();
+  });
+
   it('a_replayed_join_invalidates_an_earlier_reopen_confirmation', async () => {
     const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
@@ -4193,6 +4281,37 @@ function watchTexts(): { saw: (pattern: RegExp) => boolean; stop: () => void } {
 /** The head as it is with Claude answering, and while Mike is in the chat. */
 const withClaude = (head: (typeof HEAD)['en' | 'es']) => ({ line: head.disclosure, asks: [head.ask] });
 const withOwner = (head: (typeof HEAD)['en' | 'es']) => ({ line: head.ownerInChat, asks: [] });
+
+/** Records each observed chat-head state and painted frame, including pending and failed reads. */
+function watchHeadDisclosure(): { assert: () => void } {
+  const lines: string[] = [];
+  const record = () => {
+    if (document.querySelector('.cd-public-shell__chat-head')) lines.push(chatHead().line);
+  };
+  record();
+  const watch = new MutationObserver(record);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  let frame = 0;
+  const nextFrame = () => {
+    record();
+    frame = requestAnimationFrame(nextFrame);
+  };
+  frame = requestAnimationFrame(nextFrame);
+  onTestFinished(() => {
+    watch.disconnect();
+    cancelAnimationFrame(frame);
+  });
+  return {
+    assert: () => {
+      record();
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line, 'every observed head names Claude as an AI').toContain('Claude, an AI');
+        expect([HEAD.en.disclosure, HEAD.en.ownerInChat]).toContain(line);
+      }
+    },
+  };
+}
 
 /** Whether `el` is wholly inside the window. */
 function inWindow(el: Element): boolean {
