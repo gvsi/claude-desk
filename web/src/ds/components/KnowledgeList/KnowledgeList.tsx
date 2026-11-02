@@ -66,7 +66,7 @@ export function KnowledgeList({ items, title = 'What Claude knows', caption, not
               // Only an item whose own title reached the web can read as public.
               const customersCanSee = !withheld && item.readers.includes('public');
               return (
-                <li key={item.id} className="cd-knowledge-list__row">
+                <li key={item.id} className={`cd-knowledge-list__row${item.kind ? ' cd-knowledge-list__row--tiled' : ''}`}>
                   {item.kind ? (
                     <span className="cd-knowledge-list__tile" data-kind={item.kind} aria-hidden="true">
                       <Icon name={item.kind} />

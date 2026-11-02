@@ -121,22 +121,32 @@ function fromTheVisitor(session: SessionRecord | undefined): string | null {
   return lines.length > 0 ? lines.join(' · ') : null;
 }
 
-/** The API's agent-only outcome: matched executed receipts/cards, with later decisive events first. */
-function latestAgentOutcome(world: MockWorld, session: SessionRecord): ConversationSummary['latest_outcome'] {
-  if (session.state.kind !== 'agent') return null;
+/** An agent's newest outcome and the facts behind it, as the API's summary carries them. */
+type AgentOutcome = Pick<ConversationSummary, 'latest_outcome' | 'latest_outcome_starts_at' | 'latest_outcome_cents' | 'latest_outcome_cause'>;
+
+const NO_OUTCOME: AgentOutcome = { latest_outcome: null, latest_outcome_starts_at: null, latest_outcome_cents: null, latest_outcome_cause: null };
+
+/**
+ * The API's agent-only outcome: matched executed receipts/cards, with later decisive events first,
+ * and the kernel's facts behind it, as the API reads them: a booking's start and a charge's amount
+ * from its decision's action, a Desk-authored payment confirmation's from the session's newest
+ * link paid before it, and a refusal's cause from its `decide` entry.
+ */
+function latestAgentOutcome(world: MockWorld, session: SessionRecord): AgentOutcome {
+  if (session.state.kind !== 'agent') return NO_OUTCOME;
   const records = [...world.decisions.values()].filter((d) => d.decision.session_id === session.state.session_id);
   const decisions = new Map(records.map((d) => [d.decision.decision_id, d.decision]));
   const desk = world.desk(session.deskId);
   const atDecision = (decision: Decision) => Date.parse(desk?.ledger[decision.ledger_seq - 1]?.created_at ?? '') ||
     records.find((r) => r.decision.decision_id === decision.decision_id)?.createdAt || 0;
   type Outcome = ConversationSummary['latest_outcome'];
-  const events: { at: number; seq: number; priority: number; n: number; outcome: Outcome }[] = [];
+  const events: { at: number; seq: number; priority: number; n: number; outcome: Outcome; decision?: Decision }[] = [];
   for (const { decision } of records) {
     const { state, action } = decision;
     if (decision.outcome === 'hold' || ['refused', 'refused_at_execution', 'held', 'denied', 'expired', 'cancelled'].includes(state) ||
       (state === 'executed' && ['native.book', 'native.charge_mandate', 'native.request_callback'].includes(action?.tool ?? ''))) {
       events.push({ at: atDecision(decision), seq: decision.ledger_seq, priority: 0, n: 0,
-        outcome: state === 'refused' || state === 'refused_at_execution' ? 'turned_down' : null });
+        outcome: state === 'refused' || state === 'refused_at_execution' ? 'turned_down' : null, decision });
     }
   }
   for (const handoff of world.handoffs.values()) {
@@ -189,12 +199,28 @@ function latestAgentOutcome(world: MockWorld, session: SessionRecord): Conversat
       const result = done[card];
       if (!result) continue;
       const decision = receipts.filter((d) => d.action?.tool === result.tool).sort((a, b) => b.ledger_seq - a.ledger_seq)[0];
-      if (decision) events.push({ at: atDecision(decision), seq: decision.ledger_seq, priority: 1, n: item.n, outcome: result.outcome });
+      if (decision) events.push({ at: atDecision(decision), seq: decision.ledger_seq, priority: 1, n: item.n, outcome: result.outcome, decision });
       break;
     }
   }
   events.sort((a, b) => a.at - b.at || a.seq - b.seq || a.priority - b.priority || a.n - b.n);
-  return events.at(-1)?.outcome ?? null;
+  const newest = events.at(-1);
+  if (!newest?.outcome) return NO_OUTCOME;
+  const { outcome, decision } = newest;
+  const found: AgentOutcome = { ...NO_OUTCOME, latest_outcome: outcome };
+  if (outcome === 'visit_booked') return { ...found, latest_outcome_starts_at: decision?.action?.starts_at ?? null };
+  if (outcome === 'deposit_paid' && decision) return { ...found, latest_outcome_cents: decision.action?.amount_cents ?? null };
+  if (outcome === 'deposit_paid') {
+    // The mock names a link by its token, as the payment entry's ref_id.
+    const paid = (desk?.ledger ?? []).filter((e) => e.seq < newest.seq && e.event.kind === 'payment' && e.event.session_id === session.state.session_id &&
+      e.event.summary.state === 'paid' && !e.event.summary.refused).at(-1);
+    return { ...found, latest_outcome_cents: world.links.get(paid?.event.ref_id ?? '')?.view.amount_cents ?? null };
+  }
+  if (outcome === 'turned_down' && decision) {
+    const entry = desk?.ledger.find((e) => e.seq === decision.ledger_seq && e.event.kind === 'decide') ?? null;
+    return { ...found, latest_outcome_cause: refusalCause(decision, entry, { verified: session.state.verified }) };
+  }
+  return found;
 }
 
 /** Visitor outcomes follow kernel ledger time, never transcript text or shown cards. */
@@ -266,7 +292,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
-    latest_outcome: session.state.kind === 'agent' ? latestAgentOutcome(world, session) : latestVisitorOutcome(world, session),
+    ...(session.state.kind === 'agent' ? latestAgentOutcome(world, session) : { ...NO_OUTCOME, latest_outcome: latestVisitorOutcome(world, session) }),
   };
 }
 

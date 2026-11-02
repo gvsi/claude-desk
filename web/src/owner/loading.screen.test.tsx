@@ -1820,6 +1820,25 @@ it.each([
   await expectScreenBasics(screen.container, { owner: true });
 });
 
+it.each([1440, 800, 390])('safety_reload_keeps_the_held_header_in_place_at_%i', async (width) => {
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  const { screen } = await renderRoute(SAFETY, { viewport: { width, height: width === 390 ? 844 : 900 }, pollScale: 100 });
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await nextFrames();
+  const before = fullPageShapes(['safety-headline'])[0]!;
+  desks.release();
+  await expect.element(screen.getByRole('link', { name: '1 held for you', exact: true })).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const header = landedElement('.cd-safety > .cd-page-header')!;
+  const subtitle = header.querySelector('.cd-page-header__subtitle')!.getBoundingClientRect();
+  const action = header.querySelector('.cd-page-header__actions')!.getBoundingClientRect();
+  if (width === 800) expect(action.top, 'the held request wraps below the subtitle').toBeGreaterThan(subtitle.bottom);
+  const after = landedElement('.cd-safety__headline')!.getBoundingClientRect();
+  expect(Math.abs(after.top - before.top), `headline top: skeleton ${before.top}, loaded ${after.top}`).toBeLessThanOrEqual(1);
+  expectNoHorizontalScroll();
+});
+
 it('safety_view_switch_keeps_focus', async () => {
   const { screen, router } = await renderRoute(SAFETY, { pollScale: 100 });
   const stopped = screen.getByRole('radio', { name: 'Stopped', exact: true });
