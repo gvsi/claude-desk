@@ -1444,6 +1444,7 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
 
 /** Each part of the fresh copy's held chat, by the shape that stands for it and the part itself. */
 const CHAT_PARTS = {
+  bar: { name: 'conversation-bar', page: '.cd-conversation__bar', size: true },
   name: { name: 'conversation-name', page: '.cd-conversation__name', dimensions: ['height', 'bottom'] },
   head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height', 'bottom'] },
   visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height', 'bottom'] },
@@ -1459,6 +1460,7 @@ const CHAT_PARTS = {
  * is anchored to its shape.
  */
 const PANE_ANCHORS: readonly SkeletonAnchor[] = [
+  CHAT_PARTS.bar,
   CHAT_PARTS.name,
   CHAT_PARTS.head,
   CHAT_PARTS.visitor,
@@ -1474,6 +1476,15 @@ const PANE_ANCHORS: readonly SkeletonAnchor[] = [
  * request, each anchored to its shape by its top and bottom.
  */
 const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [CHAT_PARTS.name, CHAT_PARTS.reply, CHAT_PARTS.receipt0, CHAT_PARTS.receipt1, CHAT_PARTS.held];
+
+/**
+ * The phone's anchors as the shapes fade. There the open conversation scrolls as one, under its
+ * bar pinned at the top of the pane; the fading layer clips its shapes in a box of its own, where
+ * their bar no longer pins, and the page's bar lies over them. So the name is checked against its
+ * shape as the shapes show and once the chat has landed (`expectSkeletonLoad`), not frame by frame
+ * as they fade.
+ */
+const PHONE_LANDING_ANCHORS: readonly SkeletonAnchor[] = PHONE_PANE_ANCHORS.filter((anchor) => anchor !== CHAT_PARTS.name);
 
 /**
  * From the moment the pane's shapes start to leave, each anchored part of the chat, every frame
@@ -1554,7 +1565,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   // at its latest on a phone, over the owner's controls.
   const chat = holdReads(conversationRead(SEEDED_HOLD));
   const anchors = viewport === 'desktop' ? PANE_ANCHORS : PHONE_PANE_ANCHORS;
-  const inView = watchPaneLanding(anchors);
+  const inView = watchPaneLanding(viewport === 'desktop' ? PANE_ANCHORS : PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors,
@@ -1585,7 +1596,11 @@ it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_ma
     const rect = document.querySelector(selector)!.getBoundingClientRect();
     return { left: rect.left, right: rect.right, width: rect.width };
   };
-  const before = ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].map(part => {
+  // The bar runs across the whole pane; the transcript's rows and the controls fill the column.
+  const shapeBar = bounds(`${shape} .cd-conversation__bar`);
+  expect(Math.abs(shapeBar.left - pane.left), 'bar shape left').toBeLessThanOrEqual(1);
+  expect(Math.abs(shapeBar.width - pane.width), 'bar shape width').toBeLessThanOrEqual(1);
+  const before = ['.cd-transcript-row', '.cd-conversation__controls'].map(part => {
     const rect = bounds(`${shape} ${part}`);
     expect(Math.abs(rect.width - expectedWidth), `${part} shape width`).toBeLessThanOrEqual(1);
     expect(Math.abs((rect.left - pane.left) - (pane.right - rect.right)), `${part} shape centred`).toBeLessThanOrEqual(1);
@@ -1594,7 +1609,9 @@ it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_ma
   chat.release();
   await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector(shape)).toBeNull());
-  ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
+  const bar = bounds('.cd-conversation-pane .cd-conversation__bar');
+  for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(bar[edge] - shapeBar[edge]), `bar ${edge}`).toBeLessThanOrEqual(1);
+  ['.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
     const rect = bounds(`.cd-conversation-pane ${part}`);
     for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(rect[edge] - before[i]![edge]), `${part} ${edge}`).toBeLessThanOrEqual(1);
   });
@@ -1608,7 +1625,7 @@ it('conversation_shapes_follow_the_answer_buttons_height', async () => {
   document.head.append(style);
   onTestFinished(() => style.remove());
   const chat = holdReads(conversationRead(SEEDED_HOLD));
-  const landing = watchPaneLanding(PHONE_PANE_ANCHORS);
+  const landing = watchPaneLanding(PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors: PHONE_PANE_ANCHORS,
@@ -1640,7 +1657,7 @@ async function openChatWithOneReadHeld(key: 'needsYou' | 'conversations', path: 
     await vi.waitFor(() => expect(others.every((route) => served(route) > 0)).toBe(true));
     await vi.waitFor(() => expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
     await nextFrames();
-    expect(landedElement('.cd-conversation__head'), `the chat waits for ${key}`).toBeNull();
+    expect(landedElement('.cd-conversation__bar'), `the chat waits for ${key}`).toBeNull();
     expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown');
   };
   return { ...rendered, held, open };
@@ -1721,7 +1738,7 @@ it('conversation_reload_hands_off at 390', async () => {
   // The fresh copy's held chat, which on a phone opens at its latest.
   const desks = holdReads(ROUTES.desks.path);
   const chat = holdReads(conversationRead(SEEDED_HOLD));
-  const gaps = watchSkeletonGaps('.cd-conversation__head');
+  const gaps = watchSkeletonGaps('.cd-conversation__bar');
   const { screen } = await renderRoute(`${CONVERSATIONS}/${SEEDED_HOLD}`, { viewport: 'phone', pollScale: 100 });
   // From the loading page's first commit, which keeps the frame's hidden heading.
   const headings = watchTopHeadings();
@@ -1731,7 +1748,7 @@ it('conversation_reload_hands_off at 390', async () => {
   expect(document.querySelector(`${FULL_LAYER} .cd-conversations--open .cd-conversations__back`)).not.toBeNull();
   const names = PHONE_PANE_ANCHORS.map(({ name }) => name);
   const before = fullPageShapes(names);
-  const inView = watchPaneLanding(PHONE_PANE_ANCHORS);
+  const inView = watchPaneLanding(PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     continues: true,
@@ -2181,7 +2198,7 @@ it('conversations_paused_first_read_lands_its_error_and_stays_open_on_reconnect'
 it('conversation_paused_first_read_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: ['conversation', SEEDED_HOLD], readPath: conversationRead(SEEDED_HOLD),
-    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
+    region: '.cd-conversation-pane', landed: '.cd-conversation__bar',
     prime: CONVERSATIONS, primeLanded: '.cd-conversations__items',
   });
 });
@@ -2189,8 +2206,8 @@ it('conversation_paused_first_read_lands_its_error_and_stays_open_on_reconnect',
 it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: needsYouKey(RIVERA.deskId), readPath: NEEDS_YOU_READ,
-    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
-    prime: `${CONVERSATIONS}/${SEEDED_HOLD}`, primeLanded: '.cd-conversation__head',
+    region: '.cd-conversation-pane', landed: '.cd-conversation__bar',
+    prime: `${CONVERSATIONS}/${SEEDED_HOLD}`, primeLanded: '.cd-conversation__bar',
   });
 });
 

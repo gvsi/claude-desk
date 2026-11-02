@@ -3,11 +3,11 @@
    the list and the open conversation each scroll on their own. From 1024 px the list is its own
    column at the sidebar's edge, 260 px wide with a hairline at its right that runs to the bottom of
    the window, and the open conversation sits beside it, its content no wider than the reading
-   column, with the concept footer under it. In the open conversation the head stays at the top
+   column, with the concept footer under it. In the open conversation its bar stays at the top
    and the owner's controls at the foot, and the transcript between them scrolls; in a window too
-   short for that, the open conversation scrolls as a whole instead. Under 1024 px the
-   list and an open conversation each take the page, the conversation with "All conversations"
-   above it, and the footer follows whichever shows.
+   short for that, the open conversation scrolls as a whole instead, under the bar, which stays
+   pinned to the top. Under 1024 px the list and an open conversation each take the page, the
+   conversation with "All conversations" above it, and the footer follows whichever shows.
 
    While they load (P12-01), the list under its title and the open conversation each hold their
    place in a skeleton region, drawn from these same classes, so what lands sits where its shapes
@@ -140,11 +140,13 @@
   min-width: 0;
 }
 
-/* The open conversation's pane keeps a minimum side gutter. Its transcript reaches across that
-   gutter to the pane's edges, while its content is a centred size-conversation column. This size
-   container lets a short pane scroll the whole conversation instead of nesting scroll regions. */
+/* The open conversation's pane keeps a minimum side gutter. Its bar and its transcript reach across
+   that gutter to the pane's edges, while its content is a centred size-conversation column. This
+   size container lets a short pane scroll the whole conversation instead of nesting scroll regions. */
 .cd-conversations__open {
   --cd-open-gutter: var(--space-28);
+  /* The pane's top padding, which the conversation's bar reaches over to sit at the pane's top. */
+  --cd-open-top: var(--space-24);
   container: cd-open-conversation / size;
   position: relative;
   display: flex;
@@ -153,7 +155,7 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--space-24) var(--cd-open-gutter) var(--space-20);
+  padding: var(--cd-open-top) var(--cd-open-gutter) var(--space-20);
 }
 
 /* Keep the pane and conversation full width for the transcript's edge-to-edge scroll region.
@@ -177,9 +179,10 @@
   min-width: 0;
 }
 
-/* Direct conversation parts and the pane's unavailable states use the same column. Keep the
-   skeleton's layer full width so its transcript has the same containing block as the real one. */
-.cd-conversation > :not(.cd-conversation__scroll),
+/* Direct conversation parts and the pane's unavailable states use the same column, all but the bar
+   and the transcript's region. Keep the skeleton's layer full width so its transcript has the same
+   containing block as the real one. */
+.cd-conversation > :not(.cd-conversation__scroll, .cd-conversation__bar),
 .cd-conversation-pane > .cd-skeleton-screen__body > :not(.cd-conversation, .cd-skeleton-screen__layer) {
   width: min(100%, var(--size-conversation));
   margin-inline: auto;
@@ -232,7 +235,7 @@
   }
 }
 
-/* One conversation: who and its latest line, the conversation, then the owner's controls. */
+/* One conversation: its bar, the conversation, then the owner's controls. */
 .cd-conversation {
   display: flex;
   flex-direction: column;
@@ -257,39 +260,89 @@
   scroll-padding-block: var(--space-4);
 }
 
-/* A column too short to leave the transcript room for a held request's card under the head and
+/* A column too short to leave the transcript room for a held request's card under the bar and
    above the owner's controls after Take over: the transcript takes its own height, and the column
-   scrolls as a whole, so there is one scroll region, never one inside another. The head, those
-   controls and a card take about 37 rem from 1024 px, and about 40 in the single column, where
-   "All conversations" sits above the head and the head and the card wrap more. */
+   scrolls as a whole under the pinned bar, so there is one scroll region, never one inside another.
+   Measured with the app's fonts, against the pane's content box: from 1024 px the bar takes 32 px
+   of it (the rest of its 56 is the pane's top padding), the controls 214, the seeded held card 261
+   at its narrowest, the gaps 12 (16 less the transcript's 4 px margin) and the card's focus ring
+   8 more: 527 px, well inside 37.5 rem. In the single column "All conversations" and its gap take
+   34, the bar's two lines 69, the controls 214 and the card 306: 643 px, so 41 rem leaves the
+   transcript a little room to spare.
+
+   Scrolled as one, the handoff cards the chat opens at stop under the bar, with 4 px for a focus
+   ring: under its 56 px from 1024 px, its 69 px under. */
 @media (min-width: 1024px) {
   @container cd-open-conversation (max-height: 37.5rem) {
     .cd-conversation__scroll {
       flex: none;
       overflow: visible;
     }
-  }
-}
 
-@media (max-width: 1023.98px) {
-  @container cd-open-conversation (max-height: 40rem) {
-    .cd-conversation__scroll {
-      flex: none;
-      overflow: visible;
+    .cd-conversation__handoffs {
+      scroll-margin-top: calc(var(--size-control) + var(--space-28));
     }
   }
 }
 
-.cd-conversation__head {
+@media (max-width: 1023.98px) {
+  @container cd-open-conversation (max-height: 41rem) {
+    .cd-conversation__scroll {
+      flex: none;
+      overflow: visible;
+    }
+
+    .cd-conversation__handoffs {
+      scroll-margin-top: calc(var(--size-control) + var(--space-40) + 1px);
+    }
+  }
+}
+
+/* The bar (board REV-720 C): who the chat is with, their level, what happened last and Take over,
+   pinned to the top of the pane across its whole width, outside the conversation's column, with
+   the pane's gutter at its sides. The chat scrolls under it. From 1024 px it is one line, 56 px
+   tall (Take over with 12 px above and below it), the first thing in the pane, reaching over the
+   pane's top padding. A sticky box keeps clear of its scroller's padding, so its top gives that
+   padding back and it pins to the pane's very top. It sits over the transcript's positioned parts
+   and menus, and over the pane's loading shapes as they fade. */
+.cd-conversation__bar {
+  position: sticky;
+  top: calc(-1 * var(--cd-open-top));
+  z-index: 2;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-4) var(--space-8);
+  gap: var(--space-8);
+  box-sizing: border-box;
+  min-height: calc(var(--size-control) + var(--space-24));
+  margin-inline: calc(-1 * var(--cd-open-gutter));
+  padding: 0 var(--cd-open-gutter);
+  border-bottom: 1px solid var(--line-hairline);
+  background: var(--bg-app);
+}
+
+/* The name and its pills stay together; the caption keeps its full width beside them on a laptop. */
+.cd-conversation__who {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-conversation__who > .cd-pill,
+.cd-conversation__quiet,
+.cd-conversation__dot {
+  flex: none;
 }
 
 .cd-conversation__name,
-.cd-conversation__latest {
+.cd-conversation__latest,
+.cd-conversation__quiet {
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cd-conversation__latest,
@@ -297,7 +350,81 @@
   color: var(--text-secondary);
 }
 
-/* A replayed chat's RecordedNote, 8 px under the head. */
+.cd-conversation__dot {
+  color: var(--text-tertiary);
+}
+
+.cd-conversation__context {
+  display: contents;
+}
+
+/* "Latest: …" takes what the line leaves, cut short to fit it, with Take over at the bar's right. */
+.cd-conversation__latest {
+  flex: 1 1 0;
+}
+
+.cd-conversation__bar > .cd-button {
+  flex: none;
+  margin-left: auto;
+}
+
+@media (min-width: 1024px) {
+  .cd-conversation__bar {
+    margin-top: calc(-1 * var(--cd-open-top));
+  }
+}
+
+/* Under 1024 px, under the way back, two lines 8 px inside the bar: the name and its pills with
+   Take over at the right, on a line as tall as Take over whether it is there or not, then the
+   simulation caption and "Latest" across the bar's whole width. Only a caption keeps the dot. */
+@media (max-width: 1023.98px) {
+  .cd-conversation__bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(var(--size-control), auto);
+    row-gap: var(--space-2);
+    padding-block: var(--space-8);
+  }
+
+  .cd-conversation__who {
+    grid-area: 1 / 1;
+  }
+
+  .cd-conversation__bar > .cd-button {
+    grid-area: 1 / 2;
+  }
+
+  .cd-conversation__latest {
+    grid-column: 1 / -1;
+  }
+
+  .cd-conversation__context {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    gap: var(--space-8);
+    min-width: 0;
+  }
+
+  .cd-conversation__dot {
+    display: none;
+  }
+
+  .cd-conversation__quiet + .cd-conversation__dot {
+    display: block;
+  }
+}
+
+/* Right under the bar, the transcript's region starts at the bar's hairline, so the chat scrolls
+   up to it, and its first line rests 16 px under it, where the column's gap would put it; what it
+   scrolls to its top stops there too. */
+.cd-conversation__bar + .cd-conversation__scroll {
+  margin-top: calc(-1 * var(--space-16));
+  padding-top: var(--space-16);
+  scroll-padding-top: var(--space-16);
+}
+
+/* A replayed chat's RecordedNote, 8 px under the bar. */
 .cd-conversation__recorded {
   margin-top: calc(var(--space-8) - var(--space-16));
 }
@@ -361,8 +488,8 @@
 }
 
 /* The pane's shapes: the transcript's region opens at its end, as the chat's does, but never
-   scrolls. The owner's controls keep their room with nothing drawn in it: Take over's button and
-   the whisper box at their heights. */
+   scrolls. The owner's controls keep their room with nothing drawn in it: the line about whispers
+   and the whisper box at their heights. */
 .cd-conversation-skeleton .cd-conversation__scroll {
   overflow: hidden;
 }
@@ -376,10 +503,6 @@
 /* A line's room in its type's line box, with nothing drawn in it. */
 .cd-conversation-skeleton__room-line {
   height: 1lh;
-}
-
-.cd-conversation-skeleton__button {
-  height: var(--size-control-main);
 }
 
 .cd-conversation-skeleton__composer {
