@@ -10,6 +10,7 @@ import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { observeRequests } from '../../api/http.ts';
 import { ROUTES, type RouteKey } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { DECISIONS } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -100,6 +101,97 @@ afterEach(() => {
 });
 
 describe('Notifications request link', () => {
+  it('held_alert_has_no_ending_and_keeps_its_link', async () => {
+    const held = seededHold();
+    const { screen } = await renderRoute(TODAY);
+    const page = await openNotifications(screen, held.decision_id);
+    await expect.element(requestRows(page)).toHaveAttribute('href', requestLink(held.decision_id));
+    expect(page.element().querySelector('.cd-approval-card__status')).toBeNull();
+    expect(page.getByText('Waiting for your answer', { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('cancelled_alert_shows_the_booking_ending_without_a_link', async () => {
+    const held = seededHold();
+    const record = mockStore.world.decisions.get(held.decision_id)!;
+    record.decision = { ...held, state: 'cancelled', owner_plain: rivera.cancelledByBooking.owner_plain };
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/notifications`);
+    const page = screen.getByRole('main');
+    await expect.element(page.getByText(rivera.cancelledByBooking.owner_plain!, { exact: true })).toBeVisible();
+    await expect.element(page.getByText(alertFor(held.decision_id).body)).toBeVisible();
+    expect(requestRows(page).elements()).toHaveLength(0);
+    expect(page.element().querySelector('.cd-status-dot--info')).not.toBeNull();
+  });
+
+  it('denied_alert_shows_the_same_ending_as_todays_card', async () => {
+    const held = seededHold();
+    const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await card.getByRole('button', { name: 'Deny this time' }).click();
+    const ending = card.getByText('You denied this.', { exact: true });
+    await expect.element(ending).toBeVisible();
+    const line = ending.element().textContent!;
+    const page = await openNotifications(screen, held.decision_id);
+    await expect.element(page.getByText(line, { exact: true })).toBeVisible();
+    expect(requestRows(page).elements()).toHaveLength(0);
+    expect(page.element().querySelector('.cd-status-dot--refused')).not.toBeNull();
+  });
+
+  it('an_answered_request_keeps_no_link_while_its_next_read_is_loading', async () => {
+    const held = seededHold();
+    const needs = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in needs) throw new Error('the mock reads Needs you');
+    mockStore.world.decisions.get(held.decision_id)!.decision = { ...held, state: 'approved' };
+    // A stale Needs you still lists the hold; the decision has already answered it.
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: needs.body });
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/notifications`);
+    const page = screen.getByRole('main');
+    await expect.element(page.getByText('You allowed this.', { exact: true })).toBeVisible();
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(release);
+    const before = mockStore.requests.filter((r) => r.key === 'decision').length;
+    mockStore.inject({ route: 'decision', status: 200, until });
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'decision').length).toBeGreaterThan(before);
+    await nextFrames();
+    expect(page.element().querySelector('.cd-approval-card__status')).toBeNull();
+    expect(requestRows(page).elements()).toHaveLength(0);
+  });
+
+  it.each([[1440, 900], [390, 844]])('a_booking_closes_the_open_alert_and_wraps_its_ending_at_%sx%s', async (width, height) => {
+    const held = seededHold();
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/notifications`, { viewport: { width, height } });
+    const page = screen.getByRole('main');
+    await expect.element(requestRows(page)).toHaveAttribute('href', requestLink(held.decision_id));
+    const session = mockStore.world.sessions.get(held.session_id)!;
+    mockStore.world.context(session, 'en', 'Book the first one').decide(DECISIONS.book);
+    const ending = page.getByText(rivera.cancelledByBooking.owner_plain!, { exact: true });
+    await expect.element(ending).toBeVisible();
+    expect(requestRows(page).elements()).toHaveLength(0);
+    const column = page.element().querySelector<HTMLElement>('.cd-notifications')!;
+    const line = ending.element();
+    expect(line.scrollWidth).toBeLessThanOrEqual(line.clientWidth);
+    expect(line.getBoundingClientRect().right).toBeLessThanOrEqual(column.getBoundingClientRect().right);
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+    if (width === 390) expect(line.getBoundingClientRect().height).toBeGreaterThan(parseFloat(getComputedStyle(line).lineHeight));
+  });
+
+  it.each(['loading', 'failed'] as const)('a_%s_decision_read_draws_no_ending', async (state) => {
+    const held = seededHold();
+    const record = mockStore.world.decisions.get(held.decision_id)!;
+    record.decision = { ...held, state: 'cancelled', owner_plain: rivera.cancelledByBooking.owner_plain };
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(release);
+    mockStore.inject({ route: 'decision', status: state === 'failed' ? 503 : 200, until: state === 'loading' ? until : undefined });
+    const read = state === 'failed' ? readsAnswered({ decision: 1 }) : null;
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/notifications`);
+    const page = screen.getByRole('main');
+    await expect.element(page.getByText(alertFor(held.decision_id).body)).toBeVisible();
+    if (read) await read;
+    expect(page.element().querySelector('.cd-approval-card__status')).toBeNull();
+    expect(requestRows(page).elements()).toHaveLength(0);
+  });
+
   it.each([[1440, 900], [390, 844]])('long_alerts_wrap_inside_the_column_at_%sx%s', async (width, height) => {
     const held = seededHold();
     const entry = alertFor(held.decision_id);
@@ -247,7 +339,8 @@ describe('Notifications request link', () => {
     await answerElsewhere(held.decision_id);
     await expect.element(link, { timeout: FRESH_MS + 3_000 }).not.toBeInTheDocument();
     await expect.element(page.getByText(alertFor(held.decision_id).body)).toBeVisible();
-    expect(mainLineReads()).toBeGreaterThan(before);
+    await expect.element(page.getByText('You denied this.', { exact: true })).toBeVisible();
+    await expect.poll(mainLineReads, { timeout: FRESH_MS + 3_000 }).toBeGreaterThan(before);
   });
 
   it('another_desks_list_read_before_and_now_failing_draws_no_link', async () => {
@@ -276,8 +369,8 @@ describe('Notifications request link', () => {
   });
 
   it('another_desks_list_whose_read_again_fails_drops_its_link', async () => {
-    // With Notifications open on Main line's held request, the request is answered elsewhere and
-    // every read of Needs you fails from then on. The list read as the page opened is the last that
+    // With Notifications open on Main line's held request, every read of Needs you fails from
+    // then on. The list read as the page opened is the last that
     // worked, and it still holds the request; once the page's poll reads it again and that read
     // fails, the link goes: a list whose latest read failed may be out of date.
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks', retryScale: 0 });
@@ -288,7 +381,6 @@ describe('Notifications request link', () => {
     await expect.element(link).toBeVisible();
     const before = mainLineReads();
 
-    await answerElsewhere(held.decision_id);
     mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
     await expect.element(link, { timeout: FRESH_MS + 3_000 }).not.toBeInTheDocument();
     expect(mainLineReads()).toBeGreaterThanOrEqual(before + 2);
