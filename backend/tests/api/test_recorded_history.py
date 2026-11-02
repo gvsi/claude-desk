@@ -683,7 +683,8 @@ async def live_visit(fake, kernel_http, engine, copy: dict) -> None:
                                                                                      kind="visitor"))
     session_id, view = created.state.session_id, kernel_http.session(created.session_token)
     slot = min((slot for slot in desk.slots.values() if slot.slot_id not in desk.booked), key=lambda s: s.starts_at)
-    call = ToolCall(call_id="call-live-booking", tool="native.book", args={"slot_id": slot.slot_id})
+    call = ToolCall(call_id="call-live-booking", tool="native.book", args={
+        "slot_id": slot.slot_id, "name": "Jane Doe", "contact": "jane@example.com"})
     decision = await view.call("POST /decide", DecideRequest(session_id=session_id, generation=0, call=call))
     await view.call("POST /execute", ExecuteRequest(decision_id=decision.decision_id, session_id=session_id,
                                                     generation=0))
