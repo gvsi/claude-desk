@@ -305,20 +305,50 @@ function blueEdges(css: string): string[] {
 const FOCUS_OR_HOVER = /:(?:focus(?:-visible|-within)?|hover)(?![\w-])/;
 
 /**
- * Each innermost rule of a stylesheet whose selector names focus or hover, with its declarations. A
- * rule inside an at-rule (`@media`) counts the same.
+ * Declarations in focus or hover rules, retaining enclosing selectors through CSS nesting and
+ * at-rules. Parentheses and quoted strings may contain punctuation without ending a statement.
  */
 function focusOrHoverRules(css: string): { selector: string; declarations: [string, string][] }[] {
-  return [...withoutComments(css).matchAll(/([^{};]+)\{([^{}]*)\}/g)]
-    .map(([, prelude = '', body = '']) => ({
-      selector: prelude.trim().replace(/\s+/g, ' '),
-      declarations: body
-        .split(';')
-        .map((part) => part.trim())
-        .filter((part) => part.includes(':'))
-        .map((part): [string, string] => [part.slice(0, part.indexOf(':')).trim().toLowerCase(), part.slice(part.indexOf(':') + 1).trim()]),
-    }))
-    .filter(({ selector }) => !selector.startsWith('@') && FOCUS_OR_HOVER.test(selector));
+  const rules: ReturnType<typeof focusOrHoverRules> = [];
+  const selectors: string[] = [];
+  let statement = '';
+  let depth = 0;
+  let quote = '';
+  let escaped = false;
+  const declaration = () => {
+    const selector = selectors.at(-1) ?? '';
+    const colon = statement.indexOf(':');
+    if (colon !== -1 && FOCUS_OR_HOVER.test(selector)) {
+      rules.push({ selector, declarations: [[statement.slice(0, colon).trim().toLowerCase(), statement.slice(colon + 1).trim()]] });
+    }
+    statement = '';
+  };
+  for (const char of withoutComments(css)) {
+    if (quote) {
+      statement += char;
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = '';
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      statement += char;
+    } else if (char === '(' || char === '[') {
+      depth += 1;
+      statement += char;
+    } else if (char === ')' || char === ']') {
+      depth -= 1;
+      statement += char;
+    } else if (depth === 0 && char === '{') {
+      const parent = selectors.at(-1) ?? '';
+      const prelude = statement.trim();
+      selectors.push(prelude.startsWith('@') ? parent : `${parent} ${prelude}`.trim().replace(/\s+/g, ' '));
+      statement = '';
+    } else if (depth === 0 && (char === ';' || char === '}')) {
+      declaration();
+      if (char === '}') selectors.pop();
+    } else statement += char;
+  }
+  return rules;
 }
 
 /** A value's top-level comma-separated parts, so a color's own commas stay inside it. */
@@ -337,6 +367,22 @@ function topLevelParts(value: string): string[] {
   return [...parts, value.slice(start)].map((part) => part.trim());
 }
 
+/** `inset` must be a keyword of this shadow, not part of a variable or function argument. */
+function isInsetShadow(shadow: string): boolean {
+  let depth = 0;
+  let outside = '';
+  for (const char of shadow) {
+    if (char === '(') {
+      if (depth === 0) outside += char;
+      depth += 1;
+    } else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) outside += char;
+    } else if (depth === 0) outside += char;
+  }
+  return /(?:^|\s)inset(?:\s|$)/i.test(outside);
+}
+
 /**
  * Each declaration in a focus or hover rule that draws outside the control: an outline that isn't off
  * (any `outline` or `outline-*` other than none or 0), or a shadow with a part that isn't inset.
@@ -348,7 +394,7 @@ function ringsOnFocusOrHover(css: string): string[] {
         if (/^outline(?:-[a-z]+)?$/.test(property)) return !/^(?:none|0(?:px)?)(?:\s*!important)?$/.test(value);
         if (property !== 'box-shadow') return false;
         if (/^none(?:\s*!important)?$/.test(value)) return false;
-        return topLevelParts(value).some((shadow) => !/\binset\b/.test(shadow));
+        return topLevelParts(value).some((shadow) => !isInsetShadow(shadow));
       })
       .map(([property, value]) => `${selector} { ${property}: ${value} }`),
   );
@@ -836,6 +882,30 @@ describe('design system source guards', () => {
       '.b:focus-within { box-shadow: inset 0 0 0 1px var(--line-focus), 0 1px 2px rgba(0, 0, 0, 0.2) !important }',
       '.c:focus::after { outline-color: var(--line-focus) }',
     ]);
+    // A ring nested inside a focus or hover rule (a child rule or an at-rule) is still a ring on focus or hover,
+    // and a custom property's name is not the `inset` keyword.
+    expect(
+      ringsOnFocusOrHover(
+        '.a:hover { &::after { box-shadow: 0 0 0 2px red; } }\n' +
+          '.a:focus-visible { @media (min-width: 640px) { outline: 2px solid red; } }\n' +
+          '.b:focus-visible { color: red; .c & { box-shadow: 0 1px 2px red, inset 0 0 0 1px red; } }\n' +
+          '.d:focus-visible { box-shadow: 0 0 0 2px var(--inset-color); }\n' +
+          '.e:hover { box-shadow: inset-shadow 0 0 0 2px red; }',
+      ),
+    ).toEqual([
+      '.a:hover &::after { box-shadow: 0 0 0 2px red }',
+      '.a:focus-visible { outline: 2px solid red }',
+      '.b:focus-visible .c & { box-shadow: 0 1px 2px red, inset 0 0 0 1px red }',
+      '.d:focus-visible { box-shadow: 0 0 0 2px var(--inset-color) }',
+      '.e:hover { box-shadow: inset-shadow 0 0 0 2px red }',
+    ]);
+    expect(
+      ringsOnFocusOrHover(
+        '.a:focus-visible { box-shadow: inset 0 0 0 1px var(--line-focus); &::after { box-shadow: INSET 0 0 0 1px var(--inset-color), inset 0 0 0 2px red; } }\n' +
+          '.b:hover { @media (min-width: 640px) { outline: none; background: var(--fill-hover); } }\n' +
+          '.c { &::after { box-shadow: 0 0 0 4px red; } @media (hover: hover) { outline: 2px solid red; } }',
+      ),
+    ).toEqual([]);
     expect(
       ringsOnFocusOrHover(
         ':focus-visible { outline: none; box-shadow: inset 0 0 0 1px var(--line-focus); }\n' +
