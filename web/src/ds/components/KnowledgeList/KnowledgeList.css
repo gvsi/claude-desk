@@ -84,3 +84,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* On phones, source tiles leave the text column its full width; the pill follows below. */
+@media (max-width: 639.98px) {
+  .cd-knowledge-list__row:has(.cd-knowledge-list__tile) {
+    display: grid;
+    grid-template-columns: var(--size-nav-row) minmax(0, 1fr);
+    row-gap: var(--space-8);
+  }
+
+  .cd-knowledge-list__row:has(.cd-knowledge-list__tile) > .cd-pill {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
