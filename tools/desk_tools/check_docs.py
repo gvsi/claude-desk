@@ -11,7 +11,9 @@ found, the check says that private terms were not checked and still passes. The 
 docs/images/, whose titles and labels are public text too, are scanned line by line for the same
 references private anywhere and the same terms.
 Each phrase in DISCLOSURES appears in every doc it names, ignoring case, line breaks and curly
-apostrophes. With --final, the shipped docs also hold no placeholder: a value still to be measured
+apostrophes. The path to MVP's metric tables require a source for each row: an evals file, a pull
+request, an estimate with its formula, or a paired final-pass placeholder. With --final, the shipped
+docs also hold no placeholder: a value still to be measured
 (`[measured: …]`) or a link the owner still has to give (`[owner: …]`).
 
 Exit 0 when every check passes, 1 when any fails (each failure printed as `file:line: what`),
@@ -271,8 +273,99 @@ def check_placeholders(root: Path) -> list[Problem]:
     return problems
 
 
+def _mvp_source(root: Path, source: str) -> bool:
+    if source.startswith("estimate:"):
+        # Judge the formula itself, not a '+' or '-' in a linked file name.
+        formula = source.removeprefix("estimate:").split(";", 1)[0].split("[", 1)[0]
+        return "=" in formula and bool(re.search(r"[+×*/−-]", formula))
+    for _, raw in link_targets(source):
+        target = raw.strip("<>")
+        if re.fullmatch(r"https://github\.com/[^/]+/[^/]+/pull/\d+(?:#[^\s]*)?", target):
+            return True
+        if _SCHEME.match(target) or target.startswith("//"):
+            continue
+        path = unquote(target.split("#", 1)[0].split("?", 1)[0])
+        resolved = ((root / path.lstrip("/")) if path.startswith("/") else root / "docs" / path).resolve()
+        if resolved.is_relative_to((root / "evals").resolve()) and resolved.is_file():
+            return True
+    return False
+
+
+def _table_cells(line: str) -> list[str] | None:
+    """Split at pipes outside code spans and escapes, or return None if there are none."""
+    line = line.strip()
+    masked = _CODE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
+    pipes = [match.start() for match in re.finditer(r"\\.|\|", masked) if match.group(0) == "|"]
+    if not pipes:
+        return None
+    bounds = [-1, *pipes, len(line)]
+    cells = [line[left + 1:right].strip() for left, right in zip(bounds, bounds[1:])]
+    if pipes and pipes[0] == 0:
+        cells = cells[1:]
+    if pipes and pipes[-1] == len(line) - 1:
+        cells = cells[:-1]
+    return cells
+
+
+def check_mvp_number_sources(root: Path) -> list[Problem]:
+    """Every metric row needs its own source, even when the row contains no digits yet."""
+    name = "docs/path-to-mvp.md"
+    doc = root / name
+    if not doc.is_file():
+        return []  # The section test requires the real document; temp trees may leave it out.
+    metric_sections = {"Architecture", "Model integration", "Scaling and what breaks first",
+                       "Latency and cost per conversation"}
+    problems = []
+    section, header, candidate = "", None, None
+    for number, line, in_fence in _lines(doc.read_text()):
+        if in_fence:
+            header, candidate = None, None
+            continue
+        if line.startswith("## "):
+            section, header, candidate = line[3:].strip(), None, None
+            continue
+        if section not in metric_sections or not line.strip():
+            header, candidate = None, None
+            continue
+        cells = _table_cells(line)
+        delimiter = cells is not None and all(re.fullmatch(r":?-+:?", cell) for cell in cells)
+        if cells is None or (not delimiter and re.match(r"^\s*(?:#{1,6}(?:\s|$)|>|[-*+]\s|\d+[.)]\s)", line)):
+            header, candidate = None, None
+            continue
+        if header is None:
+            # A table starts only when a header is followed by a matching delimiter row.
+            if (candidate is not None and len(cells) == len(candidate[1])
+                    and (len(cells) > 1 or line.lstrip().startswith("|"))
+                    and delimiter):
+                header = [cell.casefold() for cell in candidate[1]]
+                if "source" not in header:
+                    problems.append(Problem(name, candidate[0], "metric table needs a source column"))
+                candidate = None
+            else:
+                candidate = number, cells
+            continue
+        if "source" not in header:
+            continue
+        if len(cells) != len(header):
+            problems.append(Problem(name, number, "metric row must have a cell for every column, including source"))
+            continue
+        source = cells[header.index("source")]
+        pending = any("[measured:" in cell for cell in cells)
+        if pending:
+            valid = (source == "[measured: source, final held-out pass]"
+                     and "value" in header
+                     and re.fullmatch(r"\[measured: [^\[\]\n]+, final held-out pass\]",
+                                      cells[header.index("value")]))
+        else:
+            valid = _mvp_source(root, source)
+        if not valid:
+            problems.append(Problem(name, number, "metric row needs an evals file or pull request source, "
+                                    "an estimate: formula, or paired final held-out pass placeholders"))
+    return problems
+
+
 def check(root: Path, final: bool = False) -> list[Problem]:
-    problems = check_links(root) + check_private(root) + check_disclosures(root)
+    problems = check_links(root) + check_private(root) + check_disclosures(root) + check_mvp_number_sources(root)
     if final:
         problems += check_placeholders(root)
     return problems

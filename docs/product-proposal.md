@@ -43,27 +43,33 @@ The first release is for real owners, who sign in with their Claude account.
 
 ## How we'll know it works
 
-Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through about 50 attacks and 30 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
+Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through 48 attacks and 39 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
 
 | Measure | What it shows | Prototype |
 | --- | --- | --- |
-| Baseline violations | money moved, private data released or a verification code leaked outside the rules; a number in prose, or a card the records don't back; a reply denying it's an AI; a ledger that doesn't verify | [measured: tier 2 pass, with its 95% upper bound]; the gate requires 0 |
-| Legitimate tasks completed | a visitor's task done correctly, alone or after the owner's approval | [measured: held-out rate with its 95% interval] |
-| False holds | the owner was asked when the rules allowed the action | [measured: false-hold rate] |
-| Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; [measured: …] |
-| Reveal delay, p50 and p95 | the wait for a checked reply | `estimate:` 0.3 to 0.8 s; [measured: …] |
+| Baseline violations | money moved, private data released or a verification code leaked outside the rules; a number in prose, or a card the records don't back; a reply denying it's an AI; a ledger that doesn't verify | 0 unwaived in 260 runs; the owner waived 2 AI-denial flags in calibration runs, one message at a time, and none of the 78 held-out attack runs was flagged (95% upper bound 3.9% per run); the gate requires 0 |
+| Legitimate tasks completed | a visitor's task done correctly, alone or after the owner's approval | 70 of 72 held-out runs (97.2%; Wilson 95% interval 90.4% to 99.2%) |
+| False holds | the owner was asked about an action the task expected the Desk to take alone | 0 of 78 decisions the held-out tasks expected allowed (0.0%) |
+| Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; measured: $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md)) |
+| Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 1.1 s p50, 2.8 s p95; measured: 1,229 / 3,909 ms (n = 60) ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b) |
 
-Limits: we wrote the scenarios, real attackers adapt, 17 held-out tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
+Limits: we wrote the scenarios, real attackers adapt, 24 held-out legitimate tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
 
 ## Business path
 
-A Desk comes with Claude's paid plans and a monthly conversation allowance; which plans, the allowance size and what happens above it are open. `estimate:` at the table's $0.20 per conversation, 100 conversations cost all of [Pro](https://claude.com/pricing)'s $20 monthly price ($20 ÷ $0.20), before the owner's own Claude use. So the allowance size decides the margin.
+**Who pays and why.** The owner, through their Claude plan; visitors and their agents never pay to ask. Owners already pay to have requests answered: [Ruby](https://www.ruby.com/pricing/)'s live receptionists start at $250 a month for 50 minutes. A Desk sells requests closed while the owner works.
 
-The main risks are a wrong answer under Claude's name, hostile traffic using up an owner's allowance, and owners who never let Claude act alone.
+**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: about $0.025 a Desk reply in the final eval pass, its checks included; `estimate:` a ten-reply conversation would cost about $0.25, so about 80 of them use all of [Pro](https://claude.com/pricing)'s $20 monthly price.
+
+**Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
+
+**Go-to-market.** Start with owners who already pay for Claude. The share kit puts a Desk where customers look: a link, a QR code, and words for a Google profile, an email signature and a voicemail. Try it at [desk.alcantara.xyz](https://desk.alcantara.xyz).
+
+**Risks.** A wrong answer under Claude's name: the reply check stops a made-up price, date or booking, not a wrong fact without one. Hostile traffic using up an owner's allowance: anyone can spend a public Desk, so a real Desk needs a spend cap per owner, and blocked attempts shouldn't count against it.
 
 ## The prototype
 
-The prototype, v1's enforced core, is at [owner: hosted URL; the passcode comes with the link], with the code at [github.com/gvsi/claude-desk](https://github.com/gvsi/claude-desk). Each visitor acts as Mike in a fresh copy of Turner Plumbing. Four things to try: chat as a customer, try to break it, answer a held request and create a Desk.
+The prototype, v1's enforced core, is at [desk.alcantara.xyz](https://desk.alcantara.xyz) (the passcode comes with the submission), with the code at [github.com/gvsi/claude-desk](https://github.com/gvsi/claude-desk). Each visitor acts as Mike in a fresh copy of Turner Plumbing. Four things to try: chat as a customer, try to break it, answer a held request and create a Desk.
 
 **Real.**
 

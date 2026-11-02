@@ -113,7 +113,10 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     const answers = () => mockStore.requests.filter((r) => r.key === 'setupAnswer');
     const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
     const send = screen.getByRole('button', { name: 'Send', exact: true });
-    await box.click();
+    // The message box is hidden under the docked question until Esc brings it back.
+    await expect.element(screen.getByRole('region', { name: CPA_COPY.first, exact: true })).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    await expect.element(box).toHaveFocus();
     await userEvent.keyboard('Both, about evenly{Enter}');
     await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.consult)[1]);
     // While the reply is written, the box keeps focus and takes typing; only Send and Enter wait.

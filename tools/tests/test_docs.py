@@ -631,6 +631,153 @@ def sections(text: str) -> dict[str, str]:
     return found
 
 
+def test_path_to_mvp_sections():
+    text = (REPO / "docs/path-to-mvp.md").read_text()
+
+    assert re.findall(r"^## (.+)$", text, re.MULTILINE) == [
+        "Architecture",
+        "Infrastructure",
+        "Model integration",
+        "Scaling and what breaks first",
+        "Latency and cost per conversation",
+        "What changes for real users",
+        "Trade-offs made and deferred",
+    ]
+
+
+@pytest.mark.parametrize("row, accepted", [
+    (None, True),  # The real draft, including every latency, cost and scaling row.
+    ("42 ms | [Run](../evals/reports/run.md)", True),
+    ("42 ms | [PR](https://github.com/gvsi/claude-desk/pull/33)", True),
+    ("estimate: 30 | estimate: 20 + 10 = 30; [pool](../backend/pool.py)", True),
+    ("[measured: local reveal latency, final held-out pass] | [measured: source, final held-out pass]", True),
+    ("42 ms |", False),
+    ("42 ms", False),
+    ("42 ms | [Notes](../docs/notes.md)", False),
+    ("42 ms | [Pool](../backend/pool.py)", False),
+    ("42 ms | [Pricing](https://example.com/pricing)", False),
+    ("42 ms | [Folder](../evals/reports/)", False),
+    ("42 ms | [Missing](../evals/reports/missing.md)", False),
+    ("estimate: 30 | estimate: from the configured pool", False),
+    ("estimate: 30 | estimate: x = y; [pool](../backend/pool.py)", False),
+    ("42 ms | [measured: source, final held-out pass]", False),
+    ("[measured: local reveal latency, final held-out pass] | [measured: source]", False),
+    ("[measured: local reveal latency, final held-out pass] | [Run](../evals/reports/run.md)", False),
+])
+def test_every_number_has_a_source(tmp_path, row, accepted):
+    if row is None:
+        assert check_docs.check_mvp_number_sources(REPO) == []
+        return
+
+    root = passing_tree(tmp_path)
+    write(root, "evals/reports/run.md", "# Measured run\n")
+    write(root, "backend/pool.py", "# Configured pool\n")
+    write(root, "docs/notes.md", "# Notes\n")
+    text = "## Scaling and what breaks first\n\n| Metric | Value | Source |\n|---|---|---|\n"
+    write(root, "docs/path-to-mvp.md", text + f"| Test metric | {row} |\n")
+
+    code, out = run(root)
+    assert (code == 0) == accepted, out
+    if not accepted:
+        assert "docs/path-to-mvp.md:5:" in out
+    elif "[measured:" in row:
+        final_code, final_out = run(root, "--final")
+        assert final_code == 1
+        assert "docs/path-to-mvp.md:5: placeholder [measured:" in final_out
+
+    # Removing the source column cannot make the table evade the check.
+    write(root, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n| Metric | Value |\n|---|---|\n| Test | 42 ms |\n")
+    code, out = run(root)
+    assert code == 1
+    assert "source column" in out
+
+
+@pytest.mark.parametrize("leading, trailing", [("", ""), ("|", ""), ("", "|"), ("|", "|")])
+@pytest.mark.parametrize("delimiter", ["-", "--", ":-:"])
+def test_mvp_short_delimiters_require_sources(tmp_path, leading, trailing, delimiter):
+    rows = ["Metric | Value | Source", " | ".join([delimiter] * 3), "Test | 42 ms | Unsourced"]
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          + "\n".join(f"{leading}{row}{trailing}" for row in rows) + "\n")
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    assert len(problems) == 1
+    assert problems[0].line == 5
+    assert "metric row needs" in problems[0].message
+
+
+@pytest.mark.parametrize("following", [
+    "# Next", "### Next", "> quote", "- item", "* item", "+ item", "1. item", "1) item",
+    "### Next | notes", "> quote | notes", "- item | notes", "* item | notes", "+ item | notes", "1. item | notes",
+    "Plain paragraph", "`code | pipe`", r"Escaped \| pipe",
+])
+def test_mvp_table_ends_at_a_new_block(tmp_path, following):
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          "Metric | Value | Source\n--- | --- | ---\n"
+          "Test | 42 ms | [PR](https://github.com/gvsi/claude-desk/pull/33)\n"
+          + following + "\n")
+
+    assert check_docs.check_mvp_number_sources(tmp_path) == []
+
+
+def test_mvp_table_without_boundary_pipes_requires_sources(tmp_path):
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          "Metric | Value | Source\n"
+          "--- | --- | ---\n"
+          "Test metric | 42 ms | Unsourced\n")
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    assert len(problems) == 1
+    assert problems[0].line == 5
+    assert "metric row needs" in problems[0].message
+
+
+@pytest.mark.parametrize("leading, trailing", [("", ""), ("|", ""), ("", "|"), ("|", "|")])
+@pytest.mark.parametrize("metric", ["Test metric", "`A | B`", "``A | `B` ``", r"A \| B"])
+@pytest.mark.parametrize("source, accepted", [
+    ("[PR](https://github.com/gvsi/claude-desk/pull/33)", True),
+    ("Unsourced", False),
+])
+def test_mvp_table_boundaries_and_literal_pipes(tmp_path, leading, trailing, metric, source, accepted):
+    rows = ["Metric | Value | Source", ":--- | ---: | :---:", f"{metric} | 42 ms | {source}"]
+    write(tmp_path, "docs/path-to-mvp.md",
+          "## Scaling and what breaks first\n\n"
+          + "\n".join(f"{leading}{row}{trailing}" for row in rows) + "\n")
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    assert (problems == []) == accepted
+    if not accepted:
+        assert len(problems) == 1
+        assert problems[0].line == 5
+        assert "metric row needs" in problems[0].message
+
+
+@pytest.mark.parametrize("table, message", [
+    ("Metric | Value\n--- | ---\nTest | 42 ms\n", "source column"),
+    ("Metric | Value | Source\n--- | --- | ---\nMissing cells\n", None),
+    ("Metric | Value | Source\n--- | --- | ---\nMissing | cells\n", "cell for every column"),
+    ("Metric | Value | Source\n--- | ---\nTest | 42 ms | Unsourced\n", None),
+    ("Metric | Value | Source\nProse | without | a delimiter\n", None),
+    ("```markdown\nMetric | Value | Source\n--- | --- | ---\nTest | 42 ms | Unsourced\n```\n", None),
+])
+def test_mvp_table_requires_a_header_and_matching_delimiter(tmp_path, table, message):
+    write(tmp_path, "docs/path-to-mvp.md", "## Scaling and what breaks first\n\n" + table)
+
+    problems = check_docs.check_mvp_number_sources(tmp_path)
+
+    if message is None:
+        assert problems == []
+    else:
+        assert len(problems) == 1
+        assert message in problems[0].message
+
+
 def test_readme_sections():
     text = (REPO / "README.md").read_text()
     lines = [line for line in text.splitlines() if line.strip()]

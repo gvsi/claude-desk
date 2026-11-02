@@ -26,7 +26,7 @@ const DESK = 'desk-okafor';
 const INTERVIEW = 'setup-okafor';
 
 function desk(setup: DeskSetup | null): DeskSummary {
-  return { desk_id: DESK, slug: 'okafor-plumbing', name: 'Main line', business_name: 'Okafor Plumbing', hours: [], answering: false, setup, business_type: 'trade' };
+  return { desk_id: DESK, slug: 'okafor-plumbing', name: 'Main line', business_name: 'Okafor Plumbing', hours: [], answering: false, setup, business_type: 'trade', unread_conversations: 0 };
 }
 
 const stops: (() => void)[] = [];

@@ -41,7 +41,7 @@ const meta = {
       "The chat is the Turner fixture's with Dana, from her question to the booking, where the board ends with a discount held for Mike and a way to cancel it.",
       'The visitor reads the kernel’s status lines, read-only, attached under each message: each action’s line, then the reply check, where the board lists the reply check first.',
       'The about column shows the whole charter, five cards, where the board shows three; the header’s phone is the contact card.',
-      '"Open now, until 6:00 pm" is the kernel’s open status, shown as written at the right of the header, where the board marks it pending in a dashed box.',
+      '"Open now, until 6:00 pm" is the kernel’s open status, shown as written at the top of the About column on wide windows, where the board marks it pending in a dashed box.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -52,13 +52,17 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    // The brand header: 76 px high, padded 12 px 40 px (the signed open-status board grows it by
-    // that padding when the status wraps), the kernel's open status at the right.
+    // The wide header keeps the business identity; status sits under the left About title.
     const header = canvas.getByRole('banner');
     expectComputed(header, { height: '76px', paddingTop: '12px', paddingRight: '40px', paddingBottom: '12px', paddingLeft: '40px' });
-    const status = within(header).getByText(OPEN_NOW.text);
-    const name = within(header).getByRole('heading', { level: 1, name: 'Turner Plumbing' });
-    await expect(status.getBoundingClientRect().left).toBeGreaterThan(name.getBoundingClientRect().right);
+    const status = one(canvasElement, '.cd-public-shell__open-status');
+    await expect(status).toHaveTextContent(OPEN_NOW.text);
+    await expect(status).toBeVisible();
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
+    await expect(about.contains(status)).toBe(true);
+    await expect(header.querySelector('.cd-public-shell__open-status')).toBeNull();
+    await expect(status.getBoundingClientRect().top).toBe(one(about, 'h2').getBoundingClientRect().bottom + 8);
+    await expect(about.getBoundingClientRect().right).toBe(canvas.getByRole('main').getBoundingClientRect().left);
 
     // The AI disclosure, under the chat's title.
     const main = canvas.getByRole('main');

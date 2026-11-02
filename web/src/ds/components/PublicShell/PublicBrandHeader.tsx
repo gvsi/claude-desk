@@ -7,7 +7,7 @@ import type { PublicBrand, PublicOpenStatus } from './PublicShell.tsx';
 
 import './PublicShell.css';
 
-/** The header's own line under a closed status, in the visitor's language. */
+/** The shell's own line under a closed status, in the visitor's language. */
 const STILL_HELPS = {
   en: 'Claude can still help.',
   es: 'Claude puede ayudarte igual.',
@@ -54,19 +54,26 @@ export function PublicBrandHeader({ brand, language, openStatus, landmark = true
           <BrandName className="cd-public-shell__brand-name cd-type-brand-name">{brand.name}</BrandName>
           <p className="cd-public-shell__tagline cd-type-meta">{brand.tagline}</p>
         </div>
-        {status ? (
-          <div className="cd-public-shell__open-status">
-            <StatusDot tone={status.open ? 'handled' : 'info'} />
-            <div className="cd-public-shell__open-status-lines">
-              {/* The kernel's words, as written. */}
-              <p className="cd-public-shell__open-status-text cd-type-meta" data-copy="user">
-                {status.text}
-              </p>
-              {status.open ? null : <p className="cd-public-shell__still-helps cd-type-caption">{STILL_HELPS[language] ?? STILL_HELPS.en}</p>}
-            </div>
-          </div>
-        ) : null}
+        <PublicBusinessStatus openStatus={openStatus} language={language} />
       </Header>
+    </div>
+  );
+}
+
+/** The kernel's status, shared by the brand header and the wide About column. */
+export function PublicBusinessStatus({ openStatus, language }: Pick<PublicBrandHeaderProps, 'openStatus' | 'language'>) {
+  const status = openStatusLine(openStatus);
+  if (!status) return null;
+  return (
+    <div className="cd-public-shell__open-status">
+      <StatusDot tone={status.open ? 'handled' : 'info'} />
+      <div className="cd-public-shell__open-status-lines">
+        {/* The kernel's words, as written. */}
+        <p className="cd-public-shell__open-status-text cd-type-meta" data-copy="user">
+          {status.text}
+        </p>
+        {status.open ? null : <p className="cd-public-shell__still-helps cd-type-caption">{STILL_HELPS[language] ?? STILL_HELPS.en}</p>}
+      </div>
     </div>
   );
 }
