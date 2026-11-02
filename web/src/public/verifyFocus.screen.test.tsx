@@ -88,6 +88,8 @@ describe.each(['desktop', 'phone'] as const)('focus once the code works at %s si
     await expect.element(field).not.toBeInTheDocument();
     await expect.poll(() => document.activeElement).toBe(verifiedLine());
     expect(document.activeElement?.textContent).toBe(VERIFIED);
+    expect(document.activeElement?.matches(':focus-visible')).toBe(true);
+    expect(getComputedStyle(document.activeElement as HTMLElement)).toMatchObject({ boxShadow: 'none', outlineStyle: 'none' });
 
     // The invoice comes in below the line, and focus stays on the line; the next Tab is its Download.
     const invoice = screen.getByRole('article', { name: 'Document, only for you' });
