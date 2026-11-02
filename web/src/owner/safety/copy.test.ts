@@ -116,6 +116,7 @@ function attempt(ledgerSeq: number): Attempt {
     triage: null,
     ledger_seq: ledgerSeq,
     cause: null,
+    from_the_visitor: null,
   };
 }
 

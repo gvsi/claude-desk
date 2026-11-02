@@ -123,6 +123,12 @@ export interface ApprovalAnswerOut {
  * closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
  * and the session's verified state;
  * the web holds its words. It is null for held requests, stopped drafts and unmapped refusals.
+ * `from_the_visitor` is what the visitor (or visiting agent) wrote in the turn that made a refused request, read as
+ * Needs you reads a held request's: at most two of their lines since Claude's last reply before the refusal's
+ * receipt in the chat, each a one-line glimpse of at most 200 characters, joined with " · "; if that window is
+ * empty, the newest line before the receipt. It is their own untrusted words, for the owner alone. It is null for
+ * held requests and stopped drafts, and for a refusal whose receipt isn't in the chat: an entry can be days old, so
+ * the chat's latest lines would quote something else.
  */
 export interface Attempt {
   ref_id: string;
@@ -158,6 +164,7 @@ export interface Attempt {
         | "no_rule"
       )
     | null;
+  from_the_visitor: string | null;
 }
 /**
  * A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk

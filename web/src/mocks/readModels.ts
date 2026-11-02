@@ -111,18 +111,21 @@ function latestVisitorText(session: SessionRecord): string | null {
 const SAID: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'agent_text']);
 
 /**
- * What Needs you quotes from a chat, as the API's `recent_texts`, `texts_before_held` and
- * `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages, oldest
- * first, each as its glimpse (`visitorLine`), joined with " · ". For a held request (`decisionId`),
- * only the visitor's lines since Claude's last reply before its held status (a request whose status
- * isn't in the chat quotes the chat's latest). If that window is empty, it quotes the newest visitor
- * line before the status. A handoff quotes the chat's latest. Just the last when there's one, and
- * null when nothing is left.
+ * What Needs you and Safety quote from a chat, as the API's `recent_texts`, `texts_before_status`
+ * and `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages,
+ * oldest first, each as its glimpse (`visitorLine`), joined with " · ". For a request
+ * (`decisionId`), only the visitor's lines since Claude's last reply before its status: a held
+ * request's held status, a refusal's receipt. If that window is empty, it quotes the newest visitor
+ * line before the status. A request whose status isn't in the chat quotes the chat's latest, as Needs
+ * you does, or nothing with `latestWhenUnshown: false`, as Safety does, since its entries can be days
+ * old. A handoff quotes the chat's latest. Just the last when there's one, and null when nothing is
+ * left.
  */
-function fromTheVisitor(session: SessionRecord | undefined, decisionId?: string): string | null {
+function fromTheVisitor(session: SessionRecord | undefined, decisionId?: string, { latestWhenUnshown = true } = {}): string | null {
   const items = session?.items ?? [];
   const held = decisionId === undefined ? -1 : items.findIndex((item) =>
     item.kind === 'status' && item.event !== null && 'decision_id' in item.event && item.event.decision_id === decisionId);
+  if (decisionId !== undefined && held === -1 && !latestWhenUnshown) return null;
   const before = held === -1 ? items : items.slice(0, held);
   const answered = held === -1 ? -1 : before.findLastIndex((item) =>
     item.kind === 'delivered' && item.event?.type === 'message' && item.event.author === 'claude');
@@ -780,7 +783,9 @@ export function reports(world: MockWorld, desk: DeskRecord, days: number = REPOR
  * stopped (the API core's `_stopped_attempts`); the briefing and the last 7 days count only the
  * refused ones. A hold is the owner's to answer, not an attempt
  * that was stopped, so it isn't listed. Each refusal carries its cause, read as the API reads it
- * from its deciding policies and its `decide` entry (`refusalCause`); a stopped draft has none.
+ * from its deciding policies and its `decide` entry (`refusalCause`), and what its visitor wrote in
+ * the turn its receipt closes (`fromTheVisitor`, with no fallback to the chat's latest lines); a
+ * stopped draft has neither.
  */
 export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
   const stopped: Attempt[] = refusals(world, desk)
@@ -796,6 +801,7 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
       cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
         verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
       }),
+      from_the_visitor: fromTheVisitor(world.sessions.get(d.decision.session_id), d.decision.decision_id, { latestWhenUnshown: false }),
     }));
   const replies: Attempt[] = stoppedReplies(desk).map((entry) => ({
     ref_id: String(entry.seq),
@@ -807,6 +813,7 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
     triage: stoppedReplyTriage(),
     ledger_seq: entry.seq,
     cause: null,
+    from_the_visitor: null,
   }));
   return [...stopped, ...replies].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }

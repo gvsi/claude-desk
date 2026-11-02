@@ -91,6 +91,7 @@ async function listSeededHold(): Promise<void> {
     triage: null,
     ledger_seq: decision.ledger_seq,
     cause: null,
+    from_the_visitor: null,
   };
   injectAttempts([...(await mockAttempts()), attempt].sort((a, b) => b.created_at.localeCompare(a.created_at)));
 }
@@ -171,6 +172,7 @@ function attempt(fields: Partial<Attempt> = {}): Attempt {
     triage: null,
     ledger_seq: 2,
     cause: null,
+    from_the_visitor: null,
     ...fields,
   };
 }

@@ -3064,6 +3064,45 @@ describe('Safety triage', () => {
   });
 });
 
+describe("Safety's quote of the visitor's words", () => {
+  const entries = async () => (await call('safety', { params: { desk_id: deskId } })).body as Attempt[];
+  /** A refusal of a booking, as the kernel decides one. */
+  const REFUSED_BOOKING = { ...DECISIONS.book, outcome: 'refuse', executed: false, reasonPlain: 'That time is taken.' } as const;
+
+  it('the_demo_agents_over_limit_charge_quotes_its_request', async () => {
+    // The refused charge quotes the agent's request, the turn its receipt closes, as the API's
+    // Safety does; Claude's seeded stopped draft quotes nothing.
+    await openChat();
+    await call('sendAgent', { params: { slug }, body: { task: 'push_the_limit', idempotency_key: 'safety-words' } });
+    await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+    const listed = await entries();
+    expect(listed.find((entry) => entry.kind === 'refused')?.from_the_visitor).toBe('Charge the full repair, $185, to Alex Kim’s card.');
+    expect(listed.filter((entry) => entry.kind === 'reply_blocked').map((entry) => entry.from_the_visitor)).toEqual([null]);
+  });
+
+  it('a_refusal_quotes_only_its_own_turn_and_nothing_when_the_chat_never_showed_it', async () => {
+    // Shown, a refusal quotes the visitor's lines since Claude's last reply before its receipt, not
+    // what came after. Never shown in the chat, it quotes nothing rather than the chat's latest lines.
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!);
+    const ctx = world.context(session, 'en', 'Book me Tuesday at 2.');
+    world.visitorText(session, 'Hi, do you fix leaks?');
+    world.emit(session, ctx.reply([proseBlock('Yes, Mike fixes leaks.')]));
+    world.visitorText(session, 'The one under the kitchen sink.');
+    world.visitorText(session, 'Book me   Tuesday at 2.');
+    const shown = ctx.decide(REFUSED_BOOKING);
+    world.emit(session, ctx.status('receipt', shown));
+    world.emit(session, ctx.reply([proseBlock('That time is taken.')]));
+    world.visitorText(session, 'Wednesday at 2 then?');
+    const unshown = ctx.decide(REFUSED_BOOKING);
+    world.visitorText(session, 'Hello?');
+
+    const quoted = new Map((await entries()).map((entry) => [entry.ref_id, entry.from_the_visitor]));
+    expect(quoted.get(shown.decision_id)).toBe('The one under the kitchen sink. · Book me Tuesday at 2.');
+    expect(quoted.get(unshown.decision_id)).toBeNull();
+  });
+});
+
 describe("Today's windows", () => {
   /** Thursday, October 29, 10:30 am in Los Angeles. */
   const NOW = new Date('2026-10-29T17:30:00Z');
