@@ -423,6 +423,8 @@ describe('the open conversation bar', () => {
     await expect.poll(() => landed('.cd-take-over').getAttribute('aria-busy')).toBeNull();
     await expect.poll(() => rect(first).bottom).toBeLessThanOrEqual(844);
     expect(rect(first).top).toBeGreaterThanOrEqual(rect(bar).bottom);
+    // The whole foot comes into view, Hand back and the box the owner now writes in included.
+    expect(rect(landed('.cd-conversation__controls')).bottom).toBeLessThanOrEqual(844);
     expect(document.activeElement).not.toBe(first);
     expectNoWindowScroll();
   });

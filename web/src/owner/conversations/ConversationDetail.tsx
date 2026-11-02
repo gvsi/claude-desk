@@ -224,12 +224,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
     if (!takeOverSent || controls.changing) return;
     setTakeOverSent(false);
     const foot = controlsRef.current;
-    // Reveal the outcome of this bar's press. A click needn't focus Take over (Safari), so after
-    // the focus hand-off above, show the owner's first line if focus never reached the controls.
+    // Reveal the outcome of this bar's press: its error, or the owner's controls whole, Hand back and
+    // the box they now write in included, whether or not the press had focus (a click needn't, Safari).
     if (controls.modeError !== null) foot?.querySelector('.cd-take-over [role="alert"]')?.scrollIntoView({ block: 'nearest' });
-    else if (mode === 'owner' && !foot?.contains(document.activeElement)) {
-      foot?.querySelector('.cd-take-over__first')?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
-    }
+    else if (mode === 'owner') foot?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
   }, [takeOverSent, controls.changing, controls.modeError, mode]);
 
   // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
