@@ -1086,16 +1086,21 @@ def request_text(request) -> str:
 
 
 async def test_only_the_consultants_calls_at_the_test_client_offer_say_the_plan_is_closed(
-        app, browser, fake, kernel_http, model, monkeypatch):
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
     before = len(model.requests)
-    owner, state = await reopened(app, browser, kernel_http, model, monkeypatch)
+    owner, state, _ = await reopened(app, browser, kernel_http, model, engine, monkeypatch)
     # Both planning calls of the answer (the reply that adds the job, then the one that shows its card) are told what
     # this turn is: the plan is closed and the owner answered the offer.
     first, second = model.requests[-2:]
     assert all(setup.SETUP_OFFER_ANSWER_LINE in request_text(request) and REQUEST in request_text(request)
                for request in (first, second))
+    # The line tells the two calls apart by a planned job: none before the first (every card settled when the plan
+    # closed), and on the second only the job the first one added.
+    assert '"status": "planned"' not in request_text(first)
+    assert f'"id": "{REOPENED_ID}"' in request_text(second) and '"status": "planned"' in request_text(second)
     # No other planning call carries it: not the ones before the offer, nor the decision and closing calls after it.
     earlier = [request for request in model.requests[before:-2] if request.output_schema is setup.SetupNextStep]
+    assert earlier
     model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
               next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
     asked = len(model.requests)

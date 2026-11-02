@@ -1116,14 +1116,19 @@ SETUP_CLOSING_LINE = ("Every topic is covered and the plan is settled. Write the
 # (`_consult_on_offer` in setup.py): on each of its planning calls, in place of a card decision or a limit answer.
 SETUP_OFFER_ANSWER_LINE = (
     "This turn: the plan is closed, and the owner answered the offer to add them as a test client with something "
-    "other than yes or no, in <owner_answer>: a request or a question, not a card decision or a limit answer. In "
-    "reply, answer what they typed in one or two sentences. When they ask for a job the Desk can do, put it in "
+    "other than yes or no, in <owner_answer>: a request or a question, not a card decision or a limit answer. A yes "
+    "to that offer puts the owner on record as one of the business's clients, with the contact they typed in "
+    "setup, so they can try verification and private answers the way a client would; nothing else changes. In "
+    "reply, answer what they typed in one or two sentences. When they ask for a new job the Desk can do, put it in "
     "add_jobs and leave next as done; code shows it as a card next, so say you'll propose it, never that it's set "
     "up. When <setup_plan> already lists a job as planned, it's the one you added for this answer and you've "
     "replied: set next to its id, with question as the short line before its card, leave reply empty and add "
-    "nothing. When they ask for an app, set next to it, with question as the line before its card. A client that "
-    "can't show cards gets no jobs or apps here. Facts, limits and jobs already decided can't change from here, so "
-    "never say you've changed them. Leave plan empty.")
+    "nothing. When they ask for an app <setup_plan> doesn't list, set next to it, with question as the line before "
+    "its card; an app it already lists can't be proposed again, so say where it stands. Facts, limits and the jobs "
+    "already decided stay as the owner chose: those cards are closed and no later screen changes a job, so never "
+    "say you've changed one, never point to a card or another place to change it, and don't add a job to stand in "
+    "for a decided one; say plainly it stays as they chose. A client that can't show cards gets no jobs or apps "
+    "here: say you can't add one from here. Leave plan empty.")
 SETUP_RETRY = "That answer didn't fit the format:\n{errors}\nAnswer again in the same format, fixing those fields."
 # The setup interview's wrappers (`setup.py`), named in `SETUP_START_SYSTEM` and `SETUP_TURN_SYSTEM`.
 OWNER_DESCRIPTION_TAG = "owner_description"

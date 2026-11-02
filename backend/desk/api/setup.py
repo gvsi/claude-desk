@@ -2251,7 +2251,8 @@ def _names_card(source, card: ProposalCard) -> bool:
 async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
                      interview: Interview, decision: str | None = None, *,
                      text: str | None = None, closing: bool = False) -> SetupNextStep | SetupCardAnswer | None:
-    """Plan after a limit or card decision without any field that can set a limit."""
+    """Plan after a limit answer, a card decision, or an answer to the test-client offer that is neither a yes nor a
+    no (`_consult_on_offer`), without any field that can set a limit."""
     parts = [
         SETUP_NEXT_HEAD.format(business_type=interview.business_type,
                                covered=", ".join(key for key in QUESTION_KEYS if closing or key in interview.covered),
