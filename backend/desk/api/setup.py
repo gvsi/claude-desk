@@ -401,7 +401,10 @@ TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact y
 TEST_CLIENT: TestClientQuestion = "test_client"   # the offer's question, which code alone asks
 TEST_CLIENT_REF = "test-client"                   # the owner's ref among the Desk's people, as a test client
 # The words and phrases code reads in a typed answer to the test-client offer (`_reads_yes`), in English and Spanish:
-# a "no" one wins over any "yes" one, and an answer with neither goes to setup's consultant (`_consult_on_offer`).
+# a "no" one wins over any "yes" one. A yes or a no is read only from a short plain answer; anything longer, or with a
+# request or a condition, goes to setup's consultant (`_consult_on_offer`). That leans on purpose: a plain answer sent
+# there costs one model call and the offer again, while a request read as a yes or a no is dropped without a word.
+TEST_CLIENT_MAX_WORDS = 8
 TEST_CLIENT_TYPED_YES = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead", "please do", "do it", "add me",
                          "sounds good", "sí", "si", "vale", "claro", "dale", "añádeme", "agrégame")
 TEST_CLIENT_TYPED_NO = ("no", "not", "don't", "dont", "nope", "not now", "later", "skip", "no gracias")
@@ -412,10 +415,21 @@ TEST_CLIENT_UNCLEAR = re.compile(r"[?¿]|^\W*(?:what|how|why|does|can|is|will|qu
 TEST_CLIENT_SI = re.compile(r"\bsi\b", re.IGNORECASE)
 TEST_CLIENT_SI_ALONE = re.compile(r"^\W*si\s*(?:$|[,.!])", re.IGNORECASE)
 # A typed answer that also asks for something besides the offer, which is never a yes or a no: adding or setting up
-# anything but the owner or the test client, or a word of a request (a job, an app, a change).
-TEST_CLIENT_REQUEST = re.compile(r"\b(?:add|añade|agrega|set\s+up|create)\b"
-                                 r"(?!\s+(?:me|myself|us|it|that|this|(?:(?:a|the|my)\s+)?test\s+clients?)\b)"
-                                 r"|\b(?:jobs?|connect|change|remove|also|trabajos?|conecta)\b", re.IGNORECASE)
+# anything but the owner, their contact or the test client (not after "don't" or "not"); a job (not a "good job");
+# connecting, changing or removing something (not after "don't" or "want to"); "también", or "also" and another word.
+TEST_CLIENT_REQUEST = re.compile(
+    r"(?<!n't\s)(?<!not\s)\b(?:add|adding|añade|añadir|agrega|agregar|set\s+up|create|crea|crear|configura"
+    r"|configurar)\b"
+    r"(?!\s+(?:me|myself|us|it|that|this|anything|my\s+(?:email|number|phone|contact)"
+    r"|mi\s+(?:correo|número|teléfono|contacto)|(?:(?:a|the|my)\s+)?test\s+clients?)\b)"
+    r"|(?<!good\s)(?<!great\s)(?<!nice\s)\bjobs?\b"
+    r"|(?<!n't\s)(?<!want\sto\s)\b(?:connect\w*|conecta\w*|change[sd]?|changing|cambia\w*|remove|quita\w*|elimina\w*"
+    r"|trabajos?)\b"
+    r"|\b(?:también|tambien)\b|\balso\s+(?!like|try|check)\w", re.IGNORECASE)
+# An opening yes or no, perhaps with "please" or "thanks", that goes on with "and", "but", "y" or "pero": more follows.
+TEST_CLIENT_CONJOINED = re.compile(r"^\W*(?:yes|yeah|yep|sure|ok|okay|sí|si|vale|claro|no|nope|not\s+now)\b"
+                                   r"(?:\W+(?:please|thanks|thank\s+you|gracias|por\s+favor))?\W+(?:and|but|y|pero)\b",
+                                   re.IGNORECASE)
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -2931,16 +2945,22 @@ def _test_client_answered(interview: Interview) -> bool:
 
 
 def _reads_yes(text: str) -> bool | None:
-    """The owner's answer to the test-client offer, read word by word by code alone: None when it asks something or
-    says yes only on a condition (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens
-    if I say yes?" are neither), or asks for something besides the offer (`TEST_CLIENT_REQUEST`, so "Yes please, and
-    add a retainer job" and "Add a deposit job, not connected to Stripe yet" are neither); else False when it has a
-    "no" word or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and "don't add me" are no); else True when it has a
-    "yes" one (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client" and "Sure, go ahead" are yes); else None."""
-    if (TEST_CLIENT_UNCLEAR.search(text) or TEST_CLIENT_REQUEST.search(text)
-            or (TEST_CLIENT_SI.search(text) and not TEST_CLIENT_SI_ALONE.match(text))):
+    """The owner's answer to the test-client offer, read word by word by code alone. A yes or a no is read only from a
+    short plain answer; anything longer, or with a request or a condition, is neither, and goes to setup's consultant.
+    None when it has more than `TEST_CLIENT_MAX_WORDS` words; asks something or says yes only on a condition
+    (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens if I say yes?" are
+    neither); asks for something besides the offer (`TEST_CLIENT_REQUEST`, so "Sí, cambia el horario" and "Not now,
+    connect Google Calendar first" are neither); or goes on after its yes or no (`TEST_CLIENT_CONJOINED`, so "Yes
+    please, and take retainer payments" is neither). Else False when it has a "no" word or phrase
+    (`TEST_CLIENT_TYPED_NO`, so "Not now" and "don't add me" are no); else True when it has a "yes" one
+    (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client" and "Sure, go ahead" are yes); else None."""
+    plain = text.replace("\u2019", "'")
+    words = re.findall(r"[^\W_]+(?:'[^\W_]+)*", plain.casefold())
+    if (len(words) > TEST_CLIENT_MAX_WORDS or TEST_CLIENT_UNCLEAR.search(plain) or TEST_CLIENT_REQUEST.search(plain)
+            or TEST_CLIENT_CONJOINED.match(plain)
+            or (TEST_CLIENT_SI.search(plain) and not TEST_CLIENT_SI_ALONE.match(plain))):
         return None
-    said = " {} ".format(" ".join(re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.casefold().replace("\u2019", "'"))))
+    said = " {} ".format(" ".join(words))
     if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_NO):
         return False
     if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_YES):

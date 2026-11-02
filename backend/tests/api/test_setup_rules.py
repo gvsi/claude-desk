@@ -797,6 +797,36 @@ def test_a_test_client_phone_is_one_number_without_the_hours(said, contact):
     assert setup._owner_contact(contact_interview(said)) == contact
 
 
+@pytest.mark.parametrize("said, read", [
+    # Each branch of `TEST_CLIENT_REQUEST` on its own: an answer that asks for something besides the offer is neither a
+    # yes nor a no, whatever yes or no words it holds.
+    ("Yes, and add deposits too", None), ("Yes, and how about adding deposits", None),      # adding something
+    ("Sí, quiero agregar depósitos", None),
+    ("Yes please, a booking job too", None), ("Yes, and a booking job too", None),          # a job
+    ("Yes, and connect Stripe", None), ("Not now, connect Google Calendar first", None),    # an app or a change
+    ("Not now, I'd rather get Stripe connected first", None), ("Yes, and remove the booking", None),
+    ("Sí, y conecta Stripe", None), ("No, primero quiero conectar Stripe", None), ("Sí, cambia el horario", None),
+    ("Sí, y quita las reservas", None), ("Sí, y elimina el depósito", None),
+    ("Sí, también cobra depósitos", None), ("Sí, y también cobra depósitos", None),         # "también"
+    ("Yes, also deposits please", None),                                                    # "also" and a word
+    ("Yes, but I want to take deposits too", None),                                          # a yes or a no, and
+    ("Yes please, and take retainer payments", None), ("Yes, but I'd like changes to the booking", None),
+    ("No, pero cambia los precios", None), ("No, pero añade un trabajo de reservas", None),
+    ("Please send retainer payment links too, no Stripe yet", None),                        # more than 8 words
+    # The offer itself, praise, the owner's own contact, or turning everything down stays a yes or a no.
+    ("Sí, agrégame", True), ("Vale, añádeme", True), ("Yes, add me", True), ("Yes, add myself", True),
+    ("Sure, set me up", True), ("Sure, set it up", True), ("Yes, set that up", True), ("Yes please", True),
+    ("Yes, set up the test client", True), ("Great job, add me", True), ("Nice job, yes please", True),
+    ("Yes, add my email", True), ("Sí, agrega mi correo", True),
+    ("No, don't add anything", False), ("No thanks, I don't want to change anything", False),
+    ("No, don't add anyone", False), ("No thanks, don't add any test clients", False),
+    ("No, don't set up anything", False), ("No, do not set up anything", False),
+    ("No thanks, maybe later", False), ("Not now", False), ("Skip", False),
+])
+def test_a_request_besides_the_offer_is_neither_a_yes_nor_a_no(said, read):
+    assert setup._reads_yes(said) is read
+
+
 @pytest.mark.parametrize("said, again", [
     ("Not now", False), ("Yes please", False), ("Please add a retainer job.", True), ("What does that mean?", True),
 ])
