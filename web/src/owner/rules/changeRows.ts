@@ -252,10 +252,11 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
   const { business, catalog, changes } = pairCards(draft, tools);
   const sentenceTools = catalog.map((tool) => ({ ...tool, effects: [...tool.effects] }));
   // Shared auto rules cover a tool with several effects only jointly. Give the foundation each
-  // side's actual coverage, so its meta names exactly those tools, once.
+  // side's actual coverage, and the side's cards it reads that coverage among, so its meta names
+  // exactly those tools, once.
   const wordsFor = (card: RuleCard, side: readonly RuleCard[]): SentenceWords => {
     const covered = isEffectCard(card) ? new Set(coveredTools(card, side, catalog)) : null;
-    return { business, people, tools: covered === null ? sentenceTools : sentenceTools.filter((tool) => covered.has(tool.tool)) };
+    return { business, people, cards: side, tools: covered === null ? sentenceTools : sentenceTools.filter((tool) => covered.has(tool.tool)) };
   };
   // Each side's labels, read once: a shared rule's coverage depends on the other shared rules beside it.
   const labelsOf = (side: readonly RuleCard[]) => new Map(side.map((card) => [card, rowLabel(card, side, catalog, business)]));
@@ -300,14 +301,16 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     const title = targetOf(row.tool, business);
     const connector = isCatalogTool(row.tool) ? connectorOf(row.tool)?.view : undefined;
     const { rule } = toolOutcome({ tool: row.tool, effects: row.effects }, draft.after);
+    // The governing rule may be shared, but this row activates only this tool; a shared rule
+    // covers it among the draft's cards, jointly with an automatic rule on each of its other effects.
+    const words: SentenceWords = { business, people, cards: draft.after, tools: [row] };
     rows.push({
       key: `turned-on:${row.tool}`,
       change: 'turned_on',
       title,
       ...(connector === undefined ? {} : { connector }),
       before: null,
-      // The governing rule may be shared, but this row activates only this tool.
-      after: rule === undefined ? defaultSide(row.tool, { business, people, tools: [row] }) : cardSide(rule, { business, people, tools: [row] }, undefined),
+      after: rule === undefined ? defaultSide(row.tool, words) : cardSide(rule, words, undefined),
       changed: [],
     });
   }
