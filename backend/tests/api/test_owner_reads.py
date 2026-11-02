@@ -745,6 +745,13 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
     await write(engine, db, asker.ids, "visitor_text", text="How much to clear a clogged drain?")
     await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off if I pay cash?")
     discount = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    elsewhere = await guest(kernel_http, fake, owner)
+    await write(engine, db, elsewhere.ids, "visitor_text", text="Another session's request")
+    await write(engine, db, elsewhere.ids, "status", ref_id=discount.decision_id)
+    await write(engine, db, asker.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
+    await write(engine, db, asker.ids, "whisper", text="Offer a callback instead.")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="I can ask about that.",
+                blocks=[{"kind": "prose", "text": "I can ask about that."}])
     await show(asker, discount)
     await write(engine, db, asker.ids, "visitor_text", text="How much to clear a drain?")
     await write(engine, db, asker.ids, "visitor_text", text="What about 20% off then?")
@@ -763,6 +770,15 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
     unasked = await quiet.decide("native.quote", discounted_quote(fake, owner))
     await show(quiet, unasked)
     await write(engine, db, quiet.ids, "visitor_text", text="Thanks")
+    agent_session, agent_token = fake._new_session(owner.copy_id, owner.desk_id, "agent")
+    fake.flush()
+    agent = Guest(Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=agent_session.session_id),
+                  kernel_http.session(agent_token), fake)
+    await write(engine, db, agent.ids, "agent_text", text="I'm asking for Alex Kim.")
+    await write(engine, db, agent.ids, "agent_text", text="Can Alex get 10% off?")
+    agent_hold = await agent.decide("native.quote", discounted_quote(fake, owner))
+    await show(agent, agent_hold)
+    await write(engine, db, agent.ids, "agent_text", text="Thanks for checking.")
 
     listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
 
@@ -774,7 +790,8 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
         discount.decision_id: "How much to clear a clogged drain? · Can I get 15% off if I pay cash?",
         bigger.decision_id: "How much to clear a drain? · What about 20% off then?",
         older.decision_id: "Do you work in Alameda? · Thanks, and what about Berkeley?",
-        unasked.decision_id: None}
+        unasked.decision_id: None,
+        agent_hold.decision_id: "I'm asking for Alex Kim. · Can Alex get 10% off?"}
     assert list(handed.values()) == ["Can you come Tuesday? · Please call me back"]
 
 
