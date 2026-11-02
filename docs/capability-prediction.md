@@ -4,7 +4,13 @@ Giovanni Alcantara · November 2, 2026
 
 ## Capability
 
-By Q4 2027, a generally available Claude model will be able to act for a person or small business on its own: answer strangers and the AI agents acting for them, apply the owner's policies to new cases, and quote, book and negotiate within set limits. It will still be open to prompt injection and social engineering, so the business's limits have to be enforced in code, outside the model.
+**By Q4 2027, a generally available Claude model will be able to act for a person or small business on its own:**
+
+- answer strangers and the AI agents acting for them
+- apply the owner's policies to new cases
+- quote, book and negotiate within set limits
+
+It will still be open to **prompt injection** and **social engineering**, so the business's limits have to be **enforced in code, outside the model**.
 
 On its own means over a whole conversation, in the visitor's language: the model works out what the visitor wants, finds the answer in what the owner has written, picks the tool that fits, applies the rules to a case nobody wrote down, and hands off what it can't settle.
 
@@ -30,23 +36,23 @@ The newest models are scored on boards other than Sierra's own, and each score h
 
 - **Sierra's leaderboard**, whose latest text results are dated August 4, 2026, stops at Claude Opus 5, at 48.7%. The top score on Sierra's leaderboard is 55.2% (Qwen 3.8 Max).
 - **[Fireworks' index](https://fireworks.ai/specialized-intelligence-index/benchmarks/customer-support/tau3-banking)**, updated October 28, 2026, runs four seeded trials per task and reports the mean. It puts Gemini 4 Argon on top at 58.2% and Claude Opus 5.5 second at 56.0%.
-- **[Artificial Analysis](https://artificialanalysis.ai/evaluations/tau3-banking)**'s rerun, on its own setup, puts the top score at 51.3% and Claude Fable 5.1 at 47.2%.
+- **[Artificial Analysis](https://artificialanalysis.ai/evaluations/tau3-banking)**'s rerun, on its own setup, puts the top score at 51.3%, Claude Fable 5.1 at 47.2% and Claude Sonnet 5 at 37.3%.
 
-Claude Sonnet 5.5 and Haiku 5.5 aren't scored on any of the three yet. The boards don't always agree: Claude Opus 5 scores 48.7% on Sierra's and 49.1% on Fireworks', but Kimi K3 scores 37.1% and 51.5%.
+Claude Sonnet 5.5 and Haiku 5.5 aren't scored on any of the three yet. The boards don't always agree: Claude Opus 5 scores 48.7% on Sierra's, 49.1% on Fireworks' and 44.7% on Artificial Analysis', and Kimi K3 scores 37.1% on Sierra's but 51.5% on Fireworks'.
 
 Claude went from 24.7% (Opus 4.5, November 2025, Sierra) to 56.0% (Opus 5.5, September 2026, Fireworks) in ten months.
 
 <!-- figure: tau3 -->
 
-`estimate:` straight-line fits in log-odds reach 80% in Q2–Q3 2027: the six Opus scores and the best score across labs in Q2 2027, and all nine Claude scores in Q3 2027. A straight line in log-odds is an S-curve in percent, which flattens as it nears 100%. The exact days:
+`estimate:` straight-line fits in log-odds reach 80% between Q2 2027 and the start of Q4 2027: the six Opus scores and the best score across labs in Q2 2027, and all ten Claude scores in the first days of Q4 2027. A straight line in log-odds is an S-curve in percent, which flattens as it nears 100%. The exact days:
 
 | Fit | Scores | Reaches 80% |
 | --- | --- | --- |
 | Opus | Sierra's five, and Opus 5.5 on Fireworks | May 31, 2027 |
 | Best across labs | Each new top score on Sierra's board, then Opus 5.5 and Gemini 4 Argon on Fireworks | May 16, 2027 |
-| All Claude | Sierra's seven, Opus 5.5 on Fireworks and Fable 5.1 on Artificial Analysis | September 7, 2027 |
+| All Claude | Sierra's seven, Opus 5.5 on Fireworks, and Fable 5.1 and Sonnet 5 on Artificial Analysis | October 3, 2027 |
 
-The fits rest on few scores, from three boards whose setups differ, and a trend can stall. The across-labs fit mixes boards, so it counts least. The prediction, Q4 2027, sits a quarter past the latest fit.
+The fits rest on few scores, from three boards whose setups differ, and a trend can stall. The across-labs fit mixes boards, so it counts least. The prediction says Q4 2027 because the latest fit reaches the bar as that quarter begins.
 
 Falsifiers: no Claude model reaches 70% on τ³-Banking by the end of Q2 2027, or an independent adaptive red team, using prompt injection and social engineering, can't get the model alone, with no limits in code, to break an owner's rules.
 

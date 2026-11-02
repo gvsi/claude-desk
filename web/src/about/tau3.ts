@@ -16,7 +16,7 @@ export const TAU3_SOURCES: Readonly<Record<Tau3Board, { name: string; url: strin
     url: 'https://fireworks.ai/specialized-intelligence-index/benchmarks/customer-support/tau3-banking',
     read: '2026-11-02',
   },
-  AA: { name: 'Artificial Analysis', url: 'https://artificialanalysis.ai/evaluations/tau3-banking', read: '2026-10-29' },
+  AA: { name: 'Artificial Analysis', url: 'https://artificialanalysis.ai/evaluations/tau3-banking', read: '2026-11-02' },
 };
 
 /** Sierra's own leaderboard, the benchmark's home. */
@@ -66,8 +66,9 @@ export const LEADERBOARD: readonly Tau3Row[] = ([
 ] as const).map((row) => ({ ...row, board: 'Sierra' as const }));
 
 /**
- * The scores the text cites from the other two boards: newer models Sierra doesn't list yet, and two it does, which
- * show how far the boards can differ. A release date is Sierra's where it lists the model, otherwise the lab's own.
+ * Every Claude score on the other two boards that Sierra doesn't list, Gemini 4 Argon, and the scores the text cites
+ * to show how far the boards can differ. A release date is Sierra's where it lists the model, otherwise the lab's own.
+ * Artificial Analysis lists a model once per setting, such as "Claude Sonnet 5 (Max)"; the name here drops the setting.
  */
 export const OTHER_BOARDS: readonly Tau3Row[] = [
   { model: 'Gemini 4 Argon', released: '2026-10-13', score: 58.2, board: 'Fireworks' },
@@ -75,6 +76,8 @@ export const OTHER_BOARDS: readonly Tau3Row[] = [
   { model: 'Kimi K3', released: '2026-07-16', score: 51.5, board: 'Fireworks' },
   { model: 'Claude Opus 5', released: '2026-07-24', score: 49.1, board: 'Fireworks' },
   { model: 'Claude Fable 5.1', released: '2026-09-01', score: 47.2, board: 'AA' },
+  { model: 'Claude Opus 5', released: '2026-07-24', score: 44.7, board: 'AA' },
+  { model: 'Claude Sonnet 5', released: '2026-06-30', score: 37.3, board: 'AA' },
 ];
 
 /** One score per model for the fits: Sierra's where it lists the model, otherwise the other board's. */
@@ -142,13 +145,13 @@ export function logOddsFit(points: readonly Tau3Row[]): LogOddsFit {
 /** The bar the prediction sets: 80% pass^1. */
 export const TAU3_BAR = 0.8;
 
-/** The nine Claude releases scored on any board, one score each, by release date. */
+/** The ten Claude releases scored on any board, one score each, by release date. */
 export const CLAUDE_SCORES: readonly Tau3Row[] = byRelease(FIT_ROWS.filter((row) => row.model.startsWith('Claude ')));
 
 /** The highest score on any board, from any lab. */
 export const TOP_SCORE: Tau3Row = FIT_ROWS.reduce((top, row) => (row.score > top.score ? row : top));
 
-/** The three fits the text cites: the best score across labs, the six Opus scores and all nine Claude scores. */
+/** The three fits the text cites: the best score across labs, the six Opus scores and all ten Claude scores. */
 export const TAU3_FITS = {
   acrossLabs: logOddsFit(bestSoFar(FIT_ROWS)),
   opus: logOddsFit(CLAUDE_SCORES.filter((row) => row.model.startsWith('Claude Opus '))),

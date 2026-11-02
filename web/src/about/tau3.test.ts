@@ -77,6 +77,8 @@ describe('the τ³-Banking chart data', () => {
       'Kimi K3 51.5 Fireworks',
       'Claude Opus 5 49.1 Fireworks',
       'Claude Fable 5.1 47.2 AA',
+      'Claude Opus 5 44.7 AA',
+      'Claude Sonnet 5 37.3 AA',
     ]);
     expect(Object.keys(TAU3_SOURCES)).toEqual(['Sierra', 'Fireworks', 'AA']);
   });
@@ -84,7 +86,7 @@ describe('the τ³-Banking chart data', () => {
   it('fits_cross_the_bar_when_the_text_says', () => {
     // A model Sierra lists keeps Sierra's score: Opus 5 is fitted at 48.7, not Fireworks' 49.1.
     const claude = LEADERBOARD.filter((row) => row.model.startsWith('Claude '));
-    const newer = OTHER_BOARDS.filter((row) => ['Claude Opus 5.5', 'Claude Fable 5.1'].includes(row.model));
+    const newer = OTHER_BOARDS.filter((row) => ['Claude Opus 5.5', 'Claude Fable 5.1', 'Claude Sonnet 5'].includes(row.model));
     const opus = [...claude, ...newer].filter((row) => row.model.startsWith('Claude Opus '));
     expect(claude).toHaveLength(7);
     expect(opus.map((row) => row.model)).toEqual([
@@ -118,19 +120,19 @@ describe('the τ³-Banking chart data', () => {
       'Gemini 4 Argon 58.2',
     ]);
 
-    // The table's exact days: Opus May 31, 2027; best across labs May 16, 2027; all nine Claude September 7, 2027.
+    // The table's exact days: Opus May 31, 2027; best across labs May 16, 2027; all ten Claude October 3, 2027.
     expect(daysFrom(logOddsFit(acrossLabs).crosses(0.8), '2027-05-16')).toBeLessThan(1);
     expect(daysFrom(logOddsFit(opus).crosses(0.8), '2027-05-31')).toBeLessThan(1);
-    expect(daysFrom(logOddsFit([...claude, ...newer]).crosses(0.8), '2027-09-07')).toBeLessThan(1);
+    expect(daysFrom(logOddsFit([...claude, ...newer]).crosses(0.8), '2027-10-03')).toBeLessThan(1);
     // The exported fits are the same three.
     expect(daysFrom(TAU3_FITS.acrossLabs.crosses(0.8), '2027-05-16')).toBeLessThan(1);
     expect(daysFrom(TAU3_FITS.opus.crosses(0.8), '2027-05-31')).toBeLessThan(1);
-    expect(daysFrom(TAU3_FITS.claude.crosses(0.8), '2027-09-07')).toBeLessThan(1);
+    expect(daysFrom(TAU3_FITS.claude.crosses(0.8), '2027-10-03')).toBeLessThan(1);
   });
 
   it('chart_claims_are_the_predictions', () => {
     const text = readFileSync(PREDICTION, 'utf8');
-    for (const claim of ['24.7%', '48.7%', '55.2%', '56.0%', '58.2%', '47.2%', 'Q2–Q3 2027', 'Q4 2027']) {
+    for (const claim of ['24.7%', '48.7%', '55.2%', '56.0%', '58.2%', '47.2%', '37.3%', '44.7%', 'Q4 2027']) {
       expect(text, claim).toContain(claim);
     }
 
@@ -138,7 +140,7 @@ describe('the τ³-Banking chart data', () => {
     expect(text).toContain('The bar is 80% pass^1');
     expect(TAU3_BAR).toBe(0.8);
 
-    // The nine Claude scores, by release, each from its board, run from 24.7 (Opus 4.5) to 56.0 (Opus 5.5).
+    // The ten Claude scores, by release, each from its board, run from 24.7 (Opus 4.5) to 56.0 (Opus 5.5).
     expect(CLAUDE_SCORES.map((row) => `${row.model} ${row.released} ${row.score} ${row.board}`)).toEqual([
       'Claude Sonnet 4.5 2025-09-29 25.3 Sierra',
       'Claude Opus 4.5 2025-11-24 24.7 Sierra',
@@ -146,6 +148,7 @@ describe('the τ³-Banking chart data', () => {
       'Claude Opus 4.7 2026-04-16 40.2 Sierra',
       'Claude Opus 4.8 2026-05-28 39.7 Sierra',
       'Claude Fable 5 2026-06-09 39.7 Sierra',
+      'Claude Sonnet 5 2026-06-30 37.3 AA',
       'Claude Opus 5 2026-07-24 48.7 Sierra',
       'Claude Fable 5.1 2026-09-01 47.2 AA',
       'Claude Opus 5.5 2026-09-22 56 Fireworks',
@@ -169,13 +172,13 @@ describe('the τ³-Banking chart data', () => {
     // The three fits reach the bar in the quarters the text names.
     expect(quarterYear(TAU3_FITS.acrossLabs.crosses(TAU3_BAR))).toBe('Q2 2027');
     expect(quarterYear(TAU3_FITS.opus.crosses(TAU3_BAR))).toBe('Q2 2027');
-    expect(quarterYear(TAU3_FITS.claude.crosses(TAU3_BAR))).toBe('Q3 2027');
+    expect(quarterYear(TAU3_FITS.claude.crosses(TAU3_BAR))).toBe('Q4 2027');
     expect(text).toContain(
-      'straight-line fits in log-odds reach 80% in Q2–Q3 2027: the six Opus scores and the best score across labs in Q2 2027, and all nine Claude scores in Q3 2027',
+      'straight-line fits in log-odds reach 80% between Q2 2027 and the start of Q4 2027: the six Opus scores and the best score across labs in Q2 2027, and all ten Claude scores in the first days of Q4 2027',
     );
     expect(text).toContain('| Opus | Sierra\'s five, and Opus 5.5 on Fireworks | May 31, 2027 |');
     expect(text).toContain('| Best across labs | Each new top score on Sierra\'s board, then Opus 5.5 and Gemini 4 Argon on Fireworks | May 16, 2027 |');
-    expect(text).toContain('| All Claude | Sierra\'s seven, Opus 5.5 on Fireworks and Fable 5.1 on Artificial Analysis | September 7, 2027 |');
+    expect(text).toContain('| All Claude | Sierra\'s seven, Opus 5.5 on Fireworks, and Fable 5.1 and Sonnet 5 on Artificial Analysis | October 3, 2027 |');
 
     // The sources the text links.
     expect(TAU3_SOURCE).toEqual({ url: 'https://taubench.com/leaderboard/', read: '2026-11-02' });
