@@ -573,7 +573,6 @@ export const TwoPlainButtons: Story = {
   },
 };
 
-/** On a vision page, which makes no requests: the answers look and focus as ever, and do nothing. */
 /** A demo visitor's held request: its pill 8 px after where and when it was held, so it's never taken for a real customer's. */
 export const DemoVisitorRequest: Story = {
   args: { demoVisitor: true, context: <>From the visitor: “<span data-copy="user">Could I get 10% off as a returning customer?</span>”</> },
@@ -593,6 +592,7 @@ export const DemoVisitorRequest: Story = {
   },
 };
 
+/** On a vision page, which makes no requests: the answers look and focus as ever, and do nothing. */
 export const InertAnswers: Story = {
   args: { inertAnswers: true },
   parameters: {
