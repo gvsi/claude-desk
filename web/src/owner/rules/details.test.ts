@@ -84,3 +84,17 @@ it('a_tool_with_no_recorded_pin_makes_no_claim_about_it', () => {
   expect(pinned({ ...REFUND, definition_sha256: null })).toBeNull();
   expect(pinned({ ...REFUND, definition_sha256: '' })).toBeNull();
 });
+
+it('a_tool_with_no_connector_takes_its_source_from_its_own_row', () => {
+  /** The Source field's words, with no connector to name it. */
+  const source = (row: ToolRow) => {
+    const field = toolDetails(row, null).fields.find(({ label }) => label === 'Source');
+    const host = document.createElement('div');
+    host.innerHTML = renderToStaticMarkup(createElement(Fragment, null, field?.value as ReactNode));
+    return host.textContent;
+  };
+  // A connected tool this version's catalog doesn't know: never "Built in", which only Claude Desk's own tools are.
+  expect(source({ ...REFUND, tool: 'mcp.secret_tool' as ToolRow['tool'], source: 'mcp' })).toBe('Connected tool');
+  // A built-in tool from a newer catalog is still built in.
+  expect(source({ ...REFUND, tool: 'native.teleport' as ToolRow['tool'], source: 'native' })).toBe('Built in');
+});

@@ -318,6 +318,13 @@ describe('rules page', () => {
     await expect.element(tool.getByRole('heading', { level: 3, name: 'A connected tool' })).toBeVisible();
     expect(ruleCells(tool.element())).toEqual(['Claude can use a connected tool / Anyone']);
     expect(other.element().textContent).not.toContain('mcp.secret_tool');
+    // Its Details says where it comes from as its own row does: a connected tool, never "Built in".
+    const toggle = tool.element().querySelector<HTMLElement>('.cd-house-rules__tool-header > .cd-advanced-details__toggle')!;
+    await userEvent.click(toggle);
+    await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+    const panel = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    const source = [...panel.querySelectorAll('.cd-advanced-details__field')].find((field) => field.querySelector('dt')?.textContent === 'Source');
+    expect(source?.querySelector('dd')?.textContent).toBe('Connected tool');
   });
 
   it('turners_rules_have_no_other_tools_card', async () => {

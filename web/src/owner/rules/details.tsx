@@ -72,9 +72,11 @@ const PIN_WORDS = {
  * definition stands against its pin (`pinState`); the block is the row's own fields.
  */
 export function toolDetails(row: ToolRow, connector: ConnectorView | null): Details {
+  // Its connector names where it comes from; without one, its own row does: only Claude Desk's own
+  // tools are built in, and a connected tool this version's catalog doesn't place is a connected tool.
   const source = row.source === 'business' ? BUSINESS_WORDS.jobs
-    : connector === null || connector.source.kind === 'built_in' ? 'Built in'
-      : <ConnectorName connector={connector} size="inline" />;
+    : connector !== null ? (connector.source.kind === 'built_in' ? 'Built in' : <ConnectorName connector={connector} size="inline" />)
+      : row.source === 'native' ? 'Built in' : 'Connected tool';
   const fields: DetailsField[] = [
     { label: 'Name', value: row.tool, mono: true },
     { label: 'Source', value: source },
