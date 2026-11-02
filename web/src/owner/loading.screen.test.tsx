@@ -24,7 +24,7 @@ import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSk
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { needsYouKey, todayKey } from './useDesks.ts';
+import { DESKS_KEY, needsYouKey, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
 import { settled } from '../ds/test/settled.ts';
@@ -1052,6 +1052,37 @@ it('desks_failure_ends_the_skeleton', async () => {
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
   expect(mockStore.requests.filter(({ key }) => key === 'desks')).toHaveLength(2);
   await expectScreenBasics(document.body, { owner: true });
+});
+
+it('desk_gate_hides_the_old_error_while_retrying_a_missing_desk', async () => {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
+  const main = mockStore.world.desk(RIVERA.deskId)!;
+  mockStore.world.addDesk({ desk_id: 'desk-rivera-new', slug: 'rivera-new', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+  // The cached list holds the first Desk but lacks the new one. Its failed re-read keeps that data.
+  mockStore.inject({ route: 'desks', status: 'network', times: 2 });
+  await router.navigate('/app/desk-rivera-new/today');
+  const error = screen.getByRole('alert').getByText("We couldn't reach Claude Desk. Check your connection, then try again.", { exact: true });
+  await expect.element(error).toBeVisible();
+
+  const desks = holdReads(ROUTES.desks.path);
+  onlineManager.setOnline(false);
+  onTestFinished(() => onlineManager.setOnline(true));
+  await screen.getByRole('button', { name: 'Try again' }).click();
+  await vi.waitFor(() => expect(client.getQueryState(DESKS_KEY)?.fetchStatus).toBe('paused'));
+  await expect.element(error).toBeVisible();
+  expect(desks.held()).toBe(0);
+  onlineManager.setOnline(true);
+  await vi.waitFor(() => expect(desks.held()).toBe(1));
+  await expect.element(error).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Desk' })).toBeVisible();
+
+  desks.release();
+  await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+  await expect.element(error).not.toBeInTheDocument();
 });
 
 it('failed_demo_inbox_read_says_so_in_its_sheet', async () => {

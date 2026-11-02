@@ -205,10 +205,11 @@ function DeskGate({ deskId }: { deskId: string }) {
   const setupShape = shown === null ? undefined : skeletonSetupOf(shown.desk);
 
   const titleId = useId();
-  const loading = shown ? readingAhead : !desks.isError && !(desks.data && !desks.isFetching);
+  const failed = desks.isError && !desks.isFetching;
+  const loading = shown ? readingAhead : !failed && !(desks.data && !desks.isFetching);
   const next = shown ? (
     <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />
-  ) : desks.isError ? (
+  ) : failed ? (
     <OwnerState error={desks.error} onRetry={() => void desks.refetch()} />
   ) : (
     <NotFound />
