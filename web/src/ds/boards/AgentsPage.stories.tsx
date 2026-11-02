@@ -133,12 +133,12 @@ export const Board: Story = {
     expectComputed(address, { fontFamily: /^"JetBrains Mono"/, fontSize: '13px' });
     const copy = within(connect).getByRole('button', { name: 'Copy address' });
     await expect(Math.round(copy.getBoundingClientRect().right)).toBe(1119);
-    // The address in its outlined box, below the ten abilities: from 393 px, 32 px tall at 799,
-    // 144 px lower after adding six 20 px lines and their 4 px gaps;
+    // The address in its outlined box, below the ten abilities and their outcomes: from 393 px, 32 px
+    // tall at 822;
     // ending 8 px before the button (603 px wide once the interface font has loaded).
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents page fonts');
     const addressBox = address.getBoundingClientRect();
-    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 799, 32]);
+    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 822, 32]);
     await expect(Math.round(copy.getBoundingClientRect().left - addressBox.right)).toBe(8);
     expectComputed(address, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderTopLeftRadius: '8px' });
     const request = one(connect, 'pre');
