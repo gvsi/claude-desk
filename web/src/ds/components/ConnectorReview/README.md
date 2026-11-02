@@ -16,7 +16,7 @@ For a business job, pass `job` instead of `connector`: `{ title, glyph, rows: { 
 - A `Card` named "Tools" with a row per tool, separated by hairlines only between rows and padded 14 px above and below: its name at weight 520, its `description` in secondary meta, then a line per rule that covers it, in secondary meta:
   - the owner's rule: "Covered by your rule: {text} · {outcomePhrase(mode, limit)}" ("… · Automatic up to $300; over $300, ask me first");
   - an always-on rule: "Covered by your always-on rule: {text}";
-  - none: "No rule of yours covers this yet, so it starts at Ask me first." (or "No rule of yours covers this yet." once the owner picked another outcome).
+  - none: "No rule of yours covers this yet, so it starts at Ask me first." (or "No rule of yours covers this yet." once the owner picked another outcome), or the tool's `uncoveredLine` in its place when the screen gives one. Setup gives one for a booking job the owner chose on its card to let run on its own, which still asks first until its rule is confirmed at the Rules step. A rule that covers the tool still shows instead.
 - Each tool's outcome at the right, an `OutcomeMenu` at `mode`. The screen starts every new tool at "Ask me first"; with `onChangeOutcome` each outcome is a menu, and without it, words and a dot. Each row lays out by its own width: under 640 px the outcome sits on its own line under its words.
 - A primary "Turn it on", a secondary "Cancel", and "You'll see the change to your rules before anything runs." in secondary meta.
 
@@ -48,7 +48,7 @@ A title that wraps balances its lines (`text-wrap: balance`), as `PageHeader`'s 
 | `job` | `ReviewJobView` | Required for a business job review; mutually exclusive with `connector`. |
 | `titleRef` | `Ref<HTMLHeadingElement>` | Optional. Makes the review heading programmatically focusable so the screen can announce a view change. |
 | `intro` | `string` | An app's promise, after "Nothing runs until you turn it on." |
-| `tools` | `ReviewToolView[]` | Required. `{ key; name; description; mode: RuleMode; coveredBy: { text; mode: RuleMode \| 'always_on'; limit? }[] }`. |
+| `tools` | `ReviewToolView[]` | Required. `{ key; name; description; mode: RuleMode; coveredBy: { text; mode: RuleMode \| 'always_on'; limit? }[]; uncoveredLine? }`. |
 | `onChangeOutcome` | `(key: string, mode: RuleMode) => void` | Makes each outcome a menu. |
 | `connection` | `'not_connected' \| 'connected'` | An app connected on this screen (setup's Stripe). |
 | `onConnect` | `() => void` | "Connect {name}", while `not_connected`. |

@@ -741,12 +741,15 @@ class SetupSuggestionsIn(BaseModel):
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
     owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
-    only to a card message, with role `claude` and empty text."""
+    only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+    themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
+    false. Read-only: it only says what happened."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
     choices: list[Choice] = []
     card: ProposalCard | None = None
+    owner_decided: bool = False
 
 
 class SetupPublicLine(BaseModel):
