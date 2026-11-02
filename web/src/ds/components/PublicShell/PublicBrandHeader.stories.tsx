@@ -61,7 +61,11 @@ export const AgentsPage: Story = {
 
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvas: 'none', canvasNote: 'N-R2-Agents-06-Phone’s header: the same, with the 16 px gutters the public page takes below 720 px.' },
+  parameters: {
+    canvas: 'N-R2-Agents-06-Phone',
+    canvasNote:
+      'The board’s header: the same, with the 16 px gutters the public page takes below 720 px. Under it is only the page’s title, in a stand-in column padded 40 px at the sides, where the board puts “Back to the chat” over the title, 16 px gutters and the agents cards under it; the story runs at the 390 × 844 phone window, not the board’s 390 × 2000.',
+  },
   play: async ({ canvas }) => {
     expectComputed(canvas.getByRole('banner'), { paddingLeft: '16px', paddingRight: '16px' });
   },
