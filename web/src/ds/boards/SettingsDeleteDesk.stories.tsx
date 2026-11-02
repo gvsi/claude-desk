@@ -40,10 +40,9 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote: [
-      'Signed on 2026-10-30.',
-      'The board\'s title is “Delete Main line?”; the title quotes the Desk name and then names its business: Delete “Main line” for Turner Plumbing? (owner decision, 2026-11-02).',
+      'Signed on 2026-10-30, and redrawn on 2026-11-02: the title quotes the Desk name and then names its business, and both delete buttons are red, with no dot beside the title (owner decisions).',
       "The general Dialog over Settings › General: Delete “Main line” for Turner Plumbing?, the body, and “Keep it” focused beside “Delete Desk”, fitted to this board (24 px padding, the body 12 px under the title, the answers at a screen’s main size).",
-      'Both delete buttons use the red danger variant, as the board draws them (owner decision, 2026-11-02, replacing the earlier neutral-delete rule). The board still draws a refused dot beside its unquoted title; the general Dialog keeps the default tone, with no dot.',
+      'Both delete buttons use the red danger variant (replacing the earlier neutral-delete rule); the general Dialog keeps the default tone, with no dot.',
       'The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
       'The page behind is Boards/Settings, general.',
     ].join(' '),
