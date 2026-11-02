@@ -726,12 +726,12 @@ async def test_verify_routes_accept_agent_sessions(app, client, frozen_clock, mo
 
 AGENT_TOOL_LABELS = {   # Turner Plumbing's agent tools today, one block each by the plain label the card gives it
     "en": ["Get a quote from the price list", "Find open times", "Book a visit", "Get a payment link for a quote",
-           "Pay for a quote within the limit of a signed mandate", "Leave contact details", "Ask for a callback",
+           "Pay for a quote within a signed limit", "Leave contact details", "Ask for a callback",
            "Verify a customer with a code sent to their contact on record",
            "Receive a verified customer's own documents", "List a verified customer's own charges"],
     "es": ["Pedir una cotización de la lista de precios", "Buscar horarios libres", "Reservar una visita",
            "Pedir un enlace de pago para una cotización",
-           "Pagar una cotización dentro del límite de un mandato firmado", "Dejar datos de contacto",
+           "Pagar una cotización dentro de un límite firmado", "Dejar datos de contacto",
            "Pedir que te devuelvan la llamada", "Verificar a un cliente con un código enviado a su contacto registrado",
            "Recibir los documentos propios de un cliente verificado",
            "Ver los cargos propios de un cliente verificado"],

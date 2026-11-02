@@ -311,7 +311,7 @@ AGENT_TOOLS: dict[str, str] = {
     "native.find_slots": "Find open times",
     "native.book": "Book a visit",
     "native.payment_link": "Get a payment link for a quote",
-    "native.charge_mandate": "Pay for a quote within the limit of a signed mandate",
+    "native.charge_mandate": "Pay for a quote within a signed limit",
     "native.capture_lead": "Leave contact details",
     "native.request_callback": "Ask for a callback",
     "native.start_verification": "Verify a customer with a code sent to their contact on record",
