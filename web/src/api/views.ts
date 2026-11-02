@@ -131,6 +131,8 @@ export interface BriefingItem {
   line: string | null;
   /** Why a `turned_down` request was refused, as a closed code; null for the other kinds and for a refusal the API can't place. */
   cause: RefusalCause | null;
+  /** It happened in a demo visitor's chat, whose persona then names it if the chat gave no name. Absent is false. */
+  demo_visitor?: boolean;
 }
 
 /** "Since last night": from 18:00 yesterday in the business's time zone, to now. */
@@ -390,9 +392,10 @@ export interface PeopleOut {
   people: { person_id: string; display_name: string; masked_contact: string }[];
   /**
    * The name and note as the visitor typed them (untrusted; the API types either as missing);
-   * `replayed`: replayed from the recorded history into this copy (plan 02b), absent is false.
+   * `replayed`: replayed from the recorded history into this copy (plan 02b), absent is false;
+   * `demo_visitor`: left in a demo visitor's chat, absent is false.
    */
-  leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean }[];
+  leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean; demo_visitor?: boolean }[];
 }
 
 /**

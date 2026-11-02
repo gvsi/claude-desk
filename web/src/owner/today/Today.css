@@ -647,6 +647,12 @@
   font-weight: inherit;
 }
 
+/* A demo visitor's pill, 8 px after the name, or after the answer's words. */
+.cd-briefing-row__who > .cd-pill,
+.cd-briefing-row__line > .cd-pill {
+  margin-left: var(--space-8);
+}
+
 /* A booking's or a lead's own words, under whose they are. */
 .cd-briefing-row__who + .cd-briefing-row__line {
   color: var(--text-secondary);

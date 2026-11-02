@@ -36,7 +36,7 @@ import asyncio
 import logging
 from collections import Counter, OrderedDict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -511,6 +511,7 @@ class Activity:
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered events whose handoff flag is false
     handoffs: list[Timed]                      # Claude's delivered events whose handoff flag is true
+    demo: dict[str, "DemoMark"] = field(default_factory=dict)  # the demo visitors' chats (`demo_visitors`)
 
 
 def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[str, dict]) -> list[Stopped]:
@@ -668,7 +669,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
         holds=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"])
                for row in decisions if row["outcome"] == "hold"],
-        stepped=stepped, texts=texts, replies=replies, handoffs=handoffs)
+        stepped=stepped, texts=texts, replies=replies, handoffs=handoffs, demo=await demo_visitors(ctx, desk_id))
 
 
 def _within(things: Iterable[Timed], start: datetime, end: datetime) -> list[Timed]:
@@ -718,13 +719,16 @@ def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
 
 def briefing_items(done: Activity, start: datetime, end: datetime) -> list[BriefingItem]:
     """Every briefing item from `start` to `end`, newest first: each refused request, booking and lead, and each
-    conversation Claude answered alone, at its newest such reply (`briefing_counts`)."""
+    conversation Claude answered alone, at its newest such reply (`briefing_counts`). One in a demo visitor's chat is
+    flagged, and named by its persona where the chat gave no name of its own, as Conversations names it."""
     who = done.people
 
     def item(kind: str, thing: Timed, ref_id: str | None = None, line: str | None = None,
              cause: RefusalCause | None = None) -> BriefingItem:
+        mark = done.demo.get(thing.session_id) if thing.session_id is not None else None
         return BriefingItem(kind=kind, at=thing.at, session_id=thing.session_id,
-                            display_name=who.name(thing.session_id), ref_id=ref_id or thing.ref_id, line=line, cause=cause)
+                            display_name=who.name(thing.session_id) or (mark.first_name if mark else None),
+                            ref_id=ref_id or thing.ref_id, line=line, cause=cause, demo_visitor=mark is not None)
 
     counted = briefing_counts(done, start, end)
     items = [item("turned_down", attempt, line=attempt.line, cause=attempt.cause) for attempt in counted.stopped]
@@ -1219,12 +1223,15 @@ async def demo_visitors(ctx: OwnerCtx, desk_id: str, session_id: str | None = No
 async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
     """The leads visitors left on the Desk, newest first, their names and notes as typed (untrusted text). A lead is
     recorded history unless the session it was left in is known live (`history_sessions`), failing closed as
-    `decision_replayed` does: one with no session, or a session the ledger doesn't show opening, counts as history."""
+    `decision_replayed` does: one with no session, or a session the ledger doesn't show opening, counts as history. A
+    lead a demo visitor left is flagged (`demo_visitors`)."""
     _, live = await history_sessions(ctx, desk_id)
+    demo = await demo_visitors(ctx, desk_id)
     rows = sorted(await ctx.ro.rows("leads", desk_id=desk_id),
                   key=lambda row: (utc(row["created_at"]), row["lead_id"]), reverse=True)
     return [Lead(lead_id=row["lead_id"], display_name=row["display_name"], note=row["note"],
-                 created_at=row["created_at"], replayed=row["session_id"] not in live) for row in rows]
+                 created_at=row["created_at"], replayed=row["session_id"] not in live,
+                 demo_visitor=row["session_id"] in demo) for row in rows]
 
 
 async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:

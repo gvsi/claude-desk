@@ -331,6 +331,30 @@ describe('Demo visitor', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each(['desktop', 'phone'] as const)('since_last_night_and_people_tag_the_demo_visitors_booking_and_lead_on_%s', async (viewport: Viewport) => {
+    const { run_id: runId, session_id: sessionId } = await startOne('briefing');
+    // It books, at the end of its lines, and has left a lead.
+    await expect.poll(() => mockStore.demoVisitors.read(runId)?.state, { timeout: 10_000 }).toBe('done');
+    const world = mockStore.world;
+    world.leads.push({ leadId: 'lead-riley', deskId: RIVERA.deskId, sessionId, displayName: 'Riley Morgan', note: 'Kitchen sink leak', createdAt: world.now() });
+    const { screen, router } = await renderRoute(TODAY, { viewport });
+    const since = screen.getByRole('region', { name: 'Since last night' });
+    const booked = since.getByRole('link').filter({ hasText: 'Booked' });
+    await expect.element(booked).toBeVisible();
+    // The demo visitor's booking: named by its persona, with the pill beside the name.
+    const pill = booked.element().querySelector('.cd-briefing-row__who .cd-pill');
+    expect(booked.element().querySelector('.cd-briefing-row__who')?.textContent).toBe('RileyDemo visitor');
+    expect(pill?.textContent).toBe('Demo visitor');
+    expectNoHorizontalScroll();
+
+    await router.navigate(`/app/${RIVERA.deskId}/people`);
+    const leadRow = () => [...document.querySelectorAll('.cd-lead-row')].find((row) => row.querySelector('.cd-lead-row__name')?.textContent === 'Riley Morgan');
+    await expect.poll(() => leadRow()?.querySelector('.cd-pill')?.textContent ?? null).toBe('Demo visitor');
+    // A real visitor's lead has none.
+    expect(document.querySelectorAll('.cd-lead-row .cd-pill')).toHaveLength(1);
+    expectNoHorizontalScroll();
+  });
+
   it('needs_you_tags_the_demo_visitors_handoff_too', async () => {
     const { run_id: runId } = await startOne('handoff');
     mockStore.demoVisitors.endRun(runId, 'finished');

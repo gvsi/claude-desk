@@ -8850,6 +8850,11 @@
               }
             ],
             "title": "Cause"
+          },
+          "demo_visitor": {
+            "type": "boolean",
+            "title": "Demo Visitor",
+            "default": false
           }
         },
         "type": "object",
@@ -8863,7 +8868,7 @@
           "cause"
         ],
         "title": "BriefingItem",
-        "description": "One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,\nthe decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a\nrefusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required\nand nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped\nrefusals. Stopped drafts stay on Safety and out of the briefing."
+        "description": "One thing that happened since last night. `ref_id` is what it links to: the refused decision for `turned_down`,\nthe decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a\nrefusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required\nand nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped\nrefusals. Stopped drafts stay on Safety and out of the briefing. `demo_visitor` is true for a thing in a demo\nvisitor's chat (`owner_reads.demo_visitors`), whose `display_name` is then its persona's first name when the chat\ngave no name of its own."
       },
       "BriefingList": {
         "properties": {
@@ -11296,6 +11301,11 @@
           "replayed": {
             "type": "boolean",
             "title": "Replayed",
+            "default": false
+          },
+          "demo_visitor": {
+            "type": "boolean",
+            "title": "Demo Visitor",
             "default": false
           }
         },

@@ -201,7 +201,9 @@ export interface BriefingNewest {
  * the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
  * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
  * and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
- * refusals. Stopped drafts stay on Safety and out of the briefing.
+ * refusals. Stopped drafts stay on Safety and out of the briefing. `demo_visitor` is true for a thing in a demo
+ * visitor's chat (`owner_reads.demo_visitors`), whose `display_name` is then its persona's first name when the chat
+ * gave no name of its own.
  */
 export interface BriefingItem {
   kind: "turned_down" | "booking" | "lead" | "answer";
@@ -235,6 +237,7 @@ export interface BriefingItem {
         | "no_rule"
       )
     | null;
+  demo_visitor?: boolean;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/briefing`: every item since last night, newest first.
@@ -640,6 +643,7 @@ export interface Lead {
   note: string | null;
   created_at: string;
   replayed?: boolean;
+  demo_visitor?: boolean;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.

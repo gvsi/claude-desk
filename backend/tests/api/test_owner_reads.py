@@ -1003,11 +1003,12 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert brief["newest"] == {
         "turned_down": {"kind": "turned_down", "at": stamp(local(2026, 10, 29, 20)),
                         "session_id": refused_chat.session_id, "display_name": None,
-                        "ref_id": refused.decision_id, "line": refused.reason_plain, "cause": "tool_not_available"},
+                        "ref_id": refused.decision_id, "line": refused.reason_plain, "cause": "tool_not_available", "demo_visitor": False},
         "booking": {"kind": "booking", "at": stamp(local(2026, 10, 29, 22)), "session_id": booked_chat.session_id,
-                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain, "cause": None},
+                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain, "cause": None, "demo_visitor": False},
         "lead_or_answer": {"kind": "answer", "at": stamp(local(2026, 10, 30, 7, 1)), "session_id": answered.session_id,
-                           "display_name": None, "ref_id": answered.session_id, "line": None, "cause": None}}
+                           "display_name": None, "ref_id": answered.session_id, "line": None, "cause": None,
+                           "demo_visitor": False}}
     listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()
     assert listed["since"] == brief["since"]
     assert [(item["kind"], item["ref_id"]) for item in listed["items"]] == [
@@ -1016,7 +1017,7 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert listed["items"][3]["line"] == refused.reason_plain
     assert listed["items"][4] == {"kind": "lead", "at": stamp(local(2026, 10, 29, 18)),
                                   "session_id": lead_chat.session_id, "display_name": "Sam Ortiz", "ref_id": lead_id,
-                                  "line": "Call after 5, the side gate", "cause": None}
+                                  "line": "Call after 5, the side gate", "cause": None, "demo_visitor": False}
     # computed from the rows on each read: polling gives the same briefing
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"] == brief
 
@@ -1283,6 +1284,40 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     listed = (await owner.get(f'desks/{owner.desk_id}/conversations')).json()
     assert [row['latest_outcome'] for row in listed if row['session_id'] == visitor.session_id] == ['visit_booked']
 
+
+
+async def test_a_demo_visitors_booking_answer_and_lead_are_flagged_and_named_by_its_persona(scene, clock):
+    # Two demo visitors' chats since last night: one books and leaves a lead, the other is answered by Claude alone;
+    # beside them a real visitor's lead.
+    booking_demo = await scene.visitor(local(2026, 10, 29, 19))
+    await write(scene.engine, scene.admin, booking_demo.ids, "demo_visitor", local(2026, 10, 29, 19), text="Riley",
+                ref_id="visitor-one")
+    await scene.text(booking_demo, local(2026, 10, 29, 19))
+    booked = await scene.booking(booking_demo, local(2026, 10, 29, 19, 1))
+    demo_lead = await scene.lead(booking_demo, local(2026, 10, 29, 19, 2), name="Riley Morgan")
+    answered_demo = await scene.visitor(local(2026, 10, 29, 20))
+    await write(scene.engine, scene.admin, answered_demo.ids, "demo_visitor", local(2026, 10, 29, 20), text="Riley",
+                ref_id="visitor-two")
+    await scene.text(answered_demo, local(2026, 10, 29, 20))
+    await scene.reply(answered_demo, local(2026, 10, 29, 20, 1))
+    real = await scene.visitor(local(2026, 10, 29, 21))
+    real_lead = await scene.lead(real, local(2026, 10, 29, 21))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+    flagged = {(item["kind"], item["ref_id"]): (item["demo_visitor"], item["display_name"]) for item in listed}
+    # Its booking and answer say they're a demo visitor's, named by its persona where it gave no name of its own.
+    assert flagged[("booking", booked.decision_id)] == (True, "Riley Morgan")
+    assert flagged[("answer", answered_demo.session_id)] == (True, "Riley")
+    assert flagged[("lead", demo_lead)] == (True, "Riley Morgan")
+    assert flagged[("lead", real_lead)] == (False, "Sam Ortiz")
+    newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]
+    assert (newest["booking"]["demo_visitor"], newest["lead_or_answer"]["demo_visitor"]) == (True, False)
+    # People's leads too.
+    people = (await owner.get(f"desks/{owner.desk_id}/people")).json()
+    leads = {lead["lead_id"]: lead["demo_visitor"] for lead in people["leads"]}
+    assert (leads[demo_lead], leads[real_lead]) == (True, False)
 
 
 async def test_briefing_list_is_the_window_newest_first(scene, clock):

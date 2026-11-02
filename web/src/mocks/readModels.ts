@@ -600,7 +600,10 @@ const KIND_ORDER: readonly BriefingKind[] = ['turned_down', 'booking', 'lead', '
 function briefingItems(a: Activity): BriefingItem[] {
   const { since, now } = a.window;
   const end = now + 1;
-  const nameOf = (sessionId: string) => a.world.sessions.get(sessionId)?.displayName ?? null;
+  const nameOf = (sessionId: string) => {
+    const session = a.world.sessions.get(sessionId);
+    return session?.displayName ?? session?.demoVisitor ?? null;
+  };
   const item = (kind: BriefingKind, h: Happened, refId: string, line: string | null, cause: RefusalCause | null = null): BriefingItem => ({
     kind,
     at: isoTime(h.at),
@@ -609,6 +612,7 @@ function briefingItems(a: Activity): BriefingItem[] {
     ref_id: refId,
     line,
     cause,
+    demo_visitor: a.world.sessions.get(h.sessionId)?.demoVisitor != null,
   });
   const refused = a.stopped.filter((s) => s.kind === 'refused');
   // An answer: Claude replied in the window, to a conversation with nothing else in it, and didn't
@@ -962,6 +966,7 @@ export function peopleOut(world: MockWorld, desk: DeskRecord): PeopleOut {
         note: lead.note,
         created_at: isoTime(lead.createdAt),
         ...(lead.replayed === true ? { replayed: true } : {}),
+        demo_visitor: world.sessions.get(lead.sessionId)?.demoVisitor != null,
       })),
   };
 }

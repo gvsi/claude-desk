@@ -542,7 +542,9 @@ class BriefingItem(BaseModel):
     the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
     refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
     and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
-    refusals. Stopped drafts stay on Safety and out of the briefing."""
+    refusals. Stopped drafts stay on Safety and out of the briefing. `demo_visitor` is true for a thing in a demo
+    visitor's chat (`owner_reads.demo_visitors`), whose `display_name` is then its persona's first name when the chat
+    gave no name of its own."""
 
     kind: Literal["turned_down", "booking", "lead", "answer"]
     at: AwareDatetime
@@ -551,6 +553,7 @@ class BriefingItem(BaseModel):
     ref_id: str
     line: str | None
     cause: RefusalCause | None
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
 
 
 class BriefingNewest(BaseModel):
@@ -1018,6 +1021,7 @@ class Lead(BaseModel):
     note: str | None
     created_at: AwareDatetime
     replayed: bool = False                  # recorded history: left in a session written into the copy, not a live one
+    demo_visitor: bool = False              # left in a demo visitor's chat (`owner_reads.demo_visitors`)
 
 
 class PeopleOut(BaseModel):
