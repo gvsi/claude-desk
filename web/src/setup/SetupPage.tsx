@@ -1,5 +1,5 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
 import { useNavigate, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
 import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
@@ -282,15 +282,22 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const changing = state !== undefined && state.step !== 'questions' && state.step !== 'live' && (chatOpen || changeRuns);
   const content = useRef<HTMLDivElement>(null);
   const returnToStep = useRef(false);
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (changing || !returnToStep.current) return;
+    returnToStep.current = false;
+    if (document.activeElement !== document.body) return;
+    // Preview's own arrival waits for its chat to load. Leave focus free until it is ready;
+    // touch-first screens keep the heading instead, without opening the keyboard.
+    if (state?.step === 'preview' && !window.matchMedia('(pointer: coarse)').matches) return;
     // Cancelling the change chat announces the restored view, or returns to the closing plan's Continue.
     const target = content.current?.querySelector<HTMLElement>(closingQuestions ? '.cd-setup-dock .cd-button--primary' : 'h1');
     if (!target) return;
-    returnToStep.current = false;
-    if (target.tagName === 'H1') target.tabIndex = -1;
+    if (target.tagName === 'H1' && !target.hasAttribute('tabindex')) {
+      target.setAttribute('tabindex', '-1');
+      target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
+    }
     target.focus({ preventScroll: true });
-  }, [changing, closingQuestions]);
+  }, [changing, closingQuestions, state?.step]);
   // A change may close the questions in one turn and return tools directly. Remember where this
   // chat opened, or where a running change was found, so both that response and a read of the landed
   // turn clear the old drafts and show the new plan.

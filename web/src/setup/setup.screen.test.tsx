@@ -2100,6 +2100,18 @@ describe('setup', () => {
     expect(getComputedStyle(heading.element()).boxShadow).toBe('none');
     expect(requests('setupReopen', mark)).toHaveLength(0);
     expectNoHorizontalScroll();
+    await userEvent.keyboard('{Tab}');
+    await expect.element(heading).not.toHaveAttribute('tabindex');
+  });
+
+  it.each(['desktop', 'phone'] as const)('change_chat_continue_preserves_preview_arrival_focus_%s', async (viewport) => {
+    const state = await interviewAtPreview();
+    const { screen } = await renderRoute(changeSomethingPath(state.interview_id), { viewport });
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toHaveFocus();
+    const mark = mockStore.requests.length;
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toHaveFocus();
+    expect(requests('setupReopen', mark)).toHaveLength(0);
   });
 
   it.each(['response', 'stream', 'lost response'] as const)('a_change_sent_from_real_situations_reopens_the_chat_and_setup_moves_forward_again_%s', async (delivery) => {
