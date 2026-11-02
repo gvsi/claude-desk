@@ -882,10 +882,16 @@ async def start_demo_visitor(desk_id: DeskId, body: DemoVisitorIn, request: Requ
         raise ApiProblem(404, "not_found")
     task_set = await demo_task_set(ctx.ro.conn, ctx.ro, desk_id)
     await ctx.ro.conn.commit()
-    await require_model_budget(request)
+    visitors = state.demo_visitors
     try:
-        run = await state.demo_visitors.start(ctx.copy_id, ctx.owner_session_id, desk_id, desk["slug"], task_set,
-                                              key=body.idempotency_key)
+        # Only a start that launches a run spends today's budget: the click's own run, or the one already going, is
+        # answered whatever the budget, so a click sent again gets the answer it got the first time. These are the
+        # lookups `start` makes first; nothing is awaited between them and `start` unless a launch is coming.
+        answered = visitors._keyed(ctx.copy_id, body.idempotency_key, desk_id) or visitors._running(ctx.copy_id)
+        if answered is None:
+            await require_model_budget(request)
+        run = await visitors.start(ctx.copy_id, ctx.owner_session_id, desk_id, desk["slug"], task_set,
+                                   key=body.idempotency_key)
     except TooManyStarts as refused:
         raise RateLimited(refused.retry_after) from None
     except KeyReused:

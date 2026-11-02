@@ -229,6 +229,40 @@ async def test_none_starts_once_todays_model_budget_is_spent(app, browser, fake,
     assert runtime.demo_visitors.newest(copy.copy_id, copy.desk_ids[0]) is None
 
 
+async def test_a_click_already_answered_is_answered_again_once_the_budget_is_spent(
+        app, browser, fake, clock, copy, visitor_model, api_settings, passcode_hash, engine):
+    owner = owner_of(app, browser, copy)
+    desk_id = copy.desk_ids[0]
+    release = asyncio.Event()
+    thinking = gated(step("never sent"), release)            # its first step is still being written
+    visitor_model.add(thinking)
+    first = await start(owner, desk_id, key="click-1")
+    assert first.status_code == 202, first.text
+    await asyncio.wait_for(thinking.entered.wait(), 5)
+
+    runtime = app.state.runtime
+    runtime.settings = production_settings(passcode_hash, api_database_url=api_settings.api_database_url,
+                                           kernel_ro_schema=api_settings.kernel_ro_schema, trusted_proxy_hops=0)
+    async with engine.begin() as conn:                     # $150 spent today: the whole budget
+        await record_model_call(conn, "copy-budget", None, "setup", usage_row(7_500_000, clock()))
+    before = visitor_sessions(fake)
+    # The click sent again, and another click while it runs: both answer the run already going, as before.
+    for key in ("click-1", "click-2"):
+        again = await start(owner, desk_id, key=key)
+        assert (again.status_code, again.json()) == (202, first.json()), key
+
+    stopped = await owner.post(f"/api/owner/desks/{desk_id}/demo_visitor/{first.json()['run_id']}/stop")
+    assert stopped.status_code == 200, stopped.text
+    release.set()
+    await runtime.demo_visitors.drain()
+    # Once it has ended its own click still answers it, but a new one would start another: today's budget refuses it.
+    repeat = await start(owner, desk_id, key="click-1")
+    assert (repeat.status_code, repeat.json()) == (202, first.json())
+    refused = await start(owner, desk_id, key="click-3")
+    assert (refused.status_code, refused.json()) == (503, {"error": "demo_budget"})
+    assert visitor_sessions(fake) == before and len(visitor_model.requests) == 1
+
+
 async def test_a_run_whose_session_never_opened_is_unavailable(app, browser, fake, copy, visitor_model):
     owner = owner_of(app, browser, copy)
     fake.fail("POST /sessions", "422", times=1)            # the Desk won't open the visitor's session
