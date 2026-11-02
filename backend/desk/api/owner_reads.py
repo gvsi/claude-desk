@@ -301,9 +301,17 @@ def holding_card(cards: Mapping[str, RuleCard], card_ids: Iterable[str]) -> Rule
     return min([card for card in deciding if card.mode == "ask"] or deciding, key=lambda card: card.card_id)
 
 
+def held_reason(card: RuleCard | None) -> str | None:
+    """The rule Needs you names for a hold whose deciding card is `card` (`holding_card`): an owner's ask card's
+    reason, as the kernel's headline names it ("Your rule asks you first: …"). A hold past an automatic card's limit
+    names none, since its headline already quotes that card, and neither does one only the default ask decided,
+    since no rule of the owner's did (the kernel's `DEFAULT_ASK_PLAIN`)."""
+    return card.reason if card is not None and card.mode == "ask" and not card.is_default else None
+
+
 async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> dict[str, str | None]:
-    """The reason of the rule card that held each decision (`holding_card`), in the policy version it was decided
-    under (default cards included), by decision ID."""
+    """The rule Needs you names for each decision (`held_reason` of its `holding_card`), in the policy version it
+    was decided under (default cards included), by decision ID."""
     versions = sorted({decision.policy_version for decision in decisions})
     if not versions:
         return {}
@@ -312,7 +320,7 @@ async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> di
         cards[row["version"]] = {card["card_id"]: RuleCard.model_validate(card) for card in row["cards"] or []}
     held = {decision.decision_id: holding_card(cards.get(decision.policy_version, {}), decision.card_ids)
             for decision in decisions}
-    return {decision_id: card.reason if card is not None else None for decision_id, card in held.items()}
+    return {decision_id: held_reason(card) for decision_id, card in held.items()}
 
 
 async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:

@@ -102,6 +102,7 @@ class LiveEvents:
         self.client.cookies.update(owner.browser.cookies)
         self.task = None
         self.buffer = ""
+        self.opened = False
 
     def open(self, path, *, body=None):
         if body is None:
@@ -110,11 +111,23 @@ class LiveEvents:
             self.task = asyncio.create_task(self.client.post(path, json=body, headers={"Accept": "text/event-stream"}))
         return self
 
-    async def next(self):
+    async def frame(self, timeout: float = 5) -> str:
         while "\n\n" not in self.buffer:
-            chunk = await asyncio.wait_for(self.sent.get(), 5)
+            chunk = await asyncio.wait_for(self.sent.get(), timeout)
             self.buffer += chunk.decode().replace("\r\n", "\n")
         frame, self.buffer = self.buffer.split("\n\n", 1)
+        return frame
+
+    async def opening(self, timeout: float = 5) -> str:
+        """The stream's first frame."""
+        self.opened = True
+        return await self.frame(timeout)
+
+    async def next(self):
+        """The next frame after the comment every stream opens with, which comes first."""
+        if not self.opened:
+            assert await self.opening() == ": open"
+        frame = await self.frame()
         lines = frame.splitlines()
         if frame.startswith(":"):
             return ("comment", frame)
@@ -326,7 +339,8 @@ async def test_setup_late_subscribers_get_the_reads_in_order_then_done(app, brow
         await app.state.runtime.turn_runs.wait(interview_id)
         # After the turn has landed, a subscriber gets done at once and refetches the saved state.
         after = await owner.browser.get(path + "/events")
-        assert after.status_code == 200 and after.text.replace("\r\n", "\n") == 'event: done\ndata: {"run":null}\n\n'
+        assert after.status_code == 200 and after.text.replace("\r\n", "\n") == (
+            ': open\n\nevent: done\ndata: {"run":null}\n\n')
     finally:
         for gate in gates:
             gate.set()
@@ -467,7 +481,8 @@ async def test_setup_retry_and_error_contract(app, browser, kernel_http, model, 
 async def test_setup_late_subscriber_and_scoping_are_json_before_stream(app, browser, kernel_http, model):
     owner, state, path = await question_ready(app, browser, kernel_http, model)
     late = await owner.browser.get(path + "/events")
-    assert late.status_code == 200 and late.text.replace("\r\n", "\n") == 'event: done\ndata: {"run":null}\n\n'
+    assert late.status_code == 200 and late.text.replace("\r\n", "\n") == (
+        ': open\n\nevent: done\ndata: {"run":null}\n\n')
     other = await new_owner(app, browser, kernel_http)
     for client, url, status in [(other.browser, path + "/events", 404),
                                 (owner.browser, "/api/owner/setup/unknown/events", 404),
@@ -635,6 +650,52 @@ async def test_setup_keepalives_are_ping_comments_every_15_seconds(app, browser,
         await app.state.runtime.turn_runs.wait(initial["interview_id"])
 
 
+@pytest.mark.parametrize("stream", ["setup", "rules"])
+async def test_owner_streams_open_at_once_with_nothing_to_send(app, browser, fake, kernel_http, model, monkeypatch,
+                                                               stream):
+    """Behind CloudFront and the load balancer, a response's headers reach the browser only with its first body byte,
+    and EventSource opens on them. A setup turn's events and an Ask Claude answer, while Claude hasn't answered yet,
+    send a comment as they start, long before their first 15 s keep-alive."""
+    from desk.api.prompts import RuleChat
+    from tests.api.test_owner_desks import new_owner as rules_owner
+
+    initial = None
+    if stream == "setup":
+        owner, initial, path = await question_ready(app, browser, kernel_http, model)
+        monkeypatch.setattr(setup, "TURN_WAIT_S", 0)
+        raw = answer_turn(setup.SETUP_TURNS["what_you_do"], "Got it", step_done=False).model_dump_json()
+    else:
+        owner = await rules_owner(app, browser, fake, kernel_http)
+        path = f"/api/owner/policy/{owner.desk_id}/chat"
+        raw = RuleChat(answer="Every payment asks you first.", change=None).model_dump_json()
+    release = asyncio.Event()
+
+    async def waiting(request):
+        await release.wait()
+        return response(text(raw))
+
+    model.add(waiting)
+    live = LiveEvents(app, browser, owner)
+    try:
+        if stream == "setup":
+            busy = await owner.browser.post(path + "/answer", json={"question": "what_you_do", "text": "Repairs"})
+            assert busy.status_code == 202
+            live.open(path + "/events")
+        else:
+            live.open(path, body={"text": "Do payments ask me first?"})
+        assert await live.opening(timeout=1) == ": open"         # no event, data or id: only the stream's start
+        release.set()
+        while (item := await live.next())[0] == "comment":
+            pass
+        assert item[0] == ("done" if stream == "setup" else "final")
+        await live.task
+    finally:
+        release.set()
+        await live.close()
+        if initial is not None:
+            await app.state.runtime.turn_runs.wait(initial["interview_id"])
+
+
 async def test_rules_stream_joins_json_work_and_disconnect_leaves_it_running(
         app, browser, fake, kernel_http, model, monkeypatch):
     from desk.api import proving
@@ -663,6 +724,40 @@ async def test_rules_stream_joins_json_work_and_disconnect_leaves_it_running(
     finally:
         gate.set()
         await live.close()
+
+
+async def test_a_send_that_fails_closes_the_routes_events_before_the_response_returns():
+    """When a send fails (the connection dropped), the SSE library closes the response's body. The route's own events
+    are closed with it, before the response returns, even while something still holds them (a traceback's frames can):
+    never left to the garbage collector and the event loop's finalizer."""
+    from desk.api.owner_streaming import event, response
+
+    closed = []
+
+    async def events():
+        try:
+            yield event("delta", {"text": "first"})
+            yield event("delta", {"text": "second"})
+        finally:
+            closed.append(True)                          # a display subscriber lets go of its waiter here
+
+    sent = 0
+
+    async def send(message):
+        nonlocal sent
+        if message["type"] == "http.response.body" and message["body"]:
+            sent += 1
+            if sent == 2:                                # the opening comment went out; the first event's send fails
+                raise OSError("the connection dropped")
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    held = events()
+    with pytest.raises(OSError):
+        await response(held)({"type": "http", "method": "GET"}, receive, send)
+
+    assert closed == [True]
 
 
 async def test_slow_subscriber_gets_reset_before_done_after_failed_attempt():

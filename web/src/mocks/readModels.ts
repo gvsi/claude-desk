@@ -348,6 +348,21 @@ function holdingCard(cards: readonly RuleCard[], cardIds: readonly string[]): Ru
 }
 
 /**
+ * The rule Needs you names for a hold, as the API names it (`owner_reads.held_reason`): an owner's ask
+ * card's reason. A hold past an automatic card's limit names none, since its headline already quotes
+ * that card, and neither does one only the default ask decided, since no rule of the owner's did.
+ */
+function heldBy(card: RuleCard | null): string | null {
+  return card?.mode === 'ask' && !card.is_default ? card.reason : null;
+}
+
+/** The card that decided a hold, in the policy version it was decided under (`holdingCard`). */
+export function decidingCard(desk: DeskRecord, decision: Decision): RuleCard | null {
+  const cards = decision.policy_version === desk.policy.version ? desk.policy.cards : desk.versions.get(decision.policy_version) ?? [];
+  return holdingCard(cards, decision.card_ids);
+}
+
+/**
  * Every held request and open handoff, oldest first. Each quotes what its visitor wrote
  * (`fromTheVisitor`): a held request the words that made it, a handoff the chat's latest, as of
  * this read. A handoff also carries its chat's newest triage
@@ -360,14 +375,12 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
     .filter((d) => d.decision.state === 'held')
     .map((d) => {
       const session = world.sessions.get(d.decision.session_id);
-      const cards = d.decision.policy_version === desk.policy.version
-        ? desk.policy.cards : desk.versions.get(d.decision.policy_version) ?? [];
       return {
         at: d.createdAt,
         item: {
           decision: d.decision,
           handoff: null,
-          held_by: holdingCard(cards, d.decision.card_ids)?.reason ?? null,
+          held_by: heldBy(decidingCard(desk, d.decision)),
           held_at: isoTime(d.createdAt),
           session: needsYouSession(session, d.decision.session_id),
           from_the_visitor: fromTheVisitor(session, d.decision.decision_id),
