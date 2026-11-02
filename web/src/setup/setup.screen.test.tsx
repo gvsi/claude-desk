@@ -723,6 +723,18 @@ describe('setup', () => {
     expect(line.element().classList.contains('cd-type-meta')).toBe(true);
   });
 
+  it('the_empty_start_box_shows_an_example_under_its_label_and_hint', async () => {
+    // Empty, the box shows an example of the few sentences it wants, first name first as the hint
+    // asks; the label and the hint stay as they are, and nothing is typed in it.
+    const { screen } = await renderRoute('/app/setup');
+    const box = screen.getByRole('textbox', { name: 'Your business', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "I'm Sam. I run a dog grooming shop in Portland.");
+    await expect.element(box).toHaveAccessibleDescription('Include your first name as customers should see it.');
+    await expect.element(box).toHaveValue('');
+    // The example is the setup's copy, not the screen's own words.
+    expect(SETUP_COPY.start.placeholder).toBe("I'm Sam. I run a dog grooming shop in Portland.");
+  });
+
   it('each_of_four_examples_fills_the_box_and_starts_nothing', async () => {
     // A chip puts its example in the box, the owner's first name in it as the hint asks, and gives
     // the box focus with the caret at its end, ready for more detail. A word

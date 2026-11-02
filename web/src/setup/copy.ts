@@ -158,6 +158,8 @@ export const SETUP_COPY = {
     title: 'Tell me about your business',
     subtitle: "A few sentences is enough. You'll see everything before anything goes live.",
     field: 'Your business',
+    /** The empty box's example: a first name, then the business, as the hint asks. */
+    placeholder: "I'm Sam. I run a dog grooming shop in Portland.",
     hint: 'Include your first name as customers should see it.',
     empty: 'Write a few sentences about your business first.',
     action: 'Start',

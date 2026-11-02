@@ -59,7 +59,7 @@ export const AddPayments: Story = {
     expectComputed(within(log).getByText(OWNER_WORDS), { fontFamily: /Hanken Grotesk/ });
     // The composer at the bottom, below the log.
     const box = within(panel).getByRole('textbox', { name: 'Ask Claude' });
-    await expect(box).toHaveAttribute('placeholder', 'Ask Claude');
+    await expect(box).toHaveAttribute('placeholder', 'What happens if someone asks for a discount?');
     await expect(box.getBoundingClientRect().top).toBeGreaterThan(log.getBoundingClientRect().bottom - 1);
     await expect(panel.getBoundingClientRect().bottom - box.getBoundingClientRect().bottom).toBeLessThan(80);
 

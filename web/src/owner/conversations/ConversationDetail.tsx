@@ -36,7 +36,7 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
-import { TRANSCRIPT_NOTE } from './copy.ts';
+import { TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { latestOf } from './latest.ts';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
@@ -57,6 +57,8 @@ export interface ConversationDetailProps {
   listRead: boolean;
   /** A line the page that opened it left, such as why joining the chat didn't go through. */
   notice: string | null;
+  /** The chat is on the copy's starting sample Desk, the plumbing demo, whose whisper example is its own. */
+  sampleDesk: boolean;
 }
 
 /** Who the chat is with when the list hasn't named them yet: what the session says they are. */
@@ -137,7 +139,7 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 
-export function ConversationDetail({ sessionId, summary, listRead, notice }: ConversationDetailProps) {
+export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
@@ -328,7 +330,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           key="say"
           variant="owner"
           label="Write to them"
-          placeholder="They see your words exactly as you write them."
+          placeholder={takeOverPlaceholder(business.owner_display_name, business.name)}
+          helper={TAKE_OVER_HELPER}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}
           onSend={say}
@@ -342,7 +345,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           key="whisper"
           variant="whisper"
           label="Whisper to Claude"
-          placeholder="Whisper to Claude. They won't see it."
+          placeholder={sampleDesk ? WHISPER_PLACEHOLDER_SAMPLE : WHISPER_PLACEHOLDER}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}
           onSend={whisper}
