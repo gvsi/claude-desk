@@ -1,8 +1,8 @@
 /**
  * How often owner screens poll, in milliseconds, through React Query's `refetchInterval` (which
  * pauses while the tab is hidden), how often typing pings go out on either side of a chat, and how
- * often the agents page reads the built-in agent's run. The Demo inbox runs its own interval
- * instead, so it stops the moment its sheet closes; like React Query's, it pauses while the tab is
+ * often the agents page reads the built-in agent's run. The Notifications page runs its own
+ * interval instead, so it stops the moment the page goes; like React Query's, it pauses while the tab is
  * hidden. An answer whose action is still under way is read again on its own schedule
  * (`ANSWER_REREAD_MS`). Tests speed every interval up with `setPollScale`.
  */

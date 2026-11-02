@@ -206,10 +206,10 @@ describe('Arrival', () => {
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
     // Each of Today's reads had been answered, once and successfully, before it started to leave. The
-    // Demo inbox is the demo bar's, read once the frame draws, not ahead with Today.
+    // notifications are the sidebar's, read once the frame draws, not ahead with Today.
     expect(handOff.answeredAsItLeft()).toEqual({ desks: 1, today: 1, needsYou: 1, ownerInbox: 0 });
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(1);
   });
 
@@ -432,7 +432,7 @@ describe('Arrival', () => {
   });
 
   it('back_again_after_the_copy_was_made_away_opens_it_as_the_passcode_does', async () => {
-    // Mike Turner's demo session ended after he saw Today, whose Demo inbox held a note the next
+    // Mike Turner's demo session ended after he saw Today, whose notifications held a note the next
     // copy's doesn't. He starts the demo again, goes Back while the passcode is tried, and the copy
     // is made while he is away, before Turner Plumbing's public page has drawn: the page does
     // nothing with it meanwhile. Forward again, it opens the copy as the passcode does, the old
@@ -445,7 +445,7 @@ describe('Arrival', () => {
       sessionId: null,
     });
     const { screen, router } = await renderRoute(TODAY, { routes: publicPage.routes });
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 2 entries', exact: true })).toBeVisible();
+    await expect.element(notificationsRow(screen, 2)).toBeVisible();
     await router.navigate(PUBLIC_PAGE);
     await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
     // The session ends, and he opens the first visit's page again.
@@ -454,8 +454,8 @@ describe('Arrival', () => {
     const dialog = introDialog(screen);
     await expect.element(dialog).toBeVisible();
     const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
-    // Whether the old copy's inbox, its count on the Demo inbox button, ever shows from now on.
-    const oldInbox = '.cd-owner-inbox [aria-label="2 entries"]';
+    // Whether the old copy's inbox, its count beside Notifications, ever shows from now on.
+    const oldInbox = '.cd-sidebar [aria-label="2 unread"]';
     let sawTheOldInbox = false;
     const look = new MutationObserver(() => {
       if (document.querySelector(oldInbox) !== null) sawTheOldInbox = true;
@@ -481,7 +481,7 @@ describe('Arrival', () => {
     await router.navigate(1);
     await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
     expect(sawTheOldInbox, 'the old copy’s inbox, on the new copy’s Today').toBe(false);
     expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
     expect(requests('copies')).toHaveLength(1);
@@ -821,16 +821,16 @@ describe('Arrival', () => {
   });
 
   it('session_end_returns_to_the_intro', async () => {
-    // Today opens drawn, on what it first shows read before it opens, the Demo inbox among them;
+    // Today opens drawn, on what it first shows read before it opens, the notifications among them;
     // Things to try's reads go out as it opens. The inbox read answers slowly here, as on a slow
     // machine, and is in before the session ends, so the 401 that ends it is one of Today's own
     // reads, a poll or Things to try's, and not that read.
     delayNextRead(ROUTES.ownerInbox.path, 60);
     const { screen, router } = await renderRoute(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
-    // In on this page, which counts its entries on the button. Not `nextAnswerTo`: the last test's
+    // In on this page, which counts them beside Notifications. Not `nextAnswerTo`: the last test's
     // page can still have an inbox read out, and its late answer would pass for this one.
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
 
     // The demo session ends: the browser's owner cookie no longer opens a copy, so Today's next poll is a 401.
     mockStore.reset('rivera', { signedIn: false });
@@ -863,7 +863,7 @@ describe('Arrival', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY);
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today opens without it; the demo bar draws the inbox once its read is in.
+    // Today opens without it; the sidebar counts the notifications once their read is in.
     await expectTodayOpensWithoutItsInbox();
     mockStore.reset('rivera', { signedIn: false });
     await expect.poll(() => router.state.location.pathname).toBe('/');
@@ -882,8 +882,8 @@ describe('Arrival', () => {
 
     await expect.poll(() => router.state.location.pathname).toBe(TODAY);
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
-    // Time for another read to go out, had anything sent one: the new copy's bar read its inbox once.
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
+    // Time for another read to go out, had anything sent one: the new copy's frame read its inbox once.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(1);
   });
@@ -1086,7 +1086,10 @@ describe('The preview behind the intro dialog', () => {
       await startTheDemo(screen);
       await expect.poll(() => router.state.location.pathname).toBe(TODAY);
       await expect.element(heldCard(screen)).toBeVisible();
-      await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+      // The notifications read too: on a laptop the sidebar counts them, as the preview did.
+      await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(1));
+      if (viewport === 'desktop') await vi.waitFor(() => expect(notificationsCount()).toBe('1 unread'));
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const after = layoutOf(document.body);
 
       expect(Object.keys(before)).toEqual(Object.keys(after));
@@ -1203,6 +1206,7 @@ describe('OwnerLayout', () => {
       'Customers',
       'Rules',
       'Safety',
+      'Notifications',
       'Profile',
       'Share',
       'Knowledge',
@@ -1210,7 +1214,7 @@ describe('OwnerLayout', () => {
     ]);
     const base = `/app/${RIVERA.deskId}`;
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['today', 'conversations', 'people', 'rules', 'safety', 'profile', 'share', 'knowledge', 'settings'].map((page) => `${base}/${page}`),
+      ['today', 'conversations', 'people', 'rules', 'safety', 'notifications', 'profile', 'share', 'knowledge', 'settings'].map((page) => `${base}/${page}`),
     );
     await expect.element(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
 
@@ -1260,10 +1264,11 @@ describe('OwnerLayout', () => {
       ['rules', 'Rules', 'Rules'],
       ['rules/all', 'All rules', 'All rules'],
       ['safety', 'Safety', 'Safety'],
+      ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
       ['share', 'Share', 'Share'],
       ['settings/general', 'Settings', 'Settings'],
-      ['settings/notifications', 'Settings', 'Settings'],
+      ['settings/alerts', 'Settings', 'Settings'],
       ['settings/billing', 'Settings', 'Settings'],
     ];
     for (const [path, heading, title] of pages) {
@@ -1499,7 +1504,7 @@ describe('OwnerLayout', () => {
   it('start_over_reads_the_new_copys_inbox', async () => {
     // Polls far apart, so only the reads that open a page land.
     const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(1);
 
     // Straight away, while this copy's inbox was just read: the new copy's Today reads its own.
@@ -1507,7 +1512,7 @@ describe('OwnerLayout', () => {
     await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${mockStore.world.ids.deskId}/today`);
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox/ })).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
     // Time for a read on mount to go out, had Today sent one: the new copy's inbox is read once.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
@@ -1525,7 +1530,7 @@ describe('OwnerLayout', () => {
     const oldInbox = holdTheAnswerTo('ownerInbox');
     const { screen, router } = await renderRoute(TODAY, { pollScale: 100 });
     await vi.waitFor(() => expect(oldInbox.sent()).toBe(true));
-    // Today opens without it; the demo bar draws the inbox once its read is in.
+    // Today opens without it; the sidebar counts the notifications once their read is in.
     await expectTodayOpensWithoutItsInbox();
 
     // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
@@ -1540,7 +1545,6 @@ describe('OwnerLayout', () => {
     // Navigation and the held read can precede React's commit, leaving the old Today's skeleton
     // mounted briefly. Wait for the new copy's loading page before either held answer is released.
     await vi.waitFor(() => expect(pageNow()).toBe('loading'));
-    const sawItOpening = watchFor('Opening your Demo inbox');
 
     // The old copy's inbox answers late, before the new copy's Desks do.
     const late = nextAnswerTo('ownerInbox');
@@ -1549,24 +1553,22 @@ describe('OwnerLayout', () => {
     newInbox.release();
     newDesks.release();
 
-    // The new copy's bar reads its own inbox, and draws it with its one entry counted, never with the
-    // inbox still opening.
+    // The new copy's frame reads its own inbox, and counts its one entry beside Notifications.
     await expect.element(heldCard(screen)).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
-    expect(sawItOpening()).toBe(false);
+    await expect.element(notificationsRow(screen, 1)).toBeVisible();
     // Time for another read to go out, had anything sent one: the old copy's read and the new one's.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
 
-    // With the sheet's own read held, it shows what Today read: the new copy's alert, linking to the
-    // new copy's held request, and nothing of the old copy.
+    // With the page's own read held, Notifications shows what Today read: the new copy's alert,
+    // linking to the new copy's held request, and nothing of the old copy.
     const newHold = mockStore.world.inbox.find((record) => record.entry.decision_id != null)?.entry.decision_id;
     if (newHold == null) throw new Error("the new copy's hold alerted the owner, naming it");
     holdReads(ROUTES.ownerInbox.path);
-    await screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true }).click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toHaveAttribute('href', `${fresh}#request-${encodeURIComponent(newHold)}`);
-    expect(sheet.getByText(leftBehind).elements()).toHaveLength(0);
+    await notificationsRow(screen, 1).click();
+    const page = screen.getByRole('main');
+    await expect.element(page.getByRole('link', { name: /Open the request/ })).toHaveAttribute('href', `${fresh}#request-${encodeURIComponent(newHold)}`);
+    expect(page.getByText(leftBehind).elements()).toHaveLength(0);
   });
 
   it('late_answering_failure_keeps_the_fresh_copy', async () => {
@@ -1627,7 +1629,6 @@ describe('OwnerLayout', () => {
         settled: async (screen: RenderResult) => {
           await expect.element(heldCard(screen)).toBeVisible();
           await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
-          await expect.element(screen.getByText('Opening your Demo inbox', { exact: true })).not.toBeInTheDocument();
         },
         controls: (screen: RenderResult) => [
           screen.getByRole('button', { name: 'Copy your Desk link' }),
@@ -2597,14 +2598,26 @@ function mainLinePath(key: 'conversations' | 'ledger'): string {
  * The animations that ran in Things to try, by name, from now until the test ends, read every frame
  * (a reload included: it watches the document, not one list).
  */
-/**
- * Today's frame is up (after the read ahead's deadline) with Today still on its own skeleton, its
- * sections waiting for the copy's Demo inbox.
- */
-/** Today opens with the copy's Demo inbox read still out: the demo bar draws no inbox button meanwhile. */
+/** Today opens with the copy's notifications read still out: the sidebar counts none meanwhile. */
 async function expectTodayOpensWithoutItsInbox(): Promise<void> {
   await vi.waitFor(() => expect(document.querySelector('.cd-needs-you')).not.toBeNull(), { timeout: READ_AHEAD_MS + 2_000 });
-  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
+  expect(notificationsCount()).toBeNull();
+}
+
+/** The count beside the sidebar's Notifications row, as it reads ("1 unread"), or null with none. */
+function notificationsCount(): string | null {
+  const row = [...document.querySelectorAll('.cd-sidebar__row')].find((link) => link.querySelector('.cd-sidebar__label')?.textContent === 'Notifications');
+  return row?.querySelector('.cd-count-pill')?.getAttribute('aria-label') ?? null;
+}
+
+/**
+ * The sidebar's Notifications row, named with its count of unread entries ("Notifications 1
+ * unread"), or with any count when `unread` is left out.
+ */
+function notificationsRow(screen: RenderResult, unread?: number) {
+  return screen
+    .getByRole('navigation', { name: 'Main' })
+    .getByRole('link', { name: unread === undefined ? /^Notifications \d+ unread$/ : `Notifications ${unread} unread`, exact: true });
 }
 
 function watchListAnimations(): () => string[] {
@@ -2871,7 +2884,7 @@ function delayNextRead(path: string, ms: number): void {
   );
 }
 
-/** Today's first reads: the copy's Desks, Today and Needs you, and the copy's Demo inbox. */
+/** Today's first reads: the copy's Desks, Today and Needs you, and the copy's notifications. */
 type TodaysReads = Record<'desks' | 'today' | 'needsYou' | 'ownerInbox', number>;
 
 /**
