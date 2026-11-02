@@ -94,8 +94,8 @@ REPLY_EXAMPLES = {
 # Receipt acknowledgements and contact offers: fixed wording without business or owner names.
 STATUS_LINES = {
     "check_status": {
-        "en": "This is waiting for approval; you can see where it stands in this chat.",
-        "es": "Esto está esperando aprobación; puede consultar su estado en este chat."},
+        "en": "Your request is waiting for approval; you can see where it stands in this chat.",
+        "es": "Su solicitud está esperando aprobación; puede consultar su estado en este chat."},
     "saved": {"en": "Thank you for the details.", "es": "Gracias por los datos."},
     "offer_callback": {
         "en": "Would you like me to arrange a callback?", "es": "¿Quiere que solicite una llamada?"},
