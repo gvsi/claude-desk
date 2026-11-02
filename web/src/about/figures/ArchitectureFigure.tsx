@@ -43,6 +43,13 @@ export const ARCHITECTURE_LABELS = {
 
 const L = ARCHITECTURE_LABELS;
 
+/** Emphasize the known technologies without changing the checked label's text. */
+function technologyNames(label: string) {
+  return label.split(/\b(Cedar|Sonnet|Jev)\b/g).map((part, i) =>
+    i % 2 === 1 ? <span key={i} className="cd-about-arch__tech">{part}</span> : part,
+  );
+}
+
 /**
  * The path the figure traces, in order: the visitor, the chat layer, the kernel's Decide and an action that runs,
  * Check reply and a reply that is shown, then the signed ledger.
@@ -150,7 +157,7 @@ function Check({
         <span className="cd-about-arch__name cd-type-section">{name}</span>
         {lines.map((line) => (
           <span key={line} className="cd-about-arch__line cd-type-caption">
-            {line}
+            {technologyNames(line)}
           </span>
         ))}
         {compact ? list : null}

@@ -37,6 +37,10 @@
 
 .cd-about-fignum {
   flex: none;
+}
+
+.cd-about-fignum,
+.cd-about-arch__tech {
   font-weight: 520;
   color: var(--text-primary);
 }

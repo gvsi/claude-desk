@@ -5,6 +5,7 @@
     text { font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: rgba(250,249,245,0.92); }
     .name { font-size: 15px; font-weight: 600; }
     .line { font-size: 12px; fill: rgba(250,249,245,0.64); }
+    .tech { font-weight: 520; fill: rgba(250,249,245,0.92); }
     .kicker { font-size: 12px; font-weight: 600; fill: rgba(250,249,245,0.64); }
     .voice { font-family: "Source Serif 4", Georgia, "Times New Roman", serif; font-size: 17px; }
     .pill { font-size: 13px; }
@@ -36,9 +37,9 @@
 
   <rect class="box" x="436" y="74" width="184" height="80" rx="12"/>
   <text class="name" x="452" y="92">Decide</text>
-  <text class="line" x="452" y="110">Cedar rules from</text>
+  <text class="line" x="452" y="110"><tspan class="tech">Cedar</tspan> rules from</text>
   <text class="line" x="452" y="122">the owner’s cards</text>
-  <text class="line" x="452" y="138">A Sonnet review can</text>
+  <text class="line" x="452" y="138">A <tspan class="tech">Sonnet</tspan> review can</text>
   <text class="line" x="452" y="150">only narrow</text>
   <path class="arrow" d="M630 114h28M653 109l5 5-5 5"/>
   <rect class="pillbox" x="668" y="98" width="80" height="32" rx="16"/>
@@ -55,7 +56,7 @@
   <text class="name" x="452" y="190">Check reply</text>
   <text class="line" x="452" y="210">Prices, dates and discounts</text>
   <text class="line" x="452" y="222">only in typed cards</text>
-  <text class="line" x="452" y="242">Sonnet and Jev can</text>
+  <text class="line" x="452" y="242"><tspan class="tech">Sonnet</tspan> and <tspan class="tech">Jev</tspan> can</text>
   <text class="line" x="452" y="254">only add blocks</text>
   <path class="arrow" d="M630 218h28M653 213l5 5-5 5"/>
   <rect class="pillbox" x="668" y="202" width="88" height="32" rx="16"/>

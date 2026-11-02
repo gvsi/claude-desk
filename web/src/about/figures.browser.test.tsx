@@ -4,14 +4,17 @@
  * written out here, never read from the components.
  */
 import axe from 'axe-core';
+import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
 import { contrastRatio } from '../ds/contrast.ts';
 import { assertCleanCopy } from '../ds/test/copy.ts';
+import { loadWebFonts } from '../ds/test/fonts.ts';
 import { AXE_TAGS, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, type Block } from './documents.ts';
+import { ReaderPage } from './ReaderPage.tsx';
 import { ARCHITECTURE_LABELS, ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale, readinessRows } from './figures/ReadinessScale.tsx';
@@ -87,7 +90,7 @@ function crossesAt(points: [number, number][], y: number): number | null {
   return null;
 }
 
-/** Text under `root` that a person reads, one entry per text node, outside `aria-hidden` subtrees. */
+/** Text under `root` that a person reads, keeping label lines whole across inline emphasis. */
 function readTexts(root: Element): string[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode: (node) =>
@@ -96,7 +99,13 @@ function readTexts(root: Element): string[] {
         : NodeFilter.FILTER_ACCEPT,
   });
   const texts: string[] = [];
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push((node.textContent ?? '').trim());
+  const lines = new Set<Element>();
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const line = node.parentElement?.closest('.cd-about-arch__line');
+    if (line && lines.has(line)) continue;
+    if (line) lines.add(line);
+    texts.push(((line ?? node).textContent ?? '').trim());
+  }
   return texts;
 }
 
@@ -298,6 +307,40 @@ describe('Tau3Chart', () => {
 });
 
 describe('ArchitectureFigure', () => {
+  it('architecture_technology_names_stand_out_in_both_layouts', async () => {
+    for (const [size, compact] of [[DESKTOP, false], [PHONE, true]] as const) {
+      await page.viewport(size.width, size.height);
+      const screen = await render(<ArchitectureFigure compact={compact} />);
+      const names = [...screen.container.querySelectorAll('.cd-about-arch__tech')];
+      expect(names.map((name) => [name.textContent, name.parentElement?.textContent]), `${size.width} wide`).toEqual([
+        ['Cedar', 'Cedar rules from the owner’s cards'],
+        ['Sonnet', 'A Sonnet review can only narrow'],
+        ['Sonnet', 'Sonnet and Jev can only add blocks'],
+        ['Jev', 'Sonnet and Jev can only add blocks'],
+      ]);
+      for (const name of names) {
+        const style = getComputedStyle(name);
+        const line = getComputedStyle(name.parentElement!);
+        expect(Number(style.fontWeight), `${size.width}: ${name.textContent}`).toBeGreaterThan(Number(line.fontWeight));
+        expect(style.color).toBe(tokenColor('--text-primary'));
+        expect(line.color).toBe(tokenColor('--text-secondary'));
+      }
+      await screen.unmount();
+    }
+  });
+
+  it('architecture_check_heights_match_the_reviewed_figure', async () => {
+    await loadWebFonts();
+    // Measured on /about/proposal at d14424d6b, before emphasizing the technology names.
+    for (const [size, height] of [[DESKTOP, 124], [PHONE, 120]] as const) {
+      await page.viewport(size.width, size.height);
+      const screen = await render(<MemoryRouter><ReaderPage id="proposal" /></MemoryRouter>);
+      const boxes = [...screen.container.querySelectorAll('.cd-about-arch__check > .cd-about-arch__box')];
+      expect(boxes.map((box) => box.getBoundingClientRect().height), `${size.width} wide`).toEqual([height, height]);
+      await screen.unmount();
+    }
+  });
+
   it('architecture_labels_are_the_checked_list', async () => {
     const [name, ...labels] = ARCHITECTURE_CHECKED;
     // The component's list, which other checks of the page read, is the checked one.
