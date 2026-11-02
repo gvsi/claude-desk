@@ -949,6 +949,21 @@ describe('public chat page', () => {
     expect(mockStore.requests.slice(before).filter(({ key }) => key === 'sendMessage')).toHaveLength(0);
   });
 
+  it('focus_leaves_ask_when_the_chat_ends_while_it_is_focused', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    const ask = screen.getByRole('button', { name: 'Ask for Mike Turner', exact: true });
+    (ask.element() as HTMLElement).focus();
+    await expect.element(ask).toHaveFocus();
+    mockStore.emit(RIVERA.slug, { type: 'error', code: 'session' });
+    await expect.element(screen.getByRole('button', { name: NEW_CHAT_LABEL.en })).toBeVisible();
+    await expect.element(ask).toBeDisabled();
+    await expect.element(screen.getByRole('group', { name: 'Chat with Turner Plumbing', exact: true })).toHaveFocus();
+    const before = requests('sendMessage').length;
+    await userEvent.keyboard('{Enter}');
+    expect(requests('sendMessage')).toHaveLength(before);
+  });
+
   it.each(['desktop', 'phone'] as const)('deleted_desk_ends_the_chat_on_%s', async (viewport) => {
     // The owner deletes the Desk the moment Claude starts writing a reply.
     const { screen } = await renderRoute(PAGE, { seed: 'rivera', viewport });

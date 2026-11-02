@@ -117,6 +117,7 @@ interface LongChatOptions {
   ownerInChat?: boolean;
   /** The composer is disabled, as the page disables it while it can't send. */
   composerDisabled?: boolean;
+  askDisabled?: boolean;
   /** The message, counted from 1, written long: several lines on a phone, fewer on a wider window. */
   longMessage?: number;
   /** A 61 px line above the composer, in its area, as the public chat shows one for a waiting request. */
@@ -153,6 +154,7 @@ function LongChat({
   banner = false,
   ownerInChat = false,
   composerDisabled = false,
+  askDisabled = false,
   longMessage,
   lineAbove = false,
   keepComposerRoom = false,
@@ -174,6 +176,7 @@ function LongChat({
       openStatus={language === 'es' ? CLOSED_ES_LONGEST : OPEN_EN}
       banner={banner ? <div data-testid="banner" style={{ height: 96 }} /> : undefined}
       ownerInChat={ownerInChat}
+      askDisabled={askDisabled}
       keepComposerRoom={keepComposerRoom}
       onAskForOwner={() => {}}
       about={page.charter}
@@ -1566,6 +1569,23 @@ it('focus_on_ask_goes_on_to_the_composer_as_the_owner_joins', async () => {
     fromTheScrollRegion: 'the scroll region',
     fromNowhere: 'the page',
   });
+});
+
+it('focus_on_ask_moves_on_when_the_chat_cannot_be_written_in', async () => {
+  await renderLongChat([390, 844]);
+  const ask = () => page.getByRole('button', { name: 'Ask for Mike Turner' });
+  for (const composerDisabled of [false, true]) {
+    act(() => root.render(<LongChat composerDisabled={composerDisabled} />));
+    (ask().element() as HTMLElement).focus();
+    await expect.element(ask()).toHaveFocus();
+    act(() => root.render(<LongChat composerDisabled={composerDisabled} askDisabled />));
+    await expect.element(ask()).toBeDisabled();
+    expect(document.activeElement).toBe(one(composerDisabled ? '.cd-public-shell__scroll' : '.cd-composer__input'));
+  }
+  act(() => root.render(<LongChat />));
+  one('.cd-public-shell__scroll').focus();
+  act(() => root.render(<LongChat askDisabled />));
+  expect(document.activeElement).toBe(one('.cd-public-shell__scroll'));
 });
 
 it('focus_moving_on_from_ask_scrolls_nothing', async () => {

@@ -657,7 +657,7 @@ export function PublicShell({
   // The owner joining takes "Ask for {owner}" out of the chat's head. Its ref callback notes, as React
   // lets go of it and while it is still on the page, whether it had focus. After the swap, focus goes
   // on (`focusAfterAsk`) only if it had, so it doesn't drop to the page; focus anywhere else, or
-  // nowhere, stays where it is.
+  // nowhere, stays where it is. A focused Ask becoming disabled follows the same path.
   const ask = useRef<HTMLButtonElement | null>(null);
   const askLeftWithFocus = useRef(false);
   const askRef = useCallback((element: HTMLButtonElement | null) => {
@@ -665,10 +665,11 @@ export function PublicShell({
     ask.current = element;
   }, []);
   useLayoutEffect(() => {
-    const follow = ownerInChat && askLeftWithFocus.current;
+    const follow = (ownerInChat && askLeftWithFocus.current)
+      || (askDisabled && ask.current !== null && ask.current === ask.current.ownerDocument.activeElement);
     askLeftWithFocus.current = false;
     if (follow && shellRef.current) focusAfterAsk(shellRef.current);
-  }, [ownerInChat]);
+  }, [ownerInChat, askDisabled]);
   const name = <Name>{brand.name}</Name>;
   const owner = ownerName === null ? null : <Name>{ownerName}</Name>;
 
