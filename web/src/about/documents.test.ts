@@ -106,7 +106,7 @@ function articleText(markdown: string): string[] {
 
 const DOCUMENTS = [
   { id: 'proposal', file: 'product-proposal.md', figures: ['architecture'], internal: ['/about/prediction'] },
-  { id: 'prediction', file: 'capability-prediction.md', figures: ['tau3', 'readiness'], internal: [] },
+  { id: 'prediction', file: 'capability-prediction.md', figures: ['tau3', 'readiness'], internal: ['/about/proposal', '/about/proposal'] },
 ] as const;
 
 describe('the About documents', () => {
@@ -126,7 +126,7 @@ describe('the About documents', () => {
         file,
       ).toEqual(sections.map(straight));
       expect(blocks.flatMap((block) => (block.kind === 'figure' ? [block.name] : [])), file).toEqual(figures);
-      // The proposal's one link to the prediction goes to its page; every other link is an https:// address.
+      // A link to the other document goes to its page; every other link is an https:// address.
       const found = links(blocks);
       expect(found.filter((link) => link.internal).map((link) => link.href), file).toEqual(internal);
       expect(found.filter((link) => !link.internal).every((link) => link.href.startsWith('https://')), file).toBe(true);
@@ -189,8 +189,8 @@ describe('the About documents', () => {
       route: '/about/prediction',
       title: 'Capability prediction',
       summary:
-        'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
-      pullQuote: 'It will still be talked around often enough that its limits must sit in code.',
+        'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
+      pullQuote: 'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.',
       hero: 'tau3',
       next: 'proposal',
     });
@@ -212,7 +212,7 @@ describe('the About documents', () => {
     }
     expect(ABOUT_DOCUMENTS.proposal.pullQuote).toBe('Talking Claude around can’t make it act past the owner’s rules.');
     expect(ABOUT_DOCUMENTS.prediction.pullQuote).toBe(
-      'It will still be talked around often enough that its limits must sit in code.',
+      'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.',
     );
   });
 
@@ -352,8 +352,8 @@ describe('the About documents', () => {
 
   it('a_bad_document_names_its_file_and_line', () => {
     const prediction = raw('capability-prediction.md');
-    const line = prediction.split('\n').indexOf('## Characteristics') + 1;
-    expect(() => readDocument('prediction', prediction.replace('## Characteristics', '### Characteristics'))).toThrow(
+    const line = prediction.split('\n').indexOf('## Limitations') + 1;
+    expect(() => readDocument('prediction', prediction.replace('## Limitations', '### Limitations'))).toThrow(
       `docs/capability-prediction.md line ${line}: a heading below ##`,
     );
     expect(() => readDocument('proposal', raw('product-proposal.md').replace('The prototype, v1', 'This prototype'))).toThrow(

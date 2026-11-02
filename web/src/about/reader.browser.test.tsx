@@ -46,8 +46,8 @@ const PAGES = {
     route: '/about/prediction',
     title: 'Capability prediction',
     summary:
-      'What a generally available Claude model will do for a small business by October 2027, and what will still hold it back.',
-    sections: ['Capability', 'Why it’s coming', 'Characteristics', 'Limitations', 'Readiness'],
+      'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
+    sections: ['Capability', 'Why it matters', 'How it’s measured', 'Why it’s coming', 'Limitations', 'Readiness'],
   },
 } as const;
 
@@ -744,8 +744,8 @@ describe('ReaderPage', () => {
     // its top.
     for (const { path, anchor, other, others } of [
       {
-        path: '/about/prediction#characteristics',
-        anchor: 'characteristics',
+        path: '/about/prediction#how-its-measured',
+        anchor: 'how-its-measured',
         other: { route: '/about/proposal', title: 'Product proposal' },
         others: ['/about/proposal#no-such-section', '/about/proposal#%E0%A4%A'],
       },
@@ -780,13 +780,13 @@ describe('ReaderPage', () => {
     let loaded = () => {};
     for (const size of [DESKTOP, PHONE]) {
       loaded = typeStillLoading();
-      const screen = await renderReader('prediction', { size, hash: '#characteristics' });
-      await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+      const screen = await renderReader('prediction', { size, hash: '#how-its-measured' });
+      await expect.poll(() => Math.abs(offsetOf('how-its-measured'))).toBeLessThanOrEqual(1);
       swapType();
-      expect(offsetOf('characteristics'), `the swap moved the page at ${size.width}`).toBeGreaterThan(20);
+      expect(offsetOf('how-its-measured'), `the swap moved the page at ${size.width}`).toBeGreaterThan(20);
       loaded();
       await expect
-        .poll(() => Math.abs(offsetOf('characteristics')), { message: `once the type has loaded at ${size.width}` })
+        .poll(() => Math.abs(offsetOf('how-its-measured')), { message: `once the type has loaded at ${size.width}` })
         .toBeLessThanOrEqual(1);
       await screen.unmount();
     }
@@ -802,8 +802,8 @@ describe('ReaderPage', () => {
     // A reader who has moved on before the type loads is left where they are, whatever they moved with.
     for (const kind of ['wheel', 'touchmove', 'pointerdown', 'keydown', 'popstate']) {
       loaded = typeStillLoading();
-      const again = await renderReader('prediction', { hash: '#characteristics' });
-      await expect.poll(() => Math.abs(offsetOf('characteristics')), { message: kind }).toBeLessThanOrEqual(1);
+      const again = await renderReader('prediction', { hash: '#how-its-measured' });
+      await expect.poll(() => Math.abs(offsetOf('how-its-measured')), { message: kind }).toBeLessThanOrEqual(1);
       window.dispatchEvent(new Event(kind));
       const where = await scrollOn();
       swapType();
@@ -815,8 +815,8 @@ describe('ReaderPage', () => {
 
     // Back returns to the reader's place and keeps no section, though the address names one.
     loaded = typeStillLoading();
-    const back = await renderReader('prediction', { hash: '#characteristics' });
-    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+    const back = await renderReader('prediction', { hash: '#how-its-measured' });
+    await expect.poll(() => Math.abs(offsetOf('how-its-measured'))).toBeLessThanOrEqual(1);
     window.dispatchEvent(new Event('wheel'));
     const place = await scrollOn();
     at.navigate?.('/about/proposal');
@@ -855,7 +855,7 @@ describe('ReaderPage', () => {
     await page.viewport(DESKTOP.width, DESKTOP.height);
     const screen = await render(
       <StrictMode>
-        <MemoryRouter initialEntries={['/about/prediction#characteristics']}>
+        <MemoryRouter initialEntries={['/about/prediction#how-its-measured']}>
           <Routes>
             <Route path="/about/prediction" element={<ReaderPage id="prediction" />} />
           </Routes>
@@ -863,11 +863,11 @@ describe('ReaderPage', () => {
         </MemoryRouter>
       </StrictMode>,
     );
-    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+    await expect.poll(() => Math.abs(offsetOf('how-its-measured'))).toBeLessThanOrEqual(1);
     swapType();
-    expect(offsetOf('characteristics'), 'the swap moved the page').toBeGreaterThan(20);
+    expect(offsetOf('how-its-measured'), 'the swap moved the page').toBeGreaterThan(20);
     loaded();
-    await expect.poll(() => Math.abs(offsetOf('characteristics')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
+    await expect.poll(() => Math.abs(offsetOf('how-its-measured')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
     await screen.unmount();
   });
 
@@ -944,13 +944,13 @@ describe('ReaderPage', () => {
   });
 
   it('a_contents_link_ends_an_addresss_keep', async () => {
-    // Opened at "Characteristics" while the type loads, then "Limitations" followed by a click alone, as assistive
+    // Opened at "How it's measured" while the type loads, then "Limitations" followed by a click alone, as assistive
     // technology activates a link (no pointer or key events). Once the type loads, the page keeps Limitations, and
-    // never goes back to Characteristics on the way.
+    // never goes back to How it's measured on the way.
     withoutScrollAnchoring();
     const loaded = typeStillLoading();
-    const screen = await renderReader('prediction', { hash: '#characteristics' });
-    await expect.poll(() => Math.abs(offsetOf('characteristics'))).toBeLessThanOrEqual(1);
+    const screen = await renderReader('prediction', { hash: '#how-its-measured' });
+    await expect.poll(() => Math.abs(offsetOf('how-its-measured'))).toBeLessThanOrEqual(1);
     followContentsLink('limitations');
     await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
     const visits: string[] = [];
@@ -966,7 +966,7 @@ describe('ReaderPage', () => {
     loaded();
     await expect.poll(() => Math.abs(offsetOf('limitations')), { message: 'kept at Limitations' }).toBeLessThanOrEqual(1);
     await twoFrames();
-    expect(visits, 'sections the page moved to once the type loaded').not.toContain('characteristics');
+    expect(visits, 'sections the page moved to once the type loaded').not.toContain('how-its-measured');
     await screen.unmount();
   });
 
@@ -1463,12 +1463,12 @@ describe('ReaderPage', () => {
     /** The window's offset that puts `anchor`'s heading `by` above the window's top. */
     const past = (anchor: string, by: number) => placeOf(anchor) + parseFloat(getComputedStyle(headingOf(anchor)).scrollMarginTop) + by;
 
-    // From part way through "Why it's coming" to part way through "Limitations", in one jump: the headings in
+    // From part way through "How it's measured" to part way through "Limitations", in one jump: the headings in
     // between go from below the line to above the window, and no heading lands above the line, so nothing comes
     // into or leaves the band the observer watches. The mark follows once the scroll rests.
-    await jumpTo(past('why-its-coming', 90));
-    await expect.poll(marked).toEqual(['Why it’s coming (location)']);
-    expect(headingOf('characteristics').getBoundingClientRect().top, 'the next heading starts below the line').toBeGreaterThan(line);
+    await jumpTo(past('how-its-measured', 90));
+    await expect.poll(marked).toEqual(['How it’s measured (location)']);
+    expect(headingOf('why-its-coming').getBoundingClientRect().top, 'the next heading starts below the line').toBeGreaterThan(line);
     const to = past('limitations', 190);
     expect(headingOf('readiness').getBoundingClientRect().top - (to - window.scrollY), 'the next heading lands below the line').toBeGreaterThan(line);
     await jumpTo(to);
@@ -1492,8 +1492,8 @@ describe('ReaderPage', () => {
     });
     expect(typeof window.onscrollend).toBe('undefined');
     const without = await renderReader('prediction');
-    await jumpTo(past('why-its-coming', 90));
-    await expect.poll(marked).toEqual(['Why it’s coming (location)']);
+    await jumpTo(past('how-its-measured', 90));
+    await expect.poll(marked).toEqual(['How it’s measured (location)']);
     await jumpTo(past('limitations', 190));
     await expect.poll(marked, { message: 'without scrollend' }).toEqual(['Limitations (location)']);
     await without.unmount();

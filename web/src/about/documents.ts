@@ -70,7 +70,7 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'proposal',
     forThePage: (markdown) => markdown,
     words: {
-      pullQuote: 'It will still be talked around often enough that its limits must sit in code.',
+      pullQuote: 'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.',
       hero: 'tau3',
     },
   },
