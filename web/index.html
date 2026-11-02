@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      // The theme chosen in this browser (src/lib/theme.ts), set before anything paints; the system's sets nothing.
+      try {
+        const theme = localStorage.getItem('claude-desk.theme');
+        if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+      } catch {}
+    </script>
     <title>Claude Desk</title>
     <link rel="icon" type="image/svg+xml" href="/src/ds/components/Mark/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
