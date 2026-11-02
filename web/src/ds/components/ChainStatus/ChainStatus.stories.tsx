@@ -62,7 +62,7 @@ export const Ok: Story = {
 export const Broken: Story = {
   args: { chainOk: broken.chain_ok, firstBadSeq: broken.first_bad_seq, entries: broken.entries.length, devKey: false },
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByText('Something in this record changed at entry 2')).toBeVisible();
+    await expect(canvas.getByText('The record check failed at entry 2')).toBeVisible();
     await expect(canvas.queryByText(UNCHANGED)).toBeNull();
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--refused');
     await expect(canvas.getByText('3 entries')).toBeVisible();

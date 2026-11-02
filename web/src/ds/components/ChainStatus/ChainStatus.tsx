@@ -7,7 +7,7 @@ import './ChainStatus.css';
 export interface ChainStatusProps {
   /** `LedgerPage.chain_ok`, or `null` before the ledger has been read. */
   chainOk: LedgerPage['chain_ok'] | null;
-  /** `LedgerPage.first_bad_seq`: the first entry where the record's check fails. */
+  /** `LedgerPage.first_bad_seq`: the first entry whose check failed. */
   firstBadSeq: LedgerPage['first_bad_seq'];
   /** How many entries the page holds (`entries.length`). */
   entries: number;

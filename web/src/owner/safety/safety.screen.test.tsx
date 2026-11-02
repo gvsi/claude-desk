@@ -457,7 +457,10 @@ describe('Safety', () => {
   it('broken_chain_is_plain', async () => {
     injectLedger(ledgerPage(threeEntries(), { chain_ok: false, first_bad_seq: 2 }));
     const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    await expect.element(screen.getByText('Something in this record changed at entry 2', { exact: true })).toBeVisible();
+    // A failed check says where it failed, never that the record changed: a changed key or a
+    // removed entry fails it too, with the entry it names unchanged.
+    await expect.element(screen.getByText('The record check failed at entry 2', { exact: true })).toBeVisible();
+    expect(document.querySelector('.cd-chain-status')?.textContent).not.toMatch(/chang/i);
     expect(screen.getByText(UNCHANGED).elements()).toHaveLength(0);
 
     // An entry's full trace says the chain is broken, and where, never that it was verified.

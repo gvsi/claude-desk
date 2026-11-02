@@ -18,12 +18,12 @@
 | State | Dot | Line |
 | --- | --- | --- |
 | `chainOk: true` | handled | "No entry has been changed since it was written" |
-| `chainOk: false`, or anything but `true` or `null` | refused | "Something in this record changed at entry {firstBadSeq}" ("Something in this record has changed since it was written" without a well-formed number) |
+| `chainOk: false`, or anything but `true` or `null` | refused | "The record check failed at entry {firstBadSeq}" ("The record check failed" without a well-formed number) |
 | `chainOk: null` | info | "Not checked yet" |
 
 Beside the line, the count in words, "{n} entries" ("1 entry"), in caption type and the secondary text color (`entriesLabel`); at the end, "Signed with a development key" when `devKey`.
 
-The words claim no more than the kernel's check shows. A pass means every entry still hashes and verifies as signed, in an unbroken run that ends at the head the kernel last wrote. A failure at an entry is the first place the record stops checking out, which may be a removed or added entry rather than that entry changing, so the line names where the record changed, not that the entry itself did. The full trace (`FullTrace`) keeps the chain's own terms.
+The words claim no more than the kernel's check shows. A pass means every entry still hashes and verifies as signed, in an unbroken run that ends at the head the kernel last wrote. A failure at an entry is only the first entry whose check failed: an untouched record checked against another key fails at entry 1, and a removed entry fails at the unchanged one after it. So a failed check says where it failed, never that the record changed. The full trace (`FullTrace`) keeps the chain's own terms.
 
 ## Props
 
