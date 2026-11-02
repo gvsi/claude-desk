@@ -32,7 +32,7 @@ const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control
 const DETAILS = [
   TODAY_COPY.chatDetail,
   DEMO_VISITOR_THING.detail,
-  `${TODAY_COPY.breakBeforeOwner}${rivera.business.ownerName.split(' ')[0]}${TODAY_COPY.breakAfterOwner}`,
+  TODAY_COPY.breakDetail,
   // The seed's hold went past an automatic rule's limit, so no rule is named (`owner_reads._held_by`).
   TODAY_COPY.waiting,
   TODAY_COPY.createDetail,

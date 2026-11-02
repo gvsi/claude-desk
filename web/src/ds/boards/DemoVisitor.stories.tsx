@@ -69,6 +69,13 @@ interface Thing {
 
 const [CHAT, BREAK, ANSWER, CREATE] = IDEAS;
 
+/**
+ * "Try to break it" and the held row in the REV-DEMO boards' own words. The web app's Today words
+ * have since changed (#865, #867); the stories' `canvasNote` says how.
+ */
+const BOARD_BREAK = ["Ask for a discount, another customer's address or ", "'s home number. Safety shows what was stopped and why."] as const;
+const BOARD_HELD_BY = 'Held by your rule: ';
+
 function things(failed: boolean): Thing[] {
   return [
     { title: CHAT.title, detail: TODAY_COPY.chatDetail, icon: 'conversations', step: 'Open your public page', link: true },
@@ -77,9 +84,9 @@ function things(failed: boolean): Thing[] {
       title: BREAK.title,
       detail: (
         <>
-          {TODAY_COPY.breakBeforeOwner}
+          {BOARD_BREAK[0]}
           <span data-copy="user">{OWNER_FIRST}</span>
-          {TODAY_COPY.breakAfterOwner}
+          {BOARD_BREAK[1]}
         </>
       ),
       icon: 'safety',
@@ -89,7 +96,7 @@ function things(failed: boolean): Thing[] {
       title: ANSWER.title,
       detail: (
         <>
-          {TODAY_COPY.waiting} {TODAY_COPY.heldBy}
+          {TODAY_COPY.waiting} {BOARD_HELD_BY}
           <span data-copy="user">{rivera.ruleCards['rv-quote'].reason}</span>
         </>
       ),

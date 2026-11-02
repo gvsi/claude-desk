@@ -1,7 +1,8 @@
 /**
  * Notifications (REV-NOTIF), under Safety in the sidebar: what Claude would have sent the owner by
- * text or email (the kernel's alert for each held request, the copy's codes and ledger
- * checkpoints), newest first under the day each came on the business's clock, each row with its time.
+ * text or email (the kernel's alert for each held request and the copy's codes; the record's signed
+ * checkpoints are left out, `ownerInboxQuery`), newest first under the day each came on the business's
+ * clock, each row with its time.
  * It took the place of the demo bar's Demo inbox sheet, in the 760 px column Customers uses. An entry
  * the owner hadn't seen when the page opened keeps a dot for the visit, and its body in the primary
  * ink; one already seen has its body in the secondary ink. An alert about a held request links to

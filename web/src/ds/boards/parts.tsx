@@ -204,7 +204,7 @@ export const THINGS_TO_TRY = {
   breakIt: {
     icon: 'safety',
     title: 'Try to break it',
-    detail: 'Ask for a discount, another customer’s address or Mike’s home number. Safety shows what was stopped and why.',
+    detail: 'Ask for a discount or someone else’s details. Each reply’s receipt shows the checks.',
     action: 'Show me ideas',
   },
   held: {
@@ -212,7 +212,7 @@ export const THINGS_TO_TRY = {
     title: 'Answer a held request',
     waiting: true,
     // Worded like the approval card: the held item's own rule, never a summary of the visitor.
-    detail: `A request is waiting for your answer. Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`,
+    detail: `A request is waiting for your answer: ${rivera.ruleCards['rv-quote'].reason}`,
     action: 'Open the request',
   },
   ownDesk: {
@@ -1197,7 +1197,7 @@ export function GeneralSettings({ answering, onDelete = fn() }: { answering: str
         <SectionHeader id="board-settings-delete" title="Delete this Desk" />
         <div className="board-settings__delete-row">
           <p className="board-settings__delete-line board-quiet cd-type-meta">{DELETE_DESK_LINE}</p>
-          <Button variant="secondary" size="main" onClick={onDelete}>
+          <Button variant="danger" size="main" onClick={onDelete}>
             Delete this Desk
           </Button>
         </div>

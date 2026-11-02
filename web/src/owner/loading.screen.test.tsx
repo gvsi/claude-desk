@@ -504,7 +504,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
   // Each card's line wraps in its third of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 2, 3, 1, 3] : [2, 2, 3, 1, 2]).forEach((count, i) => {
+  (viewport === 'phone' ? [2, 2, 3, 1, 3] : [2, 2, 2, 1, 2]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
