@@ -25,6 +25,7 @@ import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
 import { expectRevealed, expectShownWhole, watchReveal, watchRevealing } from '../test/reveal.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
+import { mockDrain } from '../test/mockDrain.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 import { OWNER_NAME_FALLBACK } from './brand.ts';
@@ -2661,7 +2662,8 @@ describe('public chat page', () => {
     await until(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
     disclosure.assert();
     await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
-    await frames();
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
     expect(requests('visitorSession'), 'confirmation stops further retries').toHaveLength(reads + 2);
     disclosure.assert();
   });
@@ -2711,7 +2713,8 @@ describe('public chat page', () => {
     }
     const stoppedReads = requests('visitorSession').length;
     await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
-    await frames();
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
     expect(requests('visitorSession'), 'no reads after the confirmation round stopped').toHaveLength(stoppedReads);
     expect(stoppedReads).toBe(reads + (stop === '401' ? 2 : 1));
     expect(texts.saw(OWNER_IN_CHAT_WORDS)).toBe(false);
@@ -2747,7 +2750,8 @@ describe('public chat page', () => {
       disclosure.assert();
     }
     await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
-    await frames();
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
     expect(requests('visitorSession'), 'the last backoff ends the round').toHaveLength(reads + 4);
     expect(texts.saw(OWNER_IN_CHAT_WORDS)).toBe(false);
     disclosure.assert();
@@ -2820,7 +2824,8 @@ describe('public chat page', () => {
       disclosure.assert();
     }
     await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
-    await frames();
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
     expect(requests('visitorSession'), 'the fresh round also stops at the cap').toHaveLength(reads + 8);
     expect(texts.saw(OWNER_IN_CHAT_WORDS), 'failed reads never confirm the owner').toBe(false);
     disclosure.assert();
@@ -2869,7 +2874,8 @@ describe('public chat page', () => {
     await until(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
     disclosure.assert();
     await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
-    await frames();
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
     expect(requests('visitorSession'), 'one read confirms the cursorless answer').toHaveLength(reads + 1);
     disclosure.assert();
   });
@@ -2918,7 +2924,8 @@ describe('public chat page', () => {
       disclosure.assert();
     }
     await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
-    await frames();
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
     expect(requests('visitorSession'), 'verify confirmation stops after the final retry').toHaveLength(reads + 4);
     expect(texts.saw(OWNER_IN_CHAT_WORDS)).toBe(false);
     disclosure.assert();
