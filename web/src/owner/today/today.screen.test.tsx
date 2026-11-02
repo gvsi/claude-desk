@@ -287,16 +287,16 @@ function watchZeroLinesOverAFailure(screen: RenderResult): () => string[] {
 
 /**
  * Whether "Since last night" draws "A quiet night", even for a moment, from the first frame it says
- * its read failed until `recovering()`, and beside that line at any time. Once `recovering()` is
- * called, a read that works may bring the quiet night back in place of the line.
+ * its read failed (`failedLine`) until `recovering()`, and beside that line at any time. Once
+ * `recovering()` is called, a read that works may bring the quiet night back in place of the line.
  */
-function watchQuietNightOverAFailure(): { drawn: () => boolean; recovering: () => void } {
+function watchQuietNightOverAFailure(failedLine: string = UNAVAILABLE): { drawn: () => boolean; recovering: () => void } {
   let failed = false;
   let recovering = false;
   let drawn = false;
   const look = () => {
     const text = sinceLastNightHeading()?.closest('section')?.textContent ?? '';
-    const saysFailed = text.includes(UNAVAILABLE);
+    const saysFailed = text.includes(failedLine);
     if (saysFailed) failed = true;
     if (text.includes('A quiet night') && (saysFailed || (failed && !recovering))) drawn = true;
   };
@@ -1564,6 +1564,33 @@ describe('Today', () => {
     expect(watch.drawn()).toBe(false);
   });
 
+  it('since_last_night_holds_back_a_quiet_night_while_offline', async () => {
+    // A quiet night is read, then Today reads again with the network gone. The read can't start, so
+    // the card says so in place of "A quiet night" until the network is back and a read works.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
+    const since = region(screen, 'Since last night');
+    const quiet = since.getByText('A quiet night', { exact: true });
+    await expect.element(quiet).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+
+    const watch = watchQuietNightOverAFailure(OWNER_ERROR_COPY.network);
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    void queryClient.invalidateQueries({ queryKey: todayKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(queryClient.getQueryState(todayKey(RIVERA.deskId))?.fetchStatus).toBe('paused'));
+    const line = since.getByRole('alert').getByText(OWNER_ERROR_COPY.network, { exact: true });
+    await expect.element(line).toBeVisible();
+    await expect.element(since.getByRole('button', { name: 'Try again' })).toBeVisible();
+    expect(quiet.elements()).toHaveLength(0);
+
+    watch.recovering();
+    onlineManager.setOnline(true);
+    await expect.element(line).not.toBeInTheDocument();
+    await expect.element(quiet).toBeVisible();
+    expect(watch.drawn()).toBe(false);
+  });
+
   it('since_last_night_keeps_its_night_while_its_read_fails', { timeout: 15_000 }, async () => {
     // A night with things in it is read, then Today's refreshes fail. The card says so first, with
     // "Try again", over what it read: the night's line, its rows and "See all" stay, as Last 7
@@ -1592,11 +1619,20 @@ describe('Today', () => {
     expect(rows.elements()).toHaveLength(3);
     await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
     // The failure's line comes first in the card, 16 px over the night's line, as Last 7 days' is
-    // over its parts.
+    // over its parts, and inset to the night's edge: its dot starts where the night's words do, and
+    // "Try again" ends where they may.
     const notice = since.getByRole('alert').element();
     expect(notice.parentElement).toHaveClass('cd-card');
     expect(notice.parentElement?.firstElementChild).toBe(notice);
     expect(Math.round(night.element().getBoundingClientRect().top - notice.getBoundingClientRect().bottom)).toBe(16);
+    const words = document.createRange();
+    words.selectNodeContents(night.element());
+    const dot = notice.querySelector('.cd-status-dot');
+    expect(Math.abs((dot?.getBoundingClientRect().left ?? -1) - words.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    const nightBox = night.element().getBoundingClientRect();
+    const nightEnd = nightBox.right - Number.parseFloat(getComputedStyle(night.element()).paddingRight);
+    const retry = since.getByRole('button', { name: 'Try again' }).element().getBoundingClientRect();
+    expect(Math.abs(retry.right - nightEnd)).toBeLessThanOrEqual(1);
 
     failing.stop();
     await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
