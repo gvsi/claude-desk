@@ -24,10 +24,10 @@ import { connectorPageHref } from '../connectors/pages.ts';
 import { BUSINESS_WORDS, businessOwnerLine, businessRulesDescription } from '../connectors/businessWords.ts';
 import { businessTools, isBusinessToolName, isCatalogTool, TOOL_NAMES, toolDisplayName, toolState } from '../connectors/catalog.ts';
 import { RouterLink } from '../OwnerLayout.tsx';
-import { JOBS_LINE, OTHER_TOOLS } from './copy.ts';
+import { JOBS_LINE, OTHER_TOOLS, RULES_FALLBACK } from './copy.ts';
 import { RuleDetails, ToolDetails } from './details.tsx';
 import { governingRules, hubSections } from './hub.ts';
-import { ALWAYS_ON_SENTENCES, ruleQualifiers, ruleSentence, type AlwaysOnSentence, type SentenceWords } from './ruleSentence.ts';
+import { ACROSS_DESK_SENTENCES, ALWAYS_ON_SENTENCES, ruleQualifiers, ruleSentence, type AlwaysOnSentence, type SentenceWords } from './ruleSentence.ts';
 
 import './HouseRules.css';
 
@@ -69,12 +69,13 @@ export interface RuleRowDetails {
  * `below` (the payment limit's field). At its end: "Updated" once a change lands on it, its own
  * control (the payment limit's "Change"), its status dot, then Details, or Details' empty place for
  * a row without it, so every dot sits in one column. An always-on rule ends with its lock and
- * "Always on" instead, flush right where Details ends, with no dot and no Details.
+ * "Always on" instead, flush right where Details ends, with no dot and no Details. Where no row has
+ * Details (setup's Your rules), `detailsPlace` is false and the dot ends the row.
  */
-export function ToolRule({ parts, line, status, shared, repeated, card, landed, actions, below, details, data }: {
+export function ToolRule({ parts, line, status, shared, repeated, card, landed, actions, below, details, detailsPlace = true, data }: {
   parts: readonly SentencePart[]; line?: string; status: RuleStatus; shared?: readonly string[]; repeated?: boolean;
   card?: RuleCard; landed?: number; actions?: ReactNode; below?: ReactNode; details?: RuleRowDetails;
-  data?: Record<`data-${string}`, string | true>;
+  detailsPlace?: boolean; data?: Record<`data-${string}`, string | true>;
 }) {
   const textId = useId();
   const row = (toggle: ReactNode) => (
@@ -98,7 +99,7 @@ export function ToolRule({ parts, line, status, shared, repeated, card, landed, 
         ) : (
           <>
             <StatusDot tone={status} />
-            {toggle ?? <DetailsSlot />}
+            {toggle ?? (detailsPlace ? <DetailsSlot /> : null)}
           </>
         )}
       </span>
@@ -143,6 +144,23 @@ export function NeverMovesMoney({ titles }: { titles: readonly string[] }) {
 }
 
 /**
+ * "Across your Desk"'s card (REV-RULES-D, A): the always-on rules over every tool, then the ask
+ * anything no rule lists falls back to, "Updated" once a removed rule `landed` on it. Rules and
+ * setup's Your rules both draw it; setup's rows have no Details, so `details` is false and keeps no
+ * place for them.
+ */
+export function AcrossYourDeskRules({ landed, details = true }: { landed?: number | undefined; details?: boolean }) {
+  return (
+    <Card padding={0}>
+      <ul className="cd-house-rules__rules cd-house-rules__rules--card" role="list">
+        {ACROSS_DESK_SENTENCES.map((rule) => <AlwaysOnRule key={rule.key} parts={rule.parts} {...(rule.line === undefined ? {} : { line: rule.line })} />)}
+        <ToolRule parts={[{ text: RULES_FALLBACK }]} status="held" landed={landed} detailsPlace={details} data={{ 'data-fallback': true }} />
+      </ul>
+    </Card>
+  );
+}
+
+/**
  * Why a tool's rules don't run now, by its title, or null while it's on: its definition changed and
  * waits for the owner's review, or it's off. Its rules' dots take this tone, not their outcome's,
  * so none says it runs while the tool can't.
@@ -156,33 +174,31 @@ function toolStatus(row: ToolRow): { tone: StatusTone; words: string } | null {
 /**
  * A tool: its title, an h3, and why it can't run when it can't; its line; then its Details
  * (REV-RULES-D), whose panel opens between the tool and its rules. Its effects show only there.
+ * Without `details` (setup's Your rules), the header ends with its line.
  */
-function ToolHeader({ row, title, href, description, connector, status }: {
+function ToolHeader({ row, title, href, description, connector, status, details }: {
   row: ToolRow; title: string; href: string | undefined; description: string; connector: ConnectorView | null;
-  status: { tone: StatusTone; words: string } | null;
+  status: { tone: StatusTone; words: string } | null; details: boolean;
 }) {
   const titleId = useId();
-  return (
-    <ToolDetails row={row} connector={connector} describedBy={titleId}>
-      {(toggle) => (
-        <div className="cd-house-rules__tool-header">
-          <div className="cd-house-rules__tool-text">
-            <div className="cd-house-rules__tool-title">
-              <h3 className="cd-house-rules__tool-heading cd-type-section">
-                {href === undefined ? <span id={titleId} className="cd-house-rules__tool-name cd-user-name" data-copy="user">{title}</span>
-                  : <RouterLink className="cd-house-rules__tool-name cd-user-name" data-copy="user" href={href}><span id={titleId}>{title}</span></RouterLink>}
-              </h3>
-              {status === null ? null : (
-                <span className="cd-house-rules__tool-status cd-type-meta"><StatusLabel tone={status.tone}>{status.words}</StatusLabel></span>
-              )}
-            </div>
-            {description === '' ? null : <p className="cd-house-rules__tool-description cd-type-meta">{description}</p>}
-          </div>
-          {toggle}
+  const header = (toggle: ReactNode) => (
+    <div className="cd-house-rules__tool-header">
+      <div className="cd-house-rules__tool-text">
+        <div className="cd-house-rules__tool-title">
+          <h3 className="cd-house-rules__tool-heading cd-type-section">
+            {href === undefined ? <span id={titleId} className="cd-house-rules__tool-name cd-user-name" data-copy="user">{title}</span>
+              : <RouterLink className="cd-house-rules__tool-name cd-user-name" data-copy="user" href={href}><span id={titleId}>{title}</span></RouterLink>}
+          </h3>
+          {status === null ? null : (
+            <span className="cd-house-rules__tool-status cd-type-meta"><StatusLabel tone={status.tone}>{status.words}</StatusLabel></span>
+          )}
         </div>
-      )}
-    </ToolDetails>
+        {description === '' ? null : <p className="cd-house-rules__tool-description cd-type-meta">{description}</p>}
+      </div>
+      {toggle}
+    </div>
   );
+  return details ? <ToolDetails row={row} connector={connector} describedBy={titleId}>{(toggle) => header(toggle)}</ToolDetails> : header(null);
 }
 
 /** A card on Rules: its key, its name, and the Desk's tools it brings. */
@@ -236,6 +252,15 @@ export interface ToolGroupEntry extends ToolGroup {
   loose: ToolRuleEntry[];
 }
 
+/**
+ * What the tools view reads: the Desk's tools, and the cards that cover them, the active version's
+ * on Rules (`RulesView`) or the draft's in setup.
+ */
+export interface ToolsView {
+  tools: ToolRow[];
+  active: Pick<PolicyVersionOut, 'cards'>;
+}
+
 /** The tools Claude reads to learn about the business, which act for no visitor, so Rules lists none of them. */
 const LEARNING_TOOLS: ReadonlySet<string> = new Set(['native.fetch_website', 'native.read_memory', 'native.web_search']);
 
@@ -247,7 +272,7 @@ const LEARNING_TOOLS: ReadonlySet<string> = new Set(['native.fetch_website', 'na
  * know, and a stored rule that covers no tool on the page ("A rule for a tool this version can't
  * name"), so no rule ever leaves the page. The page and its loading shapes both draw from it.
  */
-export function toolGroups(view: RulesView, people: PeopleOut | null): ToolGroupEntry[] {
+export function toolGroups(view: ToolsView, people: PeopleOut | null): ToolGroupEntry[] {
   const business = businessTools(view.tools);
   const words: SentenceWords = { business, people, tools: view.tools };
   const jobs = view.tools.filter((row) => row.source === 'business' && isBusinessToolName(row.tool)
@@ -327,17 +352,36 @@ export function toolGroups(view: RulesView, people: PeopleOut | null): ToolGroup
   }));
 }
 
+/** Whether a tool moves money: it charges, or pays out. */
+const movesMoney = (row: Pick<ToolRow, 'effects'>) => row.effects.some((effect) => MONEY_EFFECTS.has(effect));
+
+/** What the tools view draws: Rules' (`RulesView`, with Details and links), or setup's Your rules' (read only). */
+export type ToolConnectorsProps = {
+  people: PeopleOut | null;
+  landed?: LandedRules;
+  /** The rows a card whose tools move money opens with (Payments, Stripe), on the card's fill. */
+  moneyBand?: (group: ToolGroup) => ReactNode;
+  /** A money tool's own money rules, at the end of its list, in a card no band leads (the Desk's jobs). */
+  moneyRules?: (row: ToolRow) => ReactNode;
+} & (
+  | { deskId: string; view: RulesView; readOnly?: false }
+  /** Setup's Your rules: no Details, and no tool links away from setup. */
+  | { deskId?: undefined; view: ToolsView; readOnly: true }
+);
+
 /**
  * Rules' tools, tool by tool (REV-RULES-D, A), as `toolGroups` words them: one card per group, each
  * tool under its title with its rules and the always-on rule that sits with it. Payments and Stripe
- * open with `moneyBand`'s rows, on the card's fill. A rule a confirmed change `landed` on says
- * "Updated": a changed card's, every rule on a tool the change turned on, and a tool's default ask
- * once a change its review listed leaves the tool no rule of its own.
+ * open with `moneyBand`'s rows, on the card's fill; in a card no band leads, a tool that moves money
+ * ends its list with `moneyRules`'. A rule a confirmed change `landed` on says "Updated": a changed
+ * card's, every rule on a tool the change turned on, and a tool's default ask once a change its
+ * review listed leaves the tool no rule of its own. Setup's Your rules draws it `readOnly`, from its
+ * draft: the same rows, with no Details and no links (REV-SETUP-3).
  */
-export function ToolConnectors({ deskId, view, people, landed = NOTHING_LANDED, moneyBand }: {
-  deskId: string; view: RulesView; people: PeopleOut | null; landed?: LandedRules;
-  moneyBand?: (group: ToolGroup) => ReactNode;
-}) {
+export function ToolConnectors(props: ToolConnectorsProps) {
+  const { view, people, landed = NOTHING_LANDED, moneyBand, moneyRules } = props;
+  const version = props.readOnly === true ? null : props.view.active;
+  const deskId = props.readOnly === true ? null : props.deskId;
   return toolGroups(view, people).map((group) => (
     <Card key={group.key} as="section" label={group.name} padding={0}>
       <div className="cd-house-rules__connector">
@@ -357,11 +401,11 @@ export function ToolConnectors({ deskId, view, people, landed = NOTHING_LANDED, 
         ) : null}
         {group.entries.map((entry) => {
           const { row } = entry;
-          const href = group.connector === null ? undefined : connectorPageHref(deskId, `connectors/${group.key}/${encodeURIComponent(row.tool)}`);
+          const href = group.connector === null || deskId === null ? undefined : connectorPageHref(deskId, `connectors/${group.key}/${encodeURIComponent(row.tool)}`);
           const toolLanded = entry.covered ? undefined : latest(landed.reviewed.get(row.tool), landed.tools.get(row.tool));
           return (
             <section className="cd-house-rules__tool" key={row.tool} aria-label={entry.title} data-tool={row.tool}>
-              <ToolHeader row={row} title={entry.title} href={href} description={entry.description} connector={group.connector} status={entry.status} />
+              <ToolHeader row={row} title={entry.title} href={href} description={entry.description} connector={group.connector} status={entry.status} details={version !== null} />
               <ul className="cd-house-rules__rules" role="list">
                 {entry.rules.map((rule) => (
                   <ToolRule
@@ -371,11 +415,12 @@ export function ToolConnectors({ deskId, view, people, landed = NOTHING_LANDED, 
                     status={rule.status}
                     card={rule.card}
                     landed={toolLanded ?? latest(landed.cards.get(rule.card.card_id), landed.tools.get(row.tool))}
-                    details={{ version: view.active, cards: entry.covered ? [rule.card] : [] }}
+                    {...(version === null ? { detailsPlace: false } : { details: { version, cards: entry.covered ? [rule.card] : [] } })}
                     {...(rule.shared === undefined ? {} : { shared: rule.shared, repeated: rule.repeated ?? false })}
                   />
                 ))}
                 {entry.always === undefined ? null : <AlwaysOnRule parts={entry.always.parts} />}
+                {group.money || moneyRules === undefined || !movesMoney(row) ? null : moneyRules(row)}
               </ul>
             </section>
           );
@@ -391,7 +436,7 @@ export function ToolConnectors({ deskId, view, people, landed = NOTHING_LANDED, 
                   status={rule.status}
                   card={rule.card}
                   landed={latest(landed.cards.get(rule.card.card_id))}
-                  details={{ version: view.active, cards: [rule.card] }}
+                  {...(version === null ? { detailsPlace: false } : { details: { version, cards: [rule.card] } })}
                 />
               ))}
             </ul>

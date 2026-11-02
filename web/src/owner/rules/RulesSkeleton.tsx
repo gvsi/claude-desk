@@ -1,14 +1,14 @@
 import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import type { Effect, RuleCard } from '../../api/contracts.ts';
+import { MONEY_EFFECTS, type Effect, type RuleCard } from '../../api/contracts.ts';
 import type { PolicyVersionOut, RulesView, ToolRow } from '../../api/views.ts';
 import { Icon, Skeleton, SkeletonCard, type SentencePart, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { listWords } from '../../lib/format.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { COMPOSER_HELPER, RULES_CHIPS, RULES_FALLBACK, RULES_SECTIONS, RULES_SUBTITLE, rulesVersionLine } from './copy.ts';
-import { moneyTitles, toolGroups } from './HouseRules.tsx';
-import { ACROSS_DESK_SENTENCES, ALWAYS_ON_SENTENCES, moneyCapBandSentence } from './ruleSentence.ts';
+import { moneyTitles, toolGroups, type ToolsView } from './HouseRules.tsx';
+import { ACROSS_DESK_SENTENCES, ALWAYS_ON_SENTENCES, moneyCapBandSentence, moneyCapSentence } from './ruleSentence.ts';
 
 import './RulesPage.css';
 import './HouseRules.css';
@@ -364,8 +364,11 @@ function DetailsSpace() {
 /** A sentence's runs, a key value in its weight, as the page breaks them. */
 const runsOf = (parts: readonly SentencePart[]): TextPart[] => parts.map((part) => (part.key === true ? { text: part.text, className: 'cd-rule-sentence__key' } : part.text));
 
-/** A rule row's shape: its sentence and line, then its status dot and Details' place, "Change" first on the payment limit's, or "Always on". */
-function RuleShape({ id, parts, line, end }: { id: string; parts: readonly SentencePart[]; line?: string; end: 'dot' | 'change' | 'always' }) {
+/**
+ * A rule row's shape: its sentence and line, then its status dot and Details' place, "Change" first
+ * on the payment limit's, or "Always on". Setup's rows have no Details, so no place (`details`).
+ */
+function RuleShape({ id, parts, line, end, details = true }: { id: string; parts: readonly SentencePart[]; line?: string; end: 'dot' | 'change' | 'always'; details?: boolean }) {
   return (
     <div className="cd-house-rules__rule">
       <div className="cd-house-rules__rule-row">
@@ -386,7 +389,7 @@ function RuleShape({ id, parts, line, end }: { id: string; parts: readonly Sente
           ) : (
             <>
               <Skeleton shape="block" width="var(--size-dot)" height="var(--size-dot)" radius="full" />
-              <DetailsSpace />
+              {details ? <DetailsSpace /> : null}
             </>
           )}
         </span>
@@ -409,40 +412,60 @@ function SectionShape({ title, caption, anchor }: { title: string; caption: stri
 
 const neverMovesMoney = ALWAYS_ON_SENTENCES.find((rule) => rule.key === 'money');
 
-/** "Across your Desk", then the sample's tools, tool by tool, as the page draws them. */
-function Body() {
+/** What a tools view's shapes are drawn from, and how the page that waits for it draws its rules. */
+export interface ToolRulesShapesProps {
+  /** A sample of the page's tools and cards, worded by the page's own model (`toolGroups`). */
+  sample: ToolsView;
+  /** The payment limit the money rules are worded at. */
+  cap: number;
+  /** The "Tool by tool" header's caption: Rules' or setup's. */
+  toolsCaption: string;
+  /** The version line under the tools; none in setup, whose draft has no version to name. */
+  version: number | null;
+  /** Setup's Your rules: no Details, no "Change", and a money job's own money rules under it. */
+  readOnly: boolean;
+  /** The class of the shapes' box, which sets the gap between its sections as the page does. */
+  className: string;
+}
+
+/**
+ * "Across your Desk", then the sample's tools, tool by tool, as the tools view (`ToolConnectors`)
+ * draws them: Rules' shapes, and setup's Your rules', which are read only.
+ */
+export function ToolRulesShapes({ sample, cap, toolsCaption, version, readOnly, className }: ToolRulesShapesProps) {
   const root = useRef<HTMLDivElement>(null);
   const lines = useShapeLines(root);
+  const details = !readOnly;
   return (
     <ShapeLines.Provider value={lines}>
-      <div ref={root} className="cd-rules-skeleton__body">
+      <div ref={root} className={className}>
         <div className="cd-rules__section">
           <SectionShape title={RULES_SECTIONS.across.title} caption={RULES_SECTIONS.across.caption} anchor="rules-across-header" />
           <SkeletonCard padding={0} anchor="rules-across">
             <div className="cd-house-rules__rules cd-house-rules__rules--card">
               {ACROSS_DESK_SENTENCES.map((rule) => <RuleShape key={rule.key} id={`across:${rule.key}`} parts={rule.parts} {...(rule.line === undefined ? {} : { line: rule.line })} end="always" />)}
-              <RuleShape id="across:fallback" parts={[{ text: RULES_FALLBACK }]} end="dot" />
+              <RuleShape id="across:fallback" parts={[{ text: RULES_FALLBACK }]} end="dot" details={details} />
             </div>
           </SkeletonCard>
         </div>
         <div className="cd-rules__section">
-          <SectionShape title={RULES_SECTIONS.tools.title} caption={RULES_SECTIONS.tools.caption} anchor="rules-tools-header" />
+          <SectionShape title={RULES_SECTIONS.tools.title} caption={toolsCaption} anchor="rules-tools-header" />
           <div className="cd-rules__tool-cards">
-            {toolGroups(SAMPLE, null).map((group, index) => (
-              <SkeletonCard key={group.key} padding={0} {...(index === 0 ? { anchor: 'rules-first-card' } : {})}>
+            {toolGroups(sample, null).map((group, index) => (
+              <SkeletonCard key={group.key} padding={0} anchor={index === 0 ? 'rules-first-card' : `rules-card-${index}`}>
                 <div className="cd-house-rules__connector">
                   <div className="cd-house-rules__connector-header">
                     {group.connector === null ? null : <Skeleton shape="block" className="cd-connector-icon cd-connector-icon--section" />}
                     <div className="cd-house-rules__identity">
                       <div className="cd-house-rules__jobs-name cd-type-section"><Skeleton shape="line" text="section" width="40%" /></div>
-                      <TextShape id={`${group.key}:line`} parts={[group.line]} className="cd-house-rules__identity-line cd-type-meta" text="meta" />
+                      {group.line === '' ? null : <TextShape id={`${group.key}:line`} parts={[group.line]} className="cd-house-rules__identity-line cd-type-meta" text="meta" />}
                     </div>
                   </div>
                   {group.money ? (
                     <div className="cd-house-rules__money">
                       <div className="cd-house-rules__rules cd-house-rules__rules--band">
-                        <RuleShape id={`${group.key}:cap`} parts={moneyCapBandSentence(50_000)} line={listWords(moneyTitles(group, SAMPLE))} end="change" />
-                        {neverMovesMoney === undefined ? null : <RuleShape id={`${group.key}:money`} parts={neverMovesMoney.parts} line={listWords(moneyTitles(group, SAMPLE))} end="always" />}
+                        <RuleShape id={`${group.key}:cap`} parts={moneyCapBandSentence(cap)} line={listWords(moneyTitles(group, sample))} end={readOnly ? 'dot' : 'change'} details={details} />
+                        {neverMovesMoney === undefined ? null : <RuleShape id={`${group.key}:money`} parts={neverMovesMoney.parts} line={listWords(moneyTitles(group, sample))} end="always" />}
                       </div>
                     </div>
                   ) : null}
@@ -455,19 +478,34 @@ function Body() {
                           </div>
                           {entry.description === '' ? null : <TextShape id={`${entry.row.tool}:description`} parts={[entry.description]} className="cd-house-rules__tool-description cd-type-meta" text="meta" />}
                         </div>
-                        <DetailsSpace />
+                        {details ? <DetailsSpace /> : null}
                       </div>
                       <div className="cd-house-rules__rules">
-                        {entry.rules.map((rule) => <RuleShape key={rule.card.card_id} id={`${entry.row.tool}:${rule.card.card_id}`} parts={rule.parts} line={rule.line} end="dot" />)}
+                        {entry.rules.map((rule) => <RuleShape key={rule.card.card_id} id={`${entry.row.tool}:${rule.card.card_id}`} parts={rule.parts} line={rule.line} end="dot" details={details} />)}
                         {entry.always === undefined ? null : <RuleShape id={`${entry.row.tool}:always`} parts={entry.always.parts} end="always" />}
+                        {/* Setup's money job ends its list with its money rules, as Your rules draws them. */}
+                        {!readOnly || group.money || !entry.row.effects.some((effect) => MONEY_EFFECTS.has(effect)) ? null : (
+                          <>
+                            <RuleShape id={`${entry.row.tool}:cap`} parts={moneyCapSentence(cap)} end="dot" details={false} />
+                            {neverMovesMoney === undefined ? null : <RuleShape id={`${entry.row.tool}:money`} parts={neverMovesMoney.parts} end="always" />}
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
+                  {/* "Other tools"' rules that cover no tool on the page, under no tool's title. */}
+                  {group.loose.length === 0 ? null : (
+                    <div className="cd-house-rules__tool">
+                      <div className="cd-house-rules__rules cd-house-rules__rules--loose">
+                        {group.loose.map((rule) => <RuleShape key={rule.card.card_id} id={`loose:${rule.card.card_id}`} parts={rule.parts} line={rule.line} end="dot" details={details} />)}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </SkeletonCard>
             ))}
           </div>
-          <TextShape id="version" parts={[rulesVersionLine(7)]} className="cd-rules__version cd-type-meta" text="meta" anchor="rules-version" />
+          {version === null ? null : <TextShape id="version" parts={[rulesVersionLine(version)]} className="cd-rules__version cd-type-meta" text="meta" anchor="rules-version" />}
         </div>
       </div>
     </ShapeLines.Provider>
@@ -479,7 +517,7 @@ export function RulesSkeleton({ withHeader }: { withHeader: boolean }) {
   return (
     <div className="cd-rules">
       {withHeader ? <Header /> : null}
-      <Body />
+      <ToolRulesShapes sample={SAMPLE} cap={50_000} toolsCaption={RULES_SECTIONS.tools.caption} version={7} readOnly={false} className="cd-rules-skeleton__body" />
     </div>
   );
 }
