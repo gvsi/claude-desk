@@ -239,8 +239,7 @@ describe('Conversations', () => {
       { ...base, session_id: 'preview-only', display_name: null, verified: false, latest_visitor_text: 'Tuesday at 2 works.', outcome_counts: {}, last_activity: new Date(now - 1000).toISOString() },
       { ...base, session_id: 'no-message', latest_visitor_text: null, last_activity: new Date(now - 2000).toISOString() },
       { ...base, session_id: 'agent', kind: 'agent', latest_visitor_text: longPreview, last_activity: new Date(now - 3000).toISOString() },
-      // Two days back stays in an earlier local day even when the clock-change day lasts 25 hours.
-      { ...base, session_id: 'owner-preview', owner_preview: true, latest_visitor_text: null, last_activity: new Date(now - 2 * 86_400_000).toISOString() },
+      { ...base, session_id: 'owner-preview', owner_preview: true, latest_visitor_text: null, last_activity: new Date(now - 86_400_000).toISOString() },
     ];
     mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
     const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
