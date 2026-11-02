@@ -15,6 +15,7 @@ export interface BusinessWords {
 
 /**
  * Each business type's words (`DeskSummary.business_type`), as the project owner signed them on Nov 2.
+ * The office words were revised on Nov 2 to fit any business that books appointments.
  * `rivera` is the sample business, Turner Plumbing, which keeps its own.
  */
 export const BUSINESS_WORDS: Readonly<Record<DeskSummary['business_type'], BusinessWords>> = {
@@ -31,10 +32,10 @@ export const BUSINESS_WORDS: Readonly<Record<DeskSummary['business_type'], Busin
     questions: ['Do you give free estimates?', 'Can you come out on a Sunday?', 'Do you take credit cards on site?'],
   },
   office: {
-    alertsTitle: 'Set for a professional practice',
+    alertsTitle: 'Set for a business that books appointments',
     rightAway: 'Held requests and paused chats',
     inBriefing: 'New clients, appointments and payments',
-    questions: ['Do you work with clients in other states?', 'Can we meet in person instead of a call?', 'Do you take credit cards?'],
+    questions: ['How early should I arrive for my first appointment?', 'Can I bring someone with me to the appointment?', 'Do you take credit cards?'],
   },
   landlord: {
     alertsTitle: 'Set for a landlord',
