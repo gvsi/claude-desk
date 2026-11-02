@@ -1642,6 +1642,49 @@ def test_setup_plan_tells_an_unpriced_payment_code_settled_from_the_owners_own_n
     assert status == ("declined" if owner_says == "no" else setup.SETUP_PLAN_NO_AMOUNT)
 
 
+def test_setup_plan_tells_a_stored_yes_to_an_unpriced_payment_from_the_owners_own_no():
+    # An interview stored before the amount check may hold the owner's yes to a payment with no amount. Settling the
+    # plan voids that yes (`settle_plan`), and the setup plan says why, not that the owner turned it down.
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
+        "block": "purpose_payment", "purpose": "Retainer", "amount_cents": None})
+    entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
+    entries[0].card.state = "accepted"
+    entries[0].owner_decided = True
+    state = plan_state(entries)
+    payment_id = entries[0].card.proposal_id
+    setup.settle_plan(state)
+    status = next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == payment_id)
+    assert (entries[0].card.state, status) == ("declined", setup.SETUP_PLAN_NO_AMOUNT)
+    assert setup.owner_job_answers(state) == []
+
+
+@pytest.mark.parametrize("newer", ["declined", "priced"])
+def test_an_older_stored_yes_doesnt_clear_a_newer_decision_on_the_same_card(newer):
+    # A stored transcript can show the same card twice: an older accepted copy with no amount, then the owner's newer
+    # decision. Only the latest copy says whether code voided the owner's yes.
+    payment = job("payment", title="Pay a retainer", how=PAYMENT_HOW, config={
+        "block": "purpose_payment", "purpose": "Retainer", "amount_cents": None})
+    entries = proposal_entries([payment, job()], [], business_tools_enabled=True)
+    entries[0].card.state = "accepted"
+    entries[0].owner_decided = True
+    state = plan_state(entries)
+    payment_id = entries[0].card.proposal_id
+    latest = entries[0].model_copy(deep=True)
+    if newer == "declined":
+        latest.card.state = "declined"
+    else:
+        latest.card.job.config.amount_cents = 2_500
+    state.transcript.append(latest)
+    setup.settle_plan(state)
+    status = next(item["status"] for item in setup._setup_plan(state)["items"] if item["id"] == payment_id)
+    assert latest.owner_decided is True
+    if newer == "declined":
+        assert status == "declined"
+    else:
+        assert (status, [answer["title"] for answer in setup.owner_job_answers(state)]) == (
+            "accepted", ["Pay a retainer"])
+
+
 async def test_understanding_mints_hidden_proposals_with_code_owned_availability(monkeypatch):
     from tests.api.test_setup_questions import understanding
     answer = setup.SetupUnderstanding(**understanding(jobs=[
@@ -3649,6 +3692,14 @@ async def test_stored_accepted_unpriced_payment_is_declined_and_excluded_from_ru
     finished = await owner.browser.post(path + "/suggestions?cards=1", json={})
     assert finished.status_code == 200, finished.text
     assert next(card for card in shown(finished) if card["proposal_id"] == ids[1])["state"] == "declined"
+    # What the closing call tells Claude: code voided the owner's stored yes for want of an amount, so the plan says
+    # why, not that the owner turned it down. With business tools off it is declined as no payment job can run.
+    closing = next(request for request in reversed(model.requests) if request.output_schema is setup.SetupNextStep)
+    text = closing.messages[0]["content"][0]["text"]
+    assert setup.SETUP_CLOSING_LINE in text
+    plan = json.loads(html.unescape(text.split("<setup_plan>")[1].split("</setup_plan>")[0]))
+    status = next(item["status"] for item in plan["items"] if item["id"] == ids[1])
+    assert status == (setup.SETUP_PLAN_NO_AMOUNT if tools_enabled else "declined")
     assert PAYMENT_HOW not in ((await stored(engine, interview_id))["answers"]["how_we_help"] or "")
     reloaded = await owner.browser.get(path + "?cards=1")
     assert next(card for card in shown(reloaded) if card["proposal_id"] == ids[1])["state"] == "declined"
