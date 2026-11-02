@@ -61,7 +61,7 @@ contract test, before the task that first uses them.
   summary. A document link serves its bytes once within a day. A payment link, for the session's own current quote at
   its amount under the seed's `rv-link` card, is read, completed (a `charge` fact and the kernel's `payment_confirmed`
   verdict) or cancelled by its token alone; anything but `issued` is 409 `conflict`. A link whose quote another
-  payment has paid (a mandate charge, or another of its links) is cancelled when it is next read or completed,
+  payment has paid (a mandate charge, or another of its links) is cancelled when it is next read, completed or reached by an activation,
   ledgered `quote_paid` with no `cancel_reason`, since it can never be paid now. Tokens are kept in memory,
   never mirrored. `PaymentLinkView` serves the contract's fields: the Desk's business name, the verified customer
   by first name and last initial while the link is issued, and `cancel_reason` `rules_changed` for a link a rule
@@ -4134,7 +4134,9 @@ class FakeKernelState:
     def _cancel_disallowed_links(self, desk: Desk) -> list[str]:
         """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change. A link whose
         quote another payment has paid is cancelled for that first, whatever the rules say or who approved it
-        (`_settle_paid_quote`, naming the version): no `cancel_reason`, so no chat line."""
+        (`_settle_paid_quote`, naming the version): no `cancel_reason`, so no chat line. Unlike the kernel, this
+        activation has no expiry or mandate-expiry move of its own, so a paid quote's link past its expiry or
+        mandate reads `cancelled` here where the kernel would expire it or cancel it for its mandate."""
         decisions = {record.decision.action.action_id: record for record in self.decisions.values()
                      if record.decision.action is not None and record.decision.outcome == "allow"}
         cancelled = []
