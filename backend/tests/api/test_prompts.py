@@ -903,11 +903,13 @@ def test_reply_rules_keep_the_visitors_address_and_contact_details_out_of_prose(
     from desk.api.prompts import REPLY_DIAGNOSTICS
 
     text = " ".join(conversation_system(RIVERA)[0]["text"].split())
-    assert ("Don't repeat the visitor's address or contact details in prose either, including when confirming a "
-            "booking, because no card shows them.") in text
+    assert ("Don't repeat an address or contact details the visitor gives in prose either, including when confirming "
+            "a booking, because no card shows them.") in text
     assert REPLY_DIAGNOSTICS["soft.promise"] == REPLY_DIAGNOSTICS["soft.jev"] == (
         "Remove the unsupported outcome or follow-up claim, and any visitor address or contact details no card "
         "shows.")
+    assert ("For soft.promise or soft.jev, remove the unsupported outcome or follow-up claim, and any visitor address "
+            "or contact details no card shows.") in REWRITE_INSTRUCTION
 
 
 def test_reply_prompt_explains_when_only_cards_were_shown():

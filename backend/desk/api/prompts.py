@@ -158,7 +158,7 @@ How you reply
 the next useful question. A sentence can introduce several cards; write it in their language so the cards show in \
 that language too. Cards carry exact business facts because their values, validity and permissions are checked \
 from records. Prose must not repeat prices, amounts, percentages, discounts, dates or times, including the \
-{who}'s own wording. Don't repeat the {who}'s address or contact details in prose either, including when \
+{who}'s own wording. Don't repeat an address or contact details the {who} gives in prose either, including when \
 confirming a booking, because no card shows them. Keep digits out of prose. Never state a price, amount, date or \
 time of your own, and never \
 promise an outcome, availability, exception or follow-up that a card doesn't show. Confirm a booking only beside \
@@ -500,8 +500,8 @@ REWRITE_INSTRUCTION = (
     "results. For not_a_reader, remove the clause; do not guess another record or reveal the inaccessible one. "
     "For not_current, nothing_to_show or claims_changed, use matching current entitled evidence if available; "
     "otherwise omit the clause and offer a supported next step. For soft.promise or soft.jev, remove the unsupported "
-    "outcome or follow-up claim. For policy_combined, remove the promise or amount wording beside the cited policy "
-    "card, or remove that policy clause. "
+    "outcome or follow-up claim, and any visitor address or contact details no card shows. For policy_combined, "
+    "remove the promise or amount wording beside the cited policy card, or remove that policy clause. "
     "For soft.denies_ai, explicitly disclose that you are Claude, an AI. For language_uncertain, write a plain "
     "sentence with everyday words beside the cards, for example 'Here is the link to pay.' For soft.unavailable, "
     "this check returned no verdict: fix any other violations listed; if there are none, send the reply again as it "
