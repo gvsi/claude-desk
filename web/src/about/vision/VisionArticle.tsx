@@ -19,7 +19,7 @@ import { AboutBar } from '../AboutBar.tsx';
 import { readNext } from '../links.ts';
 import { useNoIndex } from '../useNoIndex.ts';
 import { usePagePlace } from '../usePagePlace.ts';
-import { forgetVisionCard, openedVisionCard, rememberVisionCard } from './cardReturn.ts';
+import { forgetVisionCardFocus, openedVisionCard, rememberVisionCard } from './cardReturn.ts';
 import {
   ARTICLE,
   PICTURE_CARDS,
@@ -218,7 +218,7 @@ function PictureCards() {
   useLayoutEffect(() => {
     const href = navigationType === 'POP' ? openedVisionCard(navigator, key)
       : hash === '#vision-pages' ? state?.visionCard : undefined;
-    forgetVisionCard(navigator, key);
+    forgetVisionCardFocus(navigator, key);
     const opener = Array.from(cardsRef.current?.querySelectorAll<HTMLAnchorElement>('a.va-card') ?? []).find((link) => link.getAttribute('href') === href);
     // The article restores its scroll separately; focus must leave that place alone.
     opener?.focus({ preventScroll: true });

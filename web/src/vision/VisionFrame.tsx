@@ -2,7 +2,7 @@ import { useContext, useLayoutEffect, type ReactNode } from 'react';
 import { UNSAFE_DataRouterContext, UNSAFE_NavigationContext, useLocation, useNavigate } from 'react-router';
 
 import { usePagePlace } from '../about/usePagePlace.ts';
-import { forgetVisionCard, openedVisionCard } from '../about/vision/cardReturn.ts';
+import { forgetVisionCardFocus, remembersVisionCard } from '../about/vision/cardReturn.ts';
 import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks, returnThroughHistory } from '../owner/inAppLinks.ts';
@@ -38,13 +38,13 @@ export function VisionFrame({ title, children }: VisionFrameProps) {
     // Only leaving this page for its own article entry can refocus its opener.
     // A StrictMode cleanup while this entry is still current leaves the record alone.
     if (router.state.historyAction !== 'POP' || router.state.location.key !== state.fromVision) {
-      forgetVisionCard(navigator, state.fromVision);
+      forgetVisionCardFocus(navigator, state.fromVision);
     }
   }, [router, navigator, key, state]);
 
   useDocumentTitle(title);
 
-  const remembered = typeof state?.fromVision === 'string' && openedVisionCard(navigator, state.fromVision) === pathname;
+  const remembered = typeof state?.fromVision === 'string' && remembersVisionCard(navigator, state.fromVision, pathname);
   return (
     <div className="cd-vision-frame" onClick={followInAppLinks(navigate)} onClickCapture={returnThroughHistory(navigate, VISION_BACK_HREF, remembered, { state: { visionCard: pathname } })}>
       {children(<VisionBar backHref={VISION_BACK_HREF} />)}
