@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, waitFor } from 'storybook/test';
 
 import { expectComputed } from '../../test/expectComputed.ts';
+import { RuleSentence, type SentencePart } from '../RuleSentence/RuleSentence.tsx';
 import { StatusDot, StatusLabel } from '../StatusDot/StatusDot.tsx';
 import { AdvancedDetails, DetailsSlot, type AdvancedDetailsProps } from './AdvancedDetails.tsx';
 import { jsonText } from './detailsJson.ts';
@@ -51,6 +52,9 @@ const RULE: Omit<AdvancedDetailsProps, 'children' | 'onCopy'> = {
   describedBy: 'story-rule',
 };
 
+/** The rule's sentence, as the owner app's `ruleSentence` words it. */
+const LINK_SENTENCE: readonly SentencePart[] = [{ text: 'Claude can send payment links up to ' }, { text: '$300', key: true }];
+
 const CANVAS_NOTE =
   'The details disclosure from REV-RULES-D as it ships (canvas v339, signed): no Parameters and no compiled Cedar. Your tools draws it on every tool and every rule, Rules on every rule.';
 
@@ -74,9 +78,9 @@ function Rows({ onCopy }: { onCopy: AdvancedDetailsProps['onCopy'] }) {
           <AdvancedDetails {...RULE} onCopy={onCopy}>
             {(toggle) => (
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-12)' }}>
-                <p id="story-rule" className="cd-type-body" style={{ flex: 1, minWidth: 0, margin: 0, color: 'var(--text-secondary)' }}>
-                  Claude can send payment links up to <strong>$300</strong>
-                </p>
+                <div id="story-rule" style={{ flex: 1, minWidth: 0 }}>
+                  <RuleSentence parts={LINK_SENTENCE} />
+                </div>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-8)' }}>
                   <StatusDot tone="handled" />
                   {toggle}
@@ -119,6 +123,9 @@ export const Desktop: Story = {
     // A quiet button: control type in the secondary ink, no fill until it's hovered or open.
     expectComputed(tool, { color: SECONDARY, backgroundColor: 'rgba(0, 0, 0, 0)', paddingTop: '2px', paddingLeft: '6px', height: '24px' });
     await expect(tool).toHaveAccessibleDescription('Payment link');
+    // The rule reads as RuleSentence draws it: its amount a key value, medium weight, tabular figures.
+    expectComputed(canvasElement.querySelector<HTMLElement>('.cd-rule-sentence__key')!, { fontWeight: '520', fontVariantNumeric: 'tabular-nums' });
+    await expect(rule).toHaveAccessibleDescription('Claude can send payment links up to $300');
 
     // Enter opens the tool's panel: the hover fill, the chevron turned down, the panel on the surface.
     tool.focus();
@@ -182,14 +189,14 @@ export const DotsInOneColumn: Story = {
   render: (args) => {
     const row = { display: 'flex', alignItems: 'center', gap: 'var(--space-12)', padding: 'var(--space-8) 0' } as const;
     const end = { display: 'flex', alignItems: 'center', gap: 'var(--space-8)' } as const;
-    const words = { flex: 1, minWidth: 0, margin: 0, color: 'var(--text-secondary)' } as const;
+    const words = { flex: 1, minWidth: 0 } as const;
     return (
       <ul role="list" style={{ maxWidth: 738, margin: 0, padding: 0, listStyle: 'none' }}>
         <li>
           <AdvancedDetails {...RULE} onCopy={args.onCopy}>
             {(toggle) => (
               <div style={row}>
-                <p id="story-rule" className="cd-type-body" style={words}>Claude can send payment links up to <strong>$300</strong></p>
+                <div id="story-rule" style={words}><RuleSentence parts={LINK_SENTENCE} /></div>
                 <span style={end}><StatusDot tone="handled" />{toggle}</span>
               </div>
             )}
@@ -197,7 +204,7 @@ export const DotsInOneColumn: Story = {
         </li>
         <li>
           <div style={row}>
-            <p className="cd-type-body" style={words}>Claude never says it’s anything but an AI</p>
+            <div style={words}><RuleSentence parts={[{ text: 'Claude never says it’s anything but an AI' }]} /></div>
             <span style={end}><StatusDot tone="refused" /><DetailsSlot /></span>
           </div>
         </li>
@@ -207,6 +214,8 @@ export const DotsInOneColumn: Story = {
   play: async ({ canvas, canvasElement }) => {
     const toggle = canvas.getByRole('button', { name: 'Details' });
     const slot = canvasElement.querySelector<HTMLElement>('.cd-advanced-details__slot')!;
+    // Both rows are rule sentences, as the screens draw them.
+    await expect(canvasElement.querySelectorAll('.cd-rule-sentence')).toHaveLength(2);
     // The slot is the button's width and height, unseen and out of the accessibility tree.
     await expect(slot.getBoundingClientRect().width).toBe(toggle.getBoundingClientRect().width);
     await expect(slot.getBoundingClientRect().height).toBe(toggle.getBoundingClientRect().height);
