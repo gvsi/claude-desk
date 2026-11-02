@@ -718,6 +718,9 @@ describe('ReaderPage', () => {
         expect(words && words.right <= at.left, where).toBe(true);
         expect(getComputedStyle(arrow).transform, where).toBe('none');
         card.scrollIntoView({ block: 'center' });
+        // A click on the arrow itself lands on the card's link.
+        const spot = arrow.getBoundingClientRect();
+        expect(document.elementFromPoint((spot.left + spot.right) / 2, (spot.top + spot.bottom) / 2)?.closest('a'), where).toBe(card.querySelector('a'));
         await userEvent.hover(card.querySelector('a') as HTMLElement);
         await expect.poll(() => getComputedStyle(arrow).color, { message: where }).toBe(getComputedStyle(card.querySelector('a') as HTMLElement).color);
         expect(getComputedStyle(arrow).transform, where).toBe('none');

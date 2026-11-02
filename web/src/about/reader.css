@@ -1032,6 +1032,7 @@
    at or its link has keyboard focus. */
 .cd-about-next__arrow {
   position: absolute;
+  pointer-events: none; /* a click on it goes to the card's link beneath */
   top: 50%;
   right: var(--space-20);
   margin-top: calc(var(--size-icon) / -2);

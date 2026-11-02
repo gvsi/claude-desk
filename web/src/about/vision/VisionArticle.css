@@ -396,6 +396,7 @@
    nudge. */
 .vision-article .va-next__arrow {
   position: absolute;
+  pointer-events: none; /* a click on it goes to the card's link beneath */
   top: 50%;
   right: 20px;
   margin-top: -10px;

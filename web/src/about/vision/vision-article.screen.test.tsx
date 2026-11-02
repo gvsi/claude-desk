@@ -289,6 +289,9 @@ describe('The Vision article', () => {
       expect(words && words.right <= at.left, viewport).toBe(true);
       expect(getComputedStyle(arrow).color, viewport).toBe('rgb(92, 88, 80)');
       card.scrollIntoView({ block: 'center' });
+      // A click on the arrow itself lands on the card's link.
+      const spot = arrow.getBoundingClientRect();
+      expect(document.elementFromPoint((spot.left + spot.right) / 2, (spot.top + spot.bottom) / 2)?.closest('a'), viewport).toBe(card.querySelector('a'));
       await userEvent.hover(card.querySelector('a') as HTMLElement);
       await expect.poll(() => getComputedStyle(arrow).color, { message: viewport }).toBe('rgb(28, 27, 25)');
       expect(getComputedStyle(arrow).transform, viewport).toBe('none');
