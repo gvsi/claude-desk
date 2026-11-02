@@ -2786,6 +2786,16 @@ describe("Today's How your Desk works", () => {
     expect(screen.getByRole('link', { name: /held for you/ }).elements()).toHaveLength(0);
   });
 
+  it('how_your_desk_works_draws_no_quiet_line_when_a_callback_waits', async () => {
+    openCallback();
+    const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
+    expect(region(screen, 'How your Desk works').element().querySelector('.cd-how__today')).toBeNull();
+  });
+
   it('how_your_desk_works_says_a_quiet_day_and_waits_for_the_answers', async () => {
     // A quiet day: one quiet line in place of the outcomes, with no dots or links.
     mockStore.reset('rivera_quiet');

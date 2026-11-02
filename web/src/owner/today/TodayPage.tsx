@@ -270,6 +270,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               business={desk.business_name}
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
               heldCount={readWorked ? listed.length : undefined}
+              callbackCount={callbacks.length}
               firstHeldId={firstHeld?.decision.decision_id ?? null}
             />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />

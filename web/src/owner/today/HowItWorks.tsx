@@ -33,6 +33,8 @@ export interface HowItWorksProps {
   today: Today | undefined;
   /** The requests held in Needs you, excluding callbacks; undefined until a current read is in. */
   heldCount: number | undefined;
+  /** Callbacks and handoffs in Needs you, which rule out a quiet day. */
+  callbackCount: number;
   /** The oldest request still held, which "held N for you" opens in Needs you; null when none is. */
   firstHeldId: string | null;
 }
@@ -43,7 +45,7 @@ export interface HowItWorksProps {
  * hairline, each outcome a link to where it is: what it handled to Conversations, what it held to
  * Needs you, what it turned down to Safety.
  */
-export function HowItWorks({ deskId, business, today, heldCount, firstHeldId }: HowItWorksProps) {
+export function HowItWorks({ deskId, business, today, heldCount, callbackCount, firstHeldId }: HowItWorksProps) {
   const titleId = useId();
   const counts = todayCounts(today, heldCount);
   const outcomes = counts === null ? null : todayOutcomes(counts);
@@ -71,7 +73,7 @@ export function HowItWorks({ deskId, business, today, heldCount, firstHeldId }: 
             </li>
           ))}
         </ol>
-        {outcomes === null ? null : outcomes.quiet ? (
+        {outcomes === null || (outcomes.quiet && callbackCount > 0) ? null : outcomes.quiet ? (
           <p className="cd-how__today cd-type-meta">{outcomes.line}</p>
         ) : (
           // The spaces between the parts lay nothing out in the flex line; they keep the words apart
