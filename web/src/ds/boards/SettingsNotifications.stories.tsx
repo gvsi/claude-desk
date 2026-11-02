@@ -79,7 +79,7 @@ export const Board: Story = {
     await expect(rows.map((row) => row.textContent)).toEqual(PLUMBER.map(({ when, what, how }) => `${when}${what}${how ?? ''}`));
     const card = one(alerts, '.cd-card');
     await expect(Math.round(card.getBoundingClientRect().top - one(alerts, 'h2').getBoundingClientRect().bottom)).toBe(8);
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(196);
+    await expect(Math.round(card.getBoundingClientRect().height)).toBe(202);
     await expect(within(content).queryByRole('button')).toBeNull();
 
     await expectFooter(canvasElement);

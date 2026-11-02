@@ -430,7 +430,7 @@ export const InertAsk: Story = {
     await expect(Math.round(status.getBoundingClientRect().top - rowBottom())).toBe(8);
     await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(head.getBoundingClientRect().bottom);
     await expect(Math.round(status.getBoundingClientRect().width)).toBe(Math.round(head.getBoundingClientRect().width));
-    await expect(Math.round(head.getBoundingClientRect().height - headHeight)).toBe(8 + 17);
+    await expect(Math.round(head.getBoundingClientRect().height - headHeight)).toBe(8 + 18);
     // Enter on it sends nothing either, and a second press changes nothing: still the one line.
     await userEvent.keyboard('{Enter}');
     await expect(args.onAskForOwner).not.toHaveBeenCalled();
@@ -566,7 +566,7 @@ async function openStatusIn(header: HTMLElement, text: string): Promise<{ status
   const dotColor = dotStyle.backgroundColor === 'rgba(0, 0, 0, 0)' ? dotStyle.borderTopColor : dotStyle.backgroundColor;
   await expect(contrastRatio(dotColor, groundOf(status))).toBeGreaterThanOrEqual(3);
   const dotBox = dot.getBoundingClientRect();
-  await expect(dotBox.top + dotBox.height / 2 - line.getBoundingClientRect().top).toBe(9);
+  await expect(dotBox.top + dotBox.height / 2 - line.getBoundingClientRect().top).toBe(19 / 2);
   return { status, line, dot };
 }
 
@@ -611,9 +611,10 @@ async function expectAtTheRight(header: HTMLElement, status: HTMLElement): Promi
 
 /**
  * On a phone: the status on its own line under the monogram and the name, 8 px below them and from
- * the left gutter, each of its lines on one line, and nothing reaching past the phone's width.
+ * the left gutter, the kernel's words on `wordLines` meta lines (one unless given) and the closed
+ * line on one, and nothing reaching past the phone's width.
  */
-async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, status: HTMLElement): Promise<void> {
+async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, status: HTMLElement, wordLines = 1): Promise<void> {
   await expect(phone.scrollWidth).toBeLessThanOrEqual(PHONE);
   const edge = phone.getBoundingClientRect().right;
   for (const el of header.querySelectorAll('*')) await expect(el.getBoundingClientRect().right).toBeLessThanOrEqual(edge + 0.5);
@@ -623,10 +624,10 @@ async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, st
   await expect(box.top).toBeCloseTo(Math.max(monogram.bottom, brandText.bottom) + 8, 1);
   await expect(box.left).toBe(monogram.left);
   await expect(box.left).toBe(header.getBoundingClientRect().left + 16);
-  // The kernel's words on one meta line, and the closed line on one caption line.
+  // The kernel's words on their meta lines, and the closed line on one caption line.
   for (const line of status.querySelectorAll('p')) {
     const caption = line.classList.contains('cd-public-shell__still-helps');
-    await expect(line.getBoundingClientRect().height).toBe(caption ? 17 : 18);
+    await expect(line.getBoundingClientRect().height).toBe(caption ? 18 : wordLines * 19);
   }
 }
 
@@ -718,13 +719,14 @@ export const ClosedNowEsLongestPhone: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'The "Open now" sign-off board\'s phone header with the longest Spanish status: N-Public-Rivera-Run1 at 390 px, closed until next Wednesday at 13:00 with "Claude puede ayudarte igual." under it, on their own lines under the name. Each still fits on one line, and nothing reaches past the phone\'s edge.',
+      'The "Open now" sign-off board\'s phone header with the longest Spanish status: N-Public-Rivera-Run1 at 390 px, closed until next Wednesday at 13:00 with "Claude puede ayudarte igual." under it, on their own lines under the name. In the raised type scale the kernel\'s words take two lines, the dot on the middle of the first, and the closed line one; nothing reaches past the phone\'s edge.',
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
     const { status, line, dot } = await openStatusIn(header, CLOSED_ES_LONGEST.text);
     await expectClosed(header, status, line, dot, STILL_HELPS.es);
-    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status);
+    // At 14 px the kernel's longest words are wider than the 344 px beside the dot, so they wrap.
+    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status, 2);
   },
 };
 

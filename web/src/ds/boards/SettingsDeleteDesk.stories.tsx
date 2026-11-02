@@ -59,9 +59,9 @@ export const Board: Story = {
     await expectSettingsPage(canvasElement, 'General');
     const dialog = canvas.getByRole('dialog', { name: "Delete “Main line” for Turner Plumbing?" });
     await expect(dialog).toHaveAccessibleDescription(DELETE_DESK_LINE);
-    // Where the board draws it: 440 by 182 px, centered on the window.
+    // Where the board draws it: 440 by 185 px, centered on the window.
     const box = dialog.getBoundingClientRect();
-    await expect([Math.round(box.left), Math.round(box.top), Math.round(box.width), Math.round(box.height)]).toEqual([536, 400, 440, 182]);
+    await expect([Math.round(box.left), Math.round(box.top), Math.round(box.width), Math.round(box.height)]).toEqual([536, 399, 440, 185]);
     expectComputed(dialog, { paddingTop: '24px', backgroundColor: 'rgb(42, 41, 39)' });
     // Red confirm button, independent of the default tone: no refused dot (owner decision, 2026-11-02).
     await expect(dialog.querySelector('.cd-status-dot')).toBeNull();
@@ -69,6 +69,6 @@ export const Board: Story = {
     await expect(keep).toHaveFocus();
     const remove = within(dialog).getByRole('button', { name: 'Delete Desk' });
     expectComputed(remove, SPEC.dangerMain);
-    await expect([Math.round(remove.getBoundingClientRect().top), Math.round(box.right - remove.getBoundingClientRect().right)]).toEqual([517, 25]);
+    await expect([Math.round(remove.getBoundingClientRect().top), Math.round(box.right - remove.getBoundingClientRect().right)]).toEqual([519, 25]);
   },
 };

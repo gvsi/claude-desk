@@ -77,7 +77,7 @@ export const Board: Story = {
     const rows = within(list).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
     await expect(rows.map((row) => one(row, '.cd-safety-check-row__outcome').textContent)).toEqual(['Blocked', 'Asks you', 'Blocked', 'Blocked', 'Blocked', 'Blocked']);
     await expect(one(rows[1]!, '.cd-status-dot').classList.contains('cd-status-dot--held')).toBe(true);
-    await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([89, 90, 90, 90, 90, 90]);
+    await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([92, 93, 93, 93, 93, 93]);
     // safety_rows_land_one_by_one: each motion-stagger after the one before.
     await expect(rows.map((row) => getComputedStyle(row).animationDelay)).toEqual(['0s', '0.15s', '0.3s', '0.45s', '0.6s', '0.75s']);
 

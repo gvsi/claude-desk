@@ -49,7 +49,6 @@ import {
   Notice,
   RELOAD_PAGE_LABEL,
   SignedLimitPanel,
-  Skeleton,
   SuggestionChips,
   SystemLine,
   Transcript,
@@ -62,6 +61,7 @@ import { paymentLinkMemory } from '../paymentLinks.ts';
 import { usePaymentLinks } from '../usePaymentLinks.ts';
 import type { AgentSession } from './agentSession.ts';
 import { AgentsCardContent } from './AgentsCard.tsx';
+import { TaskChipShapes } from './AgentsSkeleton.tsx';
 import { PUBLIC_COPY } from '../copy.ts';
 import {
   AGENTS_COPY,
@@ -429,11 +429,7 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   }
   // Until the Desk's set is read, the tasks' shapes hold their place, as the page's skeleton draws them.
   const chips = !OFFERS_TASKS.has(status) ? null : taskSet === null ? (
-    <div className="cd-suggestion-chips" aria-hidden="true" data-loading="task-chips">
-      {DEMO_TASKS.map((t) => (
-        <Skeleton key={t} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[t], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" />
-      ))}
-    </div>
+    <TaskChipShapes language={language} loading />
   ) : (
     <SuggestionChips label={copy.tasksLabel} suggestions={(choices?.tasks ?? DEMO_TASKS).map((t) => words[t])} onPick={pick} />
   );

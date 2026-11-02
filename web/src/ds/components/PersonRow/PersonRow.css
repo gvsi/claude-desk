@@ -1,5 +1,5 @@
 /* PersonRow and LeadRow: a name in control type over one caption line in the secondary ink, padded
-   6 px by 10 px, 51 px tall. No fill until a row that links is hovered. */
+   6 px by 10 px, 53 px tall. No fill until a row that links is hovered. */
 
 .cd-person-row {
   display: grid;

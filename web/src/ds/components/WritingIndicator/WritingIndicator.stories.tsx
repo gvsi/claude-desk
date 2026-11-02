@@ -137,7 +137,7 @@ async function expectAnnouncedOnce(status: HTMLElement, dots: readonly HTMLEleme
 /** The bubble in the visitor bubble's fill and radius, one message line tall, with 6 px round dots. */
 function expectBubbleLook(status: HTMLElement) {
   const { bubble, dots } = bubbleParts(status);
-  expectComputed(bubble, { backgroundColor: 'rgba(250, 249, 245, 0.06)', borderTopLeftRadius: '12px', height: '37px' });
+  expectComputed(bubble, { backgroundColor: 'rgba(250, 249, 245, 0.06)', borderTopLeftRadius: '12px', height: '38px' });
   for (const dot of dots) expectComputed(dot, { width: '6px', height: '6px', borderTopLeftRadius: '999px' });
 }
 
@@ -393,7 +393,7 @@ async function expectPersonTyping(root: HTMLElement, label: string, name: string
   await expect(parts.each).toHaveLength(3);
   for (const dot of parts.each) expectComputed(dot, { width: '6px', height: '6px', borderTopLeftRadius: '999px' });
   for (const el of [parts.frame, parts.dots]) expectComputed(el, { backgroundColor: 'rgba(0, 0, 0, 0)', paddingLeft: '0px' });
-  expectComputed(parts.dots, { height: '21px', marginTop: '4px' });
+  expectComputed(parts.dots, { height: '22px', marginTop: '4px' });
   // The dots start where the name starts, under it, and the frame starts at the row's left edge.
   const nameBox = parts.name.getBoundingClientRect();
   const first = parts.each[0]?.getBoundingClientRect();

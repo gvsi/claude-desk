@@ -25,8 +25,8 @@ export const SPEC = {
     height: '36px',
     backgroundColor: 'rgb(60, 57, 47)',
     borderTopLeftRadius: '8px',
-    fontSize: '16px',
-    lineHeight: '22px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
   pageTitle: { fontFamily: SERIF, fontSize: '26px', lineHeight: '34px', fontWeight: '460' },
@@ -39,7 +39,7 @@ export const SPEC = {
   /** The conversation boards: the page fills the main area, so its list starts at the sidebar's seam. */
   mainFilled: { paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', paddingLeft: '0px' },
   contentFilled: { maxWidth: 'none' },
-  reply: { fontFamily: SERIF, fontSize: '17px', lineHeight: '26px', fontWeight: '360', color: 'rgba(250, 249, 245, 0.92)' },
+  reply: { fontFamily: SERIF, fontSize: '17px', lineHeight: '26px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' },
   bubble: {
     backgroundColor: 'rgba(250, 249, 245, 0.06)',
     borderTopLeftRadius: '12px',
@@ -66,8 +66,8 @@ export const SPEC = {
     height: '40px',
     borderTopLeftRadius: '8px',
     backgroundColor: 'rgba(250, 249, 245, 0.1)',
-    fontSize: '16px',
-    lineHeight: '22px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
   dangerMain: {
@@ -463,7 +463,7 @@ export async function expectVisionBar(root: HTMLElement, backHref: string): Prom
  */
 export async function expectChannelsContent(content: HTMLElement, lead: string): Promise<void> {
   const line = within(content).getByText(lead);
-  expectComputed(line, { fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.64)' });
   const channels = within(content).getByRole('region', { name: 'Channels' });
   await expect(Math.round(channels.getBoundingClientRect().top - line.getBoundingClientRect().bottom)).toBe(20);
   await expect(Math.round(channels.getBoundingClientRect().width)).toBe(720);
@@ -478,9 +478,9 @@ export async function expectChannelsContent(content: HTMLElement, lead: string):
   ]);
   await expect(within(rows[0] as HTMLElement).getByText('On')).toBeVisible();
   await expect(within(channels).getAllByText('Coming later')).toHaveLength(5);
-  // The board's rows: 68 px for one line under the name, 86 px where it wraps (Email, WhatsApp), and
-  // a 1 px hairline over every row but the first.
-  await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([68, 87, 69, 87, 69, 69]);
+  // The board's rows: 70 px for one line under the name, 89 px where it wraps (Email, WhatsApp, and
+  // Slack, whose line takes two lines in the larger type), and a 1 px hairline over every row but the first.
+  await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([70, 90, 71, 90, 90, 71]);
   await expect(within(content).queryByRole('button')).toBeNull();
   await expect(within(content).queryByRole('switch')).toBeNull();
 }

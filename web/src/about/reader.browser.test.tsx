@@ -429,8 +429,9 @@ describe('ReaderPage', () => {
   it('phone_switch_keeps_the_three_pages_on_one_row', async () => {
     // Under the phone bar, the set's three pages sit on one row at 390 and 375 px: "Vision" never drops to a
     // line of its own and pushes the page down, and nothing runs past the window's width. The laptop switch
-    // keeps its 12 px either side of each name. Measured in the interface's web font, as the page ships, which the
-    // other tests here don't load; the sheet goes again after, so they keep measuring as before.
+    // keeps its 12 px either side of each name; the phone uses 4 px and keeps the 32 px tap height. Measured in the
+    // interface's web font, as the page ships, which the other tests here don't load; the sheet goes again after,
+    // so they keep measuring as before.
     onTestFinished(() => {
       const want = new URL(FONT_SHEET_URL).href;
       for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
@@ -445,6 +446,11 @@ describe('ReaderPage', () => {
         expect(links.map((link) => flat(link.textContent)).sort(), where).toEqual(['Capability prediction', 'Product proposal', 'Vision']);
         const tops = links.map((link) => link.getBoundingClientRect().top);
         expect(new Set(tops).size, `${where}: tops ${tops.join(', ')}`).toBe(1);
+        for (const link of links) {
+          const style = getComputedStyle(link);
+          expect([style.paddingLeft, style.paddingRight], where).toEqual(['4px', '4px']);
+          expect(link.getBoundingClientRect().height, where).toBe(32);
+        }
         // One row: the switch is as tall as its space above and one 32 px link.
         const box = (nav as HTMLElement).getBoundingClientRect();
         expect(box.height - parseFloat(getComputedStyle(nav as HTMLElement).paddingTop), where).toBe(32);

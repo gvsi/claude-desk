@@ -64,7 +64,7 @@ it('text_measurement_keeps_fractional_content_width_and_requests_its_font', asyn
   }
   flushSync(() => root.render(<Measured />));
   await nextFrames();
-  expect(host.querySelector('p')!.getBoundingClientRect().height).toBe(20);
+  expect(host.querySelector('p')!.getBoundingClientRect().height).toBe(21);
   expect(host.querySelector('output')!.textContent).toBe('1');
   expect(load.mock.calls.some(([, text]) => text === words)).toBe(true);
   expect(load.mock.calls.some(([, text]) => text === 'A measured serif summary'), 'request the serif face even when variation settings prevent font shorthand serialization').toBe(true);
@@ -314,7 +314,7 @@ it.each([
   const first = await renderRoute(today, { viewport: { width, height } });
   await expect.element(first.screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true })).toBeVisible();
   expect(JSON.parse(readLocal('todaySetup') ?? '{}'), 'only the unfinished Desk is remembered').toEqual({
-    [state.desk_id]: { step: 'rules', answering: expect.any(Boolean), business: 'Okafor Plumbing' },
+    [state.desk_id]: { step: 'rules', answering: expect.any(Boolean), business: 'Okafor Plumbing', owner: expect.any(String), timezone: expect.any(String) },
   });
   await cleanup();
 
@@ -518,11 +518,45 @@ it.each([320, 620, 820, 1024, 1279, 1512])('today_content_reload_lands_in_place 
   expectNoWindowScroll();
 });
 
+it.each([
+  { hour: 9, now: '2026-10-29T16:59:45Z' },
+  { hour: 12, now: '2026-10-29T19:59:45Z' },
+])('today_time_column_matches_its_shape_at_$hour', async ({ hour, now }) => {
+  // Only Date is faked: both a one-digit and a two-digit clock keep the rows at their shapes.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(now));
+  onTestFinished(() => vi.useRealTimers());
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  let times: DOMRect[] = [];
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: TODAY_WIDTH_ANCHORS,
+    open: async () => { await renderRoute(TODAY, { seed: 'rivera', pollScale: 100 }); },
+    release: () => {
+      times = [...document.querySelectorAll('.cd-briefing-row > .cd-skeleton-line--caption')].map((el) => el.getBoundingClientRect());
+      desks.release();
+    },
+  });
+  const landed = [...document.querySelectorAll('.cd-briefing-row__when')];
+  expect(landed).toHaveLength(2);
+  for (const [i, time] of landed.entries()) {
+    expect(time.textContent).toMatch(new RegExp(`^Today, ${hour}:`));
+    expect(getComputedStyle(time).fontSize).toBe('13px');
+    expect(getComputedStyle(time).lineHeight).toBe('18px');
+    expect(times[i]!.width).toBe(96);
+    expect(time.getBoundingClientRect().width).toBe(times[i]!.width);
+    const words = document.createRange();
+    words.selectNodeContents(time);
+    expect(words.getBoundingClientRect().width).toBeLessThanOrEqual(times[i]!.width);
+  }
+});
+
 it('today_night_line_lands_in_place_near_its_wrap', async () => {
-  // At 829 px the fresh copy's night line fits its card on two lines, and 16 px narrower it would
+  // At 880 px the fresh copy's night line fits its card on two lines, and 16 px narrower it would
   // need three: the shape measures the line at the paragraph's own width, so it reserves two lines,
   // and the card lands where it was drawn.
-  const width = 829;
+  const width = 880;
   const reads = [ROUTES.desks.path, ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId)].map(holdReads);
   onTestFinished(() => reads.forEach((read) => read.release()));
   let before: DOMRect[] = [];
@@ -578,7 +612,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
       if (height !== undefined) expect(rect.height).toBe(height);
     });
   };
-  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 44);
+  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 48);
   lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__text', ['80%'], 22);
   expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
@@ -596,10 +630,11 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
   // The seed's hold went past an automatic rule's limit, so its card names no rule.
   expect(today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__held-by')).toBeNull();
-  lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
-  lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
+  lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%', '100%', '75%']);
+  lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', viewport === 'phone' ? ['75%'] : ['100%', '75%']);
   for (const child of [1, 2]) {
-    lines(`.cd-briefing__item:nth-child(${child}) .cd-skeleton-line--caption`, `.cd-briefing__item:nth-child(${child}) .cd-briefing-row`, [86]);
+    // The time column's width, which fits the widest time today.
+    lines(`.cd-briefing__item:nth-child(${child}) .cd-skeleton-line--caption`, `.cd-briefing__item:nth-child(${child}) .cd-briefing-row`, [96]);
     lines(`.cd-briefing__item:nth-child(${child}) .cd-status-label .cd-skeleton-line`, `.cd-briefing__item:nth-child(${child}) .cd-status-label`, [58]);
   }
   lines('.cd-live .cd-skeleton-line--control', '.cd-conversation-item__top', ['55%']);
@@ -1031,11 +1066,14 @@ it('today_link_actions_measure_inherited_font_metrics', async () => {
   await expect.poll(() => Math.abs(shape.getBoundingClientRect().width - real.getBoundingClientRect().width)).toBeLessThanOrEqual(2);
 });
 
-it('reload_changes_only_the_link_pills_width_once', async () => {
+it.each([1280, 1440, 1512])('reload_changes_only_the_link_pills_width_once_at_%s', async (width) => {
   // The slug comes from the held read, so its width differs from the fresh-copy placeholder.
-  mockStore.world.desk(RIVERA.deskId)!.summary.slug = 'turner-plumbing-a-new-random-slug';
+  const slug = 'turner-plumbing-a-new-random-slug';
+  mockStore.world.desk(RIVERA.deskId)!.summary.slug = slug;
+  const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   const desks = holdReads(ROUTES.desks.path);
-  const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+  onTestFinished(desks.release);
+  const { screen } = await renderRoute(TODAY, { viewport: { width, height: 900 }, pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
   const shape = document.querySelector('[data-skeleton-anchor="link-pill"]')!.getBoundingClientRect();
   const bounds = (element: Element) => {
@@ -1088,6 +1126,19 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
     expect(landedState).toBe('leaving');
     expect(firstLanded).toEqual(bounds(document.querySelector('.cd-greeting__link')!));
     expect(changes).toEqual([boundsFromRect(shape), boundsFromRect(real)]);
+    const label = document.querySelector<HTMLElement>('.cd-greeting__link-label')!;
+    expect(label.textContent).toBe(publicLink(slug));
+    expect(label.title).toBe(publicLink(slug));
+    expect(getComputedStyle(label).textOverflow).toBe('ellipsis');
+    expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
+    expect(real.width).toBe(380);
+    const title = document.querySelector('.cd-greeting__title')!.getBoundingClientRect();
+    const chat = document.querySelector('.cd-greeting__actions > .cd-button')!.getBoundingClientRect();
+    expect(real.top - title.top).toBe(4);
+    expect(chat.top).toBe(real.top);
+    expectNoHorizontalScroll();
+    await screen.getByRole('button', { name: 'Copy your Desk link' }).click();
+    expect(writeText).toHaveBeenCalledWith(publicLink(slug));
   } finally {
     observer.disconnect();
     cancelAnimationFrame(frame);

@@ -274,7 +274,7 @@ describe('Conversations', () => {
     expect(getComputedStyle(preview!).fontSize).toBe('14px');
     expect(getComputedStyle(preview!).color).toBe(tokenColor('--text-secondary'));
     expect(preview!.scrollWidth).toBeGreaterThan(preview!.clientWidth);
-    expect(preview!.getBoundingClientRect().height).toBe(18);
+    expect(preview!.getBoundingClientRect().height).toBe(19);
     const status = links[0]!.querySelector('.cd-conversation-item__status')!;
     expect(status.textContent).toContain('Needs you');
     expect(status.textContent).toContain('Recorded');
@@ -366,7 +366,7 @@ describe('Conversations', () => {
       expect(style.color).toBe(tokenColor('--text-secondary'));
       expect(style.whiteSpace).toBe('nowrap');
       expect(style.textOverflow).toBe('ellipsis');
-      expect(line.getBoundingClientRect().height).toBe(18);
+      expect(line.getBoundingClientRect().height).toBe(19);
       expect(line.getBoundingClientRect().left).toBe(visitor.getBoundingClientRect().left);
       const status = row(id).querySelector('.cd-conversation-item__status')!;
       expect(status.textContent).toContain('Agent');

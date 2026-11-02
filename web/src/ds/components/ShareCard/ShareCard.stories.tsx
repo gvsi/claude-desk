@@ -71,8 +71,8 @@ export const Printable: Story = {
     await expect(SHARE_CARD_QR_COLORS).toEqual({ dark: '#1c1b19', light: '#eae6dc' });
     const box = card.getBoundingClientRect();
     await expect(Math.round(slot.left - box.left)).toBe(Math.round(box.right - slot.right));
-    // 300 px wide and, with the line on two lines, 306 px tall, as on the board.
-    await expect([Math.round(box.width), Math.round(box.height)]).toEqual([300, 306]);
+    // 300 px wide and, with the line on two lines, 310 px tall, as on the board.
+    await expect([Math.round(box.width), Math.round(box.height)]).toEqual([300, 310]);
     // Print card under it, 12 px down; it only calls the screen.
     const print = canvas.getByRole('button', { name: 'Print card' });
     await expect(Math.round(print.getBoundingClientRect().top - box.bottom)).toBe(12);

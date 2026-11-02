@@ -682,7 +682,7 @@ export const AskMeFirst: Story = {
     // cancel_line_only_when_asked: a preset can cancel open payment links, so the screen asks for
     // the fixed line. It sits above the buttons, under the checks, in secondary body text.
     const line = canvas.getByText(CANCELS_LINKS);
-    expectComputed(line, { fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.64)' });
     const checks = canvas.getByRole('region', { name: 'Checked before you confirm' });
     const confirm = canvas.getByRole('button', { name: 'Confirm change' });
     await expect(line.getBoundingClientRect().top - checks.getBoundingClientRect().bottom).toBe(20);

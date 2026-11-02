@@ -47,7 +47,7 @@ export const Board: Story = {
     const [ownerScreen, visitorScreen] = [one(owner, '.cd-phone-frame__screen'), one(visitor, '.cd-phone-frame__screen')];
     await expect(Math.round(visitorScreen.getBoundingClientRect().left - ownerScreen.getBoundingClientRect().right)).toBe(64);
     await expect(Math.round(ownerScreen.getBoundingClientRect().left)).toBe(334);
-    await expect(Math.round(ownerScreen.getBoundingClientRect().top - bar.getBoundingClientRect().bottom)).toBe(106);
+    await expect(Math.round(ownerScreen.getBoundingClientRect().top - bar.getBoundingClientRect().bottom)).toBe(109);
 
     // The owner's phone: the greeting, the held quote and Live now, over the five tabs, Today current.
     await expect(within(owner).getByRole('heading', { level: 2, name: 'Good morning, Mike' })).toBeVisible();

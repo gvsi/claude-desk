@@ -58,7 +58,7 @@ export const AddSomething: Story = {
     await expect(note).toHaveAccessibleDescription(HINT);
     // Its example, the screen's, shows once it is empty.
     await expect(note).toHaveAttribute('placeholder', NOTE_EXAMPLE);
-    await expect(Math.round(note.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12 + 20 + 6);
+    await expect(Math.round(note.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12 + 21 + 6);
 
     // The two adds, 12 px under the hint, at a screen's main size and 8 px apart: "Add a note" the
     // view's one primary, "Add a file" secondary and described by the line about files under them.
@@ -113,10 +113,10 @@ export const Added: Story = {
   parameters: { canvasNote: 'The board’s “Added” card under the form, its switch off: the kernel stored the note for the owner only.' },
   play: async ({ args, canvas, userEvent }) => {
     const card = canvas.getByRole('region', { name: 'Added' });
-    // 20 px under the form's last line, as the board draws it: 121 px, its words 20 px in.
+    // 20 px under the form's last line, as the board draws it: 124 px, its words 20 px in.
     const filesLine = canvas.getByText('Claude doesn’t read websites you add in this prototype yet.');
     await expect(Math.round(card.getBoundingClientRect().top - filesLine.getBoundingClientRect().bottom)).toBe(20);
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(121);
+    await expect(Math.round(card.getBoundingClientRect().height)).toBe(124);
     expectComputed(card, { backgroundColor: 'rgba(250, 249, 245, 0.03)', paddingTop: '20px', paddingLeft: '20px' });
     await expect(within(card).getByRole('status')).toHaveTextContent(ADDED_LINE);
 

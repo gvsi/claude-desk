@@ -288,7 +288,7 @@ describe('the open conversation bar', () => {
     expect(quiet.scrollWidth).toBeLessThanOrEqual(quiet.clientWidth);
     if (width < 1024) {
       expectCutShort(latest);
-      expect(rect(bar).height).toBe(69);
+      expect(rect(bar).height).toBe(70);
       expect(rect(quiet).top).toBeGreaterThanOrEqual(rect(name).bottom);
       expect(Math.abs(middle(quiet) - middle(latest))).toBeLessThanOrEqual(1);
       const dot = bar.querySelector<HTMLElement>('.cd-conversation__dot')!;
@@ -478,9 +478,11 @@ describe('the open conversation bar', () => {
   // the open conversation scrolls as one under its bar: never a region too short for the card.
   it.each([
     [390, 780, true],
-    [390, 860, false],
-    [390, 890, false],
-    [430, 858, false],
+    [390, 860, true],
+    [390, 890, true],
+    [390, 920, false],
+    [430, 858, true],
+    [430, 890, false],
     [1024, 700, true],
     [1024, 740, false],
     [1440, 650, true],

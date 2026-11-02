@@ -186,7 +186,7 @@ export const Issued: Story = {
     }
     const [number, expiry, code] = values as [HTMLElement, HTMLElement, HTMLElement];
     for (const field of values) {
-      expectComputed(field, { height: '40px', fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.64)', paddingLeft: '12px' });
+      expectComputed(field, { height: '40px', fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.64)', paddingLeft: '12px' });
     }
     // The number takes the whole row with a lock at its right; the expiry and the code share the
     // row under it, half each, split by the control line.
@@ -397,12 +397,12 @@ async function expectFinal(
   await expect(state.textContent).toBe(line);
   await expect(state.querySelectorAll('.cd-status-dot')).toHaveLength(1);
   await expect(state.querySelector(`.cd-status-dot--${dot}`)).not.toBeNull();
-  expectComputed(state, { fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.92)', marginTop: '0px' });
+  expectComputed(state, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.92)', marginTop: '0px' });
   // Under the title and over the footnote, 14 px from each, with the dot on its first line.
   await expect(box(state).top - box(title).bottom).toBe(14);
   await expect(box(footnote).top - box(state).bottom).toBe(14);
   const stateDot = state.querySelector('.cd-status-dot') as HTMLElement;
-  const firstLine = box(state).top + 10;
+  const firstLine = box(state).top + 10.5;
   await expect(box(stateDot).top + box(stateDot).height / 2).toBe(firstLine);
   return { card, state };
 }

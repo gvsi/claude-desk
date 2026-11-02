@@ -46,7 +46,7 @@ export const DanaWhitfield: Story = {
     const title = within(book).getByText('Book a visit');
     const reason = within(book).getByText('Dana can book Saturday morning visits.');
     const words = within(book).getByText('Dana Whitfield · Saturdays 9:00 am to 1:00 pm');
-    expectComputed(title, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(title, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
     expectComputed(reason, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
     expectComputed(words, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(within(book).getByText('Automatic')).toBeVisible();
@@ -59,7 +59,7 @@ export const DanaWhitfield: Story = {
     expectComputed(card, { paddingTop: '0px' });
     expectComputed(book, { paddingTop: '12px', paddingLeft: '16px', paddingBottom: '12px' });
     expectComputed(rows[1] as HTMLElement, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
-    await expect(Math.round(book.getBoundingClientRect().height)).toBe(82);
+    await expect(Math.round(book.getBoundingClientRect().height)).toBe(85);
   },
 };
 

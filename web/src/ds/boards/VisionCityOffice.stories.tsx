@@ -82,12 +82,12 @@ const ABOUT_CARDS = [
 const SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to staff'];
 
 /**
- * The page's height at the laptop's width, as the board is now drawn on the canvas: the signed
- * render's 1485 px, plus 18 px for the shell's own AI disclosure, whose longer sentence takes a
- * second line, less 6 px for each of the two fact cards, 109 px where the render drew 115 px boxes
- * in the reply card's look.
+ * The page's height at the laptop's width: the board as now drawn on the canvas, the signed render's
+ * 1485 px, plus 18 px for the shell's own AI disclosure, whose longer sentence takes a second line,
+ * less 6 px for each of the two fact cards, 109 px where the render drew 115 px boxes in the reply
+ * card's look; then 70 px for the raised type scale's taller lines.
  */
-const PAGE_HEIGHT = 1485 + 18 - 2 * 6;
+const PAGE_HEIGHT = 1485 + 18 - 2 * 6 + 70;
 
 /** The master plan's slot id, `S-<yyyymmdd>-<hhmm>`: the slot's start in the business's time zone. */
 const SLOT_ID = /^S-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})$/;
@@ -161,7 +161,7 @@ const meta = {
       'Beyond what the kernel’s templates and lines render today, and drawn as a vision of what they could carry: the code prompt’s “to the email on the application” (the kernel writes “I’ll send a code to the contact on record.”); the open-times card’s title “Rough-in inspection”, its permit line and its time ranges (the kernel writes “Times that are open” and one start time per slot); the hours card’s “Inspections, …” line and the contact card’s second line (the kernel writes each window of the hours, unlabelled, and the contact verbatim, as one line); the system line’s “sent to the email on the application” (the app writes “Verified with a code”); and the receipts “Reply checked against the City’s rules”, “Code sent to the email on the application”, “Read from your own permit file” and “Times read from the inspection calendar” (the kernel’s visitor lines are “Reply checked against {owner}’s rules”, “Verification started” and “Times read from {owner}’s calendar”, and no tool reads a permit file). The permit answer is one reply drawn as prose, card, prose, card, where the kernel delivers a reply’s prose, then its cards.',
       'By the owner’s vision-copy ruling (2026-10-30: follow the product’s rules, keep the warmth), two lines differ from the board: Claude’s garage reply reads “Whether your garage conversion needs a permit is a plan checker’s decision. I’ve asked Permit Center staff, and the answer will show up here.” where the board writes “…, so I’ve asked one to get back to you.”, and its receipt is the kernel’s visitor line for a hold, “Waiting for Permit Center staff to approve”, where the board writes “Held for a person: whether work needs a permit is a staff decision”; the hold’s reason shows only on owner screens.',
       'The AI disclosure is the shell’s own sentence, which can’t be changed or turned off, where the board writes DisclosureLine’s shorter “Meridian Bay Permits answers with Claude, an AI.”; it takes a second line, so the page is 18 px longer.',
-      'The permit status and the next steps are FactCards, at most 420 px wide, padded 12 px 14 px, with a 14 px icon and the fact in body type, where the board draws them in the reply card’s look (520 px, padded 16 px, a 16 px icon, the headline in section type); each is 109 px tall where the board’s is 115 px. With the disclosure, the page unrolled is 1491 px where the signed render drew 1485 px; the board is now drawn 1512 × 1491 on the canvas, and its render is captured at its full height. In the story the page is the window’s height, as every public page is, and the conversation scrolls between the pinned chat head and the composer.',
+      'The permit status and the next steps are FactCards, at most 420 px wide, padded 12 px 14 px, with a 14 px icon and the fact in body type, where the board draws them in the reply card’s look (520 px, padded 16 px, a 16 px icon, the headline in section type); each is 109 px tall where the board’s is 115 px. With the disclosure, the page unrolled is 1491 px where the signed render drew 1485 px; the board is now drawn 1512 × 1491 on the canvas, and its render is captured at its full height. At the raised type scale (2026-11-02) the page unrolled is 1561 px. In the story the page is the window’s height, as every public page is, and the conversation scrolls between the pinned chat head and the composer.',
       'The footer’s “Powered by” mark is the bell, where the board draws the earlier counter mark.',
     ].join(' '),
   },

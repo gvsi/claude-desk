@@ -109,12 +109,12 @@ export const Owner: Story = {
 
     // The text box grows with its text up to six lines, then scrolls.
     const oneLine = input.clientHeight;
-    await expect(oneLine).toBe(21);
+    await expect(oneLine).toBe(22);
     await userEvent.keyboard('One{Shift>}{Enter}{/Shift}two{Shift>}{Enter}{/Shift}three');
-    await expect(input.clientHeight).toBe(3 * 21);
+    await expect(input.clientHeight).toBe(3 * 22);
     await userEvent.keyboard('{Shift>}{Enter}{/Shift}four{Shift>}{Enter}{/Shift}five{Shift>}{Enter}{/Shift}six');
     await userEvent.keyboard('{Shift>}{Enter}{/Shift}seven{Shift>}{Enter}{/Shift}eight');
-    await expect(input.clientHeight).toBe(6 * 21);
+    await expect(input.clientHeight).toBe(6 * 22);
     await expect(input.scrollHeight).toBeGreaterThan(input.clientHeight);
     await expect(args.onSend).toHaveBeenCalledTimes(1);
   },
@@ -299,7 +299,7 @@ export const Failed: Story = {
     await expect(canvas.queryByRole('textbox')).toBeNull();
     const kept = canvas.getByText(KEPT_ANSWER);
     await expect(kept).toHaveAttribute('data-copy', 'user');
-    expectComputed(kept, { fontFamily: /Hanken Grotesk/, fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(kept, { fontFamily: /Hanken Grotesk/, fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.92)' });
     const tryAgain = canvas.getByRole('button', { name: 'Try again' });
     await expect(canvas.getAllByRole('button')).toEqual([tryAgain]);
     expectComputed(tryAgain, { height: '32px', backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' });

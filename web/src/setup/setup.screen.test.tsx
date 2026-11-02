@@ -3937,10 +3937,11 @@ describe('setup', () => {
   });
 
   it('preview_fills_the_height_on_a_shorter_phone', async () => {
-    // 390 x 700 still has room for the frame's 300 px: it fills down to the launch bar and "Go live"
-    // stays on the first screen.
+    // 390 x 740 still has room for the frame's 300 px: it fills down to the launch bar and "Go live"
+    // stays on the first screen. At 390 px wide the step needs 737 px in all, its title and the
+    // launch bar's line each on two lines.
     const state = await interviewAtPreview();
-    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 700 } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 740 } });
     await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview } = previewParts(screen);
     expect(preview.getBoundingClientRect().height).toBeGreaterThanOrEqual(300);
@@ -4513,7 +4514,7 @@ describe('consultant setup', () => {
     expect([...shown.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Which work comes in most']);
     expect([...shown.querySelectorAll('li')].map((el) => el.textContent)).toEqual(['Returns for individuals', 'Books for small businesses']);
     const second = getComputedStyle(shown.querySelectorAll('p')[1] as HTMLElement);
-    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['17px', '25px', '12px']);
+    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['19px', '28px', '12px']);
 
     // The dock is named by the question as it reads, with none of the Markdown's marks.
     await expect(dock).toHaveAccessibleName('Got it. Which work comes in most during tax season? Returns for individuals Books for small businesses');
@@ -4548,7 +4549,7 @@ describe('consultant setup', () => {
     const hint = panel.element().querySelector('.cd-setup-q3__hint')!;
     expect(getComputedStyle(hint).display).toBe(viewport === 'phone' ? 'none' : 'flex');
     const questionStyle = getComputedStyle(panel.element().querySelector('.cd-setup-q3__question')!);
-    expect([questionStyle.fontSize, questionStyle.lineHeight]).toEqual(['17px', '25px']);
+    expect([questionStyle.fontSize, questionStyle.lineHeight]).toEqual(['19px', '28px']);
     const key = panel.element().querySelector('kbd')!.getBoundingClientRect();
     expect([key.width, key.height]).toEqual([22, 22]);
     expect(panel.element().getBoundingClientRect().bottom).toBeLessThan(box.element().getBoundingClientRect().top);

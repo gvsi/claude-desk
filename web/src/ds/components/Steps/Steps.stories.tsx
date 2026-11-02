@@ -146,7 +146,7 @@ export const Unknown: Story = {
     await expect(line).toBeVisible();
     await expect(line).toHaveAttribute('aria-hidden', 'true');
     await expect(line.textContent?.trim()).toBe('');
-    await expect(line.getBoundingClientRect().height).toBe(18);
+    await expect(line.getBoundingClientRect().height).toBe(19);
   },
 };
 

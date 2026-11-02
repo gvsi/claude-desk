@@ -157,7 +157,7 @@ it.each([
   ['desktop', PREVIEW_ANCHORS],
   // A Desk fresh from setup has neither opening hours nor starter questions yet, and on a phone the
   // skeleton draws both: a row for the hours in its brand header (#553), so the header and the chat's
-  // head land 16 px higher than their shapes, and three starter chips under its composer, which in the
+  // head land 18 px higher than their shapes, and three starter chips under its composer, which in the
   // short frame sits at the chat's foot, so the composer lands 128 px lower than its shape. Until the
   // skeleton knows what a Desk has, the phone checks only that the shapes fill the frame.
   ['phone', []],
@@ -380,9 +380,9 @@ it.each(['en', 'es'] as const)('public_chat_headers_%s_record_closed_and_no_hour
       await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
       const real = document.querySelector('.cd-public-brand')!.getBoundingClientRect();
       for (const edge of ['top', 'left', 'width'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
-      expect(shape.height).toBe(92);
-      expect(real.height).toBe(kind === 'open' ? 92 : kind === 'closed' ? 111 : 76);
-      expect(heights).toEqual(kind === 'open' ? [92] : [92, real.height]);
+      expect(shape.height).toBe(94);
+      expect(real.height).toBe(kind === 'open' ? 94 : kind === 'closed' ? 114 : 76);
+      expect(heights).toEqual(kind === 'open' ? [94] : [94, real.height]);
     } finally {
       observer.disconnect();
       read.release();

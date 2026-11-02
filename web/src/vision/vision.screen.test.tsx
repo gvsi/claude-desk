@@ -4,7 +4,7 @@
  * phone. Each says it is vision under the vision bar, with the way back to the Vision article; each
  * is static, so it asks the API for nothing; and each is drawn as its signed board draws it.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page as browserPage, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
@@ -23,6 +23,7 @@ import {
 } from '../ds/boards/spec.ts';
 import { VISION_INERT_LINE, VISION_LINE } from '../ds/index.ts';
 import { expectComputed } from '../ds/test/expectComputed.ts';
+import { FONT_SHEET_URL, loadWebFonts } from '../ds/test/fonts.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
@@ -151,9 +152,9 @@ const CITY = {
   /**
    * The page's height unrolled at the board's width, as the story measures it: the board's 1485 px,
    * plus 18 px for the shell's own AI disclosure's second line, less 6 px for each of the two fact
-   * cards.
+   * cards, plus 70 px for the raised type scale's taller lines.
    */
-  pageHeight: 1485 + 18 - 2 * 6,
+  pageHeight: 1485 + 18 - 2 * 6 + 70,
 } as const;
 
 /** Dana's visit, in the board's words. */
@@ -462,12 +463,16 @@ describe('Vision pages against their boards', () => {
   it('city_office_matches_its_board', async () => {
     // As Boards/Vision, city office draws it, at the story's window: Marcus Bell on Meridian Bay
     // Permits' public page, asking about his permit.
+    // Measured in the web fonts, as the story is: the fallbacks wrap Claude's lines differently. The
+    // sheet goes again after, so the other tests here measure as before.
+    onTestFinished(() => {
+      const want = new URL(FONT_SHEET_URL).href;
+      for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
+    });
+    await loadWebFonts();
     const { screen } = await renderRoute(CITY_OFFICE);
     await browserPage.viewport(1512, 982);
     expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
-    // The heights below are the page's once its two typefaces have loaded.
-    await Promise.all([document.fonts.load('15px "Hanken Grotesk"'), document.fonts.load('15px "Source Serif 4"')]);
-    await document.fonts.ready;
     const log = main(screen).getByRole('log', { name: 'Conversation with Meridian Bay Permits' });
     await expect.element(log).toBeVisible();
     const root = screen.container;
@@ -487,14 +492,13 @@ describe('Vision pages against their boards', () => {
     // The page is the window's height, as every public page is: the header, the AI disclosure and
     // the composer stay in view, and only the conversation scrolls. Unrolled, the page is the one the
     // board draws: the window's height and what the conversation's scroll region holds past it.
-    // Screen tests load no web fonts, so the footer's "Powered by" line can be a pixel taller than in
-    // the story, which loads them, and the region a pixel shorter. Every part above the footer
-    // measures as the story's: the conversation, unrolled, ends at 1382 px in both.
+    // In the web fonts every part measures as the story's: the conversation, unrolled, ends at
+    // 1451 px in both.
     const shellHeight = round(one(root, '.cd-public-shell').getBoundingClientRect().height);
     expect([shellHeight, document.documentElement.scrollHeight]).toEqual([982, 982]);
     const scroller = one(root, '.cd-public-shell__scroll');
     expect(Math.abs(shellHeight + scroller.scrollHeight - scroller.clientHeight - CITY.pageHeight)).toBeLessThanOrEqual(1);
-    expect(round(top(scroller) + scroller.scrollHeight)).toBe(1382);
+    expect(round(top(scroller) + scroller.scrollHeight)).toBe(1451);
     expectNoHorizontalScroll();
 
     // The AI disclosure under the chat's title, once, and the staff to ask for.
@@ -857,7 +861,7 @@ describe('Vision pages against their boards', () => {
     const visitorScreen = one(visitor.element(), '.cd-phone-frame__screen');
     expect(round(visitorScreen.getBoundingClientRect().left - ownerScreen.getBoundingClientRect().right)).toBe(64);
     expect(round(ownerScreen.getBoundingClientRect().left)).toBe(round((window.innerWidth - (390 + 64 + 390)) / 2));
-    expect(round(top(ownerScreen) - bottom(bar))).toBe(106);
+    expect(round(top(ownerScreen) - bottom(bar))).toBe(109);
 
     // The owner's phone: the greeting, the held quote and Live now, over the five tabs, Today current.
     await expect.element(owner.getByRole('heading', { level: 2, name: 'Good morning, Mike' })).toBeVisible();

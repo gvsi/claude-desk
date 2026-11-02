@@ -256,7 +256,7 @@ export const LongGreetingOnAPhone: Story = {
     const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maximiliana' });
     expectComputed(heading, { textWrapStyle: 'balance' });
     await expect(lineWords(heading)).toEqual([['Good', 'morning,'], ['Maximiliana']]);
-    await expect(heading.getBoundingClientRect().height).toBe(2 * 44);
+    await expect(heading.getBoundingClientRect().height).toBe(2 * 48);
     await expect(canvas.getByRole('button', { name: 'Copy your Desk link' }).getBoundingClientRect().top).toBeGreaterThan(heading.getBoundingClientRect().bottom);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },

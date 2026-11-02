@@ -181,7 +181,7 @@ export const Board: Story = {
       const time = one(row, '.cd-conversation-item__time');
       await expect(tag.parentElement).toHaveClass('cd-conversation-item__status');
       await expect(Math.round(tag.getBoundingClientRect().right)).toBe(Math.round(time.getBoundingClientRect().right));
-      await expect(Math.round(row.getBoundingClientRect().height)).toBe(49);
+      await expect(Math.round(row.getBoundingClientRect().height)).toBe(51);
     }
     // unnamed_rows_read_once: a row with no name says "Visitor" or "Agent" once, as the app draws it:
     // no status words or dot under the name, only the Recorded tag. A named row keeps its status line.

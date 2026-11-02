@@ -843,7 +843,7 @@ it('draws the signed suggested group with actions per type and screen basics at 
       '(408) 555-0199, linda@chenandco.com', 'Mon–Fri, 9 am – 6 pm', 'Tax return review, $250', 'Business tax return, $600', 'Monthly bookkeeping, $150',
     ]);
     expect(rows[1]!.querySelectorAll('.cd-public-lines__text p')).toHaveLength(1);
-    if (viewport === 'phone') expect(rows.map((row) => row.getBoundingClientRect().height)).toEqual([94, 109, 109, 91, 77]);
+    if (viewport === 'phone') expect(rows.map((row) => row.getBoundingClientRect().height)).toEqual([96, 111, 111, 92, 78]);
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
   }

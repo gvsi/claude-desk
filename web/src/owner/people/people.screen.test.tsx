@@ -340,7 +340,7 @@ describe('customers', () => {
     }
     const rows = [...main.querySelectorAll<HTMLElement>('.cd-people__rows > li')];
     expect(rows).toHaveLength(5);
-    expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([51]));
+    expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([53]));
 
     // The frame with Customers current and no card on the page. Tab, once past the sidebar, stops at
     // each person's row (a link to their page), then the recorded-history link, and nowhere else: a

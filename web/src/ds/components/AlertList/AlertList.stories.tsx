@@ -46,15 +46,15 @@ export const Plumber: Story = {
     // Read-only: nothing here can be pressed or changed.
     await expect(canvasElement.querySelectorAll('button, a, input, select, textarea')).toHaveLength(0);
 
-    // A card of rows: each padded 12 px by 16 px, a hairline over every row but the first; 64 px, 65 with its hairline.
+    // A card of rows: each padded 12 px by 16 px, a hairline over every row but the first; 66 px, 67 with its hairline.
     const card = list.closest<HTMLElement>('.cd-card')!;
     expectComputed(card, { backgroundColor: 'rgba(250, 249, 245, 0.03)', borderTopColor: 'rgba(250, 249, 245, 0.14)', borderTopLeftRadius: '12px', paddingTop: '0px' });
     for (const [index, row] of rows.entries()) {
       expectComputed(row, { paddingTop: '12px', paddingRight: '16px', paddingBottom: '12px', paddingLeft: '16px' });
       expectComputed(row, index === 0 ? { borderTopWidth: '0px' } : { borderTopWidth: '1px', borderTopColor: HAIRLINE });
-      await expect(Math.round(row.getBoundingClientRect().height)).toBe(index === 0 ? 64 : 65);
+      await expect(Math.round(row.getBoundingClientRect().height)).toBe(index === 0 ? 66 : 67);
     }
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(196);
+    await expect(Math.round(card.getBoundingClientRect().height)).toBe(202);
 
     // When, in body type at weight 520; what 2 px under it in meta, secondary; how in meta, secondary,
     // centered on the row and ending 16 px from its right edge.
@@ -62,7 +62,7 @@ export const Plumber: Story = {
     const when = first.querySelector<HTMLElement>('.cd-alert-list__when')!;
     const what = first.querySelector<HTMLElement>('.cd-alert-list__what')!;
     const how = first.querySelector<HTMLElement>('.cd-alert-list__how')!;
-    expectComputed(when, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
+    expectComputed(when, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
     expectComputed(what, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     expectComputed(how, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     await expect(Math.round(what.getBoundingClientRect().top - when.getBoundingClientRect().bottom)).toBe(2);
@@ -103,7 +103,7 @@ export const Phone: Story = {
     const long = weekly.querySelector<HTMLElement>('.cd-alert-list__how')!;
     await expect(long).toHaveTextContent(LONG_HOW);
     await expect(Math.round(long.getBoundingClientRect().right)).toBeLessThanOrEqual(Math.round(weekly.getBoundingClientRect().right) - 16);
-    await expect(long.getBoundingClientRect().height).toBeGreaterThan(18);
+    await expect(long.getBoundingClientRect().height).toBeGreaterThan(19);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

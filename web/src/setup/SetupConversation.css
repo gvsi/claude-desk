@@ -85,6 +85,11 @@
   background: var(--fill-secondary);
 }
 
+/* A choice's number key stays a 22 px square: its meta-type digit is wider than the 6 px sides leave. */
+.cd-setup-q3__row .cd-setup-kbd {
+  padding-inline: var(--space-4);
+}
+
 .cd-setup-q3__row.is-active .cd-setup-kbd {
   border-color: var(--text-secondary);
   color: var(--text-primary);

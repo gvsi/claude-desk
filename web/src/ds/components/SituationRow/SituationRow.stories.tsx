@@ -56,12 +56,12 @@ export const Situations: Story = {
     }
     expectComputed(first, { paddingTop: '14px', paddingBottom: '14px' });
     const title = within(first).getByText(SITUATIONS[0]!.title);
-    expectComputed(title, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
+    expectComputed(title, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
     expectComputed(within(first).getByText('A visitor, not verified'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     const outcome = first.querySelector<HTMLElement>('.cd-situation-row__outcome')!;
     expectComputed(outcome, { fontSize: '14px', lineHeight: '19px', color: PRIMARY });
     expectComputed(within(first).getByText('Books weekday visits in your hours.'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
-    await expect(first.getBoundingClientRect().height).toBe(68);
+    await expect(first.getBoundingClientRect().height).toBe(70);
     const right = first.querySelector<HTMLElement>('.cd-situation-row__result')!;
     await expect(right.getBoundingClientRect().width).toBe(300);
     await expect(Math.round(right.getBoundingClientRect().right)).toBe(Math.round(first.getBoundingClientRect().right));

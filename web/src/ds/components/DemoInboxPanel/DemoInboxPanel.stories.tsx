@@ -134,7 +134,7 @@ export const WithCode: Story = {
     expectComputed(kind, { fontSize: '14px', lineHeight: '19px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(kind.getBoundingClientRect().top - to.getBoundingClientRect().bottom).toBe(4);
     const body = within(item).getByText(entryOf(CODE_ID).body);
-    expectComputed(body, { fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(body, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(body.getBoundingClientRect().top - kind.getBoundingClientRect().bottom).toBe(2);
 
     // inbox_announces_new_entries: the entries sit in a polite live region inside the panel, so a

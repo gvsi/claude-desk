@@ -115,7 +115,7 @@ describe('reference boards', () => {
     // A board whose story measures its page at another height than the canvas drew it keeps the two
     // apart: the render is checked at the canvas's size, the story runs at the page's own.
     const cases = [
-      ['N-R2-Vision-TeamDesk', 1022, 'laptop-1061'],
+      ['N-R2-Vision-TeamDesk', 1022, 'laptop-1142'],
       ['N-R2-Vision-ClaudeAccount', 1013, 'laptop-994'],
     ] as const;
     for (const [board, height, story] of cases) {

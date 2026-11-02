@@ -50,7 +50,7 @@ export const Rivera: Story = {
       const row = rows[index] as HTMLElement;
       const nameLine = within(row).getByText(name);
       const howLine = within(row).getByText(how);
-      expectComputed(nameLine, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+      expectComputed(nameLine, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
       expectComputed(howLine, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
       // Each row padded 14 px 16 px; a hairline above every row but the first.
       expectComputed(row, {

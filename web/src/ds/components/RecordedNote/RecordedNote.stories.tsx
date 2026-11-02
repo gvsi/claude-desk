@@ -64,9 +64,9 @@ export const Wrapped: Story = {
   play: async ({ canvasElement }) => {
     const { icon, words } = partsOf(canvasElement);
     // Two lines, the second under the words, not under the icon; the icon stays on the first.
-    await expect(Math.round(words.getBoundingClientRect().height)).toBe(34);
+    await expect(Math.round(words.getBoundingClientRect().height)).toBe(36);
     const lines = [...words.getClientRects()];
     await expect(Math.round(Math.min(...lines.map((line) => line.left)))).toBe(Math.round(words.getBoundingClientRect().left));
-    await expect(icon.getBoundingClientRect().bottom).toBeLessThan(words.getBoundingClientRect().top + 17);
+    await expect(icon.getBoundingClientRect().bottom).toBeLessThan(words.getBoundingClientRect().top + 18);
   },
 };

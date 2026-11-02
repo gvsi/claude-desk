@@ -130,8 +130,8 @@ export const Recorded: Story = {
     await expect(Math.round(tagBox.left - whoBox.right)).toBe(10);
     await expect(tagBox.top).toBe(whoBox.top);
     await expect(tagBox.height).toBe(whoBox.height);
-    // The row keeps its signed height.
-    await expect(Math.round(link.getBoundingClientRect().height)).toBe(50);
+    // The row holds its two lines between its 6 px paddings: 51 px, past its 50 px minimum.
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(51);
   },
 };
 

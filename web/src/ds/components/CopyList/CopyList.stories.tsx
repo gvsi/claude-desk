@@ -47,7 +47,7 @@ export const ReadyMadeWords: Story = {
     expectComputed(first, { paddingTop: '14px', paddingLeft: '16px' });
     expectComputed(second, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
     const title = within(first).getByText('Google profile', { selector: 'p' });
-    expectComputed(title, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(title, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
     const words = within(first).getByText(WORDS[0]!.text);
     expectComputed(words, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(words.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(4);

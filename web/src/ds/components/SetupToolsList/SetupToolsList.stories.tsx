@@ -83,7 +83,7 @@ export const Board: Story = {
       borderTopLeftRadius: '12px',
       backgroundColor: 'rgba(250, 249, 245, 0.03)',
     });
-    expectComputed(within(builtIn).getByRole('heading', { level: 2 }), { fontSize: '16px', lineHeight: '22px', fontWeight: '420', color: PRIMARY });
+    expectComputed(within(builtIn).getByRole('heading', { level: 2 }), { fontSize: '15px', lineHeight: '21px', fontWeight: '420', color: PRIMARY });
     await expect(Math.round(yours.getBoundingClientRect().top - builtIn.getBoundingClientRect().bottom)).toBe(20);
 
     // Each row: its name over its line, and at the right where it stands or what to do.
@@ -100,15 +100,15 @@ export const Board: Story = {
     // The group says these are built in, so no row repeats it.
     await expect(builtIn.querySelector('.cd-connector-name__built-in')).toBeNull();
 
-    // A row is 12 px above and below its 36 px tile and two lines, under a hairline: 65 px.
+    // A row is 12 px above and below its 36 px tile and two lines, under a hairline: 67 px.
     const [quotes] = rows as [HTMLElement];
     expectComputed(quotes, { paddingTop: '12px', paddingBottom: '12px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
-    await expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([65]));
+    await expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([67]));
     await expect(Math.round(rows[0]!.getBoundingClientRect().top - within(builtIn).getByRole('heading').getBoundingClientRect().bottom)).toBe(10);
     const tile = quotes.querySelector<HTMLElement>('.cd-connector-icon')!;
     await expect(tile.getBoundingClientRect().width).toBe(36);
     await expect(Math.round(quotes.querySelector('.cd-connector-summary')!.getBoundingClientRect().left - tile.getBoundingClientRect().right)).toBe(14);
-    expectComputed(within(quotes).getByText('Quotes'), { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
+    expectComputed(within(quotes).getByText('Quotes'), { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
     expectComputed(within(quotes).getByText('Prices jobs from your price list.'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
 
     // setup_tools_status_in_words: "On" beside a handled dot in primary ink; "Always on" in secondary.

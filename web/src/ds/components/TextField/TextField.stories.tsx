@@ -60,8 +60,8 @@ export const Default: Story = {
       borderTopLeftRadius: '8px',
       borderTopWidth: '1px',
       borderTopColor: 'rgba(250, 249, 245, 0.36)',
-      fontSize: '16px',
-      lineHeight: '22px',
+      fontSize: '15px',
+      lineHeight: '21px',
       fontWeight: '380',
       color: 'rgba(250, 249, 245, 0.92)',
     });

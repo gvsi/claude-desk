@@ -11,10 +11,10 @@ import '../SuggestionChips/SuggestionChips.css';
 import './PublicShell.css';
 
 /** Three one-line starter chips, as wide as the fresh copy's, so they wrap as its do at 390 px. */
-const CHIP_WIDTHS = [177, 186, 163] as const;
+const CHIP_WIDTHS = [189, 201, 174] as const;
 
 /** The invitation's meta line, as wide as its words in each language. */
-const INVITATION_WIDTH: Record<CopyLanguage, number> = { en: 250, es: 287 };
+const INVITATION_WIDTH: Record<CopyLanguage, number> = { en: 276, es: 322 };
 
 /**
  * The shell's own layout and measurements, with no visitor content or interactive elements. History
@@ -66,7 +66,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
               <Skeleton shape="line" text="section" width={230} anchor="chat-title" />
               <div data-skeleton-anchor="disclosure">
                 <Skeleton shape="line" text="meta" />
-                <Skeleton shape="line" text="meta" width="80%" className={language === 'en' && !footer ? 'cd-public-shell-skeleton__phone-line' : undefined} />
+                <Skeleton shape="line" text="meta" width="80%" />
                 {language === 'es' ? <Skeleton shape="line" text="meta" width="65%" className="cd-public-shell-skeleton__phone-line" /> : null}
               </div>
             </div>
@@ -76,7 +76,9 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
             <div className="cd-public-shell__conversation" data-skeleton-anchor="conversation">
               <div className="cd-public-shell__welcome">
                 <Skeleton shape="line" text="greeting" width="70%" anchor="greeting" />
-                <Skeleton shape="line" text="greeting" width="60%" className="cd-public-shell-skeleton__phone-line" />
+                {/* The greeting takes two lines on a phone, and in Spanish two from 640 px and three on a phone. */}
+                <Skeleton shape="line" text="greeting" width="60%" className={language === 'en' ? 'cd-public-shell-skeleton__phone-line' : undefined} />
+                {language === 'es' ? <Skeleton shape="line" text="greeting" width="50%" className="cd-public-shell-skeleton__phone-line" /> : null}
                 <Skeleton shape="line" text="meta" width={INVITATION_WIDTH[language]} className="cd-public-shell__invitation" anchor="invitation" />
               </div>
             </div>

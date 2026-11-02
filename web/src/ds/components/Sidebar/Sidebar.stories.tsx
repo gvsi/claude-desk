@@ -422,7 +422,7 @@ export const AboutThisPrototype: Story = {
     for (const { link } of rows) {
       await expect(link).toHaveClass('cd-sidebar__row');
       await expect(link).not.toHaveAttribute('aria-current');
-      expectComputed(link, { height: '36px', fontSize: '16px', lineHeight: '22px', fontWeight: '420', backgroundColor: 'rgba(0, 0, 0, 0)' });
+      expectComputed(link, { height: '36px', fontSize: '15px', lineHeight: '21px', fontWeight: '420', backgroundColor: 'rgba(0, 0, 0, 0)' });
       const icon = link.querySelector('svg');
       await expect(icon).toHaveAttribute('aria-hidden', 'true');
       await expect(icon?.getBoundingClientRect().width).toBe(20);

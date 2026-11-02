@@ -49,8 +49,8 @@ export const WithAction: Story = {
     const title = canvas.getByRole('heading', { level: 1, name: 'Safety' });
     expectComputed(title, {
       fontFamily: /Source Serif 4/,
-      fontSize: '24px',
-      lineHeight: '32px',
+      fontSize: '26px',
+      lineHeight: '34px',
       fontWeight: '460',
       textAlign: 'start',
       color: 'rgba(250, 249, 245, 0.92)',
@@ -279,7 +279,7 @@ const setupColumn: NonNullable<Story['decorators']> = [
  */
 async function expectBalancedTitle(title: HTMLElement, lines: number): Promise<void> {
   await expectBalancedLines(title, `${LONG_NAME} is live`, lines);
-  await expect(title.getBoundingClientRect().height).toBe(lines * 32);
+  await expect(title.getBoundingClientRect().height).toBe(lines * 34);
 }
 
 export const LongTitle: Story = {

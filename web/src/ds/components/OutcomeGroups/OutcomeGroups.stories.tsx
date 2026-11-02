@@ -70,8 +70,8 @@ export const SetupRules: Story = {
     await expect(within(canvas.getByRole('region', { name: 'Never does' })).getByText('Refunds')).toBeVisible();
 
     // outcome_groups_geometry, as the board draws it: the money line's card first, then a card per
-    // group 20 px apart, each padded 16 px; the heading's 20 px line 10 px over a hairline; rows
-    // 40 px tall under hairlines.
+    // group 20 px apart, each padded 16 px; the heading's 21 px line 10 px over a hairline; rows
+    // 41 px tall under hairlines.
     const cards = [...canvasElement.querySelectorAll<HTMLElement>('.cd-card')];
     await expect(cards).toHaveLength(4);
     // money_line_leads: the limit's line, which holds over every rule below it, in weight 520,
@@ -84,14 +84,14 @@ export const SetupRules: Story = {
       const next = cards[i + 1];
       if (next) await expect(next.getBoundingClientRect().top - card.getBoundingClientRect().bottom).toBe(20);
     }
-    // The line alone, 16 px in from the card's border: 54 px.
-    await expect(Math.round((cards[0] as HTMLElement).getBoundingClientRect().height)).toBe(54);
+    // The line alone, 16 px in from the card's border: 55 px.
+    await expect(Math.round((cards[0] as HTMLElement).getBoundingClientRect().height)).toBe(55);
     const [first] = groups(canvasElement);
     const title = first?.querySelector<HTMLElement>('.cd-outcome-groups__title');
     if (!title) throw new Error('No title');
-    expectComputed(title, { lineHeight: '20px', paddingBottom: '10px' });
+    expectComputed(title, { lineHeight: '21px', paddingBottom: '10px' });
     for (const row of rows) {
-      await expect(Math.round(row.getBoundingClientRect().height)).toBe(41);
+      await expect(Math.round(row.getBoundingClientRect().height)).toBe(42);
       expectComputed(row, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '10px' });
     }
   },
