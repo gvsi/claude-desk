@@ -89,6 +89,11 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
         opener.current = active instanceof HTMLElement && active !== document.body ? active : clickedControl();
         setOpen(true);
         setFocusComposer(true);
+      } else {
+        // A page suggestion is disabled as this answer starts. Hand its focus on as a typed
+        // question does; touch uses Close so it doesn't summon the phone keyboard.
+        const touch = window.matchMedia('(pointer: coarse)').matches && !document.activeElement?.matches(':focus-visible');
+        panelRoot.current?.querySelector<HTMLElement>(touch ? 'button[aria-label="Close"]' : 'textarea')?.focus();
       }
       const at = conversation.current;
       setTurns((now) => [...now, { id: id(), kind: 'owner', text }]);

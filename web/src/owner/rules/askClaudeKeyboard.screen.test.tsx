@@ -53,7 +53,7 @@ async function openFromSuggestionByKeyboard(place: Place, words: string) {
   const panel = screen.getByRole(place === 'as a sheet' ? 'dialog' : 'complementary', { name: 'Ask Claude' });
   const log = panel.getByRole('log');
   await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
-  return { composer, chip, panel, log };
+  return { screen, composer, chip, panel, log };
 }
 
 /**
@@ -72,6 +72,22 @@ async function closeByKeyboard(panel: Locator, closing: Closing): Promise<void> 
 }
 
 describe('ask claude opened from a suggestion by keyboard', () => {
+  it.each(['keyboard', 'touch'] as const)('a_suggestion_in_an_open_panel_hands_focus_on_by_%s', async (input) => {
+    if (input === 'touch') await coarsePointer();
+    const { screen, panel } = await openFromSuggestionByKeyboard('beside the page', 'Stop quoting on weekends');
+    const words = 'Quote water heater installs up to $600';
+    const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: words, exact: true });
+    if (input === 'keyboard') {
+      chip.element().focus();
+      await userEvent.keyboard('{Enter}');
+      await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    } else {
+      await chip.click();
+      await expect.element(panel.getByRole('button', { name: 'Close' })).toHaveFocus();
+    }
+    await expect.element(panel.getByRole('log').getByText(words, { exact: true })).toBeVisible();
+  });
+
   it.each(['desktop', 'phone'] as const)('keeping_rules_returns_focus_to_the_panel_composer_on_%s', async (viewport) => {
     const { screen } = await renderRoute(RULES, { viewport });
     await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
