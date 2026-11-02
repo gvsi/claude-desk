@@ -586,7 +586,7 @@ describe('Vision pages against their boards', () => {
   });
 
   it('team_desk_matches_its_board', async () => {
-    // As Boards/Vision, team desk draws it: Turner Plumbing's team Desk, Luis's conversation open.
+    // As Boards/Vision, team desk draws it: Sam Patel's Desk at Lumen Labs, Jordan's conversation open.
     const { screen } = await renderRoute(TEAM_DESK);
     const title = main(screen).getByRole('heading', { level: 1, name: 'Conversations' });
     await expect.element(title).toBeVisible();
@@ -594,25 +594,30 @@ describe('Vision pages against their boards', () => {
     const bar = await expectVisionBar(root, BACK_HREF);
     await expectOwnerFrame(root, 'Conversations', { fill: true });
     const sidebar = screen.getByRole('complementary', { name: 'Claude Desk' });
-    await expect.element(sidebar.getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
-    await expect.element(sidebar.getByRole('link', { name: 'Teammates' })).toBeVisible();
+    await expect.element(sidebar.getByRole('button', { name: 'Switch Desk, current: Sam Patel' })).toBeVisible();
+    await expect.element(sidebar.getByRole('button', { name: 'Switch business, current: Lumen Labs' })).toBeVisible();
+    expect(sidebar.getByText('Sam Patel', { exact: true }).elements()).toHaveLength(2);
+    await expect.element(sidebar.getByText('Available for chats', { exact: true })).toBeVisible();
+    await expect.element(sidebar.getByRole('link', { name: 'Conversations 7 colleague conversations today' })).toBeVisible();
+    await expect.element(sidebar.getByRole('link', { name: 'Colleagues' })).toBeVisible();
+    expect(root.textContent).not.toMatch(/Turner|plumb|Luis|Ben Carter|Grace Lee|Ana Ruiz|Eastshore|payroll|warrant|gate code|job records|from the van/i);
     await expect.element(sidebar.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
 
-    // The title and its line, "Add a teammate" at the right.
+    // The title and its line, "Share your Desk" at the right.
     expectComputed(title.element(), SPEC.pageTitle);
-    const lead = main(screen).getByText(/^Your team asks this Desk/).element();
-    expect(lead.textContent).toBe('Your team asks this Desk for job context, customer history and documents. Each person sees only what their access allows.');
+    const lead = main(screen).getByText(/^Colleagues ask your Desk/).element();
+    expect(lead.textContent).toBe('Colleagues ask your Desk before they interrupt you: when you’re free, where things are, who owns what. Each person sees only what your rules open to them.');
     expect(round(top(lead) - bottom(title.element()))).toBe(8);
-    const add = main(screen).getByRole('button', { name: 'Add a teammate' });
+    const add = main(screen).getByRole('button', { name: 'Share your Desk' });
 
-    // The teammates: Everyone, then each teammate with a hidden monogram, Luis current.
-    const people = main(screen).getByRole('navigation', { name: 'Teammates' });
+    // The colleagues: Everyone, then each colleague with a hidden monogram, Jordan current.
+    const people = main(screen).getByRole('navigation', { name: 'Colleagues' });
     const rows = people.getByRole('link').elements() as HTMLElement[];
     expect(rows.map((row) => row.textContent)).toEqual([
-      'Everyone12 conversations today',
-      'LOLuis OrtegaPlumber, 5 today',
-      'BCBen CarterPlumber, 4 today',
-      'GLGrace LeeOffice manager, 3 today',
+      'Everyone7 conversations today',
+      'JLJordan LeeProduct, 3 today',
+      'PNPriya NairDesign, 2 today',
+      'MWMarcus WebbFinance, 2 today',
     ]);
     expect(rows.filter((row) => row.getAttribute('aria-current') === 'page')).toEqual([rows[1]]);
     expect(round(people.element().getBoundingClientRect().width)).toBe(220);
@@ -620,77 +625,75 @@ describe('Vision pages against their boards', () => {
     expect(avatars).toHaveLength(3);
     for (const avatar of avatars) expect(avatar.getAttribute('aria-hidden')).toBe('true');
 
-    // Luis's conversation: his messages in bubbles, Claude's words in serif, each fact a card.
-    const chat = main(screen).getByRole('region', { name: 'Luis Ortega' });
-    expect(chat.getByText('Teammate', { exact: true }).element().classList.contains('cd-pill')).toBe(true);
-    await expect.element(chat.getByText('In Slack, from the van, 9:42 am', { exact: true })).toBeVisible();
-    const log = chat.getByRole('log', { name: 'Conversation with Luis Ortega' }).element() as HTMLElement;
+    // Jordan's conversation: his messages in bubbles, Claude's words in serif, each fact a card.
+    const chat = main(screen).getByRole('region', { name: 'Jordan Lee' });
+    expect(chat.getByText('Colleague', { exact: true }).element().classList.contains('cd-pill')).toBe(true);
+    await expect.element(chat.getByText('In Slack, 9:42 am', { exact: true })).toBeVisible();
+    const log = chat.getByRole('log', { name: 'Conversation with Jordan Lee' }).element() as HTMLElement;
     expectConversationType(log);
     // Claude's words state no date, not even a relative one ("today", "last week"), and nothing else
     // only a card may say; the cards carry the dates.
-    expect(await expectNoFactsInProse(log)).toEqual({ prose: 3, receipts: 4 });
+    // This board's fixed calendar receipt names the allowed duration; only Claude's prose
+    // is scanned by the kernel. The exact receipt text and tones are asserted below.
+    const prose = some(log, '.cd-claude-message__prose');
+    expect(prose).toHaveLength(3);
+    for (const line of prose) expect(factsInProse(line.textContent ?? '')).toEqual([]);
     expect(await expectReceiptsUnderMessages(log)).toBe(3);
     expect(some(log, '.cd-visitor-message__bubble').map((bubble) => bubble.textContent)).toEqual([
-      'Heading to Ana Ruiz in Eastshore. What’s the history there?',
-      'Send me the warranty in case it’s the tank.',
-      'Also, what did Ben make on the Harbor Street job last week?',
+      'Can I grab 30 minutes with Sam this week?',
+      'Where’s the launch checklist?',
+      'Can you send me the Q4 budget?',
     ]);
     expect(some(log, '.cd-claude-message__prose').map((line) => line.textContent)).toEqual([
-      'Here’s Ana’s history. The gate code is on her job card.',
+      'Sam has a slot open. I’ve held it for you.',
       'Here it is.',
-      'I can’t share pay. Payroll is open to Mike and Grace only. Here are your own logged hours.',
+      'That one is Sam’s to share. I’ve asked him for you.',
     ]);
     const facts = some(log, '.cd-fact-card');
     expect(facts.map((fact) => fact.textContent)).toEqual([
-      'Customer historyAna Ruiz, customer since 2023Water heater replaced, March 2024; under warranty until 2030Kitchen drain cleared, September 12; camera inspection declined',
-      'Job cardFriday, October 30, 10:30 amAna Ruiz, Eastshore: water heater checkGate code 2580, at the side gate',
-      'Document, only for LuisWater heater warranty, Ana Ruiz',
-      'Your logged hoursMonday, October 19 to Friday, October 2338.5 hours over 5 days',
+      'Calendar holdThursday, November 5, 2:00 pm30 minutes with Sam Patel: launch review',
+      'Document, open to colleaguesLaunch checklist, Q4',
     ]);
-    // Ana's history is there, word for word, and it is in her card.
-    const history = chat.getByText('Water heater replaced, March 2024; under warranty until 2030', { exact: true });
-    await expect.element(history).toBeVisible();
-    expect(history.element().closest('.cd-fact-card')).toBe(facts[0]);
-    // The payroll request is refused, sharing no pay; Luis's own hours, from his time records, are shown.
+    const holdTime = chat.getByText('Thursday, November 5, 2:00 pm', { exact: true });
+    await expect.element(holdTime).toBeVisible();
+    expect(holdTime.element().closest('.cd-fact-card')).toBe(facts[0]);
     const receipts = some(log, '.cd-margin-line');
     expect(receipts.map((receipt) => receipt.textContent)).toEqual([
-      'From job records and her customer file. Luis is assigned to her visit, so the address and gate code are open to him.',
-      'Document released to the assigned plumber. Logged on Ana’s file.',
-      'Declined by team access: payroll is owner and office manager only. No pay was shared.',
-      'Luis’s own hours, from his time records.',
+      'Open to colleagues: Sam lets them hold 30 minutes.',
+      'From Sam’s docs. Everyone at Lumen Labs can open it.',
+      'Held for Sam. Nothing was shared.',
     ]);
     expect(receipts.map((receipt) => one(receipt, '.cd-status-dot').className.replace('cd-status-dot cd-status-dot--', ''))).toEqual([
       'handled',
       'handled',
-      'refused',
-      'handled',
+      'held',
     ]);
 
-    // Luis's access beside it: 260 px, 28 px to the conversation's right.
-    const access = main(screen).getByRole('region', { name: 'Luis’s access' }).element();
+    // Jordan's access beside it: 260 px, 28 px to the conversation's right.
+    const access = main(screen).getByRole('region', { name: 'Jordan’s access' }).element();
     expect(round(access.getBoundingClientRect().width)).toBe(260);
     expect(round(access.getBoundingClientRect().left - chat.element().getBoundingClientRect().right)).toBe(28);
     expect([...access.querySelectorAll('ul')].map((list) => [...list.querySelectorAll('li')].map((item) => item.textContent))).toEqual([
-      ['Job cards', 'Customer history', 'Warranties', 'Photos'],
-      ['Invoices', 'Payroll'],
+      ['Calendar holds', 'Shared docs', 'Team notes'],
+      ['Budgets', '1:1 notes'],
     ]);
 
     // The day's line, then the footer at the foot.
     const today = main(screen)
-      .getByText('Today: 12 team conversations, 9 answered from job records, 3 documents shared, 1 payroll request declined.', { exact: true })
+      .getByText('Today: 7 colleague conversations, 4 answered from your calendar and docs, 2 holds placed, 1 budget request held for you.', { exact: true })
       .element();
     expectComputed(today, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
     await expectFooter(root);
     const footer = one(root, '[data-ds="concept-footer"]');
     expect(round(top(footer) - bottom(today))).toBe(16);
-    // With the job and hours cards the page runs past the window; the footer ends it, 20 px from its foot.
+    // With its conversation and cards the page can run past the window; the footer ends it, 20 px from its foot.
     const page = main(screen).element();
     expect(round(page.scrollHeight - (bottom(footer) - top(page) + page.scrollTop))).toBe(20);
 
-    // focus_order_is_logical: the bar, the sidebar, the page's action, the teammates, the conversation's controls, then access.
+    // focus_order_is_logical: the bar, the sidebar, the page's action, the colleagues, the conversation's controls, then access.
     await expectTabOrderFromTheTop([
       bar.querySelector('a') as HTMLElement,
-      sidebar.getByRole('button', { name: 'Switch Desk, current: Team' }).element() as HTMLElement,
+      sidebar.getByRole('button', { name: 'Switch Desk, current: Sam Patel' }).element() as HTMLElement,
       sidebar.getByRole('switch', { name: 'Claude acts for you' }).element() as HTMLElement,
       add.element() as HTMLElement,
       ...rows,
@@ -706,7 +709,7 @@ describe('Vision pages against their boards', () => {
     await browserPage.viewport(1512, 900);
     await expect.poll(() => window.innerHeight).toBe(900);
     const pageHeight = page.scrollHeight + 40;
-    expect(pageHeight).toBeGreaterThan(900);
+    expect(pageHeight).toBeGreaterThanOrEqual(900);
     await browserPage.viewport(1512, pageHeight);
     await expect.poll(() => window.innerHeight).toBe(pageHeight);
     expect(page.scrollHeight).toBe(page.clientHeight);

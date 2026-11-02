@@ -2,8 +2,8 @@
  * The vision pages the "Run 2 · vision" boards draw (N-R2-Vision-*), composed from the components
  * and tokens for the `Boards/Vision, *` stories only, as `parts.tsx` composes the other pages. The web
  * app (plan 04, Task 17) builds the same pages from the same components: the vision bar over each,
- * every fact in a `FactCard`, the phones in `PhoneFrame`, and Luis's access in `AccessPanel`. The
- * data here is the boards' own sample data: Turner Plumbing's team, Dana's visit, the phone apps,
+ * every fact in a `FactCard`, the phones in `PhoneFrame`, and Jordan's access in `AccessPanel`. The
+ * data here is the boards' own sample data: Sam Patel's Desk at Lumen Labs, Dana's visit, the phone apps,
  * and Marcus Bell on Meridian Bay Permits' public page, a fictional city permits office.
  */
 import type { ReactNode } from 'react';
@@ -35,7 +35,7 @@ import { VisionBar } from '../components/VisionBar/VisionBar.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
 import { cardBlock, meridian, proseBlock, rivera } from '../fixtures/index.ts';
 import { fixtureHeldRule } from '../test/heldRule.ts';
-import { MAIN_LINE, OWNER_HREFS, brandOf } from './parts.tsx';
+import { OWNER_HREFS, brandOf } from './parts.tsx';
 
 import './vision.css';
 
@@ -93,43 +93,38 @@ function VisionOwnerFrame({ business, owner, desks, currentDeskId, current, peop
 
 /** Claude's words in a conversation, in serif, as a checked reply's prose block. */
 function Reply({ text, language = 'en' }: { text: string; language?: CopyLanguage }) {
-  return <ClaudeMessage plainProse blocks={[proseBlock(text)]} language={language} ownerName={rivera.business.ownerName} />;
+  return <ClaudeMessage plainProse blocks={[proseBlock(text)]} language={language} ownerName="Sam Patel" />;
 }
 
 // ---------------------------------------------------------------------------------------------
-// The team Desk (N-R2-Vision-TeamDesk): Turner Plumbing's team asking its own Desk.
+// The team Desk (N-R2-Vision-TeamDesk): Sam Patel's own Desk at Lumen Labs.
 
-export const TEAM = { id: 'desk-rivera-team', name: 'Team' };
+export const TEAM = { id: 'desk-lumen-sam', name: 'Sam Patel' };
 
-/** The team, in the board's order: who, their role and today's count. "Everyone" first. */
+/** The colleagues, in the board's order: who, their role and today's count. "Everyone" first. */
 export const TEAMMATES = [
-  { name: 'Luis Ortega', line: 'Plumber, 5 today' },
-  { name: 'Ben Carter', line: 'Plumber, 4 today' },
-  { name: 'Grace Lee', line: 'Office manager, 3 today' },
+  { name: 'Jordan Lee', line: 'Product, 3 today' },
+  { name: 'Priya Nair', line: 'Design, 2 today' },
+  { name: 'Marcus Webb', line: 'Finance, 2 today' },
 ] as const;
 
-/** What Luis can and can't open, in the board's order. */
-export const LUIS_ACCESS = {
-  canOpen: ['Job cards', 'Customer history', 'Warranties', 'Photos'],
-  cantOpen: ['Invoices', 'Payroll'],
+/** What Jordan can and can't open, in the board's order. */
+export const JORDAN_ACCESS = {
+  canOpen: ['Calendar holds', 'Shared docs', 'Team notes'],
+  cantOpen: ['Budgets', '1:1 notes'],
 } as const;
 
-/**
- * Claude's words to Luis, in order. Owner's copy ruling, 2026-10-30, for invariant 2: the board's
- * "on today’s job card" and "your own logged hours for last week" put dates in Claude's words; the
- * visit's date and the week's dates are now in a job card and an hours card, and the words stay as
- * helpful.
- */
+/** Claude's words to Jordan, in order. The calendar hold carries the time. */
 export const TEAM_REPLIES = [
-  'Here’s Ana’s history. The gate code is on her job card.',
+  'Sam has a slot open. I’ve held it for you.',
   'Here it is.',
-  'I can’t share pay. Payroll is open to Mike and Grace only. Here are your own logged hours.',
+  'That one is Sam’s to share. I’ve asked him for you.',
 ] as const;
 
 /** The day's line under the page. */
-export const TEAM_TODAY = 'Today: 12 team conversations, 9 answered from job records, 3 documents shared, 1 payroll request declined.';
+export const TEAM_TODAY = 'Today: 7 colleague conversations, 4 answered from your calendar and docs, 2 holds placed, 1 budget request held for you.';
 
-/** A teammate's turn and Claude's answer with its card and receipt, as the board draws them. */
+/** A colleague's turn and Claude's answer with its card and receipt, as the board draws them. */
 function TeamTurn({ asked, reply, facts = [], receipts }: { asked: string; reply: string; facts?: readonly FactCardProps[]; receipts: readonly { source: ReceiptSource; plain: string }[] }) {
   return (
     <>
@@ -148,17 +143,17 @@ function TeamTurn({ asked, reply, facts = [], receipts }: { asked: string; reply
   );
 }
 
-/** Conversations on Turner Plumbing's team Desk, Luis's open, with what he can open beside it. */
+/** Conversations on Sam Patel's Desk at Lumen Labs, Jordan's open, with his access beside it. */
 export function TeamDeskConversations() {
   return (
     <VisionOwnerFrame
-      business={rivera.business.name}
-      owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
-      desks={[MAIN_LINE, TEAM]}
+      business="Lumen Labs"
+      owner={{ name: 'Sam Patel', status: 'Available for chats' }}
+      desks={[{ id: 'desk-lumen-priya', name: 'Priya Nair' }, TEAM]}
       currentDeskId={TEAM.id}
       current="conversations"
-      peopleLabel="Teammates"
-      counts={{ conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } }}
+      peopleLabel="Colleagues"
+      counts={{ conversations: { n: 7, label: '7 colleague conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } }}
       answeringDescription="Within your rules"
     >
       <div className="board-filled-page board-vision-page board-vision-team">
@@ -167,20 +162,20 @@ export function TeamDeskConversations() {
             title="Conversations"
             actions={
               <Button variant="secondary" onClick={fn()}>
-                Add a teammate
+                Share your Desk
               </Button>
             }
           />
           <p className="board-quiet cd-type-meta board-vision-team__lead">
-            Your team asks this Desk for job context, customer history and documents. Each person sees only what their access allows.
+            Colleagues ask your Desk before they interrupt you: when you’re free, where things are, who owns what. Each person sees only what your rules open to them.
           </p>
         </div>
         <div className="board-vision-team__columns">
-          <nav aria-label="Teammates" className="board-vision-team__people">
+          <nav aria-label="Colleagues" className="board-vision-team__people">
             <a href="#everyone" className="board-vision-team__person">
               <span>
                 <span className="cd-type-control board-vision-team__name">Everyone</span>
-                <span className="board-quiet cd-type-caption board-vision-team__line">12 conversations today</span>
+                <span className="board-quiet cd-type-caption board-vision-team__line">7 conversations today</span>
               </span>
             </a>
             {TEAMMATES.map((person, index) => (
@@ -202,13 +197,13 @@ export function TeamDeskConversations() {
               </a>
             ))}
           </nav>
-          <section className="board-vision-team__chat" aria-labelledby="board-vision-luis">
+          <section className="board-vision-team__chat" aria-labelledby="board-vision-jordan">
             <div className="board-vision-team__head">
-              <h2 id="board-vision-luis" className="cd-type-section" data-copy="user">
-                Luis Ortega
+              <h2 id="board-vision-jordan" className="cd-type-section" data-copy="user">
+                Jordan Lee
               </h2>
-              <Pill>Teammate</Pill>
-              <span className="board-quiet cd-type-meta">In Slack, from the van, 9:42 am</span>
+              <Pill>Colleague</Pill>
+              <span className="board-quiet cd-type-meta">In Slack, 9:42 am</span>
               <span className="board-vision-team__actions">
                 <Button variant="secondary" onClick={fn()}>
                   Whisper
@@ -218,52 +213,35 @@ export function TeamDeskConversations() {
                 </Button>
               </span>
             </div>
-            <Transcript label="Conversation with Luis Ortega">
+            <Transcript label="Conversation with Jordan Lee">
               <TeamTurn
-                asked="Heading to Ana Ruiz in Eastshore. What’s the history there?"
+                asked="Can I grab 30 minutes with Sam this week?"
                 reply={TEAM_REPLIES[0]}
                 facts={[
                   {
-                    label: 'Customer history',
-                    icon: 'document',
-                    title: 'Ana Ruiz, customer since 2023',
-                    lines: ['Water heater replaced, March 2024; under warranty until 2030', 'Kitchen drain cleared, September 12; camera inspection declined'],
-                  },
-                  {
-                    label: 'Job card',
+                    label: 'Calendar hold',
                     icon: 'calendar',
-                    title: 'Friday, October 30, 10:30 am',
-                    lines: ['Ana Ruiz, Eastshore: water heater check', 'Gate code 2580, at the side gate'],
+                    title: 'Thursday, November 5, 2:00 pm',
+                    lines: ['30 minutes with Sam Patel: launch review'],
                   },
                 ]}
-                receipts={[
-                  {
-                    source: CHECKED,
-                    // A receipt states no time: the visit's time is on the Job card.
-                    plain: 'From job records and her customer file. Luis is assigned to her visit, so the address and gate code are open to him.',
-                  },
-                ]}
+                receipts={[{ source: decided('executed'), plain: 'Open to colleagues: Sam lets them hold 30 minutes.' }]}
               />
               <TeamTurn
-                asked="Send me the warranty in case it’s the tank."
+                asked="Where’s the launch checklist?"
                 reply={TEAM_REPLIES[1]}
-                facts={[{ label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' }]}
-                // "Warranty" is a promise word to the kernel's prose check; the card names the document.
-                receipts={[{ source: decided('executed'), plain: 'Document released to the assigned plumber. Logged on Ana’s file.' }]}
+                facts={[{ label: 'Document, open to colleagues', icon: 'document', title: 'Launch checklist, Q4' }]}
+                receipts={[{ source: decided('executed'), plain: 'From Sam’s docs. Everyone at Lumen Labs can open it.' }]}
               />
               <TeamTurn
-                asked="Also, what did Ben make on the Harbor Street job last week?"
+                asked="Can you send me the Q4 budget?"
                 reply={TEAM_REPLIES[2]}
-                facts={[{ label: 'Your logged hours', icon: 'clock', title: 'Monday, October 19 to Friday, October 23', lines: ['38.5 hours over 5 days'] }]}
-                receipts={[
-                  { source: decided('refused'), plain: 'Declined by team access: payroll is owner and office manager only. No pay was shared.' },
-                  { source: CHECKED, plain: 'Luis’s own hours, from his time records.' },
-                ]}
+                receipts={[{ source: decided('held'), plain: 'Held for Sam. Nothing was shared.' }]}
               />
             </Transcript>
           </section>
           <div className="board-vision-team__access">
-            <AccessPanel name="Luis" canOpen={LUIS_ACCESS.canOpen} cantOpen={LUIS_ACCESS.cantOpen} onEditAccess={fn()} />
+            <AccessPanel name="Jordan" canOpen={JORDAN_ACCESS.canOpen} cantOpen={JORDAN_ACCESS.cantOpen} onEditAccess={fn()} />
           </div>
         </div>
         <div className="board-vision-team__foot">

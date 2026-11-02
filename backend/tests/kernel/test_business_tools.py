@@ -30,7 +30,9 @@ def test_block_descriptions_use_the_approved_third_person_sentences():
         ('intake', {'questions': ['What?']},
          "Saves the person's name, contact details and answers to the business's questions, so the owner can follow up."),
         ('typed_booking', {'appointment_type': 'Consult', 'minutes': 30},
-         "Books one open time on the business's calendar for this kind of appointment."),
+         "Books one open time on the business's calendar for this kind of appointment. It needs the visitor's "
+         "name and a phone number or email, passed as name and contact, unless the visitor is verified or they "
+         "were saved with capture_lead in this conversation; it's refused without them."),
         ('purpose_payment', {'purpose': 'Retainer', 'amount_cents': 5000},
          'Creates a secure payment link for this purpose, for the amount the owner set.'),
         ('urgent', {'urgent_when': 'A burst pipe'},
@@ -1152,3 +1154,31 @@ async def test_business_free_names_are_enabled_resolving_titles_and_types_never_
         ctx.bind(copy.copy_id)
         assert await context.business_free_names(ctx, copy.desk_id) == ['Book a consult', 'Free consult', INTRO_CALL,
                                                                          'Urgent support']
+
+
+async def test_a_held_business_tool_request_names_its_block_on_its_receipt(app, client, reviewer):
+    """A business tool's request reaches the soft checks named by its block (`render.RECEIPT_SUBJECTS`, as
+    `block:<name>`): a held intake is a "Details request", whatever the owner titled the tool. Once the owner
+    replaces the tool while the hold stands (an intake made a typed booking), its current block no longer
+    names what was asked for, so the request has no receipt rather than a new name."""
+    from .test_reply_check import checked
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == copy.desk_id,
+                                                                      Tool.tool == 'desk.new-enquiry')))
+        row.status, row.review_reason = 'enabled', None
+        await activate_cards(ctx, copy.desk_id, [])
+    visitor = await open_visitor(client, copy)
+    held = await decided(client, visitor, 'desk.new-enquiry', {'name': 'Dana', 'answers': ['Need a consult']})
+    assert (held.outcome, held.state) == ('hold', 'held')
+    assert (await checked(client, visitor, 'I can help with that.')).ok
+    assert reviewer.soft_inputs[-1].cards == [
+        "Request receipt card: Details request: Waiting for Mike Turner to approve"]
+
+    replaced = intake(config={'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 15})
+    assert (await put(client, copy, [replaced])).status_code == 200
+    assert (await checked(client, visitor, 'I can help with that.')).ok
+    assert reviewer.soft_inputs[-1].cards == []

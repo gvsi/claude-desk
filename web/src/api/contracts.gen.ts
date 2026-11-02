@@ -572,6 +572,7 @@ export interface DemoInboxEntry {
   body: string;
   created_at: string;
   decision_id?: string | null;
+  title?: string | null;
 }
 export interface DeskAnsweringRequest {
   on: boolean;
@@ -880,6 +881,8 @@ export interface EvOwnerJoined {
 }
 export interface EvOwnerLeft {
   type: "owner_left";
+  resuming?: boolean;
+  generation?: number | null;
 }
 export interface EvOwnerTyping {
   type: "owner_typing";
@@ -888,6 +891,7 @@ export interface EvOwnerTyping {
 }
 export interface EvTurnEnd {
   type: "turn_end";
+  generation?: number | null;
 }
 export interface EvWriting {
   type: "writing";

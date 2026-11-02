@@ -7,7 +7,7 @@ import type { CopyOut } from '../api/views.ts';
 import type { SessionEndedState } from '../app/providers.tsx';
 import { useLeavingSignal } from '../app/useLeavingSignal.ts';
 import { IntroDialog, type IntroErrorCode } from '../ds/index.ts';
-import { THINGS_TO_TRY } from './arrival/ideas.ts';
+import { INTRO_THINGS } from './arrival/ideas.ts';
 import { TodayPreview } from './arrival/TodayPreview.tsx';
 import { DESKS_KEY, dropTheOldInbox, forgetReadAhead, invalidateCopy, lastOrFirst, READ_AHEAD_MS, readTodayAhead, todayPath } from './useDesks.ts';
 
@@ -190,7 +190,7 @@ export function Arrival() {
         <IntroDialog
           title={TITLE}
           intro={ended ? `${SESSION_ENDED} ${INTRO}` : INTRO}
-          thingsToTry={THINGS_TO_TRY.map(({ title, detail, icon }) => ({ title, detail, icon }))}
+          thingsToTry={[...INTRO_THINGS]}
           submitLabel="Start the demo"
           onSubmit={onSubmit}
           busy={busy}

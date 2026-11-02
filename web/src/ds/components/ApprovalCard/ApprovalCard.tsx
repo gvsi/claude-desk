@@ -18,6 +18,7 @@ import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { OWNER_STATE_WORDS, receiptTone } from '../MarginReceipt/receiptTone.ts';
 import { errorCopy } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
+import { Pill } from '../Pill/Pill.tsx';
 import { RuleSentence, type RuleSentenceProps } from '../RuleSentence/RuleSentence.tsx';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
 
@@ -111,6 +112,11 @@ export interface ApprovalCardProps {
   context?: ReactNode;
   /** Where and when it was held: "Web chat, 2 min ago". */
   waiting: string;
+  /**
+   * The request came from a demo visitor's chat, an AI the owner started to play a customer: a "Demo
+   * visitor" pill after where and when it was held, so it's never taken for a real customer's.
+   */
+  demoVisitor?: boolean;
   /**
    * The verified person's name on record (`NeedsYouItem.session.display_name` when `verified`), so
    * Allow's rule answer reads "Only for {personName}, always". Leave it out for an agent or anyone
@@ -262,6 +268,7 @@ export function ApprovalCard({
   rule,
   context,
   waiting,
+  demoVisitor = false,
   personName,
   onAnswer,
   pending = false,
@@ -462,7 +469,7 @@ export function ApprovalCard({
 
   const sides = sidesOf(offered);
 
-  const words = { rule, context, waiting };
+  const words = { rule, context, waiting, demoVisitor };
   const regionClass = ['cd-approval-card', settle ? 'cd-approval-card--settling' : '', settle?.pulse ? 'cd-approval-card--pulse' : '']
     .filter(Boolean)
     .join(' ');
@@ -555,6 +562,7 @@ interface RequestWordsProps {
   rule: ApprovalRule | undefined;
   context: ReactNode;
   waiting: string;
+  demoVisitor: boolean;
   /** The answered layer's status line: the one `role="status"` node, which takes focus when the answers go. */
   statusRef?: RefObject<HTMLSpanElement>;
 }
@@ -573,7 +581,7 @@ function HeldRule({ rule }: { rule: ApprovalRule }) {
 }
 
 /** What the card says: its status line and when it was held, what was asked, and the rule that held it. */
-function RequestWords({ decision, tone, rule, context, waiting, statusRef }: RequestWordsProps) {
+function RequestWords({ decision, tone, rule, context, waiting, demoVisitor, statusRef }: RequestWordsProps) {
   return (
     <>
       <div className="cd-approval-card__top cd-type-caption">
@@ -587,7 +595,14 @@ function RequestWords({ decision, tone, rule, context, waiting, statusRef }: Req
             <span className="cd-approval-card__status-line">{statusLine(decision)}</span>
           )}
         </span>
-        <span className="cd-approval-card__waiting">{waiting}</span>
+        {demoVisitor ? (
+          <span className="cd-approval-card__waiting cd-approval-card__waiting--tagged">
+            {waiting}
+            <Pill>Demo visitor</Pill>
+          </span>
+        ) : (
+          <span className="cd-approval-card__waiting">{waiting}</span>
+        )}
       </div>
       <p className="cd-approval-card__reason cd-type-summary">{decision.reason_plain}</p>
       {context ? <p className="cd-approval-card__context cd-type-meta">{context}</p> : null}

@@ -5,8 +5,8 @@
  * together.
  *
  * What the vision pages show, in the signed boards' words (the "Run 2 · vision" boards,
- * N-R2-Vision-*): a resident on a fictional city permits office's public Desk, Turner Plumbing's
- * team Desk, a returning visitor signed in with a Claude account, and the app on a phone. Fixed data
+ * N-R2-Vision-*): a resident on a fictional city permits office's public Desk, Sam Patel's
+ * Desk at Lumen Labs, a returning visitor signed in with a Claude account, and the app on a phone. Fixed data
  * only: no page reads anything from the API. Turner's own facts and the city's public Desk come from
  * the design system's fixtures, as the first visit's still preview of Today does.
  *
@@ -63,7 +63,7 @@ export interface VisionOwner {
   desks: { id: string; name: string }[];
   currentDeskId: string;
   current: NavKey;
-  /** The Desk's word for the people it serves: "Teammates". */
+  /** The Desk's word for the people it serves: "Colleagues". */
   peopleLabel: string;
   counts: { conversations?: NavCount; safety?: NavCount };
   /** The Answering switch's line: whom Claude answers, under whose rules. */
@@ -155,46 +155,46 @@ export const CITY_SUGGESTIONS = ['Book an inspection', 'Pay the fee', 'Talk to s
 export const CITY_SOURCES = { checked: CHECKED, executed: decided('executed'), held: decided('held') } as const;
 
 // ---------------------------------------------------------------------------------------------
-// The team Desk (N-R2-Vision-TeamDesk): Turner Plumbing's team asking its own Desk.
+// The team Desk (N-R2-Vision-TeamDesk): Sam Patel's own Desk at Lumen Labs.
 
 export const TEAM_OWNER: VisionOwner = {
-  business: rivera.business.name,
-  owner: { name: rivera.business.ownerName, status: 'Available for chats' },
+  business: 'Lumen Labs',
+  owner: { name: 'Sam Patel', status: 'Available for chats' },
   desks: [
-    { id: 'desk-rivera-main', name: rivera.business.deskName },
-    { id: 'desk-rivera-team', name: 'Team' },
+    { id: 'desk-lumen-priya', name: 'Priya Nair' },
+    { id: 'desk-lumen-sam', name: 'Sam Patel' },
   ],
-  currentDeskId: 'desk-rivera-team',
+  currentDeskId: 'desk-lumen-sam',
   current: 'conversations',
-  peopleLabel: 'Teammates',
-  counts: { conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
+  peopleLabel: 'Colleagues',
+  counts: { conversations: { n: 7, label: '7 colleague conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
   answeringDescription: 'Within your rules',
 };
 
 export const TEAM_HEADER = {
   title: 'Conversations',
-  action: 'Add a teammate',
-  lead: 'Your team asks this Desk for job context, customer history and documents. Each person sees only what their access allows.',
+  action: 'Share your Desk',
+  lead: 'Colleagues ask your Desk before they interrupt you: when you’re free, where things are, who owns what. Each person sees only what your rules open to them.',
 } as const;
 
-/** The teammates column: "Everyone" first, then each teammate with their role and today's count. */
-export const TEAM_EVERYONE = { name: 'Everyone', line: '12 conversations today' } as const;
+/** The colleagues column: "Everyone" first, then each colleague with their role and today's count. */
+export const TEAM_EVERYONE = { name: 'Everyone', line: '7 conversations today' } as const;
 
 export const TEAMMATES = [
-  { name: 'Luis Ortega', line: 'Plumber, 5 today' },
-  { name: 'Ben Carter', line: 'Plumber, 4 today' },
-  { name: 'Grace Lee', line: 'Office manager, 3 today' },
+  { name: 'Jordan Lee', line: 'Product, 3 today' },
+  { name: 'Priya Nair', line: 'Design, 2 today' },
+  { name: 'Marcus Webb', line: 'Finance, 2 today' },
 ] as const;
 
-/** Luis's conversation: who, where he asked from, and what the owner can do. */
+/** Jordan's conversation: who, where he asked from, and what the owner can do. */
 export const TEAM_CHAT = {
-  name: 'Luis Ortega',
-  level: 'Teammate',
-  where: 'In Slack, from the van, 9:42 am',
+  name: 'Jordan Lee',
+  level: 'Colleague',
+  where: 'In Slack, 9:42 am',
   actions: ['Whisper', 'Take over'],
 } as const;
 
-/** A teammate's turn and Claude's answer, with its cards and receipts. */
+/** A colleague's turn and Claude's answer, with its cards and receipts. */
 export interface TeamTurn {
   asked: string;
   reply: string;
@@ -202,64 +202,46 @@ export interface TeamTurn {
   receipts: readonly VisionReceipt[];
 }
 
-/**
- * Luis's conversation. Owner's copy ruling, 2026-10-30, for invariant 2: Claude's words state no
- * date, not even "today" or "last week"; the visit's date and time are in a job card and the week's
- * dates in an hours card beside them. The kernel's prose check reads the receipts too.
+/** Jordan asks Sam's Desk for time and a shared document; the budget stays held for Sam.
+ * Claude's words state no time: the calendar hold carries it.
  */
 export const TEAM_TURNS: readonly TeamTurn[] = [
   {
-    asked: 'Heading to Ana Ruiz in Eastshore. What’s the history there?',
-    reply: 'Here’s Ana’s history. The gate code is on her job card.',
+    asked: 'Can I grab 30 minutes with Sam this week?',
+    reply: 'Sam has a slot open. I’ve held it for you.',
     facts: [
       {
-        label: 'Customer history',
-        icon: 'document',
-        title: 'Ana Ruiz, customer since 2023',
-        lines: ['Water heater replaced, March 2024; under warranty until 2030', 'Kitchen drain cleared, September 12; camera inspection declined'],
-      },
-      {
-        label: 'Job card',
+        label: 'Calendar hold',
         icon: 'calendar',
-        title: 'Friday, October 30, 10:30 am',
-        lines: ['Ana Ruiz, Eastshore: water heater check', 'Gate code 2580, at the side gate'],
+        title: 'Thursday, November 5, 2:00 pm',
+        lines: ['30 minutes with Sam Patel: launch review'],
       },
     ],
-    receipts: [
-      {
-        source: CHECKED,
-        // A receipt states no time either: the visit's time is on the Job card.
-        plain: 'From job records and her customer file. Luis is assigned to her visit, so the address and gate code are open to him.',
-      },
-    ],
+    receipts: [{ source: decided('executed'), plain: 'Open to colleagues: Sam lets them hold 30 minutes.' }],
   },
   {
-    asked: 'Send me the warranty in case it’s the tank.',
+    asked: 'Where’s the launch checklist?',
     reply: 'Here it is.',
-    facts: [{ label: 'Document, only for Luis', icon: 'document', title: 'Water heater warranty, Ana Ruiz' }],
-    // "Warranty" is a promise word to the kernel's prose check; the card names the document.
-    receipts: [{ source: decided('executed'), plain: 'Document released to the assigned plumber. Logged on Ana’s file.' }],
+    facts: [{ label: 'Document, open to colleagues', icon: 'document', title: 'Launch checklist, Q4' }],
+    receipts: [{ source: decided('executed'), plain: 'From Sam’s docs. Everyone at Lumen Labs can open it.' }],
   },
   {
-    asked: 'Also, what did Ben make on the Harbor Street job last week?',
-    reply: 'I can’t share pay. Payroll is open to Mike and Grace only. Here are your own logged hours.',
-    facts: [{ label: 'Your logged hours', icon: 'clock', title: 'Monday, October 19 to Friday, October 23', lines: ['38.5 hours over 5 days'] }],
-    receipts: [
-      { source: decided('refused'), plain: 'Declined by team access: payroll is owner and office manager only. No pay was shared.' },
-      { source: CHECKED, plain: 'Luis’s own hours, from his time records.' },
-    ],
+    asked: 'Can you send me the Q4 budget?',
+    reply: 'That one is Sam’s to share. I’ve asked him for you.',
+    facts: [],
+    receipts: [{ source: decided('held'), plain: 'Held for Sam. Nothing was shared.' }],
   },
 ];
 
-/** What Luis can and can't open, in the board's order. */
-export const LUIS_ACCESS = {
-  name: 'Luis',
-  canOpen: ['Job cards', 'Customer history', 'Warranties', 'Photos'],
-  cantOpen: ['Invoices', 'Payroll'],
+/** What Jordan can and can't open, in the board's order. */
+export const JORDAN_ACCESS = {
+  name: 'Jordan',
+  canOpen: ['Calendar holds', 'Shared docs', 'Team notes'],
+  cantOpen: ['Budgets', '1:1 notes'],
 } as const;
 
 /** The day's line under the page. */
-export const TEAM_TODAY = 'Today: 12 team conversations, 9 answered from job records, 3 documents shared, 1 payroll request declined.';
+export const TEAM_TODAY = 'Today: 7 colleague conversations, 4 answered from your calendar and docs, 2 holds placed, 1 budget request held for you.';
 
 // ---------------------------------------------------------------------------------------------
 // The Claude account (N-R2-Vision-ClaudeAccount): Dana, back on Turner's public page, signed in.

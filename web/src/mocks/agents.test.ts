@@ -17,6 +17,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+it('question_run_finishes_after_the_desk_answers', async () => {
+  vi.useFakeTimers();
+  mockStore.reset('rivera');
+  const params = { slug: RIVERA.slug };
+  await mockStore.dispatch('openSession', { params });
+  const started = await mockStore.dispatch('sendAgent', {
+    params,
+    body: { task: 'ask_question', idempotency_key: 'question-answer' },
+  });
+  expect(started).toMatchObject({ status: 202 });
+  if ('network' in started) throw new Error('the run must start');
+  const { run_id } = started.body as { run_id: string };
+  await vi.advanceTimersByTimeAsync(AGENT_TURN_GAP_MS * 4);
+  const read = await mockStore.dispatch('agentRun', { params: { ...params, run_id } });
+  if ('network' in read) throw new Error('the run must be readable');
+  expect(read.body).toMatchObject({
+    task: 'ask_question',
+    state: 'done',
+    turns: [
+      { author: 'agent', text: 'Do you flush water heaters, for Alex Kim?' },
+      { author: 'desk', text: null, blocks: [{ text: 'Yes, we do water heater flushes.' }], receipts: [] },
+    ],
+  });
+});
+
 it('uses_the_kernel_signed_limit_lines_in_both_languages', () => {
   for (const language of ['en', 'es'] as const) {
     const renderer = readFileSync(path.join(RENDER, `${language}.py`), 'utf8');

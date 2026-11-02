@@ -457,6 +457,16 @@
   margin-top: calc(var(--space-8) - var(--space-16));
 }
 
+/* A demo visitor's note, at the top of the transcript's region: 16 px under the bar, where the
+   chat's first line would rest, and 16 px over its opening lines, so it scrolls away with them and
+   the pinned bar keeps its height. A Stop that failed says why under it. */
+.cd-conversation__demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}
+
 /* A held request's card, and a receipt's full trace, in the conversation's column. */
 .cd-conversation__held,
 .cd-conversation__trace {

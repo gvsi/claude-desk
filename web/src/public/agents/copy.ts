@@ -15,9 +15,15 @@ import type { DemoTaskSet } from '../../api/views.ts';
 import { AGENT_START_RETRY_COPY, type CopyLanguage } from '../../ds/index.ts';
 
 /** The built-in agent's tasks, as the API names them (`send_agent {task}`). */
-export const DEMO_TASKS = ['book_visit', 'quote_and_deposit', 'push_the_limit'] as const;
+export const DEMO_TASKS = ['book_visit', 'ask_question', 'quote_and_deposit', 'push_the_limit'] as const;
 
 export type DemoTask = (typeof DEMO_TASKS)[number];
+
+/** Board 03: tasks without money first, payment tasks second; each row wraps on its own. */
+export const DEMO_TASK_ROWS = [
+  ['book_visit', 'ask_question'],
+  ['quote_and_deposit', 'push_the_limit'],
+] as const satisfies readonly (readonly DemoTask[])[];
 
 export type { DemoTaskSet };
 
@@ -33,26 +39,31 @@ export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoT
   en: {
     rivera: {
       book_visit: 'Book the earliest visit',
+      ask_question: 'Ask about heater flushes',
       quote_and_deposit: 'Get a quote and pay the service call deposit',
       push_the_limit: 'Try to pay more than its limit',
     },
     trade: {
       book_visit: 'Book the earliest visit',
+      ask_question: 'Ask about small repairs',
       quote_and_deposit: 'Pay up front, within its limit',
       push_the_limit: 'Try to pay more than its limit',
     },
     office: {
       book_visit: 'Book the earliest consult',
+      ask_question: 'Ask what to bring',
       quote_and_deposit: 'Pay up front, within its limit',
       push_the_limit: 'Try to pay more than its limit',
     },
     landlord: {
       book_visit: 'Book the earliest viewing',
+      ask_question: 'Ask about pets',
       quote_and_deposit: 'Pay up front, within its limit',
       push_the_limit: 'Try to pay more than its limit',
     },
     other: {
       book_visit: 'Book the earliest appointment',
+      ask_question: 'Ask what to know first',
       quote_and_deposit: 'Pay up front, within its limit',
       push_the_limit: 'Try to pay more than its limit',
     },
@@ -60,26 +71,31 @@ export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoT
   es: {
     rivera: {
       book_visit: 'Reservar la primera visita libre',
+      ask_question: 'Preguntar por el lavado de calentadores',
       quote_and_deposit: 'Pedir un presupuesto y pagar el depósito de la visita',
       push_the_limit: 'Intentar pagar más de su límite',
     },
     trade: {
       book_visit: 'Reservar la primera visita libre',
+      ask_question: 'Preguntar por reparaciones pequeñas',
       quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
       push_the_limit: 'Intentar pagar más de su límite',
     },
     office: {
       book_visit: 'Reservar la primera consulta libre',
+      ask_question: 'Preguntar qué llevar',
       quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
       push_the_limit: 'Intentar pagar más de su límite',
     },
     landlord: {
       book_visit: 'Reservar la primera visita libre a un departamento',
+      ask_question: 'Preguntar por mascotas',
       quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
       push_the_limit: 'Intentar pagar más de su límite',
     },
     other: {
       book_visit: 'Reservar la primera cita libre',
+      ask_question: 'Preguntar qué saber antes de la primera cita',
       quote_and_deposit: 'Pagar por adelantado, dentro de su límite',
       push_the_limit: 'Intentar pagar más de su límite',
     },

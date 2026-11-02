@@ -3,7 +3,9 @@
  * its bar as REV-720 C draws it): a bar pinned to the top of the pane with who it is with, what
  * happened last and Take over; every message with the checks under it, the requests held for the
  * owner answered in place, the visitor's typing, and the owner's controls at the foot: hand back
- * or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
+ * or resume, whisper to Claude, or write to the visitor in their own words. Polled while open. A
+ * demo visitor's chat (REV-DEMO) adds its pill to the bar after the level pill, and its note to the
+ * top of the transcript, over the opening lines.
  */
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
@@ -37,8 +39,9 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { useRequestRules } from '../rules/useRequestRules.ts';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
-import { TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder } from './copy.ts';
+import { DEMO_VISITOR_PILL, TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
+import { DemoVisitorNote, useDemoVisitorRun } from './DemoVisitorNote.tsx';
 import { latestOf } from './latest.ts';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
@@ -60,6 +63,8 @@ export interface ConversationDetailProps {
   notice: string | null;
   /** The chat is on the copy's starting sample Desk, the plumbing demo, whose whisper example is its own. */
   sampleDesk: boolean;
+  /** The demo visitor run the page that opened it started in this chat, if it did. */
+  demoVisitorRun?: string | null;
 }
 
 /** Who the chat is with when the list hasn't named them yet: what the session says they are. */
@@ -140,14 +145,22 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 
-export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk }: ConversationDetailProps) {
+export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk, demoVisitorRun = null }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
   const nameRef = useRef<HTMLHeadingElement>(null);
   const transcriptRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
+  // Whether focus was in the owner's controls at the foot as they went: the demo visitor ended while she
+  // was in the whisper box, or Hand back (or Resume Claude) left an ended demo chat with nobody there.
+  const controlsHadFocus = useRef(false);
+  const holdControls = useCallback((controls: HTMLDivElement | null) => {
+    const leaving = controlsRef.current;
+    if (controls === null && leaving !== null && leaving.contains(leaving.ownerDocument.activeElement)) controlsHadFocus.current = true;
+    controlsRef.current = controls;
+  }, []);
   const [unsent, setUnsent] = useState<{ kind: 'say' | 'whisper'; text: string } | null>(null);
 
   const chat = useQuery({
@@ -181,6 +194,12 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
     reveal(handoffCards);
   }, [ready, handoffCards, sessionId, reveal]);
   const mode = chat.data?.state.mode;
+  // A demo visitor's chat, by its transcript or the list's row: its note reads its run.
+  const demo = chat.data?.demo_visitor === true || summary?.demo_visitor === true;
+  const namedRun = chat.data?.demo_visitor_run_id ?? summary?.demo_visitor_run_id ?? null;
+  const demoRun = useDemoVisitorRun(deskId, demo, namedRun, demoVisitorRun);
+  const demoEnded = demo && demoRun.phase === 'ended';
+  const nobodyThere = chat.data?.replayed === true || (demoEnded && chat.data?.state.mode === 'ai');
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
   // nothing new while a message is on its way, so they never replace words typed after them.
@@ -212,6 +231,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   // When Take over goes from the bar with focus on it (she took the chat over, or it changed hands
   // elsewhere while she was on it), focus moves to the first line of the owner's controls, as
   // TakeOverBar moves it for its own buttons, so a keyboard user isn't dropped to the top of the page.
+  // A demo visitor's chat that ended while Claude has it has no controls: focus goes to its name, as it
+  // does when those controls go with focus in them.
   const takeOverButton = useRef<HTMLButtonElement | null>(null);
   const takeOverHadFocus = useRef(false);
   const holdTakeOver = useCallback((button: HTMLButtonElement | null) => {
@@ -220,10 +241,14 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
     takeOverButton.current = button;
   }, []);
   useLayoutEffect(() => {
-    if (!takeOverHadFocus.current) return;
+    if (!takeOverHadFocus.current && !controlsHadFocus.current) return;
     takeOverHadFocus.current = false;
+    controlsHadFocus.current = false;
     const active = document.activeElement;
-    if (active === null || active === document.body) controlsRef.current?.querySelector<HTMLElement>('.cd-take-over__first')?.focus();
+    if (active !== null && active !== document.body) return;
+    const first = controlsRef.current?.querySelector<HTMLElement>('.cd-take-over__first');
+    if (first) first.focus();
+    else nameRef.current?.focus({ preventScroll: true });
   });
   useLayoutEffect(() => {
     if (!takeOverSent || controls.changing) return;
@@ -281,9 +306,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   const started = startedLine(read, desk.slug, who, business.timezone);
   const now = new Date();
   // Take over is offered in the bar while Claude answers (and in a mode this build doesn't know), as
-  // TakeOverBar would offer it: no one is on the other side of a recorded chat, and a paused chat
-  // keeps it beside Resume Claude at the foot.
-  const takeOverHere = read.replayed !== true && state.mode !== 'owner' && state.mode !== 'paused';
+  // TakeOverBar would offer it: no one is on the other side of a recorded chat, nor of a demo
+  // visitor's that has ended while Claude has it, and a paused chat keeps it under Resume Claude at
+  // the foot, until a demo visitor's has ended: then only Resume Claude.
+  const takeOverHere = !nobodyThere && state.mode !== 'owner' && state.mode !== 'paused';
 
   // The requests held in this chat: as Needs you lists them, those answered or being answered here, oldest first.
   const held = heldOldestFirst(needsYou.data ?? []).filter((item) => item.decision.session_id === sessionId);
@@ -327,8 +353,9 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
       if (!sent) setUnsent({ kind: 'whisper', text });
     });
   };
+  // Once a demo visitor has ended nobody is left to write to, or for Claude to answer: no composer.
   let composer = null;
-  if (state.mode === 'owner') {
+  if (!demoEnded && state.mode === 'owner') {
     composer = (
       // While the owner types in a chat she took over, the visitor sees her initials and three dots.
       <div ref={composerRef} data-composer="say" onInput={ownerTyping.onInput}>
@@ -344,7 +371,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
         />
       </div>
     );
-  } else if (state.mode === 'ai') {
+  } else if (!demoEnded && state.mode === 'ai') {
     composer = (
       <div ref={composerRef} data-composer="whisper">
         <Composer
@@ -362,13 +389,15 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
 
   return pane(
     <section className="cd-conversation" aria-labelledby={titleId}>
-      {/* The bar, pinned to the top of the pane across its width: who, their level, what happened last and Take over. */}
+      {/* The bar, pinned to the top of the pane across its width: who, their level (and a demo visitor's pill), what
+          happened last and Take over. */}
       <header className="cd-conversation__bar">
         <div className="cd-conversation__who">
           <h2 ref={nameRef} tabIndex={-1} id={titleId} className="cd-conversation__name cd-type-section" data-copy="user">
             {who}
           </h2>
           {level !== who ? <Pill>{level}</Pill> : null}
+          {demo ? <Pill>{DEMO_VISITOR_PILL}</Pill> : null}
           {state.kind === 'agent' ? (
             <Pill>
               <StatusDot tone="handled" />
@@ -412,6 +441,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
             ))}
           </div>
         ) : null}
+        {/* A demo visitor's note opens the transcript, over its opening lines, and scrolls away with them. */}
+        {demo ? <DemoVisitorNote deskId={deskId} phase={demoRun} onStopped={() => nameRef.current?.focus({ preventScroll: true })} /> : null}
         <Transcript label={`Conversation with ${who}`} logRef={transcriptRef}>
           <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
@@ -433,15 +464,19 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
           ) : null}
         </Transcript>
       </div>
-      {/* No one is on the other side of a recorded chat: nothing to take over, whisper or write. */}
-      {read.replayed === true ? null : (
-        <div ref={controlsRef} className="cd-conversation__controls">
+      {/* No one is on the other side of a recorded chat, nor of a demo visitor's once it has ended (its visitor
+          session is gone, or idle for good) and Claude has it again: nothing to take over, whisper or write. An ended
+          demo chat the owner still has keeps Hand back, and one the breaker paused keeps only Resume Claude, with no
+          Take over and no composer. */}
+      {nobodyThere ? null : (
+        <div ref={holdControls} className="cd-conversation__controls">
           <TakeOverBar
             mode={state.mode}
             visitorName={who}
             ownerName={business.owner_display_name}
             agent={state.kind === 'agent'}
             takeOverAbove
+            offerTakeOver={!demoEnded}
             onTakeOver={controls.takeOver}
             onHandBack={controls.handBack}
             onResume={controls.resume}

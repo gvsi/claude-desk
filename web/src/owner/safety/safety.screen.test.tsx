@@ -4,7 +4,7 @@
  * each saying where it came from and when it happened.
  */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
@@ -15,7 +15,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { isoTime } from '../../mocks/world.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../../test/screen.ts';
 import { attemptTime } from './copy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -35,6 +35,24 @@ async function readsMore(key: string, n: number): Promise<void> {
 function box(el: Element | null | undefined): DOMRect {
   if (!el) throw new Error('no element to measure');
   return el.getBoundingClientRect();
+}
+
+/** Two frames, so a layout the last step changed has been drawn. */
+function frames(): Promise<void> {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
+/** `el` shows whole inside `scroller`'s box. */
+function expectInView(el: Element | null, scroller: Element): void {
+  const shown = box(scroller);
+  expect(box(el).top).toBeGreaterThanOrEqual(shown.top);
+  expect(box(el).bottom).toBeLessThanOrEqual(shown.bottom);
+}
+
+/** The page fits its window: neither the main area nor the window scrolls. */
+function expectPageFits(main: HTMLElement): void {
+  expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
+  expectNoWindowScroll();
 }
 
 /** Today as the mock reads it now, changed by `patch`, answering every read of it from here on. */
@@ -246,6 +264,9 @@ function recordRow(screen: RenderResult, seq: number) {
  * opened) was yesterday's.
  */
 const NOW = new Date('2026-10-30T17:30:00Z');
+
+/** 9:00 am that Friday, in Los Angeles: an attempt this week's count takes in. */
+const THIS_MORNING = '2026-10-30T16:00:00.000000Z';
 
 beforeEach(() => {
   localStorage.clear();
@@ -478,10 +499,12 @@ describe('Safety', () => {
     expect(trace.getByText(/Chain verified/).elements()).toHaveLength(0);
   });
 
-  it('a_long_trace_scrolls_in_its_column_and_the_page_stays_put', async () => {
+  it('a_long_trace_scrolls_in_itself_and_the_page_stays_put', async () => {
     // A trace taller than the window, in a window short enough for it (owner comment, 2026-11-01:
-    // "long trace column makes the whole page jump"). Opening it leaves the page where it was, and
-    // the trace scrolls inside its own column beside the list.
+    // "long trace column makes the whole page jump"; 2026-11-02: the side card scrolls instead of
+    // the full page). Opening it leaves the page where it was and the page still fits the window:
+    // the trace scrolls inside its own border beside the list, and the record's long list scrolls
+    // in its own column.
     const checks = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`check_${i}`, { status: 'ok', blocked: false, latency_ms: i }]));
     const entries = threeEntries();
     entries[2] = entry(3, '2026-10-20T16:52:00.000000Z', { kind: 'reply', session_id: 'ses-1', summary: { author: 'claude', ok: true, language: 'en', violations: [], soft_checks: checks } });
@@ -496,18 +519,174 @@ describe('Safety', () => {
     const trace = region(screen, 'Full trace of entry 3');
     await expect.element(trace).toBeVisible();
     await expect.poll(() => document.activeElement).toBe(trace.element());
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    await frames();
     expect(main.scrollTop).toBe(before);
-    // Its record opened, the trace is taller than the window, and still the page stays where it was.
-    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expectPageFits(main);
+    // The trace scrolls inside its own border, all of it in the window, and Tab reaches it.
+    const scroller = trace.element();
+    expect(scroller.scrollHeight).toBeGreaterThan(scroller.clientHeight);
+    expect(box(scroller).bottom).toBeLessThanOrEqual(box(main).bottom);
+    expect(scroller.tabIndex).toBe(0);
+
+    // From the keyboard it scrolls: with the trace in focus, End takes it to its end, where its
+    // last line shows, and the page stays where it was.
+    expect(scroller.scrollTop).toBe(0);
+    await userEvent.keyboard('{End}');
+    await expect.poll(() => scroller.scrollTop).toBeGreaterThanOrEqual(scroller.scrollHeight - scroller.clientHeight - 1);
     expect(main.scrollTop).toBe(before);
-    const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
-    if (!beside) throw new Error('the trace sits in the column beside the list');
-    expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
-    // Exactly the main area's height inside its 24 px top and 20 px bottom padding, so all of it
-    // shows once the page is scrolled to it, 20 px clear of the main area's bottom.
-    expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
+    expectInView(scroller.lastElementChild, scroller);
+
+    // Scrolled down, then another entry picked: its trace starts at its top.
+    await recordRow(screen, 2).click();
+    const next = region(screen, 'Full trace of entry 2');
+    await expect.element(next).toBeVisible();
+    await expect.poll(() => next.element().scrollTop).toBe(0);
+    expect(main.scrollTop).toBe(before);
+  });
+
+  it.each([
+    [1280, 600],
+    [1280, 650],
+    [1440, 900],
+    [1512, 945],
+  ] as const)('an_open_entry_fits_the_window_at_%sx%s_and_its_card_scrolls', async (width, height) => {
+    // The owner, 2026-11-02: "make sure it works well without scrolling.. maybe the side card can
+    // scroll instead of the full page". The agent's refused charge open, with how it was stopped
+    // and its full trace, record and all: the page fits the window, its header, count and record
+    // check stay in view, and the side card scrolls inside itself.
+    await refuseTheAgentsCharge();
+    const { screen } = await renderRoute(SAFETY, { viewport: { width, height } });
+    const open = detail(screen);
+    await expect.element(open.getByText("This action didn't run.", { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+    await open.getByRole('button', { name: 'See how it was stopped' }).click();
+    await open.getByRole('button', { name: 'Full trace' }).click();
+    const trace = open.getByRole('region', { name: /^Full trace of entry \d+$/ });
+    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeInTheDocument();
+    await expect.poll(() => document.activeElement).toBe(trace.element());
+    await frames();
+    const main = open.element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expect(main.scrollTop).toBe(0);
+    expectPageFits(main);
+    for (const part of [
+      screen.getByRole('heading', { level: 1, name: 'Safety', exact: true }),
+      screen.getByText(HEADLINE),
+      screen.getByText('No entry has been changed since it was written', { exact: true }),
+    ]) {
+      await expect.element(part).toBeVisible();
+      expect(box(part.element()).top).toBeGreaterThanOrEqual(box(main).top);
+    }
+
+    // The card scrolls itself, inside the window, and opening the trace scrolled it to the trace's
+    // top, or as far as the card goes.
+    const card = open.element();
+    expect(card.scrollHeight).toBeGreaterThan(card.clientHeight);
+    expect(box(card).bottom).toBeLessThanOrEqual(box(main).bottom);
+    expect(card.scrollTop).toBeGreaterThan(0);
+    const traceTop = box(trace.element()).top;
+    expect(traceTop).toBeGreaterThanOrEqual(box(card).top);
+    expect(traceTop < box(card).top + 40 || card.scrollTop >= card.scrollHeight - card.clientHeight - 1).toBe(true);
+    // A keyboard reaches it, and its own border shows the focus: no ring around it.
+    const how = open.getByRole('button', { name: 'See how it was stopped' });
+    how.element().focus();
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(card);
+    const edge = getComputedStyle(card);
+    expect([edge.borderTopColor, edge.boxShadow, edge.outlineStyle]).toEqual([tokenColor('--line-focus'), 'none', 'none']);
+
+    // From the keyboard it scrolls: from its top, End takes it to its end, where the link to the
+    // conversation shows, and the page stays where it was.
+    card.scrollTop = 0;
+    await frames();
+    await userEvent.keyboard('{End}');
+    await expect.poll(() => card.scrollTop).toBeGreaterThanOrEqual(card.scrollHeight - card.clientHeight - 1);
+    expect(main.scrollTop).toBe(0);
+    expectInView(open.getByRole('link', { name: 'Open conversation', exact: true }).element(), card);
+  });
+
+  it('a_long_stopped_list_scrolls_in_its_column_and_the_page_fits', async () => {
+    // A week with many stopped attempts: the list scrolls in its own column and the page still fits
+    // the window. Each row's checkpoint line has words only a screen reader reads, placed out of the
+    // flow; they stay inside the list's column rather than stretching the page under it.
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts(
+      Array.from({ length: 20 }, (_, i) =>
+        attempt({ ref_id: `dec-${i}`, created_at: `2026-10-20T16:${String(50 - i).padStart(2, '0')}:00.000000Z` }),
+      ),
+    );
+    const { screen } = await renderRoute(SAFETY, { viewport: { width: 1440, height: 900 } });
+    const list = screen.getByRole('list', { name: 'Stopped, newest first' });
+    await expect.element(list).toBeVisible();
+    expect(list.getByRole('link').elements()).toHaveLength(20);
+    await frames();
+    const main = list.element().closest<HTMLElement>('.cd-app-shell__main');
+    const column = list.element().closest<HTMLElement>('.cd-attempts');
+    if (!main || !column) throw new Error('the list in its column, in the main area');
+    expectPageFits(main);
+    expect(column.scrollHeight).toBeGreaterThan(column.clientHeight);
+    expect(box(column).bottom).toBeLessThanOrEqual(box(main).bottom);
+  });
+
+  it('a_long_reason_keeps_its_meter_inside_the_card_at_1280x600', async () => {
+    // A short laptop window and a reason long enough that "See how it was stopped" opens its meter
+    // below the card's visible part. The meter's words only a screen reader reads sit out of the
+    // flow; they stay inside the card, which scrolls, rather than stretching the page under it.
+    const reason = Array.from({ length: 12 }, () => REFUND_REASON).join(' ');
+    injectLedger(ledgerPage(threeEntries()));
+    // Refused this week, so the count heads the page rather than the empty state.
+    injectAttempts([attempt({ reason_plain: reason, created_at: THIS_MORNING })]);
+    await stoppedThisWeek(1);
+    const { screen } = await renderRoute(`${SAFETY}/dec-refund`, { viewport: { width: 1280, height: 600 } });
+    const open = detail(screen);
+    await expect.element(open.getByText(reason, { exact: true })).toBeVisible();
+    await open.getByRole('button', { name: 'See how it was stopped' }).click();
+    await expect.element(open.getByText('Stopped by: Action checkpoint', { exact: true })).toBeInTheDocument();
+    const card = open.element();
+    card.scrollTop = 0;
+    await frames();
+    const meter = open.getByText('Stopped by: Action checkpoint', { exact: true }).element();
+    expect(box(meter).top).toBeGreaterThan(box(card).bottom);
+    const main = card.closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expectPageFits(main);
+    expect(card.scrollHeight).toBeGreaterThan(card.clientHeight);
+  });
+
+  it('a_very_short_window_keeps_the_card_six_controls_tall_and_scrolls_the_page', async () => {
+    // Under about 530 px of window the list and the open entry would show little of either, so they
+    // keep six controls' height and the page scrolls instead.
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts([attempt({ created_at: THIS_MORNING })]);
+    await stoppedThisWeek(1);
+    const { screen } = await renderRoute(`${SAFETY}/dec-refund`, { viewport: { width: 1280, height: 480 } });
+    const open = detail(screen);
+    await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeInTheDocument();
+    await frames();
+    const control = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--size-control'));
+    expect(control).toBeGreaterThan(0);
+    expect(box(open.element()).height).toBeGreaterThanOrEqual(6 * control - 1);
+    const main = open.element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expect(main.scrollHeight).toBeGreaterThan(main.clientHeight);
+    expectNoWindowScroll();
+  });
+
+  it('an_open_entry_on_a_phone_scrolls_with_the_page', async () => {
+    // On a phone the page scrolls as usual and the card is as tall as what it holds.
+    await refuseTheAgentsCharge();
+    const { screen } = await renderRoute(SAFETY, { viewport: 'phone' });
+    const open = detail(screen);
+    await expect.element(open.getByText("This action didn't run.", { exact: true })).toBeInTheDocument();
+    await open.getByRole('button', { name: 'Full trace' }).click();
+    await expect.element(open.getByText('What was recorded', { exact: true })).toBeInTheDocument();
+    const card = open.element();
+    expect(card.scrollHeight).toBeLessThanOrEqual(card.clientHeight);
+    expect(card.hasAttribute('tabindex')).toBe(false);
+    const main = card.closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expect(main.scrollHeight).toBeGreaterThan(main.clientHeight);
+    expectNoWindowScroll();
   });
 
   it.each(['desktop', 'phone'] as const)('header_says_what_the_page_is_on_%s', async (viewport) => {
@@ -524,30 +703,6 @@ describe('Safety', () => {
     expect(subtitle.element().compareDocumentPosition(headline.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
-  });
-
-  it('record_is_closed_for_each_entry_opened', async () => {
-    // The owner opens entry 2's record, then picks entry 3 in the same list: its trace opens with
-    // the record closed, as every trace does, rather than keeping the last one's open.
-    injectLedger(ledgerPage(threeEntries()));
-    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    await recordRow(screen, 2).click();
-    const first = region(screen, 'Full trace of entry 2');
-    const recorded = first.getByRole('button', { name: 'What was recorded', exact: true });
-    await recorded.click();
-    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
-    await recordRow(screen, 3).click();
-    const next = region(screen, 'Full trace of entry 3');
-    await expect.element(next).toBeVisible();
-    await expect.element(next.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
-    expect(next.element().querySelector('pre')).toBeNull();
-
-    // Back to entry 2: its record is closed again, not left as it was.
-    await recordRow(screen, 2).click();
-    const again = region(screen, 'Full trace of entry 2');
-    await expect.element(again).toBeVisible();
-    await expect.element(again.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
-    expect(again.element().querySelector('pre')).toBeNull();
   });
 
   it('dev_key_is_labelled', async () => {
@@ -667,9 +822,6 @@ describe('Safety', () => {
     await expect.element(full).toHaveAttribute('aria-expanded', 'true');
     const trace = region(screen, 'Full trace of entry 2');
     await expect.element(trace).toBeVisible();
-    expect(trace.element().textContent).not.toContain('payments.create_refund');
-    // What was recorded opens under its label.
-    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     const values = [...document.querySelectorAll('.cd-type-trace')].map((el) => el.textContent);
     expect(values).toContain('2');
     expect(values.join('\n')).toContain('payments.create_refund');
@@ -947,12 +1099,7 @@ describe('Safety', () => {
     await expectScreenBasics(screen.container, { owner: true });
     await recordRow(screen, returned.seq).click();
     const trace = region(screen, `Full trace of entry ${returned.seq}`);
-    // The raw record waits, closed, under its label: the trace opens on its plain line and the chain.
-    const recorded = trace.getByRole('button', { name: 'What was recorded', exact: true });
-    await expect.element(recorded).toHaveAttribute('aria-expanded', 'false');
-    expect(trace.element().textContent).not.toContain('"from"');
-    await recorded.click();
-    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
+    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeVisible();
     expect(trace.element().textContent).toContain('"from": "owner"');
     expect(trace.element().textContent).toContain('"to": "ai"');
   });
@@ -1189,7 +1336,6 @@ describe('Safety', () => {
     const values = () => [...trace.element().querySelectorAll('.cd-type-trace')].map((el) => el.textContent ?? '');
     await expect.element(trace.getByText('Recorded at', { exact: true })).toBeVisible();
     expect(values()).toContain(decide.created_at);
-    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     expect(values().join('\n')).toContain(replayedAt);
 
     // The attempt kept in that entry says the same, at the same time.
