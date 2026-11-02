@@ -525,7 +525,9 @@ it.each([
   // Only Date is faked: both a one-digit and a two-digit clock keep the rows at their shapes.
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(now));
-  onTestFinished(() => vi.useRealTimers());
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   let times: DOMRect[] = [];
