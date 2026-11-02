@@ -109,7 +109,8 @@ describe('Notifications request link', () => {
     await expect.element(page.getByText(entry.body)).toBeVisible();
     const column = page.element().querySelector<HTMLElement>('.cd-notifications')!;
     const edge = column.getBoundingClientRect();
-    const text = column.querySelectorAll<HTMLElement>('h1, h2, p, span, a');
+    // What is drawn: a screen reader's words are clipped to nothing on purpose.
+    const text = [...column.querySelectorAll<HTMLElement>('h1, h2, p, span, a')].filter((element) => element.closest('.cd-sr-only') === null);
     expect(text.length).toBeGreaterThan(5);
     for (const element of text) {
       expect(element.scrollWidth, element.className).toBeLessThanOrEqual(element.clientWidth);

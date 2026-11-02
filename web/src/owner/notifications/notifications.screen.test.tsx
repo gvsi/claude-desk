@@ -2,8 +2,8 @@
  * Notifications in a real browser against the mock API, as REV-NOTIF draws it: the sidebar's row
  * under Safety with a count of the unread ones, which goes as the page shows them; the page's days
  * and rows, newest first, with a dot on each entry that was unread as the page opened; its empty
- * state and a failed read; on a laptop and on a phone, where the row is in the Menu sheet. The
- * demo bar has no Demo inbox of its own any more.
+ * state; on a laptop and on a phone, where the row is in the Menu sheet. The demo bar has no Demo
+ * inbox of its own any more. A failed read is the loading, Today and verify screens' to check.
  */
 import { describe, expect, it } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
@@ -109,18 +109,6 @@ describe('Notifications', () => {
     expect(rows(screen)).toHaveLength(0);
     expect(unreadPill(screen)).toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
-  });
-
-  it('failed_read_says_so_with_try_again', async () => {
-    mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
-    const { screen } = await renderRoute(NOTIFICATIONS, { retryScale: 0 });
-    const main = screen.getByRole('main');
-    const notice = main.getByRole('alert');
-    await expect.element(notice).toHaveTextContent(/^Couldn't open your notifications\./);
-    expect(main.getByText('Nothing here yet', { exact: true }).query()).toBeNull();
-    await notice.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(notice).not.toBeInTheDocument();
-    await expect.poll(() => rows(screen).length).toBeGreaterThan(0);
   });
 
   it.each(['desktop', 'phone'] as const)('page_fits_and_keeps_its_row_on_%s', async (viewport) => {

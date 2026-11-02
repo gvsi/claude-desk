@@ -33,7 +33,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Plumber: Story = {
-  parameters: { canvasNote: 'Notifications’ card at the content column’s 720 px, under the page’s own heading, which the board draws over it.' },
+  parameters: { canvasNote: 'Alerts’ card at the content column’s 720 px, under the page’s own heading, which the board draws over it.' },
   play: async ({ canvas, canvasElement }) => {
     // list_semantics_kept: a list named by its label, one item per alert setting, its role kept with its markers gone.
     await expect(expectListsKeepTheirRole(canvasElement)).toBe(1);
@@ -42,7 +42,7 @@ export const Plumber: Story = {
     await expect(rows.map((row) => row.querySelector('.cd-alert-list__when')?.textContent)).toEqual(['Right away', 'In your briefing', 'Not at all']);
     await expect(rows.map((row) => row.querySelector('.cd-alert-list__what')?.textContent)).toEqual(PLUMBER.map((item) => item.what));
     // How each reaches the owner at the right; nothing for alerts that don't.
-    await expect(rows.map((row) => row.querySelector('.cd-alert-list__how')?.textContent ?? null)).toEqual(['Demo inbox', 'Each morning at 7:00 am', null]);
+    await expect(rows.map((row) => row.querySelector('.cd-alert-list__how')?.textContent ?? null)).toEqual(['Notifications', 'Each morning at 7:00 am', null]);
     // Read-only: nothing here can be pressed or changed.
     await expect(canvasElement.querySelectorAll('button, a, input, select, textarea')).toHaveLength(0);
 

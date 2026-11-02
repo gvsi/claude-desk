@@ -61,8 +61,8 @@ export { COPIED_FOR_MS } from '../../ds/index.ts';
  * you" and "Live now" when they have something, and "Since last night" always; at the right the last
  * 7 days. Today opens no visitor chat itself, and
  * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
- * request (`#request-<id>`, as the Demo inbox links an owner's alert) brings that request's card
- * into view and focus, once the demo bar's Demo inbox sheet, whose link it may be, has closed. Until what the page first shows is read, it holds its own shapes, so it
+ * request (`#request-<id>`, as Notifications links an owner's alert) brings that request's card
+ * into view and focus. Until what the page first shows is read, it holds its own shapes, so it
  * opens drawn however the owner came to it.
  */
 export function TodayPage({ namesTheTab = true }: TodayPageProps) {

@@ -85,7 +85,7 @@ export function NotificationsPage() {
   const [openedAt] = useState(() => Date.now() - FRESH_MS);
   // What the owner had seen as the page opened: every other entry keeps its dot for this visit.
   const [seenAtOpen] = useState(seenIds);
-  const inbox = useNotifications();
+  const inbox = useNotifications({ onPage: true });
   const failure = useReadFailure(inbox, { pausedRoute: 'ownerInbox' });
 
   // Read again as the page opens, so it shows what is there now.
@@ -93,6 +93,16 @@ export function NotificationsPage() {
   useEffect(() => {
     void refetch();
   }, [refetch]);
+
+  // Whether the page is still shown: false from the moment it goes, before its effects are cleaned
+  // up, so a poll that comes due as the owner leaves reads nothing.
+  const shown = useRef(true);
+  useLayoutEffect(() => {
+    shown.current = true;
+    return () => {
+      shown.current = false;
+    };
+  }, []);
 
   // Then every few seconds while it stays open and the tab is in view, counted again from each change
   // to the read (it going out, its answer, read or failed), as React Query's `refetchInterval` counts.
@@ -106,7 +116,7 @@ export function NotificationsPage() {
     const startCount = () => {
       window.clearInterval(poll);
       poll = window.setInterval(() => {
-        if (!focusManager.isFocused()) return;
+        if (!shown.current || !focusManager.isFocused()) return;
         void refetch({ cancelRefetch: false });
         for (const deskId of linkedDesks.current) void queryClient.prefetchQuery({ ...needsYouQuery(deskId), staleTime: FRESH_MS });
       }, pollMs('inbox'));
