@@ -49,7 +49,7 @@ function SafetyRecord() {
                 What
               </th>
               <th scope="col" className="cd-type-caption">
-                Recorded by
+                From
               </th>
               <th scope="col" className="cd-type-caption">
                 Time
@@ -86,7 +86,7 @@ const meta = {
     canvasNote: [
       'Every entry: the ledger as a table, newest first, and one entry’s full trace beside it.',
       'The ledger is the Turner fixture’s three entries, with the held quote’s decision open, where the board lists entries 48 to 39 and opens the refused refund; the times are the screen’s strings.',
-      'The table is page layout the web app (plan 04) owns, composed on the tokens; every entry is “Recorded by your Desk”, where the board says “Recorded by the checkpoint”, so the owner’s row names no part; FullTrace’s own line keeps “Recorded by the checkpoint.”, as signed at sign-off.',
+      'The table is page layout the web app (plan 04) owns, composed on the tokens; every entry is “Recorded by your Desk” under the column head “From”, where the board says “Recorded by the checkpoint” under “Recorded by”, so the owner’s row names no part and the head doesn’t repeat it; FullTrace’s own line keeps “Recorded by the checkpoint.”, as signed at sign-off.',
       'The board’s open questions are canvas notes.',
     ].join(' '),
   },
@@ -104,6 +104,8 @@ export const Board: Story = {
 
     // The ledger, newest first, each recorded by the Desk; the open one marked.
     const table = canvas.getByRole('table', { name: 'Every entry' });
+    // The column heads, where the board's "Recorded by" became "From", so the head doesn't repeat its cells.
+    await expect(within(table).getAllByRole('columnheader').map((head) => head.textContent)).toEqual(['Entry', 'What', 'From', 'Time']);
     const rows = within(table).getAllByRole('row').slice(1);
     await expect(rows.map((row) => row.firstElementChild?.textContent)).toEqual(['3', '2', '1']);
     for (const row of rows) await expect(row).toHaveTextContent(ORIGIN.kernel);

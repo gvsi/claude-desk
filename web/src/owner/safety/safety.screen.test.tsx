@@ -759,8 +759,10 @@ describe('Safety', () => {
     expect(detail(screen).getByText(REPORTED).elements()).toHaveLength(0);
     noOldWords();
 
-    // Every row of the record.
+    // Every row of the record, under a column head that doesn't repeat its words.
     await viewOption(screen, 'Every entry').click();
+    await expect.element(recordRow(screen, 4)).toBeVisible();
+    expect([...document.querySelectorAll('.cd-record__head > span')].map((el) => el.textContent)).toEqual(['Entry', 'What', 'From', 'Time']);
     await expect.element(recordRow(screen, 4).getByText(REPORTED, { exact: true })).toBeVisible();
     for (const seq of [1, 2, 3]) await expect.element(recordRow(screen, seq).getByText(CHECKED, { exact: true })).toBeVisible();
     noOldWords();

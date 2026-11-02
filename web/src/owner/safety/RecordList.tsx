@@ -82,7 +82,7 @@ export function RecordList({ page, devKey, timezone }: RecordListProps) {
         <div className="cd-record__head cd-type-caption" aria-hidden="true">
           <span>Entry</span>
           <span>What</span>
-          <span>Recorded by</span>
+          <span>From</span>
           <span className="cd-record__head-when">Time</span>
         </div>
         <ul className="cd-record__list" aria-label="Every entry, newest first">
