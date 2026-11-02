@@ -376,7 +376,7 @@ export function decidingCard(desk: DeskRecord, decision: Decision): RuleCard | n
 export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
   const deskId = desk.summary.desk_id;
   const held = decisionsOf(world, deskId)
-    .filter((d) => d.decision.state === 'held')
+    .filter((d) => world.supersedeIfBooked(d).state === 'held')
     .map((d) => {
       const session = world.sessions.get(d.decision.session_id);
       return {

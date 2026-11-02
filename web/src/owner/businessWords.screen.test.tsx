@@ -17,9 +17,9 @@ it.each([
   { type: 'trade', description: 'An electrician in Fresno', title: 'Set for a trade business',
     alerts: ['Held requests, paused chats and emergencies', 'New leads, bookings and payments', 'Messages Claude answered on its own'],
     questions: ['Do you give free estimates?', 'Can you come out on a Sunday?', 'Do you take credit cards on site?'] },
-  { type: 'office', description: 'Bright Smile Dental. A dentist in Oakland.', title: 'Set for a professional practice',
+  { type: 'office', description: 'Bright Smile Dental. A dentist in Oakland.', title: 'Set for a business that books appointments',
     alerts: ['Held requests and paused chats', 'New clients, appointments and payments', 'Messages Claude answered on its own'],
-    questions: ['Do you work with clients in other states?', 'Can we meet in person instead of a call?', 'Do you take credit cards?'] },
+    questions: ['How early should I arrive for my first appointment?', 'Can I bring someone with me to the appointment?', 'Do you take credit cards?'] },
   { type: 'landlord', description: 'Apartments in Sacramento', title: 'Set for a landlord',
     alerts: ['Held requests, paused chats and maintenance requests', 'New applicants, viewings and payments', 'Messages Claude answered on its own'],
     questions: ['Do you allow pets?', 'Is parking included?', 'Can I pay rent by card?'] },
@@ -48,5 +48,5 @@ it.each([
 it('the sample business keeps Turner’s words on every Desk, whatever its type says', () => {
   expect(businessWords({ business_name: 'Turner Plumbing', business_type: 'rivera' }).alertsTitle).toBe('Set for a plumber');
   expect(businessWords({ business_name: 'Turner Plumbing', business_type: 'other' }).alertsTitle).toBe('Set for a plumber');
-  expect(businessWords({ business_name: 'Bright Smile Dental', business_type: 'office' }).alertsTitle).toBe('Set for a professional practice');
+  expect(businessWords({ business_name: 'Bright Smile Dental', business_type: 'office' }).alertsTitle).toBe('Set for a business that books appointments');
 });

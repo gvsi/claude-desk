@@ -33,15 +33,34 @@ export function proposalForThePage(markdown: string): string {
   return markdown.replace(sentence, ON_THE_PAGE);
 }
 
+/** The blocks a card holds, by their places in the document, the last one included. */
+export interface BlockSpan {
+  first: number;
+  last: number;
+}
+
 export interface AboutDocument {
   route: string;
   title: string;
   /** The one line under the title (`links.ts`). */
   summary: string;
+  /**
+   * How the page opens. `hero`: the app icon, then "About this prototype", the title and the summary centred
+   * above the lead figure, `hero`. `column`: "About this prototype", the title and the summary left-aligned at the
+   * top of the article's column, with no icon and no lead figure.
+   */
+  layout: 'hero' | 'column';
+  /** The figure under the summary in the `hero` layout; its marker in the article renders nothing. */
+  hero?: FigureName;
   /** A sentence of the document, shown after its first section. */
-  pullQuote: string;
-  /** The figure under the summary; its marker in the article renders nothing. */
-  hero: FigureName;
+  pullQuote?: string;
+  /** The opening of the first section that the page sets in a card with the prediction at a glance (`claimOf`). */
+  claim?: BlockSpan;
+  /**
+   * Column widths, in percent of the article's column, for the one table in a section, by the section's anchor. On a
+   * laptop that table keeps those widths; every other table sizes its columns to its words.
+   */
+  columns?: Record<string, readonly number[]>;
   /** The other document: "Also read" beside this one, and the one a relative link in it may name. */
   next: AboutId;
   blocks: Block[];
@@ -52,7 +71,9 @@ interface Source {
   next: AboutId;
   /** The page's named changes to the Markdown, applied before parsing. */
   forThePage: (markdown: string) => string;
-  words: Pick<AboutDocument, 'pullQuote' | 'hero'>;
+  words: Pick<AboutDocument, 'layout' | 'pullQuote' | 'hero' | 'columns'>;
+  /** Whether the first section's opening is set as a claim card (`claimOf`). */
+  claimCard?: true;
 }
 
 const SOURCES: Record<AboutId, Source> = {
@@ -61,7 +82,8 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'prediction',
     forThePage: proposalForThePage,
     words: {
-      pullQuote: 'Talking Claude around can’t make it act past the owner’s rules.',
+      layout: 'hero',
+      pullQuote: 'Prompt injection and social engineering can’t make Claude act past the owner’s rules.',
       hero: 'architecture',
     },
   },
@@ -69,23 +91,61 @@ const SOURCES: Record<AboutId, Source> = {
     file: 'capability-prediction.md',
     next: 'proposal',
     forThePage: (markdown) => markdown,
-    words: {
-      pullQuote: 'It will still be talked around often enough that its limits must sit in code.',
-      hero: 'tau3',
-    },
+    // The safety results' model columns need room for their figures and notes (design lane, 2026-11-02).
+    words: { layout: 'column', columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] } },
+    claimCard: true,
   },
 };
+
+/**
+ * The blocks of the claim the page sets in a card at the top of the first section, so the card shows the document's
+ * own words: the paragraph that opens the section, one bold run (the lead), the list under it and the paragraph after
+ * it (the caveat). A document whose first section doesn't open that way fails here.
+ */
+function claimOf(blocks: Block[]): BlockSpan {
+  const section = blocks.findIndex((block) => block.kind === 'heading' && block.depth === 2);
+  const [lead, list, caveat] = section < 0 ? [] : blocks.slice(section + 1, section + 4);
+  const boldLead = lead?.kind === 'paragraph' && lead.children.length === 1 && lead.children[0]?.kind === 'strong';
+  if (!boldLead || list?.kind !== 'list' || caveat?.kind !== 'paragraph') {
+    throw new MarkdownError(null, 'the claim card needs the first section to open with a bold lead, a list and a paragraph');
+  }
+  return { first: section + 1, last: section + 3 };
+}
+
+/** The tables in the section `id` names: the blocks between its heading and the next. */
+export function tablesIn(blocks: Block[], id: string): Extract<Block, { kind: 'table' }>[] {
+  const start = blocks.findIndex((block) => block.kind === 'heading' && block.id === id);
+  if (start < 0) return [];
+  const end = blocks.findIndex((block, i) => i > start && block.kind === 'heading');
+  return blocks
+    .slice(start + 1, end < 0 ? blocks.length : end)
+    .filter((block): block is Extract<Block, { kind: 'table' }> => block.kind === 'table');
+}
+
+/** Each section's set column widths, checked against its one table: as many widths as columns, adding up to 100. */
+function checkColumns(blocks: Block[], columns: Record<string, readonly number[]> = {}): void {
+  for (const [id, widths] of Object.entries(columns)) {
+    const tables = tablesIn(blocks, id);
+    if (tables.length !== 1) throw new MarkdownError(null, `the column widths for ${id} need one table in that section`);
+    const sum = widths.reduce((total, width) => total + width, 0);
+    if (widths.length !== tables[0]?.head.length || sum !== 100) {
+      throw new MarkdownError(null, `the column widths for ${id} need one width per column, adding up to 100`);
+    }
+  }
+}
 
 /**
  * One document's page from its Markdown, with curly quote marks where the Markdown has straight ones. A
  * `MarkdownError` names the file as well as the line.
  */
 export function readDocument(id: AboutId, markdown: string): AboutDocument {
-  const { file, next, forThePage, words } = SOURCES[id];
+  const { file, next, forThePage, words, claimCard } = SOURCES[id];
   // The one relative link a document may hold is the other document's file name, which becomes its page.
   const resolve = (target: string) => (target === SOURCES[next].file ? ABOUT_PAGES[next].route : undefined);
   try {
-    return { ...ABOUT_PAGES[id], ...words, next, blocks: curlQuotes(parseDocument(forThePage(markdown), resolve)) };
+    const blocks = curlQuotes(parseDocument(forThePage(markdown), resolve));
+    checkColumns(blocks, words.columns);
+    return { ...ABOUT_PAGES[id], ...words, ...(claimCard ? { claim: claimOf(blocks) } : {}), next, blocks };
   } catch (error) {
     if (error instanceof MarkdownError) throw new MarkdownError(error.line, error.reason, `docs/${file}`);
     throw error;
