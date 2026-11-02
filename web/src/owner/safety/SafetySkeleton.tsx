@@ -2,7 +2,7 @@ import { useRef } from 'react';
 
 import { chainLine, PageHeaderSkeleton, Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
-import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, SAFETY_SUBTITLE, originCopy, turnedDownHeadline } from './copy.ts';
+import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, SAFETY_SUBTITLE, heldForYou, originCopy, turnedDownHeadline } from './copy.ts';
 
 import './Safety.css';
 
@@ -143,7 +143,8 @@ function Detail() {
 
 /**
  * Safety's first view, in its own responsive layout, with its header added on a reload: its subtitle
- * in as many lines as its words take at the column's width in this browser's fonts.
+ * in as many lines as its words take at the column's width in this browser's fonts. The header's
+ * action is drawn as one request held for the owner, as on a fresh copy, since the count isn't read yet.
  */
 export function SafetySkeleton({ withHeader }: { withHeader: boolean }) {
   return (
@@ -157,7 +158,7 @@ export function SafetySkeleton({ withHeader }: { withHeader: boolean }) {
               height="var(--size-control)"
               anchor="page-actions"
               measure={{
-                label: '1 held for you',
+                label: heldForYou(1),
                 className: 'cd-button cd-button--secondary cd-button--inline cd-type-control',
                 contentClassName: 'cd-status-label',
                 suffix: { className: 'cd-status-dot', width: 'var(--size-dot)' },
