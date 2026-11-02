@@ -44,6 +44,19 @@ def test_lane_database_urls_reach_postgres_directly_over_the_lane_link():
     assert firewall in (tools / "lane-exec.py").read_text()
 
 
+def test_a_lanes_database_rule_comes_before_its_lane_network_reject():
+    """A lane's firewall rules are appended in order, and the first match wins: the ACCEPT for the bridge's Postgres
+    must come before the REJECT for the lane network it sits in, or new lanes lose their database after the next
+    provision."""
+    from desk_tools.testbox import DATABASE_HOST, DATABASE_PORT
+    launcher = (Path(__file__).parents[1] / "testbox" / "lane-exec.py").read_text()
+    accept = f'"iptables", "-A", "OUTPUT", "-d", "{DATABASE_HOST}", "-p", "tcp", "--dport", "{DATABASE_PORT}", "-j", "ACCEPT"'
+    reject = '"iptables", "-A", "OUTPUT", "-d", "10.200.0.0/16", "-j", "REJECT"'
+    assert accept in launcher and reject in launcher
+    assert launcher.index(accept) < launcher.index(reject)
+    assert '"iptables", "-I"' not in launcher            # an inserted rule would jump the order the file shows
+
+
 def test_command_preserves_argument_boundaries():
     assert remote_command(["printf", "%s", "hello; touch /bad"]) == "printf %s 'hello; touch /bad'"
 
