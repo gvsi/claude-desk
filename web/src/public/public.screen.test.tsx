@@ -5150,11 +5150,13 @@ describe('a Desk whose owner gave no name', () => {
 
   it('no_owner_name_takes_over_as_the_business', async () => {
     // The owner, who gave no name, takes the chat over and writes: the visitor sees the business
-    // join and speak, never setup's fallback, "Owner" (owner, 2026-11-02).
+    // join and write, never setup's fallback, "Owner" (owner, 2026-11-02).
     const slug = await liveSetupDesk(FENSTER);
     const { screen } = await renderRoute(`/d/${slug}`);
     await ready(screen);
-    await say(screen, 'Do you install skylights?');
+    const before = mockStore.visitorSession(slug)?.events.length ?? 0;
+    await type(screen, 'Do you install skylights?');
+    await turnEndedOn(slug, before);
     const session = mockStore.visitorSession(slug);
     if (!session) throw new Error('the visitor has a chat');
     const call = async (key: 'takeover' | 'ownerMessage', body: unknown) => {
@@ -5164,8 +5166,10 @@ describe('a Desk whose owner gave no name', () => {
     await call('takeover', { generation: session.state.generation });
     await call('ownerMessage', { text: 'Yes, we do. When suits you?', kind: 'say' });
     await expect.element(screen.getByText('Fenster & Fenster joined the chat', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Yes, we do. When suits you?', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Fenster & Fenster said', { exact: true })).toBeVisible();
+    const words = screen.getByText('Yes, we do. When suits you?', { exact: true });
+    await expect.element(words).toBeVisible();
+    // Their message is the business's, by name, as the owner's own messages are.
+    expect(words.element().closest('.cd-person-message')?.querySelector('.cd-person-message__name')?.textContent).toBe('Fenster & Fenster');
     expect(document.querySelector('[role="log"]')?.textContent ?? '').not.toMatch(/\bOwner\b/);
   });
 

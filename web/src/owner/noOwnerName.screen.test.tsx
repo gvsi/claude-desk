@@ -2,7 +2,7 @@
  * An owner who gave no name, in a real browser against the mock API: the Desk carries setup's
  * fallback, "Owner", which is no one's name, so Share, Profile and a conversation never show it
  * (owner, 2026-11-02). Share's card asks for a person, as the public page does, and its ready-made
- * words, Profile and the conversation's lines name the business.
+ * words, Profile and the owner's own messages in a conversation go by the business.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -50,12 +50,21 @@ describe('An owner who gave no name', () => {
     expect(screen.getByRole('main').element().textContent).not.toMatch(/\bOwner\b/);
   });
 
-  it('a_conversation_names_the_business_where_it_would_name_the_owner', async () => {
+  it('a_conversation_shows_the_owner_by_the_business', async () => {
     await withNoOwnerName();
     const { screen } = await renderRoute(`${DESK}/conversations/${DANA_LIVE}`);
-    await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
-    // What the visitor would see as the owner takes over: the business joined the chat.
-    expect(document.querySelector('.cd-take-over')?.textContent).toContain(`“${BUSINESS} joined the chat.”`);
+    // The owner takes over and writes: their own message is "You", beside the business's initials,
+    // as the sidebar's owner row shows them.
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+    await box.fill('Yes, we can come on Tuesday.');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    const mine = screen.getByRole('log').getByText('Yes, we can come on Tuesday.', { exact: true });
+    await expect.element(mine).toBeVisible();
+    const message = mine.element().closest('.cd-person-message');
+    expect(message?.querySelector('.cd-person-message__avatar')?.textContent).toBe('TP');
+    expect(document.querySelector('.cd-sidebar__owner .cd-sidebar__avatar')?.textContent).toBe('TP');
     expect(screen.getByRole('main').element().textContent).not.toMatch(/\bOwner\b/);
   });
 });
