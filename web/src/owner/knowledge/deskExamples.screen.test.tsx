@@ -22,10 +22,10 @@ it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_st
   const salon = await liveSetupDeskIds('A hair salon in Oakland');
   const { screen } = await renderRoute(`/app/${salon.deskId}/knowledge`, { viewport, pollScale: 100 });
   const salonQuestions = screen.getByRole('region', { name: QUESTIONS, exact: true });
-  await expect.element(salonQuestions.getByRole('heading', { name: QUESTIONS, exact: true })).toBeVisible();
-  await expect.element(salonQuestions.getByText(QUESTION_NOTE, { exact: true })).toBeVisible();
-  await expect.element(salonQuestions.getByText('Mock', { exact: true })).toBeVisible();
-  expect.soft(salonQuestions.getByRole('listitem').elements()).toHaveLength(0);
+  await expect.element(screen.getByRole('textbox', { name: 'A website', exact: true })).toBeVisible();
+  expect.soft(salonQuestions.query()).toBeNull();
+  expect.soft(screen.getByRole('heading', { name: QUESTIONS, exact: true }).query()).toBeNull();
+  expect.soft(screen.getByText(QUESTION_NOTE, { exact: true }).query()).toBeNull();
   expect.soft(screen.getByRole('textbox', { name: 'A website', exact: true }).element().hasAttribute('placeholder')).toBe(false);
   const more = screen.getByRole('region', { name: 'More sources', exact: true });
   await expect.element(more.getByText(MORE_NOTE, { exact: true })).toBeVisible();

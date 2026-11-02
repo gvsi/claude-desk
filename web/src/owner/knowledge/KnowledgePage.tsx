@@ -382,7 +382,7 @@ export function KnowledgePage() {
 /** Static examples share the real source list’s card and row markup. */
 export function KnowledgePreviews({ showSampleQuestions = true }: { showSampleQuestions?: boolean } = {}) {
   return <div className="cd-knowledge__previews">
-    <KnowledgeList title="Questions Claude couldn’t answer" items={showSampleQuestions ? SAMPLE_QUESTIONS : []} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} />
+    {showSampleQuestions ? <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} /> : null}
     <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
   </div>;
 }
