@@ -285,7 +285,7 @@ AGENT_TOOLS: dict[str, str] = {
     "native.find_slots": "Buscar horarios libres",
     "native.book": "Reservar una visita",
     "native.payment_link": "Pedir un enlace de pago para una cotización",
-    "native.charge_mandate": "Pagar una cotización dentro del límite de un mandato firmado",
+    "native.charge_mandate": "Pagar una cotización dentro de un límite firmado",
     "native.capture_lead": "Dejar datos de contacto",
     "native.request_callback": "Pedir que te devuelvan la llamada",
     "native.start_verification": "Verificar a un cliente con un código enviado a su contacto registrado",
