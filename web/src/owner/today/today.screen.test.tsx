@@ -945,14 +945,18 @@ describe('Today', () => {
     const retry = section.getByRole('button', { name: 'Try again' });
     await expect.element(retry).toBeVisible();
 
-    // A retry that still fails keeps the same button and its keyboard focus.
+    // A retry that still fails keeps the same button and its keyboard focus. The failing read is held,
+    // so its busy state shows however fast the failure would come back.
+    const path = ROUTES[route].path.replace('{desk_id}', RIVERA.deskId);
+    const failing = holdReads(path);
     (retry.element() as HTMLElement).focus();
     await userEvent.keyboard('{Enter}');
     await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    failing.release();
     await expect.element(retry).not.toHaveAttribute('aria-busy');
     await expect.element(retry).toHaveFocus();
 
-    const read = holdReads(ROUTES[route].path.replace('{desk_id}', RIVERA.deskId));
+    const read = holdReads(path);
     (retry.element() as HTMLElement).focus();
     await userEvent.keyboard('{Enter}');
     await expect.element(retry).toHaveAttribute('aria-busy', 'true');
