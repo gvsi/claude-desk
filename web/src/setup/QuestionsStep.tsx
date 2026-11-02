@@ -291,6 +291,8 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
 
   const suggestions = async () => {
     if (suggesting || busy || sending !== null || deciding !== null) return;
+    returnFocus.current = true;
+    returnToTextarea.current = false;
     setSuggesting(true);
     setSuggestionsError(null);
     try {
@@ -301,6 +303,7 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
         const now = await reread();
         if (now !== null && (now.step !== 'questions' || now.busy === true)) return;
       }
+      returnFocus.current = false;
       setSuggestionsError(ownerErrorCopy(err));
     } finally {
       setSuggesting(false);
