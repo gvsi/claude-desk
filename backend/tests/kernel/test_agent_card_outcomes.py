@@ -26,7 +26,8 @@ from desk.kernel_service import activation, compiler, public, render
 from desk.kernel_service.seed import RIVERA_CARDS, RIVERA_MONEY_CAP_CENTS
 
 from .helpers import activate_cards, kernel_ctx, rows_of
-from .test_adapters import Rivera, rivera
+from .test_adapters import Rivera, quote_args, rivera
+from .test_decide import decided, open_visitor
 from .test_desk_writes import put_part
 
 # Turner Plumbing's agent abilities as seeded, each with its outcome: its own auto cards for anyone allow
@@ -211,6 +212,29 @@ async def test_an_unreadable_version_claims_no_outcome(app: FastAPI, client, mon
         (await activation.active_version(ctx, copy.desk_id)).status = "superseded"
     assert {(block.outcome, block.outcome_text) for block in (await public_page(client, copy)).agent_card} == {
         (None, None)}
+
+
+@pytest.mark.parametrize("state", ["outdated", "unloadable"])
+async def test_an_active_version_decide_cant_use_claims_no_outcome(app: FastAPI, client, state):
+    """A version still marked active that `/decide` won't decide on, because it was proved under another
+    baseline or other invariants and not rebuilt (`activation.outdated`) or its Cedar can't load
+    (`versions.use`), refuses every request, so the page claims no outcome on it, as it does with none."""
+    copy = await rivera(app, client)
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        version = await activation.active_version(ctx, copy.desk_id)
+        if state == "outdated":
+            version.baseline_sha256 = "0" * 64        # proved under a baseline this kernel doesn't enforce
+        else:
+            version.cedar_sha256 = "0" * 64           # Cedar that no longer matches the hash it was proved under
+    for lang in ("en", "es"):
+        page = await public_page(client, copy, lang)
+        assert {(block.outcome, block.outcome_text) for block in page.agent_card} == {(None, None)}, lang
+        assert len(page.agent_card) == len(SEEDED)
+    # the page agrees with `/decide`, which refuses a quote the seed's own card would allow
+    visitor = await open_visitor(client, copy)
+    refused = await decided(client, visitor, "native.quote", quote_args(("drain", 1)))
+    assert (refused.outcome, refused.state) == ("refuse", "refused")
 
 
 def test_the_outcome_words_are_the_kernels_and_name_no_one():

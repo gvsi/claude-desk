@@ -14,7 +14,8 @@ left out. Each block carries its outcome for an agent with no standing of its ow
 `asks_first` or `never`, read from the active version's cards for anyone alone
 (`compiler.outcome_for`), and the kernel's fixed words for it: no card's ID, reason, limit,
 hours or discount reaches the page, and nothing of a card for a person or an agent key. With no
-active version, or when reading it fails, the blocks claim no outcome. It names no one: the page
+active version, one `/decide` won't decide on (outdated or unloadable), or when reading it fails, the
+blocks claim no outcome. It names no one: the page
 shows the AI disclosure, and the API's code-built card where to send requests and how to sign them.
 
 `open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
@@ -189,11 +190,13 @@ async def _agent_outcomes(ctx: KernelCtx, desk_id: str, tools: Collection[str],
     """Each of `tools`' outcome for an agent with no standing of its own, by the Desk's active
     version's cards for anyone (`compiler.outcome_for`), among the enabled `profiles`. Only
     the outcome's key leaves here: no card ID, reason, limit, or anything of a card for a person or
-    an agent key. With no active version, or when reading one fails (logged naming only the
-    error's type), none: the card then claims no outcome rather than guess one."""
+    an agent key. None, so the card claims no outcome rather than guess one, when `/decide` would
+    refuse every request: with no active version, or one it won't decide on (outdated, or whose
+    Cedar can't load: the checks `decide_call` makes); and when reading one fails (logged naming
+    only the error's type)."""
     try:
         version = await activation.active_version(ctx, desk_id)
-        if version is None:
+        if version is None or activation.outdated(version) or ctx.policies.versions.use(version):
             return {}
         return {tool: AGENT_OUTCOME[compiler.outcome_for(tool, version.cards, profiles, STANDING.get(tool, compiler.ANYONE))]
                 for tool in tools}

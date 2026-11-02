@@ -389,7 +389,7 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
 AgentOutcome = Literal["allowed", "asks_first", "never"]
 
 class AgentAbility(RenderedBlock):        # one Agent Card block: the kernel's prose for an ability, with its outcome
-    outcome: AgentOutcome | None          # None with no active version or one that can't be read: no outcome is claimed
+    outcome: AgentOutcome | None          # None when /decide would refuse everything (no active version, or one it won't decide on) or it can't be read
     outcome_text: str | None              # the kernel's fixed words for `outcome` in ?lang= (they name no one); None with it
 
     @model_validator(mode="after")
