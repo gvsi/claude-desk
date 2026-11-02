@@ -50,8 +50,10 @@ function ToolRule({ parts, mode, shared, repeated, card, words }: {
       <div className="cd-house-rules__rule-text">
         <RuleSentence
           parts={repeated ? [...parts, { text: ' · Shared rule, as above' }] : parts}
-          meta={card !== undefined && (card.who === 'person' || card.who === 'agent') ? ruleMeta(card, words) : undefined}
         />
+        {card === undefined || card.who === 'anyone' ? null : (
+          <p className="cd-rule-sentence__meta cd-type-meta">{ruleMeta(card, words).who}</p>
+        )}
         {shared === undefined || shared.length === 0 || repeated ? null : (
           <p className="cd-house-rules__shared cd-type-meta">Shared rule. Also applies to:<br /><ToolTitleList titles={shared} /></p>
         )}
