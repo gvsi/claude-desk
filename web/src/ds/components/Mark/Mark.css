@@ -30,14 +30,14 @@
 }
 
 /* The light theme turns the app's grounds to paper, so the bell drawn for them takes the drawing's
-   dark ink there, chosen in this browser or by a system that prefers it when System is chosen. The
-   clay dome is the logo's own and stays; the ink lines set the bell off the paper. */
+   dark ink there, chosen in this browser or by the system while dark isn't chosen. The clay dome is
+   the logo's own and stays; the ink lines set the bell off the paper. */
 :root[data-theme='light'] .cd-mark--dark .cd-mark__ink {
   fill: var(--mark-ink);
 }
 
 @media (prefers-color-scheme: light) {
-  :root[data-theme='system'] .cd-mark--dark .cd-mark__ink {
+  :root:not([data-theme='dark']) .cd-mark--dark .cd-mark__ink {
     fill: var(--mark-ink);
   }
 }

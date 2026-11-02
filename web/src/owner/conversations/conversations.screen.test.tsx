@@ -29,6 +29,8 @@ import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, foc
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
+// A phone whose open conversation's pane stays under the single column's 41rem, so the pane scrolls as one.
+const SHORT_PHONE = { width: 390, height: 780 };
 const LA = 'America/Los_Angeles';
 const OWNER = rivera.business.ownerName;
 const DANA = rivera.people.dana.name;
@@ -526,14 +528,15 @@ describe('Conversations', () => {
     const chat = named(DANA_LIVE, DANA);
     lengthen(chat);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    const { screen } = await renderRoute(LIST, { viewport, pollScale: 100 });
+    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    const { screen } = await renderRoute(LIST, { viewport: viewport === 'phone' ? SHORT_PHONE : viewport, pollScale: 100 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
     await row.click();
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
     // On a laptop the transcript scrolls in its own region, opened at its top, where the card is. On
-    // this phone the pane scrolls as one, and the card stops under the pinned bar.
+    // this short phone the pane scrolls as one, and the card stops under the pinned bar.
     const region = scrollerOf(card.element());
     const bar = document.querySelector('.cd-conversation__bar')!;
     const top = () => Math.max(region.getBoundingClientRect().top, viewport === 'phone' ? bar.getBoundingClientRect().bottom : 0);
@@ -2434,7 +2437,8 @@ describe('Conversations', () => {
   it('conversations_fit_a_phone', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
-    const { screen, router } = await renderRoute(LIST, { viewport: 'phone' });
+    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    const { screen, router } = await renderRoute(LIST, { viewport: SHORT_PHONE });
 
     // The list has the page to itself.
     const list = screen.getByRole('navigation', { name: 'Conversations' });
@@ -2452,7 +2456,7 @@ describe('Conversations', () => {
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
 
-    // Read to its end, the conversation scrolls as one on this phone, under its bar: the bar, with
+    // Read to its end, the conversation scrolls as one on this short phone, under its bar: the bar, with
     // the chat's name and Take over, stays pinned in view, and the way back scrolls with the chat.
     const latest = log(screen).getByText(last, { exact: true });
     latest.element().scrollIntoView({ block: 'end' });
