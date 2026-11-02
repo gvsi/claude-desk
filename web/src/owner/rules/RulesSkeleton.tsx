@@ -172,10 +172,12 @@ const SAMPLE_GROUPS = rulesGroups({
     ].map(sampleCard)],
   },
   tools: [
-    { tool: 'native.payment_link', source: 'native', effects: ['charge'] },
-    { tool: 'native.charge_mandate', source: 'native', effects: ['charge'] },
-    { tool: 'payments.create_refund', source: 'mcp', effects: ['pay_out', 'private_data'] },
-    { tool: 'desk.emergency-callback', source: 'business', effects: ['change'], business: {
+    { tool: 'native.capture_lead', source: 'native', status: 'enabled', effects: ['change'] },
+    { tool: 'native.request_callback', source: 'native', status: 'enabled', effects: ['change'] },
+    { tool: 'native.payment_link', source: 'native', status: 'enabled', effects: ['charge'] },
+    { tool: 'native.charge_mandate', source: 'native', status: 'enabled', effects: ['charge'] },
+    { tool: 'payments.create_refund', source: 'mcp', status: 'enabled', effects: ['pay_out', 'private_data'] },
+    { tool: 'desk.emergency-callback', source: 'business', status: 'enabled', effects: ['change'], business: {
       title: 'Emergency callback', description: '', config: { block: 'urgent', urgent_when: '' },
     } },
   ],

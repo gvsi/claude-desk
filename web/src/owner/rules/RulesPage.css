@@ -106,7 +106,13 @@
 }
 
 .cd-rules__row > .cd-rule-sentence {
-  flex: 1 1 240px;
+  flex: 1 1 auto;
+}
+
+.cd-rules__baseline-label {
+  flex-basis: 100%;
+  margin: 0 0 var(--space-8);
+  color: var(--text-tertiary);
 }
 
 .cd-rules__row-actions {

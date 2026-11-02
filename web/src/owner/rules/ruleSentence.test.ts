@@ -181,7 +181,8 @@ describe('any tool', () => {
     for (const applies_to of ['native.teleport', 'desk.not-listed', 'mcp.secret_tool']) {
       const unknown = card({ card_id: 'u', applies_to, mode: 'auto', who: 'anyone' });
       const sentence = read(ruleSentence(unknown, words));
-      expect(sentence).toBe('Claude can use a connected tool');
+      expect(sentence).toBe("A rule for a tool this version can't name");
+      expect(sentence).not.toContain('Claude can');
       expect(sentence).not.toContain(applies_to);
       expect(line(ruleMeta(unknown, words))).toBe('A connected tool · Anyone');
     }

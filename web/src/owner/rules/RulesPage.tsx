@@ -77,19 +77,23 @@ interface Said {
   line: string;
 }
 
-/** What has landed on Rules since the owner opened it: each tool's latest landing, and the payment limit's. */
+/** Latest landings by changed card, enabled tool, fallback scope and payment limit. */
 interface Landed {
   tools: ReadonlyMap<string, number>;
+  cards: ReadonlyMap<string, number>;
+  fallback: number | null;
   limit: number | null;
 }
 
-const NOTHING_LANDED: Landed = { tools: new Map(), limit: null };
+const NOTHING_LANDED: Landed = { tools: new Map(), cards: new Map(), fallback: null, limit: null };
 
 /** `landed` with `landing`'s rows, each now from it. */
 function withLanding(landed: Landed, landing: Landing): Landed {
   const tools = new Map(landed.tools);
-  for (const tool of landing.rows.tools) tools.set(tool, landing.id);
-  return { tools, limit: landing.rows.moneyLimit ? landing.id : landed.limit };
+  for (const tool of landing.rows.cards === undefined ? landing.rows.tools : landing.rows.turnedOn ?? []) tools.set(tool, landing.id);
+  const cards = new Map(landed.cards);
+  for (const card of landing.rows.cards ?? []) cards.set(card, landing.id);
+  return { tools, cards, fallback: landing.rows.fallback ? landing.id : landed.fallback, limit: landing.rows.moneyLimit ? landing.id : landed.limit };
 }
 
 /**
@@ -385,10 +389,10 @@ export function RulesPage() {
   } else {
     const groups = rulesGroups(rules.data, people.data ?? null);
     const listed = new Set(groups.flatMap((group) => group.rows.flatMap((row) => row.toolKeys)));
-    const fallbackAt = Math.max(0, ...[...landed.tools].filter(([tool]) => !listed.has(tool)).map(([, at]) => at));
+    const fallbackAt = Math.max(landed.fallback ?? 0, ...[...landed.tools].filter(([tool]) => !listed.has(tool)).map(([, at]) => at));
     body = (
       <>
-        <RulesGroups groups={groups} landed={landed.tools} landedLimit={landed.limit} />
+        <RulesGroups groups={groups} landedCards={landed.cards} landed={landed.tools} landedLimit={landed.limit} />
         <p className="cd-rules__fallback cd-type-meta" data-landed={fallbackAt || undefined}>
           {fallbackAt === 0 ? null : <LandedGlow key={`glow-${fallbackAt}`} />}
           {RULES_FALLBACK}

@@ -96,6 +96,40 @@ describe('the Rules hub', () => {
     expect(groups[0]?.rows.flatMap((row) => row.cards.map((card) => card.applies_to))).not.toContain('native.start_verification');
   });
 
+  it('a_turned_off_tool_keeps_its_rule_with_its_status', () => {
+    const rules = view();
+    rowOf(rules, 'native.quote').status = 'disabled';
+    const quote = rulesGroups(rules, people())[0]!.rows.find((row) => row.cards.some((card) => card.applies_to === 'native.quote'))!;
+    expect(quote.parts.map((part) => part.text).join('')).toBe('Claude can send quotes from your price list, at list price');
+    expect(quote.meta.who).toBe('Anyone · Turned off');
+  });
+
+  it('a_turned_off_tool_never_borrows_a_joined_tools_available_status', () => {
+    const rules = view();
+    rowOf(rules, 'native.capture_lead').status = 'disabled';
+    const lead = rulesGroups(rules, people())[0]!.rows.find((row) => row.cards.some((card) => card.applies_to === 'native.capture_lead'))!;
+    expect(lead.cards).toHaveLength(1);
+    expect(lead.meta.who).toBe('Anyone · Turned off');
+  });
+
+  it('a_changed_pin_keeps_its_rule_and_needs_review', () => {
+    const rules = view();
+    Object.assign(rowOf(rules, 'native.payment_link'), { status: 'needs_review', review_reason: 'changed', pending_sha256: 'b'.repeat(64) });
+    const link = rulesGroups(rules, people())[0]!.rows.find((row) => row.cards.some((card) => card.applies_to === 'native.payment_link'))!;
+    expect(link.parts.map((part) => part.text).join('')).toBe('Claude can send payment links up to $300');
+    expect(link.meta.who).toBe('Anyone · Needs your review');
+  });
+
+  it('amount_holds_keep_each_audience_and_source_cards', () => {
+    const personal = { ...rivera.ruleCards['rv-link'], card_id: 'personal-link', who: 'person', person_id: rivera.personalBookingCard.person_id } satisfies RuleCard;
+    const groups = rulesGroups(view([personal]), people());
+    const holds = groups[1]!.rows.filter((row) => row.key.startsWith('holds'));
+    expect(holds).toHaveLength(2);
+    expect(holds[0]!.cards.map((card) => card.card_id)).toEqual(['rv-link', 'rv-mandate']);
+    expect(holds[1]!.cards.map((card) => card.card_id)).toEqual(['personal-link']);
+    expect(holds[1]!.meta.who).not.toBe('Anyone');
+  });
+
   it('joins_only_matching_conditions_and_keeps_personal_business_and_never_rules', () => {
     const rules = view([rivera.personalBookingCard]);
     const openTimes = rules.active.cards.find((card) => card.applies_to === 'native.find_slots')!;
@@ -109,6 +143,21 @@ describe('the Rules hub', () => {
     const changed = rulesGroups(rules, people());
     expect(changed[2]?.rows[0]?.cards).toEqual([urgent]);
     expect(changed[0]?.rows.find((row) => row.cards.some((card) => card.applies_to === 'native.capture_lead'))?.parts.map((part) => part.text).join('')).toBe('Claude can take leads and callbacks');
+  });
+
+  it('an_unknown_target_stays_under_its_outcome_without_claiming_a_capability', () => {
+    const unknown = card({ card_id: 'future-tool', applies_to: 'native.teleport', mode: 'auto', reason: 'Future rule.' });
+    const groups = rulesGroups(view([unknown]), people());
+    const row = groups[0]!.rows.find((row) => row.cards.includes(unknown) || row.cards.some((c) => c.card_id === unknown.card_id))!;
+    expect(row.parts.map((part) => part.text).join('')).toBe("A rule for a tool this version can't name");
+    expect(groups[0]!.title).toBe('Allow');
+  });
+
+  it('group_meta_names_tools_covered_jointly_by_active_cards', () => {
+    const payOut = card({ card_id: 'payout', applies_to: 'effect:pay_out', mode: 'auto', reason: 'Pay out.' });
+    const privateData = card({ card_id: 'private', applies_to: 'effect:private_data', mode: 'auto', reason: 'Read private data.' });
+    const groups = rulesGroups(view([payOut, privateData]), people());
+    expect(groups[0]!.rows.find((row) => row.cards.some((c) => c.card_id === 'payout'))!.meta.tools).toEqual({ titles: ['Refund'] });
   });
 
   it('a_shared_sentence_names_the_actual_tools_where_its_change_lands', () => {
@@ -600,7 +649,7 @@ describe('the rows a confirmed change lands on', () => {
   it('a_tool_rule_lands_on_its_tool_alone', () => {
     // "Stop quoting on weekends": the quote rule moves to weekdays.
     const weekdays = { ...rivera.ruleCards['rv-quote'], hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } } satisfies RuleCard;
-    expect(rowsChangedBy(drafted([weekdays]), view().tools)).toEqual({ tools: ['native.quote'], moneyLimit: false });
+    expect(rowsChangedBy(drafted([weekdays]), view().tools)).toMatchObject({ tools: ['native.quote'], moneyLimit: false });
   });
 
   it('a_preset_lands_on_every_tool_whose_rules_it_changes', () => {
@@ -632,7 +681,7 @@ describe('the rows a confirmed change lands on', () => {
     });
     const draft = draftFromDiff(mockStore.world.draftCards(desk(), cards), desk().policy);
     expect(titlesOf(draft)).toEqual(new Set(['Refund']));
-    expect(rowsChangedBy(draft, view().tools)).toEqual({ tools: ['payments.create_refund'], moneyLimit: false });
+    expect(rowsChangedBy(draft, view().tools)).toMatchObject({ tools: ['payments.create_refund'], moneyLimit: false });
   });
 
   it('a_preset_lands_on_exactly_the_tools_its_review_lists', () => {
@@ -651,13 +700,13 @@ describe('the rows a confirmed change lands on', () => {
 
   it('a_new_limit_lands_on_its_line_and_the_rules_it_lowers', () => {
     // Raised to $5,000, no rule changes: the limit's line alone.
-    expect(rowsChangedBy(drafted([], { cap: 500_000 }), view().tools)).toEqual({ tools: [], moneyLimit: true });
+    expect(rowsChangedBy(drafted([], { cap: 500_000 }), view().tools)).toMatchObject({ tools: [], moneyLimit: true });
     // Lowered to $100 with Payment link's $300 brought down with it: the line, and Payment link.
     const lowered = mockStore.world.draftCards(
       desk(),
       desk().policy.cards.map((c) => (c.card_id === 'rv-link' ? { ...c, max_amount_cents: 10_000 } : c)),
       { cap: 10_000 },
     );
-    expect(rowsChangedBy(draftFromDiff(lowered, desk().policy), view().tools)).toEqual({ tools: ['native.payment_link'], moneyLimit: true });
+    expect(rowsChangedBy(draftFromDiff(lowered, desk().policy), view().tools)).toMatchObject({ tools: ['native.payment_link'], moneyLimit: true });
   });
 });

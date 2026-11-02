@@ -260,6 +260,10 @@ export function ruleSentence(card: RuleCard | readonly RuleCard[], words: Senten
   const cards = asCards(card);
   const [first] = cards;
   const targets = targetsOf(cards);
+  // A future or missing target describes a stored rule, never a present capability.
+  if (targets.some((target) => !Object.hasOwn(TOOL_PHRASES, target) && toolDisplayName(target, words.business) === null)) {
+    return [{ text: "A rule for a tool this version can't name" }];
+  }
   const phrase = rowPhrase(targets, words.business);
   const parts: SentencePart[] = [];
   if (first.mode === 'auto') parts.push({ text: 'Claude can ' }, ...runs(phrase.can));
@@ -385,10 +389,11 @@ function holdGroupMeta(group: readonly RuleCard[], words: SentenceWords): RuleMe
  * The Ask me first rows past the automatic rules' amount limits: one per group of people, its
  * limits joined as C1 joins them ("Claude asks you before payment links over **$300** or agent
  * payments over **$20**", Payment link and Charge within a signed limit · Anyone), and a person's
- * or agent's own limits in a row of their own. Empty when no card has a limit.
+ * or agent's own limits in a row of their own. Each row keeps its source cards for landing.
+ * Empty when no card has a limit.
  */
-export function holdRows(cards: readonly RuleCard[], words: SentenceWords): { parts: SentencePart[]; meta: RuleMeta }[] {
-  return holdGroups(cards).map((group) => ({ parts: holdParts(group), meta: holdGroupMeta(group, words) }));
+export function holdRows(cards: readonly RuleCard[], words: SentenceWords): { cards: readonly RuleCard[]; parts: SentencePart[]; meta: RuleMeta }[] {
+  return holdGroups(cards).map((group) => ({ cards: group, parts: holdParts(group), meta: holdGroupMeta(group, words) }));
 }
 
 /** The one group of limits a single hold sentence can word; holds for different people are refused. */

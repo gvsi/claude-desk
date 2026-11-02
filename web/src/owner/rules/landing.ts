@@ -43,7 +43,11 @@ export function land(deskId: string, change: ConfirmedChange): void {
   const rows =
     waiting === null
       ? change.rows
-      : { tools: [...new Set([...waiting.rows.tools, ...change.rows.tools])], moneyLimit: waiting.rows.moneyLimit || change.rows.moneyLimit };
+      : { tools: [...new Set([...waiting.rows.tools, ...change.rows.tools])], moneyLimit: waiting.rows.moneyLimit || change.rows.moneyLimit,
+          ...(waiting.rows.cards === undefined && change.rows.cards === undefined ? {} : { cards: [...new Set([...(waiting.rows.cards ?? []), ...(change.rows.cards ?? [])])] }),
+          ...(waiting.rows.fallback === undefined && change.rows.fallback === undefined ? {} : { fallback: waiting.rows.fallback || change.rows.fallback || false }),
+          ...(waiting.rows.turnedOn === undefined && change.rows.turnedOn === undefined ? {} : { turnedOn: [...new Set([...(waiting.rows.turnedOn ?? []), ...(change.rows.turnedOn ?? [])])] }),
+        };
   current = { id: count, deskId, version: Math.max(change.version, waiting?.version ?? 0), rows };
   notify();
 }

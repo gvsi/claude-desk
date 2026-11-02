@@ -11,6 +11,7 @@ import {
   describeEffects,
   OUTCOME_WORDS,
   ruleWordsLine,
+  reviewChanges,
   rulesForTool,
   type ConnectorView,
   type RuleMode,
@@ -25,7 +26,7 @@ import { capOf, type RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
 import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
 import {
-  ALWAYS_ON_SENTENCES, canJoin, discountHoldSentence, holdMeta, holdSentence,
+  ALWAYS_ON_SENTENCES, canJoin, discountHoldSentence, holdRows,
   moneyCapMeta, moneyCapSentence, ruleMeta, ruleSentence, type RuleMeta, type SentencePart,
 } from './ruleSentence.ts';
 
@@ -33,11 +34,12 @@ import {
 export interface RulesSentenceRow {
   key: string;
   cards: readonly RuleCard[];
-  /** Actual tool IDs, including the tools a shared effect rule covers, for landing a change. */
+  /** Actual tool IDs, including shared coverage, for tool enablement landings and status. */
   toolKeys: readonly string[];
   parts: readonly SentencePart[];
   meta: RuleMeta;
   moneyLimit?: boolean;
+  sectionLabel?: string;
 }
 
 export interface RulesGroup {
@@ -60,10 +62,10 @@ const LEARNING_TOOLS = new Set(['native.fetch_website', 'native.read_memory', 'n
  */
 export function rulesGroups(view: {
   active: Pick<RulesView['active'], 'cards' | 'auto_money_cap_cents'>;
-  tools: readonly Pick<ToolRow, 'tool' | 'source' | 'business' | 'effects'>[];
+  tools: readonly Pick<ToolRow, 'tool' | 'source' | 'business' | 'effects' | 'status' | 'review_reason'>[];
 }, people: PeopleOut | null | undefined): RulesGroup[] {
   const business = businessTools(view.tools);
-  const words = { business, people, tools: view.tools };
+  const words = { business, people, tools: view.tools, cards: view.active.cards };
   const toolKeys = (group: readonly RuleCard[]): string[] => [...new Set(group.flatMap((card) =>
     card.applies_to.startsWith('effect:') ? coveredTools(card, view.active.cards, view.tools) : [card.applies_to],
   ))];
@@ -81,33 +83,46 @@ export function rulesGroups(view: {
     ['native.capture_lead', 'native.request_callback', 'desk:urgent'],
     ['native.release_document', 'payments.list_charges'],
   ];
+  const stateOf = (card: RuleCard) => {
+    const tool = view.tools.find((row) => row.tool === card.applies_to);
+    return tool === undefined ? 'off' : toolState(tool);
+  };
   const joined: RuleCard[][] = [];
   for (const card of cards) {
     const family = families.find((keys) => keys.includes(target(card)));
     const row = family === undefined ? undefined : joined.find((group) =>
-      group.every((other) => family.includes(target(other)) && other.applies_to !== card.applies_to) && canJoin([...group, card]),
+      group.every((other) => family.includes(target(other)) && other.applies_to !== card.applies_to && stateOf(other) === stateOf(card)) && canJoin([...group, card]),
     );
     if (row === undefined) joined.push([card]);
     else row.push(card);
   }
+  const withStatus = (group: readonly RuleCard[], meta: RuleMeta): RuleMeta => {
+    const tools = view.tools.filter((tool) => toolKeys(group).includes(tool.tool));
+    const changed = tools.some((tool) => toolState(tool) === 'changed');
+    if (tools.length === 0 || (!changed && tools.some((tool) => toolState(tool) === 'on'))) return meta;
+    const status = changed ? 'Needs your review' : 'Turned off';
+    return { ...meta, who: `${meta.who} · ${status}` };
+  };
   const rows = (mode: RuleMode): RulesSentenceRow[] => joined.filter((group) => group[0]?.mode === mode).map((group) => ({
-    key: group.map((card) => card.card_id).join(':'), cards: group, toolKeys: toolKeys(group), parts: ruleSentence(group, words), meta: ruleMeta(group, words),
+    key: group.map((card) => card.card_id).join(':'), cards: group, toolKeys: toolKeys(group), parts: ruleSentence(group, words), meta: withStatus(group, ruleMeta(group, words)),
   }));
   const auto = cards.filter((card) => card.mode === 'auto');
   const holds: RulesSentenceRow[] = auto.flatMap((card) => {
     const parts = discountHoldSentence(card);
-    return parts === null ? [] : [{ key: `discount:${card.card_id}`, cards: [card], toolKeys: toolKeys([card]), parts, meta: ruleMeta(card, words) }];
+    return parts === null ? [] : [{ key: `discount:${card.card_id}`, cards: [card], toolKeys: toolKeys([card]), parts, meta: withStatus([card], ruleMeta(card, words)) }];
   });
-  const limited = auto.filter((card) => card.max_amount_cents != null);
-  const parts = holdSentence(limited);
-  const meta = holdMeta(limited, words);
-  if (parts !== null && meta !== null) holds.push({ key: 'holds', cards: limited, toolKeys: toolKeys(limited), parts, meta });
+  for (const { cards: limited, parts, meta } of holdRows(auto, words)) {
+    holds.push({ key: `holds:${limited.map((card) => card.card_id).join(':')}`, cards: limited, toolKeys: toolKeys(limited), parts, meta: withStatus(limited, meta) });
+  }
   holds.push({ key: 'money-cap', cards: [], toolKeys: [], parts: moneyCapSentence(capOf(view.active)), meta: moneyCapMeta(words), moneyLimit: true });
+  const ownerNever = rows('never');
   return [
     { mode: 'auto', title: OUTCOME_WORDS.auto, rows: rows('auto') },
     { mode: 'ask', title: OUTCOME_WORDS.ask, rows: [...holds, ...rows('ask')] },
-    { mode: 'never', title: `${OUTCOME_WORDS.never} · always on, every Desk`, rows: [
-      ...rows('never'), ...ALWAYS_ON_SENTENCES.map((rule) => ({ ...rule, key: `always:${rule.key}`, cards: [], toolKeys: [] })),
+    { mode: 'never', title: ownerNever.length === 0 ? `${OUTCOME_WORDS.never} · always on, every Desk` : OUTCOME_WORDS.never, rows: [
+      ...ownerNever, ...ALWAYS_ON_SENTENCES.map((rule, index) => ({ ...rule, key: `always:${rule.key}`, cards: [], toolKeys: [],
+        ...(ownerNever.length > 0 && index === 0 ? { sectionLabel: 'Always on, every Desk' } : {}),
+      })),
     ] },
   ];
 }
@@ -321,12 +336,18 @@ export function hubSections(view: RulesView, people: PeopleOut | null | undefine
   });
 }
 
-/** The rows on Rules a confirmed change changed: its tools' rows, and the payment limit's line. */
+/** The changed card identities and removed scopes, alongside tools and the payment limit. */
 export interface ChangedRows {
   /** The tools whose rules the change changed, or which it turned on, in the order of `tools`. */
   tools: AnyToolName[];
   /** It changed the payment limit, whose line leads Payments and Stripe. */
   moneyLimit: boolean;
+  /** Cards whose sentences changed; absent only for older callers that land by tool. */
+  cards?: string[];
+  /** A reviewed scope now falls back to asking, even if another card covers the same tool. */
+  fallback?: boolean;
+  /** Tool enablements affect all their sentences, unlike a card change. */
+  turnedOn?: AnyToolName[];
 }
 
 /**
@@ -337,7 +358,14 @@ export interface ChangedRows {
  * replaces with one that differs only in its id changes no row.
  */
 export function rowsChangedBy(draft: RuleDraft, tools: readonly Pick<ToolRow, 'tool' | 'effects' | 'source' | 'business'>[]): ChangedRows {
-  return { tools: reviewedTools(draft, tools), moneyLimit: draft.moneyCap !== null };
+  const catalog = [...tools, ...draft.turnedOn];
+  const changes = reviewChanges(draft.before, draft.after, (tool) => catalog.find((row) => row.tool === tool)?.effects ?? []);
+  return {
+    tools: reviewedTools(draft, tools), moneyLimit: draft.moneyCap !== null,
+    cards: [...new Set(changes.flatMap(({ after }) => after === null ? [] : [after.card_id]))],
+    fallback: changes.some(({ after }) => after === null),
+    turnedOn: draft.turnedOn.map((row) => row.tool),
+  };
 }
 
 /** The payment limit's field, when it holds anything but whole dollars. */

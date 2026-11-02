@@ -4,10 +4,11 @@ import { Card, LandedGlow, OUTCOME_TONE, RuleSentence, StatusDot, UpdatedPill } 
 import type { RulesGroup } from './hub.ts';
 
 /** The board's single card. A row keeps its source cards for landing and the later Details action. */
-export function RulesGroups({ groups, landed, landedLimit }: {
+export function RulesGroups({ groups, landed, landedCards, landedLimit }: {
   groups: readonly RulesGroup[];
   landed: ReadonlyMap<string, number>;
   landedLimit: number | null;
+  landedCards: ReadonlyMap<string, number>;
 }) {
   const id = useId();
   return (
@@ -20,8 +21,10 @@ export function RulesGroups({ groups, landed, landedLimit }: {
             </h2>
             <ul role="list" className="cd-rules__rows">
               {group.rows.map((row) => {
-                const at = row.moneyLimit ? landedLimit : row.toolKeys.reduce<number | null>((latest, tool) => {
-                  const value = landed.get(tool);
+                const at = row.moneyLimit ? landedLimit : [
+                  ...row.cards.map((card) => landedCards.get(card.card_id)),
+                  ...row.toolKeys.map((tool) => landed.get(tool)),
+                ].reduce<number | null>((latest, value) => {
                   return value === undefined ? latest : Math.max(latest ?? 0, value);
                 }, null);
                 return (
@@ -29,6 +32,7 @@ export function RulesGroups({ groups, landed, landedLimit }: {
                     data-rule-cards={row.cards.map((card) => card.card_id).join(' ')} data-rule-key={row.key}
                     data-money-limit={row.moneyLimit || undefined}>
                     {at === null ? null : <LandedGlow key={at} />}
+                    {row.sectionLabel === undefined ? null : <p className="cd-rules__baseline-label cd-type-meta">{row.sectionLabel}</p>}
                     <RuleSentence parts={row.parts} meta={row.meta} />
                     <div className="cd-rules__row-actions">
                       {at === null ? null : <UpdatedPill key={at} />}

@@ -752,6 +752,20 @@ describe('rules page', () => {
     expect(screen.container.textContent?.split(REVIEWER_LINE)).toHaveLength(2);
   });
 
+  it('owner_never_rules_precede_a_separate_always_on_label', async () => {
+    desk().policy.cards = desk().policy.cards.map((card) => card.card_id === 'rv-refund' ? { ...card, mode: 'never' } : card);
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const never = screen.getByRole('region', { name: 'Never', exact: true });
+    await expect.element(never).toBeVisible();
+    const label = never.getByText('Always on, every Desk', { exact: true });
+    await expect.element(label).toBeVisible();
+    expect(label.element().classList.contains('cd-type-meta')).toBe(true);
+    const owner = never.getByText('Claude never sends refunds', { exact: true });
+    expect(owner.element().compareDocumentPosition(label.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const baseline = never.getByText("Claude never says it's anything but an AI", { exact: true });
+    expect(label.element().compareDocumentPosition(baseline.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('never_ends_with_the_four_always_on_rules_and_the_fallback', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const never = screen.getByRole('region', { name: 'Never · always on, every Desk' });

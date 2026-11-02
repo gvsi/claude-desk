@@ -81,7 +81,7 @@ const CLEAR = 'rgba(0, 0, 0, 0)';
 /** The rows on Rules a change can land on, by name, in the page's order: the Desk's own jobs, then each connector's tools. */
 function landingRows(root: HTMLElement): { name: string; row: HTMLElement }[] {
   return [...root.querySelectorAll<HTMLElement>('.cd-rules__row[data-rule-key]')]
-    .filter((row) => !/^(discount:|holds$|money-cap$|always:)/.test(row.dataset.ruleKey ?? ''))
+    .filter((row) => !/^(discount:|holds:|money-cap$|always:)/.test(row.dataset.ruleKey ?? ''))
     .flatMap((row) => [...row.querySelectorAll('.cd-rule-sentence__meta [data-copy="user"]')]
       .map((title) => ({ name: title.textContent ?? '', row })));
 }
@@ -158,6 +158,23 @@ async function askForTheWeekdayChange(opts: RenderRouteOptions = {}, words = ASK
 }
 
 describe('a confirmed rule change in Ask Claude', () => {
+  it('removing_saturday_marks_the_fallback_without_marking_weekdays', async () => {
+    await reduceMotion();
+    worker.use(http.post(CHAT_PATH, () => {
+      const cards = desk().policy.cards.filter((card) => card.card_id !== 'rv-book-sat');
+      const draft = mockStore.world.draftCards(desk(), cards);
+      return HttpResponse.json({ answer: 'Saturday bookings ask you first.', draft });
+    }, { once: true }));
+    const { screen, log, panel } = await askForTheWeekdayChange({}, 'Ask me before Saturday bookings');
+    await log.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.poll(() => saysUpdated(fallback(screen.container))).toBe(true);
+    const weekday = screen.container.querySelector<HTMLElement>('[data-rule-cards="rv-book-wk"]')!;
+    expect(saysUpdated(weekday)).toBe(false);
+    expect(wordsOf(weekday)).toBe('Claude can book visits on weekdays, 8:00 am to 6:00 pm');
+    await panel.getByRole('button', { name: 'Close' }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Ask Claude to change a rule' })).toHaveFocus();
+  });
+
   it('the_receipt_takes_the_reviews_place_with_the_answers_version', async () => {
     const { log } = await askForTheWeekdayChange();
     // The API's answer names the version now in force: the receipt says that one, whatever the draft's.
@@ -477,12 +494,12 @@ describe('a preset or a new payment limit', () => {
     expect(listed).not.toContain('Share a document');
     await screen.getByRole('button', { name: 'Confirm change' }).click();
 
-    // Back on Rules, exactly those rows say "Updated" and light up; Quote and Share a document don't.
+    // Removed Saturday bookings land on the fallback; the equivalent weekday card stays unmarked.
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
-    expect(updatedRows(root).sort()).toEqual(listed.filter((name) => landingRows(root).some((row) => row.name === name)));
-    for (const name of listed.filter((name) => landingRows(root).some((row) => row.name === name))) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
-    for (const name of ['Quote', 'Share a document']) {
+    expect(updatedRows(root).sort()).toEqual(listed.filter((name) => name !== 'Book a visit' && landingRows(root).some((row) => row.name === name)));
+    for (const name of listed.filter((name) => name !== 'Book a visit' && landingRows(root).some((row) => row.name === name))) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
+    for (const name of ['Quote', 'Share a document', 'Book a visit']) {
       expect(saysUpdated(toolRow(root, name)), name).toBe(false);
       expect(fillOf(toolRow(root, name)), name).toBe('none');
     }
