@@ -259,6 +259,8 @@ Instead of a water heater visit on every Desk, `DEMO_TASKS` holds a fixed line f
 - (a) Lines built from the Desk's business tool titles or catalog names: that owner text would reach the agent's model, whose requests its launcher sees unchecked, widening that recorded exception.
 - (b) Hiding the agent's words for Desk-built tasks: it would undo the owner's decision to show them.
 
+The `ask_question` task (#682) is shown second on every Desk; its English lines and chips are proposed in #757 and wait for the owner's sign-off, as do the Spanish chip words; showing it only on Desks without a payment tool was considered and rejected so every Desk shows it the same way.
+
 ---
 
 ## Setup web app
