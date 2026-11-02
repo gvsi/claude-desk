@@ -169,17 +169,17 @@ function MetaLine({
   if (shared) parts.push(<span key="shared">{SHARED_RULE}</span>);
   if (says(appliesTo) && typeof appliesTo === 'string') parts.push(<span key="target">{appliesTo.trim()}</span>);
   if (text !== '') parts.push(<span key="words">{text}</span>);
-  const className = `cd-change-review__meta cd-type-meta${strong ? ' cd-change-review__strong' : ''}`;
+  // The tools line is the rule's target, not its words, so it takes neither the words' weight nor their tag.
   const titles =
     says(appliesTo) && typeof appliesTo !== 'string' ? (
-      <p className={className}>
+      <p className="cd-change-review__meta cd-type-meta">
         <ToolTitleList titles={appliesTo.titles} />
       </p>
     ) : null;
   if (parts.length === 0) return titles;
   return (
     <>
-      <p className={className}>
+      <p className={`cd-change-review__meta cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
         {parts.flatMap((part, index) => (index === 0 ? [part] : [<span key={`sep-${index}`}> · </span>, part]))}
         {tag ? (
           <>
