@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
 
-import { buildTokensCss, type DesignTokens, type TypeStyle } from '../../scripts/build-tokens.mjs';
+import { buildTokensCss, type DesignTokens, type ThemedValues, type TypeStyle } from '../../scripts/build-tokens.mjs';
 import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast, tokenHex } from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
@@ -26,25 +26,28 @@ function label(pair: { fg: string; ground: string; over?: string; under?: string
   return `${pair.fg} on ${pair.ground}${over}${under}${faded}`;
 }
 
+/** A token's value: a color's or a shadow's dark value, or a plain one. */
 function tokenValue(name: string): string | undefined {
-  const color = tokens.color.tokens.find((t) => t.name === name);
-  if (color) return color.value.dark;
+  const themed = [...tokens.color.tokens, ...tokens.shadow.tokens].find((t) => t.name === name);
+  if (themed) return themed.value.dark;
   for (const family of LIST_FAMILIES) {
-    if (family === 'color') continue;
+    if (family === 'color' || family === 'shadow') continue;
     const entry = tokens[family].tokens.find((t) => t.name === name);
     if (entry) return entry.value;
   }
   return undefined;
 }
 
-/** Color tokens that alias a `mark-*` color or clay, as "name: value". */
-function aliasesOfTheMarkOrClay(colors: readonly { name: string; value: { dark: string } }[]): string[] {
-  return colors
-    .filter((token) => {
-      const target = ALIAS.exec(token.value.dark)?.[1];
-      return target !== undefined && (target.startsWith('mark-') || target === 'clay' || target.startsWith('clay-'));
-    })
-    .map((token) => `${token.name}: ${token.value.dark}`);
+/** Color tokens that alias a `mark-*` color or clay in any theme, as "name: value". */
+function aliasesOfTheMarkOrClay(colors: readonly { name: string; value: ThemedValues }[]): string[] {
+  return colors.flatMap((token) =>
+    Object.values(token.value)
+      .filter((value): value is string => {
+        const target = value === undefined ? undefined : ALIAS.exec(value)?.[1];
+        return target !== undefined && (target.startsWith('mark-') || target === 'clay' || target.startsWith('clay-'));
+      })
+      .map((value) => `${token.name}: ${value}`),
+  );
 }
 
 /** The tokens with one more interface type style, for the builder's checks. */
@@ -58,6 +61,79 @@ describe('design tokens', () => {
   test('tokens_css_is_generated_from_tokens_json', () => {
     const committed = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'tokens.css'), 'utf8');
     expect(buildTokensCss(tokens)).toBe(committed);
+  });
+
+  test('a_light_theme_overrides_only_the_tokens_it_has_values_for', () => {
+    // Dark is the base: every token, on :root and on anything marked dark. Light is chosen in this
+    // browser (data-theme="light" on the root) or by the system while dark isn't chosen, and sets only
+    // the tokens with a light value, with the browser's own scheme. An alias without one (line-focus)
+    // resolves against the light values on the same root, and a fixed color (the mark's) stays.
+    const usage = 'A test token.';
+    const themed: DesignTokens = structuredClone(tokens);
+    themed.color = {
+      themes: [
+        { id: 'dark', name: 'Dark' },
+        { id: 'light', name: 'Light' },
+      ],
+      tokens: [
+        { name: 'bg-app', value: { dark: '#1c1b19', light: '#f6f4ee' }, usage },
+        { name: 'text-primary', value: { dark: 'rgba(250,249,245,0.92)', light: 'rgba(28,27,25,0.92)' }, usage },
+        { name: 'line-focus', value: { dark: '{text-primary}' }, usage },
+        { name: 'mark-ink', value: { dark: '#141413' }, usage },
+      ],
+    };
+    themed.shadow = {
+      tokens: [{ name: 'shadow-composer', value: { dark: '0 4px 20px rgba(0,0,0,0.25)', light: '0 4px 20px rgba(28,27,25,0.08)' }, usage }],
+    };
+    const css = buildTokensCss(themed);
+    const dark = [
+      ':root,',
+      '[data-theme="dark"] {',
+      '  --bg-app: #1c1b19;',
+      '  --text-primary: rgba(250,249,245,0.92);',
+      '  --line-focus: var(--text-primary);',
+      '  --mark-ink: #141413;',
+      '  --shadow-composer: 0 4px 20px rgba(0,0,0,0.25);',
+      '}',
+    ].join('\n');
+    const light = [
+      '  color-scheme: light;',
+      '  --bg-app: #f6f4ee;',
+      '  --text-primary: rgba(28,27,25,0.92);',
+      '  --shadow-composer: 0 4px 20px rgba(28,27,25,0.08);',
+    ];
+    const chosen = [':root[data-theme="light"] {', ...light, '}'].join('\n');
+    const system = [
+      '@media (prefers-color-scheme: light) {',
+      '  :root:not([data-theme="dark"]) {',
+      ...light.map((line) => `  ${line}`),
+      '  }',
+      '}',
+    ].join('\n');
+    expect(css).toContain(`\n${dark}\n\n${chosen}\n\n${system}\n`);
+    // A token without a light value is set once, in the dark block.
+    for (const name of ['--line-focus', '--mark-ink']) expect(css.split(`${name}:`), name).toHaveLength(2);
+
+    // Without a light theme, only the dark block, as before.
+    const darkOnly: DesignTokens = structuredClone(themed);
+    darkOnly.color.themes = [{ id: 'dark', name: 'Dark' }];
+    for (const token of [...darkOnly.color.tokens, ...darkOnly.shadow.tokens]) delete token.value.light;
+    expect(buildTokensCss(darkOnly)).not.toMatch(/data-theme="light"|prefers-color-scheme|color-scheme/);
+
+    // Every value is checked as the dark one is, and only the two themes are known.
+    const broken = (change: (copy: DesignTokens) => void) => {
+      const copy: DesignTokens = structuredClone(themed);
+      change(copy);
+      return () => buildTokensCss(copy);
+    };
+    expect(broken((copy) => (copy.color.tokens[2]!.value.light = '{no-such-color}'))).toThrow(/line-focus/);
+    expect(broken((copy) => (copy.color.tokens[3]!.value.light = 'red'))).toThrow(/mark-ink/);
+    expect(broken((copy) => (copy.shadow.tokens[0]!.value.light = '0 0 0 red; color: red'))).toThrow(/shadow-composer/);
+    // As tokens.json may hold them: a misspelt theme, or a shadow with no dark value.
+    const loose = (values: ThemedValues) => values as unknown as Record<string, string | undefined>;
+    expect(broken((copy) => (loose(copy.color.tokens[0]!.value).dim = '#000000'))).toThrow(/bg-app/);
+    expect(broken((copy) => delete loose(copy.shadow.tokens[0]!.value).dark)).toThrow(/shadow-composer/);
+    expect(broken((copy) => (copy.color.themes = [{ id: 'dark', name: 'Dark' }, { id: 'dim', name: 'Dim' }]))).toThrow(/theme/);
   });
 
   test('core_values_match_design_system_v2', () => {
@@ -156,8 +232,14 @@ describe('design tokens', () => {
       { name: 'odd-field', value: { dark: '{clay}' } },
       { name: 'odd-soft', value: { dark: '{clay-soft}' } },
       { name: 'fine', value: { dark: '{bg-app}' } },
+      { name: 'odd-light', value: { dark: '#1c1b19', light: '{mark-ink}' } },
     ];
-    expect(aliasesOfTheMarkOrClay(sample)).toEqual(['odd-tile: {mark-tile}', 'odd-field: {clay}', 'odd-soft: {clay-soft}']);
+    expect(aliasesOfTheMarkOrClay(sample)).toEqual([
+      'odd-tile: {mark-tile}',
+      'odd-field: {clay}',
+      'odd-soft: {clay-soft}',
+      'odd-light: {mark-ink}',
+    ]);
     expect(aliasesOfTheMarkOrClay(tokens.color.tokens)).toEqual([]);
   });
 
@@ -281,14 +363,75 @@ describe('design tokens', () => {
     }
   });
 
-  test('one_dark_theme_only', () => {
-    expect(tokens.color.themes).toEqual([{ id: 'dark', name: 'Dark' }]);
-    for (const token of tokens.color.tokens) {
-      expect(Object.keys(token.value), token.name).toEqual(['dark']);
+  test('light_blocks_hold_exactly_the_listed_tokens', () => {
+    // The light theme's values, as the design system set them: warm paper, the dark theme's ink at its
+    // alpha steps, an ink primary button, darker steps of the status hues, a darker clay, a lighter
+    // scrim and shadows. The aliases (line-field-focus, line-focus, button-primary-text, status-info)
+    // follow the light values by themselves; the mark, the connectors, the illustration's other inks
+    // and the QR tile and its hairline are the same in both themes. The illustration's ink and the QR
+    // code's, which alias bg-app in dark, stay dark ink on paper.
+    const expected = {
+      'bg-app': '#f6f4ee',
+      'bg-panel': '#efece4',
+      'bg-surface': '#fbfaf6',
+      'bg-muted': '#e9e5da',
+      'bg-selected': '#e3ddcf',
+      'text-primary': 'rgba(28,27,25,0.92)',
+      'text-secondary': 'rgba(28,27,25,0.68)',
+      'text-tertiary': 'rgba(28,27,25,0.64)',
+      'line-hairline': 'rgba(28,27,25,0.10)',
+      'line-card': 'rgba(28,27,25,0.13)',
+      'line-control': 'rgba(28,27,25,0.22)',
+      'line-control-hover': 'rgba(28,27,25,0.32)',
+      'line-field': 'rgba(28,27,25,0.56)',
+      'fill-card': 'rgba(255,255,255,0.55)',
+      'fill-count': 'rgba(28,27,25,0.05)',
+      'fill-hover': 'rgba(28,27,25,0.05)',
+      'fill-bubble': 'rgba(28,27,25,0.06)',
+      'fill-secondary': 'rgba(28,27,25,0.07)',
+      'fill-secondary-hover': 'rgba(28,27,25,0.11)',
+      'button-primary': '#1f1e1b',
+      'button-primary-hover': '#3a3833',
+      'button-danger-fill': 'rgba(176,58,74,0.10)',
+      'button-danger-fill-hover': 'rgba(176,58,74,0.16)',
+      'button-danger-text': '#9e3343',
+      'accent-blue': '#285e92',
+      'status-handled': '#3f7a2e',
+      'status-held': '#8c6d08',
+      'status-refused': '#b2475a',
+      clay: '#c4673f',
+      scrim: 'rgba(28,27,25,0.32)',
+      'illustration-card': '#fdfcf9',
+      'illustration-ink': '#1c1b19',
+      'illustration-arc': 'rgba(28,27,25,0.08)',
+      'qr-ink': '#1c1b19',
+      'shadow-composer': '0 4px 20px rgba(28,27,25,0.08)',
+      'shadow-dialog': '0 4px 8px rgba(28,27,25,0.05), 0 12px 28px -2px rgba(28,27,25,0.14)',
+      'shadow-illustration-card': '0 1px 2px rgba(28,27,25,0.12)',
+    };
+    const css = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'tokens.css'), 'utf8');
+    /** The declarations in the block that opens with `opening`, as a property-to-value map. */
+    const declarations = (opening: string) => {
+      const start = css.indexOf(`${opening} {\n`);
+      expect(start, opening).toBeGreaterThanOrEqual(0);
+      const body = css.slice(start + opening.length + 2, css.indexOf('}', start));
+      return Object.fromEntries(body.split(';').map((d) => d.trim()).filter(Boolean).map((d) => [d.slice(0, d.indexOf(':')), d.slice(d.indexOf(':') + 1).trim()]));
+    };
+    const want = { 'color-scheme': 'light', ...Object.fromEntries(Object.entries(expected).map(([name, value]) => [`--${name}`, value])) };
+    expect(declarations(':root[data-theme="light"]')).toEqual(want);
+    expect(declarations('@media (prefers-color-scheme: light) {\n  :root:not([data-theme="dark"])')).toEqual(want);
+    // Each theme block once: dark on the root, light chosen, light by the system.
+    const count = (opening: string) => css.split(opening).length - 1;
+    expect([':root,\n[data-theme="dark"] {', ':root[data-theme="light"] {', ':root:not([data-theme="dark"]) {'].map(count)).toEqual([1, 1, 1]);
+  });
+
+  test('every_color_and_shadow_has_a_dark_value', () => {
+    // Dark is the base theme: every color and shadow has a dark value, and light is the only other theme.
+    const themes = tokens.color.themes.map((theme) => theme.id);
+    expect(themes).toEqual(['dark', 'light']);
+    for (const token of [...tokens.color.tokens, ...tokens.shadow.tokens]) {
       expect(typeof token.value.dark, token.name).toBe('string');
-    }
-    for (const token of tokens.shadow.tokens) {
-      expect(typeof token.value, `${token.name} has no per-theme values`).toBe('string');
+      expect(Object.keys(token.value).filter((theme) => !themes.includes(theme)), token.name).toEqual([]);
     }
   });
 
