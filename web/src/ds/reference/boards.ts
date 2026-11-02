@@ -80,7 +80,7 @@ export const REFERENCE_BOARDS = [
   // The agent's run inside the same card, its reply cards held there, and a charge over its limit.
   'N-R2-Agents-04-Run',
   'N-R2-Agents-05-Over-Limit',
-  // The agents page on a phone; both page boards redrawn on 2026-11-02 (canvas v321).
+  // The agents page on a phone; both page boards redrawn on 2026-11-02 (canvas v326).
   'N-R2-Agents-06-Phone',
   // The chat: a payment link a rule change cancelled.
   'N-R2-Chat-Link-Cancelled',
