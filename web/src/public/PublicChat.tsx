@@ -604,6 +604,25 @@ interface WaitingRequests {
 function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): WaitingRequests {
   const places = useRef(new Map<string, CancelPlace>());
   const [away, setAway] = useState<ReadonlySet<string>>(NONE);
+  const leftWithFocus = useRef<{ button: HTMLElement; margin: HTMLElement; receipt: number; composer: boolean } | null>(null);
+
+  // As with "View request", the ref notes focus before React removes the control. Only a
+  // removed button hands its place on; ordinary ref updates and focus elsewhere leave it alone.
+  useLayoutEffect(() => {
+    const left = leftWithFocus.current;
+    leftWithFocus.current = null;
+    if (!left || left.button.isConnected || document.activeElement !== document.body) return;
+    const box = left.composer ? composer.current?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled):not([readonly])') : null;
+    if (box) box.focus({ preventScroll: true });
+    else if (left.margin.isConnected) {
+      // A touch pointer must not raise the phone keyboard. The request's replacement receipt
+      // keeps the visitor's place instead, also when the composer cannot be written in.
+      const outcome = left.margin.children.item(left.receipt);
+      const target = outcome instanceof HTMLElement ? outcome : left.margin;
+      target.tabIndex = -1;
+      target.focus({ preventScroll: true });
+    }
+  });
 
   const look = useCallback(() => {
     const now = new Set<string>();
@@ -639,8 +658,18 @@ function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObj
 
   const place = useCallback(
     (id: string, receipt: number) => (block: HTMLDivElement | null) => {
-      if (block === null) places.current.delete(id);
-      else places.current.set(id, { block, receipt });
+      if (block === null) {
+        const previous = places.current.get(id);
+        const button = previous?.block.querySelector<HTMLElement>(':scope > .cd-button');
+        const margin = previous?.block.parentElement;
+        if (button && margin && document.activeElement === button) {
+          leftWithFocus.current = {
+            button, margin, receipt: previous.receipt,
+            composer: button.matches(':focus-visible') || !window.matchMedia('(pointer: coarse)').matches,
+          };
+        }
+        places.current.delete(id);
+      } else places.current.set(id, { block, receipt });
     },
     [],
   );
@@ -783,18 +812,6 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // app's name comes back when the page closes. Inside an owner screen (setup's preview) the tab is
   // that screen's.
   useDocumentTitle(embedded ? null : (desk?.business_name ?? null));
-
-  // A cancel that went through takes its button away: the visitor's place moves to the composer,
-  // unless they have already moved on to something else.
-  const lastCancel = useRef<string | null>(null);
-  useEffect(() => {
-    const cancelled = lastCancel.current;
-    lastCancel.current = chat.cancelling;
-    if (cancelled === null || chat.cancelling !== null) return;
-    if (chat.state.openHolds.includes(cancelled) || chat.cancelFailed === cancelled) return;
-    if (document.activeElement !== null && document.activeElement !== document.body) return;
-    composerRef.current?.querySelector('textarea')?.focus();
-  }, [chat.cancelling, chat.cancelFailed, chat.state.openHolds]);
 
   // A waiting line that goes with focus on its "View request" (the request was answered, or its
   // receipt came back into view) leaves the visitor's place in the composer, without scrolling.
