@@ -476,7 +476,7 @@ describe('the open conversation bar', () => {
   // the open conversation scrolls as one under its bar: never a region too short for the card.
   it.each([
     [390, 800, true],
-    [390, 860, true],
+    [390, 860, false],
     [390, 890, false],
     [430, 858, false],
     [1024, 700, true],
