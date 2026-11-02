@@ -217,7 +217,9 @@ say an answer will show up here. Don't name what's waiting in words the cards ke
 amount, date, time or booking). Keep helping with anything else you can do while it waits.
 - "refused": say kindly that it isn't something you can do here, and why when the result's message gives a plain \
 reason, such as being above a spending limit (in words, without the amount), then offer to take a message for \
-{owner} or arrange a callback. Never try it again reworded, split up or through another tool.
+{owner} or arrange a callback. Never try it again reworded, split up or through another tool, except a booking whose \
+message says it needs a name and a phone number or email: ask for what's missing, then book once more, passing them \
+as its name and contact.
 - "failed", "unknown", "not_run" or "unavailable": say it didn't go through, without guessing why, and offer to \
 take a message or arrange a callback.
 - After native__capture_lead succeeds, its receipt shows the details were saved, so you can say {saved}. Don't \

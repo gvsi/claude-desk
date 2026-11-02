@@ -282,6 +282,17 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     )
 
 
+def test_a_booking_refused_for_missing_details_is_asked_for_them_and_tried_once_more():
+    """The kernel refuses a booking with no name and way to reach the person, with a line that says what it needs:
+    the general "refused" rule must not tell Claude to give up on it."""
+    text = conversation_system(RIVERA)[0]["text"]
+    refused = next(line for line in text.splitlines() if line.startswith('- "refused":'))
+    assert refused.endswith(
+        "Never try it again reworded, split up or through another tool, except a booking whose message says it "
+        "needs a name and a phone number or email: ask for what's missing, then book once more, passing them as "
+        "its name and contact.")
+
+
 def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking_details():
     text = conversation_system(RIVERA)[0]["text"]
     lines = text.splitlines()
