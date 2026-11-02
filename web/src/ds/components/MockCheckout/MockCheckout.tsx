@@ -10,7 +10,7 @@ import { Notice } from '../Notice/Notice.tsx';
 import { Pill } from '../Pill/Pill.tsx';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
-import { CHECKOUT_COPY, TEST_CARD, type FinalPaymentState } from './checkoutCopy.ts';
+import { CHECKOUT_COPY, TEST_CARD, type CheckoutCopy, type FinalPaymentState } from './checkoutCopy.ts';
 
 import './MockCheckout.css';
 
@@ -101,7 +101,7 @@ export function MockCheckout({
   onPay,
   onCancel,
 }: MockCheckoutProps) {
-  const copy = CHECKOUT_COPY[language];
+  const copy: CheckoutCopy = CHECKOUT_COPY[language];
   const id = useId();
   const titleId = `${id}-title`;
   const cardLabelId = `${id}-card`;
@@ -147,16 +147,17 @@ export function MockCheckout({
   // A blank name is no name: the card then asks for one.
   const nameOnCard = customerName?.trim();
   // The visitor's completed or cancelled checkout uses the same link back to a known chat.
-  const canReturn = final === 'paid' || (final === 'cancelled' && cancelReason !== 'rules_changed');
+  const parts = copy.returnLine[final];
+  const canReturn = parts !== undefined && !(final === 'cancelled' && cancelReason === 'rules_changed');
   const back = canReturn && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
   const finalLine =
-    back !== null ? (
+    back !== null && parts !== undefined ? (
       <span>
-        {final === 'paid' ? copy.paid.before : `${copy.final.cancelled} `}
+        {parts.before}
         <TextLink href={back} runningText>
-          {copy.paid.back}
+          {parts.back}
         </TextLink>
-        {final === 'paid' ? copy.paid.after : '.'}
+        {parts.after}
       </span>
     ) : final === 'cancelled' && cancelReason === 'rules_changed' ? (
       copy.cancelledRulesChanged
