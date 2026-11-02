@@ -17,6 +17,8 @@
 
 A mode this build doesn't know shows the `ai` bar, which offers only Take over. `agent` drops the line about what the visitor sees: agents never receive it.
 
+With `takeOverAbove`, the screen draws Take over itself, in the bar at the top of the owner's open conversation (board REV-720 C): while Claude answers, this bar keeps only its line about whispers, with no button and no line about what the visitor sees. The owner and paused bars are unchanged.
+
 ## What the consumer provides
 
 - `mode` from the session, `visitorName` as the screen names the visitor (`whoLabel`), and `ownerName`, the business's `owner_display_name`, which the visitor sees. Both names are shown as people's own words (`data-copy="user"`). The visitor may have chosen their name, so it is set off as user text (`.cd-user-name`) and starts each line it is in: no sentence of the bar's own runs into it.
@@ -33,10 +35,11 @@ A mode this build doesn't know shows the `ai` bar, which offers only Take over. 
 | `visitorName` | `string` | Required. |
 | `ownerName` | `string` | Required. `owner_display_name`. |
 | `agent` | `boolean` | An agent's session. |
+| `takeOverAbove` | `boolean` | Take over is drawn above, in the conversation's bar: the `ai` bar keeps only its line. |
 | `onTakeOver` | `() => void` | Required. |
 | `onHandBack` | `() => void` | Required. |
 | `onResume` | `() => void` | Required. |
 | `pending` | `boolean` | Every control waits; only the one pressed here spins. |
 | `error` | `string` | The screen's line. |
 
-The lead lines take at most `size-reading`. In the owner’s open conversation, the bar fills the centred `size-conversation` column and its controls sit below the lead at the left. Elsewhere, the controls start at `size-margin` beside the lead and grow into the available width; below the two columns' width they wrap under the lines and fill the row. The visitor hint uses that width instead of staying in a narrow column, so it stays on one line wherever its words fit and wraps naturally on a phone. `AvailableWidth` shows it at the 640 px composer width. The buttons are `size-control-main`. When the mode changes under a button that had focus, focus moves to the bar's first line, and a button never turns into the opposite one under focus.
+The lead lines take at most `size-reading`. In the owner’s open conversation, the bar fills the centred `size-conversation` column and its controls sit below the lead at the left; Take over itself sits in the conversation's bar at the top (`takeOverAbove`). Elsewhere, the controls start at `size-margin` beside the lead and grow into the available width; below the two columns' width they wrap under the lines and fill the row. The visitor hint uses that width instead of staying in a narrow column, so it stays on one line wherever its words fit and wraps naturally on a phone. `AvailableWidth` shows it at the 640 px composer width. The buttons are `size-control-main`. When the mode changes under a button that had focus, focus moves to the bar's first line, and a button never turns into the opposite one under focus.

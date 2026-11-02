@@ -182,10 +182,10 @@ function Receipt({ width, anchor }: { width: number; anchor?: string }) {
 }
 
 /**
- * Where the owner's controls will be, for a live chat as Claude answers it: Take over's line, its
- * button and what the visitor sees, then the whisper box. Nothing is drawn there, since a recorded
- * chat has none and an agent's differ, but the room is kept, so the transcript's region over it is
- * as tall as the chat's, and what lands at its foot lands where its shapes were.
+ * Where the owner's controls will be, for a live chat as Claude answers it: the line about
+ * whispers, then the whisper box (Take over is in the bar). Nothing is drawn there, since a
+ * recorded chat has none and an agent's differ, but the room is kept, so the transcript's region
+ * over it is as tall as the chat's, and what lands at its foot lands where its shapes were.
  */
 function ControlsRoom() {
   return (
@@ -195,18 +195,6 @@ function ControlsRoom() {
           <MeasuredLines
             parts={[VISITOR, ' never sees whispers. Whispers steer Claude, and your rules still apply.']}
             className="cd-take-over__first cd-take-over__line cd-type-caption"
-            text="caption"
-            fallback={1}
-            drawn={false}
-          />
-        </div>
-        <div className="cd-take-over__action">
-          <div className="cd-take-over__buttons">
-            <div className="cd-conversation-skeleton__button" />
-          </div>
-          <MeasuredLines
-            parts={[VISITOR, ' sees “Mike Turner joined the chat.”']}
-            className="cd-take-over__line cd-type-caption"
             text="caption"
             fallback={1}
             drawn={false}
@@ -246,20 +234,26 @@ function useOpensAtTheEnd() {
 
 /**
  * The open conversation's pane as shapes, from its own classes, as a fresh copy's held chat (what
- * Today's "Open the request" opens) draws: who it is with (their name, the level pill and the
- * latest line); the transcript's header lines; the visitor's bubble at the right; Claude's
- * handoff card at the left with its two receipt lines; and the held request's card, each part as
- * tall as it lands. The transcript's region opens at its end, as the chat's does, over the room
- * the owner's controls take.
+ * Today's "Open the request" opens) draws: its bar, pinned at the top of the pane with its own
+ * ground and hairline, with who it is with (their name and the level pill) and the latest line,
+ * and no shape for Take over, since a recorded or paused chat has none there (the bar is as tall
+ * either way); the transcript's header lines; the visitor's bubble at the right; Claude's handoff
+ * card at the left with its two receipt lines; and the held request's card, each part as tall as
+ * it lands. The transcript's region opens at its end, as the chat's does, over the room the
+ * owner's controls take.
  */
 export function ConversationSkeleton() {
   const region = useOpensAtTheEnd();
   return (
     <div className="cd-conversation cd-conversation-skeleton">
-      <div className="cd-conversation__head">
-        <Skeleton shape="line" text="section" width={64} anchor="conversation-name" />
-        <Skeleton shape="block" measure={{ label: 'Public', className: 'cd-pill cd-type-pill', tagName: 'span' }} height="var(--space-20)" radius="full" />
-        <Skeleton shape="line" text="meta" width={200} />
+      <div className="cd-conversation__bar" data-skeleton-anchor="conversation-bar">
+        <div className="cd-conversation__who">
+          <Skeleton shape="line" text="section" width={64} anchor="conversation-name" />
+          <Skeleton shape="block" measure={{ label: 'Public', className: 'cd-pill cd-type-pill', tagName: 'span' }} height="var(--space-20)" radius="full" />
+        </div>
+        <div className="cd-conversation__latest">
+          <Skeleton shape="line" text="meta" width={200} />
+        </div>
       </div>
       <div ref={region} className="cd-conversation__scroll">
         <div className="cd-transcript">
