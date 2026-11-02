@@ -52,6 +52,8 @@ export const SPEC = {
   },
   receipt: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
   dot: { width: '6px', height: '6px' },
+  /** Share's More channels: four rows in one card, separated by hairlines. */
+  shareChannelRow: { paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' },
   card: {
     backgroundColor: 'rgba(250, 249, 245, 0.03)',
     borderTopWidth: '1px',

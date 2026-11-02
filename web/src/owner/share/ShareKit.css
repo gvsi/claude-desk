@@ -1,6 +1,6 @@
 /* ShareKit (N-Run2-Share): the link card, then 24 px under it the printable card (300 px) and,
-   32 px to its right, the ready-made words under their heading, 8 px apart, with the website embed
-   20 px under them: an outline with no fill, its pill at the right. When the kit has less room than
+   32 px to its right, the ready-made words under their heading, 8 px apart, with More channels
+   8 px under them: one card of rows, each with its pill at the right. When the kit has less room than
    the card and a readable column of words, the two stack; on a phone (N-Run2-Share-Phone) every
    gap is 16 px. */
 
@@ -36,14 +36,27 @@
   color: var(--text-primary);
 }
 
+.cd-share-kit__channels {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-share-kit__channel-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .cd-share-kit__later {
   display: flex;
   align-items: center;
   gap: var(--space-16);
-  margin-top: var(--space-12);
-  padding: var(--space-14) var(--space-16);
-  border: 1px solid var(--line-card);
-  border-radius: var(--radius-card);
+  padding: var(--space-16);
+}
+
+.cd-share-kit__later + .cd-share-kit__later {
+  border-top: 1px solid var(--line-hairline);
 }
 
 .cd-share-kit__later-text {
@@ -56,12 +69,12 @@
 }
 
 /* No weight token: the section type's 520, as CopyList's titles set it. */
-.cd-share-kit .cd-share-kit__later-title {
+.cd-share-kit__later-title {
   color: var(--text-primary);
   font-weight: 520;
 }
 
-.cd-share-kit .cd-share-kit__later-line {
+.cd-share-kit__later-text .cd-share-kit__later-line {
   margin-top: var(--space-2);
   color: var(--text-secondary);
 }
@@ -78,10 +91,6 @@
   .cd-share-kit,
   .cd-share-kit__kit {
     gap: var(--space-16);
-  }
-
-  .cd-share-kit__later {
-    margin-top: var(--space-8);
   }
 }
 
