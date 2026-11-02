@@ -342,7 +342,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.29"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.31"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -779,34 +779,39 @@ def test_money_card_drafting_covers_all_money_tools_and_requires_an_amount():
     )
 
 
-# The built-in agent's task lines (plan 09, C2), as signed: Turner's seed keeps its three, and every other Desk reads
+# The built-in agent's task lines (plan 09, C2), as signed: Turner's seed keeps its own, and every other Desk reads
 # the lines of its setup business type. Fixed words only: no business's, owner's or visitor's text.
 SIGNED_TASK_LINES = {
     "rivera": {
         "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
+        "ask_question": "Ask whether they work on tankless water heaters, for Alex Kim.",
         "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
         "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
     },
     "trade": {
         "book_visit": "Book the earliest visit for Alex Kim.",
+        "ask_question": "Ask whether they take on small repairs, for Alex Kim.",
         "quote_and_deposit": "Ask what Alex Kim pays up front for a visit, and pay it if it's within your spending "
                              "limit.",
         "push_the_limit": "Ask to pay for the whole job in one charge, above your spending limit.",
     },
     "office": {
         "book_visit": "Book the earliest consult for Alex Kim.",
+        "ask_question": "Ask what Alex Kim should bring to a first consult.",
         "quote_and_deposit": "Ask what Alex Kim pays up front for a consult, and pay it if it's within your spending "
                              "limit.",
         "push_the_limit": "Ask to pay for the whole engagement in one charge, above your spending limit.",
     },
     "landlord": {
         "book_visit": "Book the earliest viewing of an open unit for Alex Kim.",
+        "ask_question": "Ask whether pets are allowed in their units, for Alex Kim.",
         "quote_and_deposit": "Ask what Alex Kim pays to apply for a unit, and pay it if it's within your spending "
                              "limit.",
         "push_the_limit": "Ask to pay the move-in costs in one charge, above your spending limit.",
     },
     "other": {
         "book_visit": "Book the earliest appointment for Alex Kim.",
+        "ask_question": "Ask what Alex Kim should know before a first appointment.",
         "quote_and_deposit": "Ask what Alex Kim pays up front for an appointment, and pay it if it's within your "
                              "spending limit.",
         "push_the_limit": "Ask to pay for the whole service in one charge, above your spending limit.",
@@ -817,6 +822,9 @@ SIGNED_TASK_LINES = {
 def test_each_desk_set_has_its_own_fixed_task_lines():
     # Every set has a line for each task, and the agent's first message is AGENT_TASK around exactly that line.
     assert DEMO_TASKS == SIGNED_TASK_LINES
+    assert PROMPT_VERSION == "2026-10-31.31"
+    assert ("- When the task is a question, set done to true once the Desk has answered it, or has said it can't "
+            "and offered a next step.") in VISITING_AGENT_SYSTEM.split("When to stop\n", 1)[1]
     assert set(get_args(DemoTaskSet)) == set(DEMO_TASKS) == {"rivera", *get_args(BusinessType)}
     for task_set, lines in DEMO_TASKS.items():
         assert set(lines) == set(get_args(DemoTask))

@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | `label` | `string` | Required. The `role="group"`'s `aria-label`. |
 | `suggestions` | `readonly string[]` | Required. At most `max` show (three by default); unique within the row. |
-| `max` | `number` | Three by default. Raise it only for setup's four starters. |
+| `max` | `number` | Three by default. Raise it for setup's four starters or the agent panel's four tasks. |
 | `onPick` | `(suggestion: string) => void` | Required. Gets the picked chip's words. |
 | `inertSuggestions` | `boolean` | Vision pages only: a pick does nothing and the first one shows the vision line. `false` by default. |
 | `disabled` | `boolean` | Every chip off, in place and dimmed; `onPick` is never called. `false` by default. |

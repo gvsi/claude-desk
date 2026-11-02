@@ -53,7 +53,7 @@ export interface AgentRunStarted {
  */
 export interface AgentTasks {
   task_set: "rivera" | "trade" | "office" | "landlord" | "other";
-  tasks: ("book_visit" | "quote_and_deposit" | "push_the_limit")[];
+  tasks: ("book_visit" | "ask_question" | "quote_and_deposit" | "push_the_limit")[];
 }
 /**
  * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,
@@ -401,7 +401,7 @@ export interface DemoAgentRun {
   run_id: string;
   launcher_session_id: string;
   slug: string;
-  task: "book_visit" | "quote_and_deposit" | "push_the_limit";
+  task: "book_visit" | "ask_question" | "quote_and_deposit" | "push_the_limit";
   state: "running" | "done" | "failed";
   turns: AgentTurn[];
 }
@@ -861,7 +861,7 @@ export interface SafetyRow {
   blocked: boolean;
 }
 export interface SendAgentIn {
-  task: "book_visit" | "quote_and_deposit" | "push_the_limit";
+  task: "book_visit" | "ask_question" | "quote_and_deposit" | "push_the_limit";
   idempotency_key: string;
 }
 /**

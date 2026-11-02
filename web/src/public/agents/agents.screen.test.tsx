@@ -50,8 +50,8 @@ const agentRuns = () => [...mockStore.world.sessions.values()].filter((s) => s.s
 /** The routes the page called, in order. */
 const calls = () => mockStore.requests.map((r) => r.key);
 
-/** The panel's three tasks. */
-const TASKS = ['Book the earliest visit', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
+/** The panel's four tasks. */
+const TASKS = ['Book the earliest visit', 'Ask about tankless heaters', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
 
 /** The panel's lead before a run, as boards 03 to 05 write it. */
 const LEAD = 'A built-in agent visits Turner Plumbing for Alex Kim. It’s simulated.';
@@ -259,13 +259,13 @@ describe('agents page', () => {
   });
 
   it('a_desk_setup_made_offers_its_own_tasks', async () => {
-    // A dentist's Desk, which setup made as an office without enabled payment tools: only its consult,
+    // A dentist's Desk, which setup made as an office without enabled payment tools: its consult and question,
     // in English and Spanish, never Turner's visit or service call deposit; the run's first request
     // is titled with the chip picked. The Desk's set is read once, with the visitor's chat. (The CPA
     // starter is an office too, but the mock's setup runs it as its consultant interview, which this
     // helper doesn't answer; the mock's unit test types every starter.)
     const slug = await liveSetupDesk("I'm Dana Park. Park Dental is a family dentist in Fremont, and new patients start with a checkup.");
-    const office = ['Book the earliest consult'];
+    const office = ['Book the earliest consult', 'Ask what to bring'];
     const { screen } = await renderRoute(`/d/${slug}/agents`);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await expect.element(panel.getByRole('button', { name: office[0] })).toBeVisible();
@@ -288,14 +288,14 @@ describe('agents page', () => {
     const es = await renderRoute(`/d/${slug}/agents`, { language: 'es-MX' });
     const enviar = es.screen.getByRole('region', { name: 'Enviar un agente' });
     await expect.element(enviar.getByRole('button', { name: 'Reservar la primera consulta libre' })).toBeVisible();
-    expect(enviar.getByRole('button').elements().map((el) => el.textContent)).not.toContain('Pagar por adelantado, dentro de su límite');
+    expect(enviar.getByRole('button').elements().map((el) => el.textContent)).toEqual(['Reservar la primera consulta libre', 'Preguntar qué llevar']);
   });
 
-  it('offers_the_listed_tasks_in_page_order_and_all_three_for_older_or_unreadable_reads', async () => {
-    const all = ['Book the earliest consult', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+  it('offers_the_listed_tasks_in_page_order_and_all_four_for_older_or_unreadable_reads', async () => {
+    const all = ['Book the earliest consult', 'Ask what to bring', 'Pay up front, within its limit', 'Try to pay more than its limit'];
     const bodies = [
       { task_set: 'office', tasks: ['book_visit'] },
-      { task_set: 'office', tasks: ['push_the_limit', 'book_visit', 'quote_and_deposit'] },
+      { task_set: 'office', tasks: ['push_the_limit', 'ask_question', 'book_visit', 'quote_and_deposit'] },
       { task_set: 'office' },
       { task_set: 'office', tasks: null },
       { task_set: 'office', tasks: ['book_visit', 'unknown'] },
@@ -320,14 +320,14 @@ describe('agents page', () => {
     mockStore.inject({ route: 'agentTasks', status: 200, body: { task_set: 'rivera' }, delayMs: 1_000 });
     const slow = await renderRoute(PAGE);
     const waiting = slow.screen.getByRole('region', { name: 'Send an agent' });
-    await expect.poll(() => waiting.element().querySelectorAll('[data-loading="task-chips"] .cd-skeleton').length).toBe(3);
+    await expect.poll(() => waiting.element().querySelectorAll('[data-loading="task-chips"] .cd-skeleton').length).toBe(4);
     expect(chipsIn(slow.screen)).toEqual([]);
     await expect.element(waiting.getByRole('button', { name: TASKS[0] })).toBeVisible();
     expect(waiting.element().querySelector('[data-loading="task-chips"]')).toBeNull();
 
     // A read that fails, or a session that won't open for it, never holds the page up: the tasks come
     // in plain words for any business, and the agent still goes out on the one picked.
-    const plain = ['Book the earliest appointment', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    const plain = ['Book the earliest appointment', 'Ask what to know first', 'Pay up front, within its limit', 'Try to pay more than its limit'];
     const failures = [
       { route: 'agentTasks', status: 200, body: null },
       { route: 'agentTasks', status: 200, body: { task_set: 'unknown', tasks: ['book_visit'] } },

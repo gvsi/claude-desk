@@ -544,13 +544,25 @@ async def test_the_agent_reads_its_desks_own_task_lines(app, browser, fake, kern
     desk_id, slug = await owner_desk(kernel_http, fake, clock, copy.owner_token, "Chen & Co.")
     await setup_row(engine, copy.copy_id, desk_id, "office")
     client, _, _ = await open_session(app, browser, slug)
-    for task in ("book_visit", "quote_and_deposit", "push_the_limit"):
+    for task in ("book_visit", "ask_question", "quote_and_deposit", "push_the_limit"):
         agent_model.add(step("", done=True))
         run = (await read_run(client, slug, await send_agent(app, client, slug, task))).json()
         assert run["state"] == "done"
         assert agent_model.requests[-1].messages == [
             {"role": "user", "content": [{"type": "text", "text": agent_task(task, "office")}]}]
     assert "consult" in agent_model.requests[0].messages[0]["content"][0]["text"]
+
+
+async def test_send_agent_accepts_a_question(app, browser, fake, kernel_http, agent_model, desk_model):
+    slug = await new_slug(kernel_http, fake)
+    client, _, _ = await open_session(app, browser, slug)
+    agent_model.add(step("Does your business work on tankless water heaters for Alex Kim?"), step("", done=True))
+    desk_model.add(say("We work on tankless water heaters."))
+    run = (await read_run(client, slug, await send_agent(app, client, slug, "ask_question"))).json()
+    assert (run["task"], run["state"]) == ("ask_question", "done")
+    assert [turn["author"] for turn in run["turns"]] == ["agent", "desk"]
+    assert agent_model.requests[0].messages == [
+        {"role": "user", "content": [{"type": "text", "text": agent_task("ask_question", "rivera")}]}]
 
 
 async def test_no_desk_or_visitor_text_reaches_the_agent_model(app, browser, fake, kernel_http, clock, engine,
@@ -596,7 +608,7 @@ async def test_no_desk_or_visitor_text_reaches_the_agent_model(app, browser, fak
     assert whispered.status_code == 200, whispered.text
     await app.state.runtime.runner.drain()
 
-    for task in ("book_visit", "quote_and_deposit", "push_the_limit"):
+    for task in ("book_visit", "ask_question", "quote_and_deposit", "push_the_limit"):
         agent_model.add(step("Hello, I'd like some help for Alex Kim."), step("", done=True))
         desk_model.add(say("Happy to help with that."))
         run = (await read_run(client, slug, await send_agent(app, client, slug, task))).json()
@@ -619,7 +631,8 @@ async def test_the_agents_page_reads_its_desks_task_set(app, browser, fake, kern
     for sent_to, expected in ((seed_slug, "rivera"), (slug, "landlord")):
         client, tokens[sent_to], _ = await open_session(app, browser, sent_to)
         read = await client.get(f"/api/public/desks/{sent_to}/agent_tasks")
-        tasks = ["book_visit", "quote_and_deposit", "push_the_limit"]  # both fixtures have enabled payment tools
+        # Both fixtures have enabled payment tools.
+        tasks = ["book_visit", "ask_question", "quote_and_deposit", "push_the_limit"]
         assert (read.status_code, read.json()) == (200, {"task_set": expected, "tasks": tasks}), sent_to
         assert read.headers["cache-control"] == "no-store"
     # No session, or another Desk's session sent on this Desk's path, reads nothing.
@@ -649,14 +662,16 @@ async def test_agent_tasks_fit_the_desks_enabled_tools(app, browser, fake, kerne
             "status": status if tool == payment_tool else "disabled"}))
     client, _, _ = await open_session(app, browser, slug)
     read = await client.get(f"/api/public/desks/{slug}/agent_tasks")
-    tasks = ["book_visit", "quote_and_deposit", "push_the_limit"] if status == "enabled" else ["book_visit"]
+    tasks = ["book_visit", "ask_question"]
+    if status == "enabled":
+        tasks += ["quote_and_deposit", "push_the_limit"]
     assert (read.status_code, read.json()) == (200, {"task_set": "office", "tasks": tasks})
     assert read.headers["cache-control"] == "no-store"
     # The route reads current tool status on every request, without caching the earlier choice.
     for tool in ("native.payment_link", "native.charge_mandate"):
         fake._put_tool(desk, desk.tools[tool].model_copy(update={"status": "disabled"}))
     assert (await client.get(f"/api/public/desks/{slug}/agent_tasks")).json() == {
-        "task_set": "office", "tasks": ["book_visit"]}
+        "task_set": "office", "tasks": ["book_visit", "ask_question"]}
 
 
 async def test_desk_replies_are_untrusted_in_the_agent_prompt(app, browser, fake, kernel_http, agent_model, desk_model):

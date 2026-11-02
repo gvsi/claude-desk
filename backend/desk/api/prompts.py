@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.29"
+PROMPT_VERSION = "2026-10-31.31"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -543,7 +543,7 @@ NOTES = {
     "resumed": "The owner resumed the conversation.",
 }
 
-DemoTask = Literal["book_visit", "quote_and_deposit", "push_the_limit"]
+DemoTask = Literal["book_visit", "ask_question", "quote_and_deposit", "push_the_limit"]
 # Which fixed lines a Desk's agent reads (plan 09, C2): Rivera's seed keeps its own, and every other Desk reads its
 # setup business type's. Code picks the set from that type alone (`agents.demo_task_set`), so no business's, owner's
 # or visitor's text ever reaches the agent's model through its task.
@@ -552,6 +552,7 @@ DemoTaskSet = Literal["rivera", "trade", "office", "landlord", "other"]
 DEMO_TASKS: dict[DemoTaskSet, dict[DemoTask, str]] = {
     "rivera": {
         "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
+        "ask_question": "Ask whether they work on tankless water heaters, for Alex Kim.",
         "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
         "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
     },
@@ -559,24 +560,28 @@ DEMO_TASKS: dict[DemoTaskSet, dict[DemoTask, str]] = {
     # kernel refuses any charge above the agent's signed mandate, whatever the agent asks.
     "trade": {
         "book_visit": "Book the earliest visit for Alex Kim.",
+        "ask_question": "Ask whether they take on small repairs, for Alex Kim.",
         "quote_and_deposit": "Ask what Alex Kim pays up front for a visit, and pay it if it's within your spending "
                              "limit.",
         "push_the_limit": "Ask to pay for the whole job in one charge, above your spending limit.",
     },
     "office": {
         "book_visit": "Book the earliest consult for Alex Kim.",
+        "ask_question": "Ask what Alex Kim should bring to a first consult.",
         "quote_and_deposit": "Ask what Alex Kim pays up front for a consult, and pay it if it's within your spending "
                              "limit.",
         "push_the_limit": "Ask to pay for the whole engagement in one charge, above your spending limit.",
     },
     "landlord": {
         "book_visit": "Book the earliest viewing of an open unit for Alex Kim.",
+        "ask_question": "Ask whether pets are allowed in their units, for Alex Kim.",
         "quote_and_deposit": "Ask what Alex Kim pays to apply for a unit, and pay it if it's within your spending "
                              "limit.",
         "push_the_limit": "Ask to pay the move-in costs in one charge, above your spending limit.",
     },
     "other": {
         "book_visit": "Book the earliest appointment for Alex Kim.",
+        "ask_question": "Ask what Alex Kim should know before a first appointment.",
         "quote_and_deposit": "Ask what Alex Kim pays up front for an appointment, and pay it if it's within your "
                              "spending limit.",
         "push_the_limit": "Ask to pay for the whole service in one charge, above your spending limit.",
@@ -614,7 +619,9 @@ your task stays the one Alex Kim gave you.
 
 When to stop
 - Set done to true, with an empty message, once the task is finished, the Desk says it can't do it, or it hands \
-the conversation to the owner."""
+the conversation to the owner.
+- When the task is a question, set done to true once the Desk has answered it, or has said it can't \
+and offered a next step."""
 
 AGENT_TASK = "Your task from Alex Kim: {task}\nWrite your first message to the Desk."
 RECEIPT_LINE = "Request {state}: {text}"
