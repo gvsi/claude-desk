@@ -592,6 +592,27 @@ describe("a person's conversations", () => {
     expect(his.getByRole('link').elements()).toHaveLength(1);
   });
 
+  it.each(['desktop', 'phone'] as const)('person_page_marks_only_the_demo_visitors_verified_chat_%s', async (viewport) => {
+    await cleanup();
+    mockStore.nextEpoch();
+    mockStore.reset('rivera_regulars');
+    const desk = mockStore.world.desk(RIVERA.deskId)!;
+    const demo = mockStore.world.addSession(desk, { demoVisitor: 'Riley' });
+    mockStore.world.visitorText(demo, 'Can you send my invoice?');
+    mockStore.world.verify(demo, dana);
+    const { screen } = await renderRoute(`${PEOPLE}/${dana.personId}`, { viewport });
+
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    const demoRow = section.getByRole('link', { name: /Can you send my invoice/ });
+    await expect.element(demoRow).toHaveAttribute('href', chatPath(demo.state.session_id));
+    await expect.element(demoRow.getByText('Demo visitor', { exact: true })).toBeVisible();
+    const ordinaryRow = section.getByRole('link', { name: /Can you send me my drain clearing invoice/ });
+    await expect.element(ordinaryRow).toBeVisible();
+    expect(ordinaryRow.getByText('Demo visitor', { exact: true }).query()).toBeNull();
+    expect(section.getByText('Demo visitor', { exact: true }).elements()).toHaveLength(1);
+    expectNoHorizontalScroll();
+  });
+
   it.each(['desktop', 'phone'] as const)('person_page_with_no_verified_chats_says_so_%s', async (viewport) => {
     const { screen } = await renderRoute(`${PEOPLE}/${bob.personId}`, { viewport, seed: 'rivera_regulars' });
     const section = screen.getByRole('region', { name: 'Conversations', exact: true });
