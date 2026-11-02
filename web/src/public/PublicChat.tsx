@@ -869,6 +869,19 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const { brand, ownerName } = brandFrom(desk);
   const { state } = chat;
   const ended = state.error === 'session';
+  // Claude's reply is on its way: from the visitor's message until the stream says what came of its
+  // turn, unless it didn't send or the owner is in the chat; then while Claude writes and the
+  // kernel checks the reply; then while its words are revealed and its cards and receipts come in.
+  // The visitor can type meanwhile, and Send waits.
+  const waitedOn = pending === null ? undefined : state.rows.findLast(({ item }) => item.kind === 'visitor' && (pending.id === null || item.id === pending.id))?.item;
+  const replyOnItsWay =
+    pending !== null &&
+    state.turnMarks === pending.marks &&
+    !chat.ownerInChat &&
+    state.connection === 'open' &&
+    waitedOn?.kind === 'visitor' &&
+    waitedOn.status === 'sent';
+  const sendHeld = ready && (replyOnItsWay || state.writing || replyComingIn);
   // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
   // so it stays with the request however far the chat goes on. One cancel is out at a time: while
   // it is, the others wait, their words shown and their clicks ignored, so none goes unanswered.
@@ -921,6 +934,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
             language={language}
             onSubmit={chat.verify}
             onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
+            askWaits={!chat.ownerInChat && sendHeld}
           />,
         ]
       : [];
@@ -964,26 +978,15 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const turnNotice =
     state.error !== null && !ended ? <Notice tone="error">{evErrorCopy({ code: state.error }, language)}</Notice> : null;
   // What the visitor sends brings the end of the conversation back into view.
+  // Everything that posts a message (Send, "Ask for {owner}", "I can't get the code") waits too.
   const send = (text: string) => {
+    if (sendHeld) return;
     newest.follow();
     visitorTyping.sent();
     // While the owner has the chat she answers, in her own time: nothing waits on Claude.
     if (!chat.ownerInChat) setPending({ marks: state.turnMarks, id: null });
     chat.send(text);
   };
-  // Claude's reply is on its way: from the visitor's message until the stream says what came of its
-  // turn, unless it didn't send or the owner is in the chat; then while Claude writes and the
-  // kernel checks the reply; then while its words are revealed and its cards and receipts come in.
-  // The visitor can type meanwhile, and Send waits.
-  const waitedOn = pending === null ? undefined : state.rows.findLast(({ item }) => item.kind === 'visitor' && (pending.id === null || item.id === pending.id))?.item;
-  const replyOnItsWay =
-    pending !== null &&
-    state.turnMarks === pending.marks &&
-    !chat.ownerInChat &&
-    state.connection === 'open' &&
-    waitedOn?.kind === 'visitor' &&
-    waitedOn.status === 'sent';
-  const sendHeld = ready && (replyOnItsWay || state.writing || replyComingIn);
   // Sent again, a message waits for a reply on its way and holds Send until its own starts, as a
   // new one does.
   const resend = (id: string) => {
@@ -1017,6 +1020,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         language={language}
         openStatus={openStatus}
         onAskForOwner={askForOwner}
+        askWaits={sendHeld}
         // While the owner has taken the chat over, the head says so in the disclosure's place, still
         // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
         // session mode, as it is: nothing on the page decides it.

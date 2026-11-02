@@ -165,6 +165,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
 | `onAskForOwner` | `() => void` | Required. |
+| `askWaits` | `boolean` | A reply is coming in: "Ask for {ownerName}" waits (`aria-disabled`, focus kept, presses do nothing), as the composer's Send does. `false` by default. |
 | `ownerInChat` | `boolean` | The owner is in the chat: the head says so and that Claude, an AI, is paused, and Ask isn't shown. Only from the kernel's session mode: `SessionState.mode === 'owner'` as the chat opens or reloads, then the stream's `owner_joined` and `owner_left`. `PublicChat` passes `chat.ownerInChat`, derived by `PublicChatProvider` through `ownerInChatNow`; it is false while the stream is disconnected or catching up, or the mode is not confirmed. `false` by default. |
 | `inertAsk` | `boolean` | Vision pages only: Ask does nothing and its first press shows the vision line. `false` by default. |
 | `about` | `RenderedBlock[]` | The charter blocks. |

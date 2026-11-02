@@ -64,6 +64,11 @@ export interface PublicShellProps {
   /** Asks for the owner in the chat. */
   onAskForOwner: () => void;
   /**
+   * A reply is coming in: "Ask for {owner}" waits (`aria-disabled`, focus kept, presses do nothing)
+   * until it has, as the composer's Send does. `false` by default.
+   */
+  askWaits?: boolean;
+  /**
    * The owner is in the chat (a take-over). While it is set, the chat's head says so on the
    * disclosure's line, "{owner} is in this chat. Claude, an AI, is paused until {owner} hands it
    * back.", which still names Claude as an AI, and "Ask for {owner}" isn't shown. `false` by default.
@@ -615,6 +620,7 @@ export function PublicShell({
   language,
   openStatus,
   onAskForOwner,
+  askWaits = false,
   ownerInChat = false,
   inertAsk = false,
   about,
@@ -747,7 +753,7 @@ export function PublicShell({
             {/* A vision page's Ask goes nowhere, and says so once, in the pinned head under its row.
                 While the owner is in the chat there is no Ask: the owner is already here. */}
             {ownerInChat ? null : (
-              <Button variant="secondary" buttonRef={askRef} onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
+              <Button variant="secondary" buttonRef={askRef} waiting={askWaits} onClick={inertAsk ? () => setInertAskPressed(true) : onAskForOwner}>
                 {copy.askFor(owner)}
               </Button>
             )}

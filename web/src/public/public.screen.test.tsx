@@ -1976,6 +1976,37 @@ describe('public chat page', () => {
     await expect.element(box).toHaveValue('And on a Sunday?');
   });
 
+  it('ask_for_the_owner_waits_for_a_reply_on_its_way_and_asks_once_it_has_come_in', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const sends = () => requests('sendMessage').length;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' }, until: gate, afterCommit: true });
+    const before = chatEvents().length;
+    await chatBox(screen).click();
+    await userEvent.keyboard('How much is drain clearing?{Enter}');
+    await expect.poll(sends).toBe(1);
+    // The reply is on its way: "Ask for Mike Turner" waits, as Send does, and a press asks nothing.
+    const askFor = screen.getByRole('button', { name: 'Ask for Mike Turner' });
+    await expect.element(askFor).toHaveAttribute('aria-disabled', 'true');
+    (askFor.element() as HTMLElement).focus();
+    (askFor.element() as HTMLElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sends()).toBe(1);
+    await expect.element(askFor).toHaveFocus();
+
+    release();
+    await turnEnded(before);
+    await expect.element(askFor).not.toHaveAttribute('aria-disabled');
+    await askFor.click();
+    await expect.poll(sends).toBe(2);
+    expect(requests('sendMessage').at(-1)?.body).toEqual({ text: expect.stringContaining('Mike Turner') });
+  });
+
   it('a_reply_from_history_shows_whole_with_its_card_and_receipt_at_once', async () => {
     const first = await renderRoute(PAGE);
     await ready(first.screen);
