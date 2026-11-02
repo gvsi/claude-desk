@@ -377,6 +377,17 @@
   overflow: hidden;
 }
 
+/* The recorded-history shape uses the note's 14 px icon and 6 px gap; measure its words in
+   the remaining width so they wrap to the same caption lines as the real note. */
+.cd-conversation-skeleton__recorded-icon {
+  flex: none;
+  margin-top: var(--space-2);
+}
+
+.cd-conversation-skeleton .cd-recorded-note__text {
+  flex: 1;
+}
+
 /* The held request's rule, beside its icon, as wide as the row leaves it. */
 .cd-conversation-skeleton__rule {
   flex: 1;

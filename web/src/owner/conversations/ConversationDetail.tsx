@@ -197,7 +197,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   // way the pane ends up draws inside the one region, so it stays mounted as they change.
   const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
   const pane = (content: ReactNode) => (
-    <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
+    <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton recorded={summary?.replayed === true} />} className="cd-conversation-pane">
       {content}
     </SkeletonScreen>
   );

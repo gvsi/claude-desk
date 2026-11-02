@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard } from '../../ds/index.ts';
+import { CARD_CHROME, ConceptFooter, RECORDED_NOTE, Skeleton, SkeletonCard } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { publicLink } from '../customerLink.ts';
@@ -250,9 +250,9 @@ function useOpensAtTheEnd() {
  * by its opening lines and hairline; the visitor's bubble at the right; Claude's handoff card at
  * the left with its two receipt lines; and the held request's card, each part as tall as it lands.
  * The transcript's region opens at its end, as the chat's does, over the room the owner's
- * controls take.
+ * controls take. A replayed chat adds its recorded-history line and has no owner controls.
  */
-export function ConversationSkeleton() {
+export function ConversationSkeleton({ recorded = false }: { recorded?: boolean }) {
   const region = useOpensAtTheEnd();
   return (
     <div className="cd-conversation cd-conversation-skeleton">
@@ -261,6 +261,18 @@ export function ConversationSkeleton() {
         <Skeleton shape="block" measure={{ label: 'Public', className: 'cd-pill cd-type-pill', tagName: 'span' }} height="var(--space-20)" radius="full" />
         <Skeleton shape="line" text="meta" width={200} />
         <div className="cd-conversation__about" data-skeleton-anchor="conversation-about">
+          {recorded ? (
+            <div className="cd-recorded-note cd-type-caption">
+              <Skeleton shape="block" width={14} height={14} className="cd-conversation-skeleton__recorded-icon" />
+              <MeasuredLines
+                parts={[RECORDED_NOTE]}
+                className="cd-type-caption"
+                text="caption"
+                width="75%"
+                boxClassName="cd-recorded-note__text"
+              />
+            </div>
+          ) : null}
           <MeasuredLines
             parts={[`Today at 12:00 pm, web chat from ${FRESH_LINK}`]}
             className="cd-conversation__line cd-type-caption"
@@ -286,7 +298,7 @@ export function ConversationSkeleton() {
           <HeldCardShape anchor="held-card" />
         </div>
       </div>
-      <ControlsRoom />
+      {recorded ? null : <ControlsRoom />}
     </div>
   );
 }

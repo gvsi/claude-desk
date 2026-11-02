@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { ROUTES } from '../../api/routes.ts';
-import type { OwnerTranscript } from '../../api/views.ts';
+import type { ConversationSummary, OwnerTranscript } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { loadWebFonts } from '../../ds/test/fonts.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -180,29 +180,53 @@ describe('the open conversation head', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
-  it.each(SIZES)('the_loading_shapes_draw_the_same_lines_and_hairline_at_%sx%s', async (width, height) => {
+  it.each(SIZES.flatMap(([width, height]) => [
+    [width, height, false] as const,
+    [width, height, true] as const,
+  ]))('the_loading_shapes_draw_the_same_lines_and_hairline_at_%sx%s_recorded_%s', async (width, height, recorded) => {
+    if (recorded) {
+      const list = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
+      const read = await mockStore.dispatch('conversation', { params: { session_id: SEEDED_HOLD } });
+      if ('network' in list || list.status !== 200 || 'network' in read || read.status !== 200) throw new Error('the mock reads the held chat and its summary');
+      mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: (list.body as ConversationSummary[]).map((s) => s.session_id === SEEDED_HOLD ? { ...s, replayed: true } : s) });
+      mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...(read.body as OwnerTranscript), replayed: true } });
+    }
     const chat = holdReads(conversationRead(SEEDED_HOLD));
     onTestFinished(chat.release);
     const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height }, pollScale: 100 });
     const shape = '.cd-conversation-pane .cd-conversation-skeleton';
     await vi.waitFor(() => expect(document.querySelector(`${shape} .cd-conversation__about`)).not.toBeNull());
+    // The list read supplies replayed before the held detail read is released.
+    await expect.poll(() => document.querySelector('.cd-conversations__list .cd-conversation-item[aria-current="true"]')).not.toBeNull();
+    await expect.poll(() => document.querySelector('.cd-conversations__region .cd-skeleton-screen__layer')).toBeNull();
     const shapeHead = document.querySelector<HTMLElement>(`${shape} .cd-conversation__head`)!;
     const shapeLines = [...shapeHead.querySelectorAll<HTMLElement>(':scope > .cd-conversation__about > *')];
     // Each line's shape is as many caption lines as its words take here, once the fonts have loaded.
     await expect.poll(() => shapeLines.map((line) => line.getBoundingClientRect().height)).toEqual(
-      shapeLines.map((line) => line.childElementCount * 17),
+      shapeLines.map((line) => line.querySelectorAll('.cd-skeleton-line--caption').length * 17),
     );
     const before = {
       head: shapeHead.getBoundingClientRect(),
       lines: shapeLines.map((line) => line.getBoundingClientRect()),
       hairline: getComputedStyle(shapeHead).borderBottom,
     };
-    expect(before.lines).toHaveLength(2);
+    expect(before.lines).toHaveLength(recorded ? 3 : 2);
+    expect(document.querySelector(`${shape} .cd-conversation__controls`) === null).toBe(recorded);
+    if (recorded) {
+      const note = shapeLines[0]!;
+      const icon = note.querySelector<HTMLElement>('.cd-skeleton--block')!;
+      const text = note.querySelector<HTMLElement>('.cd-recorded-note__text')!;
+      expect(icon, 'the recorded note reserves its icon').not.toBeNull();
+      expect(icon.getBoundingClientRect().width).toBe(14);
+      expect(icon.getBoundingClientRect().height).toBe(14);
+      expect(text.getBoundingClientRect().left - icon.getBoundingClientRect().right).toBe(6);
+    }
 
     chat.release();
     const head = await opened(screen, 'Visitor');
     const lines = linesOf(head);
-    expect(lines.map((line) => line.textContent)).toEqual([expect.stringContaining(WEB_CHAT_FROM), TRANSCRIPT_NOTE]);
+    expect(lines.map((line) => line.textContent)).toEqual([...(recorded ? [RECORDED] : []), expect.stringContaining(WEB_CHAT_FROM), TRANSCRIPT_NOTE]);
+    expect(head.closest('.cd-conversation')!.querySelector('.cd-conversation__controls') === null).toBe(recorded);
     const real = head.getBoundingClientRect();
     expect(getComputedStyle(head).borderBottom, 'the shapes draw the head\'s hairline').toBe(before.hairline);
     for (const edge of ['top', 'left', 'width', 'bottom'] as const) {
