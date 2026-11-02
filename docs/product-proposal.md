@@ -43,7 +43,7 @@ The first release is for real owners, who sign in with their Claude account.
 
 ## How we'll know it works
 
-Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through about 50 attacks and 30 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
+Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through 47 attacks and 37 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
 
 | Measure | What it shows | Prototype |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs
 | Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; [measured: …] |
 | Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 0.3 to 0.8 s; [measured: …] |
 
-Limits: we wrote the scenarios, real attackers adapt, 17 held-out tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
+Limits: we wrote the scenarios, real attackers adapt, 23 held-out tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
 
 ## Business path
 
