@@ -2830,10 +2830,14 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     _hold_unless_kept(interview, key)
     stored_lines = {name: line for name in TIME_FRAME_LINES
                     if isinstance(line := getattr(interview.answers, name, None), str)}
+    # A change ("Change something") names the time frames it removes, and the owner's next answers are often more of
+    # it, so only the setup questions' answers before any change are checked for keeping them.
+    problems = (None if interview.reopens else
+                lambda drafted: owner_time_frame_errors(text, drafted, stored_lines))
     turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                             [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS,
-                            problems=lambda drafted: owner_time_frame_errors(text, drafted, stored_lines),
-                            timeout_s=lambda: _turn_time_left(interview), retry_min_s=UNDERSTAND_RETRY_MIN_S)
+                            problems=problems, timeout_s=lambda: _turn_time_left(interview),
+                            retry_min_s=UNDERSTAND_RETRY_MIN_S)
     patch = turn.patch()
     if key in LIMIT_CHOICES:
         choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)
