@@ -135,7 +135,7 @@ function ColorSheet({ theme }: { theme: 'dark' | 'light' }) {
   return (
     <Sheet
       title="Colors"
-      intro="Two themes: dark, the default, and light on warm paper. Each value is the theme's that the toolbar draws, and a color with no light value keeps its dark one. Translucent colors are shown over the app background, where they are used."
+      intro="Two themes: dark, the base, and light on warm paper. Each value is the theme's that the toolbar draws, and a color with no light value keeps its dark one. Translucent colors are shown over the app background, where they are used."
     >
       {[...groups].map(([title, colors]) => (
         <Group key={title} title={title}>
@@ -344,31 +344,27 @@ function shownValue(canvasElement: HTMLElement, name: string): string | null | u
   return within(canvasElement).getByText(name, { exact: true }).nextElementSibling?.textContent;
 }
 
+/** What the sheet shows for three colors in each theme: one that changes, one fixed, one alias. */
+const SHOWN: Record<'dark' | 'light', readonly string[]> = {
+  dark: ['#1c1b19', '#141413', '{text-secondary}'],
+  light: ['#f6f4ee', '#141413', '{text-secondary}'],
+};
+
 export const Colors: Story = {
   render: (_, { globals }) => <ColorSheet theme={globals.theme === 'light' ? 'light' : 'dark'} />,
-  play: async ({ canvas, canvasElement }) => {
-    // Each color's dark value, the theme Storybook draws in unless asked.
+  play: async ({ canvas, canvasElement, globals }) => {
+    // Each color's value in the theme the sheet draws in: dark, as Storybook draws unless asked, or
+    // light, where a color keeps its dark value if it has no light one.
+    const theme = globals.theme === 'light' ? 'light' : 'dark';
     await expect(canvas.getByText(/^Two themes:/)).toBeVisible();
     await expect([shownValue(canvasElement, 'bg-app'), shownValue(canvasElement, 'mark-ink'), shownValue(canvasElement, 'line-focus')]).toEqual([
-      '#1c1b19',
-      '#141413',
-      '{text-secondary}',
+      ...SHOWN[theme],
     ]);
   },
 };
 
-/** The same sheet in the light theme: each color's light value, or its dark one where it keeps it. */
-export const ColorsLight: Story = {
-  render: Colors.render,
-  globals: { theme: 'light' },
-  play: async ({ canvasElement }) => {
-    await expect([shownValue(canvasElement, 'bg-app'), shownValue(canvasElement, 'mark-ink'), shownValue(canvasElement, 'line-focus')]).toEqual([
-      '#f6f4ee',
-      '#141413',
-      '{text-secondary}',
-    ]);
-  },
-};
+/** The same sheet in the light theme. */
+export const ColorsLight: Story = { ...Colors, globals: { theme: 'light' } };
 
 export const Type: Story = { render: () => <TypeSheet /> };
 
