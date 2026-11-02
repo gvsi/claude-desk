@@ -63,6 +63,8 @@ interface Held {
   key: string;
   at: number;
   timer: ReturnType<typeof setTimeout> | null;
+  /** Stops listening on its chat's stream, once the run ends. */
+  leave: () => void;
 }
 
 /** Why a start can't be answered: the key started a run on another Desk, or the copy has started its three this hour. */
@@ -137,6 +139,7 @@ export class DemoVisitorRuns {
   private end(held: Held, how: DemoVisitorEnded): void {
     if (held.timer !== null) clearTimeout(held.timer);
     held.timer = null;
+    held.leave();
     held.run.state = ENDED_STATE[how];
     held.run.ended = how;
   }
@@ -156,7 +159,10 @@ export class DemoVisitorRuns {
     };
     // The chat's mark names its run, as the API's does.
     session.demoVisitorRun = run.run_id;
-    const held: Held = { run, key, at: now, timer: null };
+    // It listens on its chat's stream for its whole run, as the API's keeps it open, so the owner reads it as here.
+    const listening = () => {};
+    session.listeners.add(listening);
+    const held: Held = { run, key, at: now, timer: null, leave: () => session.listeners.delete(listening) };
     this.runs.set(run.run_id, held);
     const lines: string[] = [...DEMO_VISITOR_LINES];
     // The line it is typing, sent at its next step; and the newest item it had read when the owner last had its answer.
