@@ -610,6 +610,13 @@ class DemoVisitors:
         await held.opened.wait()
         return held.run.model_copy(deep=True)
 
+    def existing(self, copy_id: str, key: str | None, desk_id: str) -> DemoVisitorRun | None:
+        """A snapshot of the retained keyed run or the copy's running run that `start` would answer, else None.
+        Raise `KeyReused` when the key belongs to another Desk in the copy; never launch or wait for a run."""
+        self._forget(self._clock())
+        held = self._keyed(copy_id, key, desk_id) or self._running(copy_id)
+        return held.run.model_copy(deep=True) if held is not None else None
+
     def start_wait(self, copy_id: str) -> int | None:
         """None while the copy may start another demo visitor this hour; else the whole seconds, at least 1, until
         its oldest start in the hour leaves it."""

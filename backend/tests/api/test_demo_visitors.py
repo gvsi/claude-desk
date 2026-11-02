@@ -989,6 +989,42 @@ async def test_a_key_answers_the_run_it_started(app, fake, kernel_http, clock, v
     await visitors.drain()
 
 
+async def test_existing_answers_the_keyed_run_before_the_running_run(app, fake, visitors, visitor_model, clock,
+                                                                    copy):
+    copy_id, desk_id = copy.copy_id, copy.desk_ids[0]
+    seeded = await visitor_sessions(fake)
+    assert visitors.existing(copy_id, "click-1", desk_id) is None
+    visitor_model.add(step("", done=True))
+    first = await start(visitors, fake, copy, key="click-1")
+    await visitors.drain()
+
+    release = asyncio.Event()
+    thinking = gated(step("", done=True), release)
+    visitor_model.add(thinking)
+    second = await start(visitors, fake, copy, key="click-2")
+    await asyncio.wait_for(thinking.entered.wait(), 5)
+    assert visitors.existing(copy_id, "click-1", desk_id).run_id == first.run_id
+    assert visitors.existing(copy_id, "new-click", desk_id).run_id == second.run_id
+    assert visitors.existing(copy_id, None, "another-desk").run_id == second.run_id
+    assert visitors.existing("another-copy", "click-1", desk_id) is None
+    with pytest.raises(KeyReused):
+        visitors.existing(copy_id, "click-1", "another-desk")
+
+    snapshot = visitors.existing(copy_id, "click-2", desk_id)
+    snapshot.first_name = "Changed"
+    assert visitors.existing(copy_id, "click-2", desk_id).first_name == second.first_name
+    assert await visitor_sessions(fake) == seeded + 2
+    assert len(visitor_model.requests) == 2
+
+    release.set()
+    await visitors.drain()
+    assert visitors.existing(copy_id, None, desk_id) is None
+    assert visitors.existing(copy_id, "click-2", desk_id).ended == "finished"
+    clock.advance(3600)
+    assert visitors.existing(copy_id, "click-1", desk_id) is None
+    assert visitors.existing(copy_id, "click-2", desk_id) is None
+
+
 async def test_runs_are_read_by_their_copy_for_an_hour(app, fake, kernel_http, visitors, visitor_model, clock,
                                                        copy):
     visitor_model.add(step("", done=True))
