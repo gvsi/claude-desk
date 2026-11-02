@@ -54,7 +54,7 @@ def test_a_lanes_database_rule_comes_before_its_lane_network_reject():
     reject = '"iptables", "-A", "OUTPUT", "-d", "10.200.0.0/16", "-j", "REJECT"'
     assert accept in launcher and reject in launcher
     assert launcher.index(accept) < launcher.index(reject)
-    assert '"iptables", "-I"' not in launcher            # an inserted rule would jump the order the file shows
+    assert not any(flag in launcher for flag in ('"-I"', '"--insert"'))   # an inserted rule jumps the file's order
 
 
 def test_command_preserves_argument_boundaries():
