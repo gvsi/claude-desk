@@ -76,8 +76,11 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    has replaced since the request), then the decision's status line: each held request awaiting
    the owner ("Quote request: Waiting for Mike Turner to approve"), and each request that has left
    `held` since
-   Claude's latest reply in the session that passed, in ledger order ("Quote request: Cancelled",
-   when the visitor's booking closed a held discount). A receipt backs what it says and nothing
+   Claude's latest reply in the session that passed, in ledger order ("Quote request: Closed: your
+   booking replaced this request", when the visitor's booking closed a held discount). Only the
+   owner's approval runs a held request, so one that ran reads that approval before what it did
+   ("Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"), as the chat
+   showed them. A receipt backs what it says and nothing
    more: never another request, a follow-up, an outcome, a time or an approval it doesn't state.
    They are read without a lock, in a savepoint, and a read that fails adds none. A receipt only
    restates a status the chat already shows and updates, so unlike the handoff's card it isn't
@@ -1559,9 +1562,10 @@ async def _last_passed_reply(ctx: KernelCtx, session_row: SessionRow, *, after: 
         event["summary"]["ok"].astext == "true").order_by(LedgerRow.seq.desc()).limit(1)))).scalar_one_or_none()
 
 
-async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str]]:
+async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str, str | None]]:
     """The session's request receipts, oldest request first, each as what was asked for (its key in
-    `render.RECEIPT_SUBJECTS`) and its decision's status line (`visitor_plain`), read without a lock:
+    `render.RECEIPT_SUBJECTS`), its decision's status line (`visitor_plain`) and, for one that ran, the
+    owner who approved it (only an owner's approval runs a held request), read without a lock:
     each held request awaiting the owner, as `_awaiting_holds` reads them (held and not expired), and
     each request that has left `held` (answered, cancelled, timed out, run or settled) after Claude's
     latest reply in the session that passed the check, by ledger order (its decision's `ledger_seq`,
@@ -1578,7 +1582,10 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     shown = [row for row in rows
              if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
     asked = await _receipt_asked(ctx, session_row, shown)
-    return [(key, row.visitor_plain) for row, key in zip(shown, asked, strict=True) if key is not None]
+    owner = ((await _desk_info(ctx, session_row.desk_id)).owner_display_name
+             if any(row.state == "executed" for row in shown) else None)
+    return [(key, row.visitor_plain, owner if row.state == "executed" else None)
+            for row, key in zip(shown, asked, strict=True) if key is not None]
 
 
 async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, rows: Sequence) -> list[str | None]:
@@ -1619,7 +1626,7 @@ async def request_receipts(ctx: KernelCtx, session_row: SessionRow, language: re
     except SQLAlchemyError as error:
         log_error(logger, error, "request_receipts_unread")
         return []
-    return [render.receipt_check_text(asked, line, language) for asked, line in found]
+    return [render.receipt_check_text(asked, line, language, approved_by=owner) for asked, line, owner in found]
 
 
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:

@@ -1036,6 +1036,23 @@ async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(
     assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]
 
 
+async def test_a_hold_the_owner_approved_and_that_ran_reads_his_approval_then_what_it_did(app, client, reviewer):
+    """A held request the owner approved, which then ran, shows what it did (`executed_status`); the check
+    reads the approval before that line, as the chat showed it, so "Mike Turner approved it; your quote is
+    below" is backed, until a reply that passes has told the visitor."""
+    from .test_approvals import answered
+
+    copy, visitor = await visitor_of(app, client)
+    held = await held_quote(client, visitor)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert result.decision.state == "executed", result
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == [
+        "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"]
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == []
+
+
 async def test_a_denied_hold_backs_the_reply_after_it_until_a_reply_passes(app, client, reviewer):
     """The order a live conversation takes: a reply passes on the held quote's receipt, the owner says no,
     the next reply is shown exactly the denial's receipt (no longer the held one), and once a reply has

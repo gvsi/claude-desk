@@ -261,7 +261,8 @@ class SoftPromiseInput(BaseModel):
     prose as the visitor would see it, each card's kind and text ("Quote card: ...",
     `render.check_text`), then the session's request receipts, each what was asked for and its
     decision's status line ("Request receipt card: Quote request: Waiting for Mike Turner to approve",
-    `render.receipt_check_text`), and the session's fixed next steps.
+    `render.receipt_check_text`), after the owner's approval for a request that ran, and the session's
+    fixed next steps.
     Never anything the visitor wrote."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
