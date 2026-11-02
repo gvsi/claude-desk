@@ -138,13 +138,13 @@ import logging
 import re
 import secrets
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from functools import partial
 from time import monotonic
-from typing import Literal, TypeVar, cast, get_args
+from typing import Any, Literal, TypeVar, cast, get_args
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -173,6 +173,7 @@ from desk.api.model import (
     parse_structured,
 )
 from desk.api.prompts import (
+    ANSWER_RETRY,
     ANSWERS_SO_FAR_TAG,
     ANSWERS_TAG,
     CAPABILITIES,
@@ -218,6 +219,7 @@ from desk.api.prompts import (
     SITUATION_CALLER_TOOL_REQUIRED,
     SITUATION_PRICE_REQUIRED,
     SITUATION_TOOLS_BY_WHO,
+    TIME_FRAME_UNACCOUNTED,
     TOOLS_TAG,
     WEB_SEARCH_TAG,
     BlockConfig,
@@ -244,6 +246,7 @@ from desk.api.prompts import (
     SetupAnswers,
     SetupPatch,
     SetupStart,
+    SetupTurn,
     SetupUnderstanding,
     SituationDraft,
     SuggestedFacts,
@@ -902,10 +905,11 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
                     max_tokens: int, route: str = ROUTE, effort: Effort = "low",
                     check: Callable[[Output], str | None | Awaitable[str | None]] | None = None,
                     timeout_s: float | Callable[[], float] | None = None,
-                    retry_min_s: float = 0) -> Output | None:
+                    retry_min_s: float = 0, check_retry: str = DRAFT_RETRY) -> Output | None:
     """A structured setup answer as `output` that `check` (if given, awaited when it answers an awaitable) finds
     nothing wrong with. A finished answer (`end_turn`) that doesn't fit, or that `check` lists problems with, gets one
-    retry with them; None when the retry doesn't fit either. 503 `model_unavailable` when the model gives no answer at
+    retry with them (`check`'s under `check_retry`); None when the retry doesn't fit either. 503 `model_unavailable`
+    when the model gives no answer at
     all, one that stopped before it finished (any other stop reason, `max_tokens` say) whatever its text, or none
     within `timeout_s` (`SETUP_TIMEOUT_S` unless the caller gives another): each call's usage is recorded first, a
     timed-out one as failed."""
@@ -951,7 +955,7 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
                 problems = await problems
             if problems is None:
                 return parsed
-            retry = DRAFT_RETRY.format(errors=problems)
+            retry = check_retry.format(errors=problems)
         logger.info("a %s answer didn't fit %s (attempt %d)", route, output.__name__, attempt)
         answered = text if text is not None else parsed.model_dump_json()
         messages += [{"role": "assistant", "content": [{"type": "text", "text": answered}]}, _user(retry)]
@@ -959,18 +963,25 @@ async def ask_model(model: ModelClient, record: Record, system: str, messages: l
 
 
 async def structured(model: ModelClient, record: Record, system: str, messages: list[dict],
-                     output: type[Output], max_tokens: int) -> Output:
-    """The setup route's answer as `output`. An answer that doesn't fit gets one retry, with its errors; then, or
-    when the model gives no answer at all, 503 `model_unavailable`."""
-    answer = await _ask_drafts(model, record, system, messages, output, max_tokens=max_tokens)
+                     output: type[Output], max_tokens: int,
+                     problems: Callable[[Output], list[str]] | None = None, **bounds: Any) -> Output:
+    """The setup route's answer as `output`. An answer that doesn't fit, or that `problems` lists problems with (then
+    under `ANSWER_RETRY`), gets one retry, with its errors, within `bounds` (`ask_model`'s `timeout_s` and
+    `retry_min_s`); then, or when the model gives no answer at all, 503 `model_unavailable`."""
+    if problems is not None:
+        bounds["check_retry"] = ANSWER_RETRY
+    answer = await _ask_drafts(model, record, system, messages, output, problems=problems, max_tokens=max_tokens,
+                               **bounds)
     if answer is None:
         raise ApiProblem(503, "model_unavailable")
     return answer
 
 
 async def _ask_drafts(model: ModelClient, record: Record, system: str, messages: list[dict],
-                      output: type[Output], **kwargs) -> Output | None:
-    """Retry dropped proposals once; a partial second answer remains usable, including on an unavailable retry."""
+                      output: type[Output], problems: Callable[[Output], list[str]] | None = None,
+                      **kwargs) -> Output | None:
+    """Retry dropped proposals, or what `problems` lists, once; a partial second answer remains usable, including on
+    an unavailable retry."""
     last = None
 
     def check(parsed: Output) -> str | None:
@@ -978,6 +989,8 @@ async def _ask_drafts(model: ModelClient, record: Record, system: str, messages:
         first = last is None
         last = parsed
         errors = parsed._draft_errors if isinstance(parsed, DraftOutput) else []
+        if first and problems is not None:
+            errors = [*errors, *problems(parsed)]
         return "\n".join(errors) if first and errors else None
 
     try:
@@ -2379,6 +2392,91 @@ def _code_next(interview: Interview, answering: QuestionKey | None = None) -> Qu
                  if key not in interview.covered and key != answering and key not in OPT_IN_TOPICS), None)
 
 
+# A time frame or time threshold the owner states ("we reply within one business day", "a deadline in the next week").
+# A customer line keeps it word for word where the kernel's public-text check allows, or the turn's reply names the
+# change and points to What customers will read (`SETUP_TURN_SYSTEM`). Code checks only that each one is kept or
+# named, never what the kernel would accept.
+_COUNT_EN = (r"(?:\d+(?:\s*(?:to|or)\s*\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|"
+             r"twenty|thirty|forty\s?eight|seventy\s?two|a\s+few|a\s+couple(?:\s+of)?|few|several)")
+_UNIT_EN = r"(?:(?:business|working|work|calendar)\s+)?(?:minute|hour|day|week|month)s?"
+_COUNT_ES = (r"(?:\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|quince|veinte|treinta|"
+             r"cuarenta\s+y\s+ocho|setenta\s+y\s+dos|unos\s+pocos|unas\s+pocas|pocos|pocas|unos|unas)")
+_UNIT_ES = r"(?:minutos?|horas?|d[ií]as?|semanas?|mes(?:es)?)(?:\s+(?:h[aá]bil(?:es)?|laborables?))?"
+# A weekday only as a deadline ("by Friday"): "Monday to Friday" is the hours.
+_WEEKDAY_EN = r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|the\s+weekend)"
+_WEEKDAY_ES = r"(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|fin\s+de\s+semana)"
+OWNER_TIME_FRAME = re.compile(
+    rf"(?<!\w)(?:{_COUNT_EN}\s+{_UNIT_EN}"
+    r"|\d+\s*(?:hrs?|h|mins?)"
+    # "a" or "an" counts only after a deadline's or a threshold's words: "$150 an hour" and "once a week" are none
+    rf"|(?:within|in|under|after|inside(?:\s+of)?|at\s+least)\s+an?\s+{_UNIT_EN}"
+    r"|an?\s+(?:minute|hour|day|week|month)(?:'s|s)?\s+(?:notice|ahead|in\s+advance|beforehand)"
+    r"|(?:the\s+)?(?:next|same|following)\s+(?:(?:business|working)\s+)?(?:day|week|month|morning)"
+    r"|within\s+the\s+(?:hour|day|week|month)"
+    r"|end\s+of\s+(?:the\s+)?(?:(?:business|working)\s+)?(?:day|week|month)"
+    rf"|(?:by|before|until|no\s+later\s+than)\s+(?:(?:this|next)\s+)?{_WEEKDAY_EN}"
+    r"|this\s+(?:week|month)|today|tonight|tomorrow"
+    rf"|{_COUNT_ES}\s+{_UNIT_ES}"
+    r"|(?:el\s+)?mismo\s+d[ií]a|(?:la\s+)?pr[oó]xima\s+semana|(?:el\s+)?pr[oó]ximo\s+mes"
+    r"|(?:el\s+)?(?:siguiente|pr[oó]ximo)\s+d[ií]a(?:\s+h[aá]bil)?|d[ií]a\s+(?:h[aá]bil\s+)?siguiente"
+    r"|dentro\s+de\s+la\s+(?:hora|semana)"
+    rf"|(?:antes\s+del?|para\s+el|hasta\s+el)\s+{_WEEKDAY_ES}"
+    r"|esta\s+semana|hoy|(?<!la\s)mañana)(?!\w)")
+# Hours ("7 days a week", "24 hours a day", "open 24h", "de 9h a 18h", "Monday until Friday", "del lunes hasta el
+# viernes") and how long a visit lasts (never "the last 30 days"), which no customer line holds as a time frame.
+_NOT_TIME_FRAMES = re.compile(
+    r"(?<!\w)(?:\w+\s+(?:hours?|days?)\s+a\s+(?:day|week)|24/7|open\s+24\s*(?:h|hrs?|hours?)"
+    r"|\d+\s*h(?:\s+(?:a|al|to|until|till|hasta))?\s+\d+\s*h"
+    rf"|{_WEEKDAY_EN}\s+(?:to|through|thru|until|till)\s+{_WEEKDAY_EN}"
+    rf"|(?:de|del)\s+{_WEEKDAY_ES}\s+(?:a|al|hasta(?:\s+el)?)\s+{_WEEKDAY_ES}"
+    r"|(?<!the\s)(?<!past\s)last(?:s|ing)?\s+(?:for\s+)?(?:about\s+|around\s+|up\s+to\s+)?"
+    r"(?:a\s+few|a\s+couple(?:\s+of)?|\S+)\s+(?:(?:business|working)\s+)?"
+    r"(?:minute|min|hour|hr|day|week|month)s?)(?!\w)")
+TIME_FRAME_LINES = ("summary", "pricing", "intake", "urgent", "after_hours")
+# A reply names a change only beside the pointer the rule for customer lines asks for, never by saying the words back.
+LINES_POINTER = "what customers will read"
+
+
+def _plain(text: str) -> str:
+    return " ".join(text.casefold().replace("-", " ").replace("\u2019", "'").split())
+
+
+def owner_time_frames(text: str) -> list[str]:
+    """The time frames the owner's answer states, each once, lowercased without a leading article."""
+    spans = OWNER_TIME_FRAME.findall(_NOT_TIME_FRAMES.sub(" ", _plain(text)))
+    return list(dict.fromkeys(re.sub(r"^(?:the|el|la) ", "", span) for span in spans))
+
+
+def _says(text: str, span: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(span)}(?!\w)", _plain(text)) is not None
+
+
+def owner_time_frame_errors(text: str, turn: SetupTurn, stored: Mapping[str, str] | None = None) -> list[str]:
+    """The answer turn's retry line when it drafts a customer line and a time frame from the owner's answer `text` is
+    in none of its customer lines nor the `stored` ones (by field) it leaves as they are, nor named in its reply as a
+    change (with the pointer to What customers will read). A turn that drafts none has nothing to check."""
+    drafted = {name: line for name in TIME_FRAME_LINES
+               if isinstance(line := getattr(turn, name, None), str) and line.strip()}
+    if not drafted:
+        return []
+    kept = [line for name, line in (stored or {}).items() if name not in drafted]
+    lines, named = [*drafted.values(), *kept], LINES_POINTER in _plain(turn.reply)
+    missing = [span for span in owner_time_frames(text)
+               if not any(_says(line, span) for line in lines) and not (named and _says(turn.reply, span))]
+    if not missing:
+        return []
+    logger.info("a setup turn left %d of the owner's time frames out of its lines and reply", len(missing))
+    return [TIME_FRAME_UNACCOUNTED]
+
+
+def _turn_time_left(interview: Interview) -> float:
+    """An answer turn's model call's bound: `SETUP_TIMEOUT_S`, or less when the run's deadline is nearer, keeping
+    `TURN_FINISH_S` for the turn to save, so a late retry is skipped and the first answer stands."""
+    if interview.turn_deadline is None:
+        return SETUP_TIMEOUT_S
+    return min(SETUP_TIMEOUT_S, interview.turn_deadline - asyncio.get_running_loop().time() - TURN_FINISH_S)
+
+
 def _hold_unless_kept(interview: Interview, answering: QuestionKey | None = None) -> None:
     """Show none of this turn's first reply on the owner's display when it could be hidden before it is saved: it
     reads untrusted text, and the topic code asks next by default is a limit question (`_TurnReplies.before`)."""
@@ -2715,8 +2813,12 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     # The questions still to ask for facts a change gave off their own questions, waiting on the one answered.
     waiting = list(interview.latest_ask.asks_after) if interview.latest_ask is not None else []
     _hold_unless_kept(interview, key)
+    stored_lines = {name: line for name in TIME_FRAME_LINES
+                    if isinstance(line := getattr(interview.answers, name, None), str)}
     turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
-                            [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS)
+                            [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS,
+                            problems=lambda drafted: owner_time_frame_errors(text, drafted, stored_lines),
+                            timeout_s=lambda: _turn_time_left(interview), retry_min_s=UNDERSTAND_RETRY_MIN_S)
     patch = turn.patch()
     if key in LIMIT_CHOICES:
         choice = next((choice for choice in LIMIT_CHOICES[key](interview.business_type)

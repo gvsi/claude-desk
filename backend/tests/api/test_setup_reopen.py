@@ -178,7 +178,8 @@ async def test_a_slow_reopen_answers_202_and_is_polled_or_rolled_back_at_its_dea
     await at_step(owner, model, state, "preview")
     before = await stored(engine, state["interview_id"])
     monkeypatch.setattr(setup, "TURN_WAIT_S", 0.01)
-    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.5 if timeout else 10)
+    # The turn's model call ends `TURN_FINISH_S` before the run's deadline, for the turn to save.
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", setup.TURN_FINISH_S + (0.5 if timeout else 10))
     release = asyncio.Event()
     model.add(gated(turn("Closed on Saturdays, noted. Anything else?", step_done=False), release))
     pending = await reopen(owner, state, key="slow-change")
