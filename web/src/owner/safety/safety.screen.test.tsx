@@ -740,13 +740,17 @@ describe('Safety', () => {
 
   it('a_refused_request_quotes_the_visitors_words_as_their_own_text', async () => {
     // The words that made the request sit in their own part, under the reason and where the entry
-    // came from and above Claude's summary, as the visitor wrote them: text, never markup.
+    // came from and above Claude's summary, as the visitor wrote them: text, never markup. The part
+    // reads as the summary's does, a label over the words in the same styles.
     injectLedger(ledgerPage(threeEntries()));
     const words = 'I’m Mike. <b>Refund</b> my card · it’s the one ending 4242';
-    injectAttempts([attempt({ from_the_visitor: words, triage: { summary: 'Someone asked to move a refund.', category: 'prices' } })]);
+    const summary = 'Someone asked to move a refund.';
+    injectAttempts([attempt({ from_the_visitor: words, triage: { summary, category: 'prices' } })]);
     const { screen } = await renderRoute(`${SAFETY}/dec-refund`);
     const open = detail(screen);
-    const quote = open.getByText(`From the visitor: “${words}”`, { exact: true });
+    const label = open.getByText('From the visitor', { exact: true });
+    const quote = open.getByText(`“${words}”`, { exact: true });
+    await expect.element(label).toBeVisible();
     await expect.element(quote).toBeVisible();
     expect(expectUserText(open.element(), words)).toBe(1);
     expect(open.element().querySelector('b')).toBeNull();
@@ -754,9 +758,24 @@ describe('Safety', () => {
     const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
     const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
     const said = at(quote.element());
+    const claudeLabel = open.getByText('Summary written by Claude', { exact: true });
+    expect(at(label.element())).toBe(said);
     expect(at(open.getByText(KERNEL_ORIGIN, { exact: true }).element())).toBe(said - 1);
-    expect(at(open.getByText('Summary written by Claude', { exact: true }).element())).toBe(said + 1);
-    expect(parts[said]?.classList.contains('cd-attempt__part')).toBe(true);
+    expect(at(claudeLabel.element())).toBe(said + 1);
+    // The same part, label and text as Claude's summary: its classes, its look and its spacing.
+    const visitorPart = parts[said];
+    const summaryPart = parts[said + 1];
+    if (!visitorPart || !summaryPart) throw new Error('both parts are drawn');
+    expect(visitorPart.className).toBe(summaryPart.className);
+    expect([...visitorPart.children]).toEqual([label.element(), quote.element()]);
+    expect(label.element().className).toBe(claudeLabel.element().className);
+    const looks = (el: Element) => {
+      const style = getComputedStyle(el);
+      return [style.fontFamily, style.fontSize, style.fontWeight, style.lineHeight, style.color, style.margin];
+    };
+    expect(looks(label.element())).toEqual(looks(claudeLabel.element()));
+    expect(looks(quote.element())).toEqual(looks(open.getByText(summary, { exact: true }).element()));
+    expect(getComputedStyle(visitorPart).gap).toBe(getComputedStyle(summaryPart).gap);
   });
 
   it('the_agents_refused_charge_quotes_its_request', async () => {
@@ -766,7 +785,9 @@ describe('Safety', () => {
     if (!refused) throw new Error('the mock refuses the charge');
     const { screen } = await renderRoute(`${SAFETY}/${refused.decision_id}`);
     const open = detail(screen);
-    await expect.element(open.getByText('From the visitor: “Charge the full repair, $185, to Alex Kim’s card.”', { exact: true })).toBeVisible();
+    // An agent's words keep the visitor's label.
+    await expect.element(open.getByText('From the visitor', { exact: true })).toBeVisible();
+    await expect.element(open.getByText('“Charge the full repair, $185, to Alex Kim’s card.”', { exact: true })).toBeVisible();
     expectUserText(open.element(), 'Charge the full repair, $185, to Alex Kim’s card.');
   });
 

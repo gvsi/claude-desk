@@ -115,11 +115,13 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
           {replayed ? <p className="cd-attempt__origin cd-type-caption">{REPLAYED_LABEL}</p> : null}
         </div>
         {/* The visitor's own untrusted words that made the request, from the chat, not the signed
-            record: a part of their own, as Today's held card quotes them, and text only. */}
+            record: a part of their own, labelled as Claude's summary below is, and text only. An
+            agent's words are labelled the same. */}
         {attempt.from_the_visitor !== null && attempt.from_the_visitor !== '' ? (
           <div className="cd-attempt__part">
+            <p className="cd-attempt__label cd-type-caption">From the visitor</p>
             <p className="cd-attempt__visitor cd-type-body">
-              From the visitor: “<span data-copy="user">{attempt.from_the_visitor}</span>”
+              “<span data-copy="user">{attempt.from_the_visitor}</span>”
             </p>
           </div>
         ) : null}
