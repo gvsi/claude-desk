@@ -130,8 +130,9 @@ describe('the About documents', () => {
       const found = links(blocks);
       expect(found.filter((link) => link.internal).map((link) => link.href), file).toEqual(internal);
       expect(found.filter((link) => !link.internal).every((link) => link.href.startsWith('https://')), file).toBe(true);
-      // None is lost: every `](` in the Markdown is a link, except the architecture figure's image line.
-      const count = (pattern: RegExp) => raw(file).match(pattern)?.length ?? 0;
+      // None is lost after the page's named replacement, except the architecture figure's image line.
+      const markdown = id === 'proposal' ? proposalForThePage(raw(file)) : raw(file);
+      const count = (pattern: RegExp) => markdown.match(pattern)?.length ?? 0;
       expect(found.length, file).toBe(count(/\]\(/g) - count(/!\[/g));
     }
   });
@@ -276,13 +277,20 @@ describe('the About documents', () => {
   };
 
   it('the_replacement_matches_once_before_and_after_the_fill', () => {
-    // The document links the public repository; the hosted address is still the owner's to give.
+    // Use the committed sentence whether its hosted address is a placeholder or already filled.
     const proposal = raw('product-proposal.md');
-    const sentence = `The prototype, v1's enforced core, is at ${HOSTED}, with the code at ${REPO}.`;
+    const sentences = proposal.match(PROTOTYPE_SENTENCE);
+    expect(sentences).toHaveLength(1);
+    const sentence = sentences?.[0] ?? '';
     expect(proposal.split(sentence)).toHaveLength(2);
-    const filled = proposal.replace(HOSTED, '[desk.example.com](https://desk.example.com)');
+    const beforeFillSentence = `The prototype, v1's enforced core, is at ${HOSTED}, with the code at ${REPO}.`;
+    const unfilled = proposal.replace(sentence, beforeFillSentence);
+    const filled = proposal.replace(sentence,
+      `The prototype, v1's enforced core, is at [desk.example.com](https://desk.example.com), with the code at ${REPO}.`);
+    expect(unfilled).toContain(HOSTED);
     expect(filled).not.toContain('[owner:');
     expect(proposal.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
+    expect(unfilled.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
     expect(filled.match(PROTOTYPE_SENTENCE)).toHaveLength(1);
     // The reader's pattern is the plan's.
     expect(READERS_SENTENCE.source).toBe(PROTOTYPE_SENTENCE.source);
@@ -291,21 +299,25 @@ describe('the About documents', () => {
     // the sentence's period, whether whitespace follows or the text ends there.
     const repository = (markdown: string) => [...markdown.matchAll(READERS_SENTENCE)].map((match) => match[1]);
     expect(repository(proposal)).toEqual([REPO]);
+    expect(repository(unfilled)).toEqual([REPO]);
     expect(repository(filled)).toEqual([REPO]);
     expect(sentence.endsWith(`${REPO}.`)).toBe(true);
     expect(repository(sentence)).toEqual([REPO]);
     expect(repository(proposal.replace(REPO, '[owner: repo link]'))).toEqual(['[owner: repo link]']);
 
     // Before the fill: the hosted address goes, the repository link stays, and nothing else changes.
-    const page = proposalForThePage(proposal);
+    const page = proposalForThePage(unfilled);
     expect(page).toContain(`You’re in it. The code is at ${REPO}. Each visitor acts as Mike`);
     expect(page).not.toContain(HOSTED);
+    expect(page).toBe(unfilled.replace(beforeFillSentence, `You’re in it. The code is at ${REPO}.`));
+    expect(proposalForThePage(proposal)).toBe(page);
     expect(page).toBe(proposal.replace(sentence, `You’re in it. The code is at ${REPO}.`));
     expect(ABOUT_DOCUMENTS.proposal.blocks).toContainEqual(YOURE_IN_IT);
 
     // After the fill: the repository link survives as a link, and the hosted address isn't on the page.
     const { blocks } = readDocument('proposal', filled);
     expect(blocks).toContainEqual(YOURE_IN_IT);
+    expect(proposalForThePage(filled)).toBe(page);
     expect(links(blocks).map((link) => link.href)).not.toContain('https://desk.example.com');
 
     // Anything but exactly one match fails loudly, naming the second match's line.

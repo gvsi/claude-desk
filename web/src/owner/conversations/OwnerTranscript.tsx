@@ -56,7 +56,11 @@ export interface OwnerTranscriptProps {
   focusTarget: RefObject<HTMLElement | null>;
   /** Who an agent's requests come from, as the owner's screens name them. */
   agentName: string;
-  /** The owner's display name: Claude's messages name them, and their own messages show their initials. */
+  /**
+   * Who the owner is in the chat: Claude's messages name them, and their own messages show these
+   * initials. Their display name, or the business's when they gave none, as the sidebar's owner row
+   * shows it.
+   */
   ownerName: string;
   /** The business's time zone, which a whisper's time is read in. */
   timezone: string;

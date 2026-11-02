@@ -19,6 +19,7 @@ import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary } from '../api/views.ts';
 import { startingDeskFor } from './arrival/keptCopy.ts';
 import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
+import { givenOwnerName } from '../public/brand.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
   AppShell,
@@ -464,7 +465,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       todayHref={todayPath(deskId)}
       linkComponent={RouterLink}
       banner={
-        <ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />
+        <ReviewerBar ownerName={givenOwnerName(business.owner_display_name)} onStartOver={() => setConfirming(true)} />
       }
       sidebar={sidebar}
       fill={fill}
@@ -559,7 +560,8 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         }}
         answering={desk.answering}
         onAnsweringChange={props.onAnsweringChange}
-        owner={{ name: business.owner_display_name, status: 'Available for chats' }}
+        // With no owner's name, the row names the business, its initials in the avatar (owner, 2026-11-02).
+        owner={{ name: givenOwnerName(business.owner_display_name) ?? business.name, status: 'Available for chats' }}
         linkComponent={RouterLink}
         about={SIDEBAR_ABOUT}
         conceptFooter={props.conceptFooter ?? true}
