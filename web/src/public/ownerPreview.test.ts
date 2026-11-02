@@ -46,9 +46,13 @@ it('reopening_preview_does_not_reuse_an_owner_read_from_before_leaving', async (
   await draw(true);
   await act(async () => {
     release(Response.json({ desks: [{ desk_id: 'desk-turner', slug: 'turner-plumbing' }] }));
-    await vi.waitFor(() => expect(client.isFetching()).toBe(0));
   });
-  expect(view).toEqual({ settled: true, href: null });
+  // TanStack tells the hook on a tick of its own after the read ends, so wait for the view itself,
+  // letting React draw each time, not only for the read to end.
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(view).toEqual({ settled: true, href: null });
+  });
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(outcomes.filter((outcome) => !outcome.ok && outcome.error.kind === 'network')).toEqual([]);
 });

@@ -56,7 +56,7 @@ function ToolText({ name, description, updated }: { name: string; description: s
     <span className="cd-tool-rules__tool-text">
       <span className="cd-tool-rules__tool-head">
         {/* The tool's own title (a business's job from setup), so it is user text, not the app's words. */}
-        <span className="cd-tool-rules__tool-name cd-type-section" data-copy="user">
+        <span className="cd-tool-rules__tool-name cd-type-section cd-user-name" data-copy="user">
           {name}
         </span>
         {updated ? <UpdatedPill /> : null}

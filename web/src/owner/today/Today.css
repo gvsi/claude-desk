@@ -333,6 +333,22 @@
   color: var(--text-secondary);
 }
 
+/* The waiting words and unseen longest end line share a cell, so an answer never grows the row. */
+.cd-things__detail[data-room] {
+  display: grid;
+}
+
+.cd-things__detail[data-room]::after {
+  content: attr(data-room);
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+
+.cd-things__detail-now {
+  grid-area: 1 / 1;
+  align-self: start;
+}
+
 .cd-things__action {
   display: flex;
   justify-content: flex-end;
@@ -666,6 +682,17 @@
   padding: var(--space-12) var(--space-8) 0;
 }
 
+/* While Today's latest read has failed, its line comes first in the card, 16 px over the night
+   read before, as Last 7 days' line is over its parts, and inset 8 px to the night's own edge.
+   Alone in the card, as over a quiet night, it keeps the card's edge. */
+.cd-card > .cd-notice:has(+ :is(.cd-since__line, .cd-briefing, .cd-since__all)) {
+  padding-inline: var(--space-8);
+}
+
+.cd-card > .cd-notice + :is(.cd-since__line, .cd-briefing, .cd-since__all) {
+  margin-top: var(--space-16);
+}
+
 /* The full briefing */
 .cd-briefing-page {
   display: flex;
@@ -839,7 +866,6 @@
   .cd-today--skeleton { --cd-today-approval-last-width: 75%; }
 }
 .cd-today-skeleton__link { flex: 0 1 auto; min-width: 0; max-width: 100%; }
-.cd-today-skeleton__rule { flex: 1; min-width: 0; }
 .cd-today-skeleton__text { display: block; min-width: 0; width: 100%; max-width: 100%; }
 .cd-today-skeleton__fixed-line { max-width: none; }
 .cd-today-skeleton__presence { min-height: calc(var(--size-avatar) - var(--space-6)); }

@@ -427,7 +427,8 @@ describe('the scripted Desk', () => {
       answers: ['allow_once', 'deny_once'],
     });
     expect(item?.decision?.decision_id).toBe(held?.type === 'held' ? held.decision_id : 'none');
-    expect(item?.held_by).toBe('Quotes from your price list, at list price.');
+    // Past rv-quote's automatic limit: held_by names only an ask card's reason.
+    expect(item?.held_by).toBeNull();
     expect(item?.from_the_visitor).toBe('Can I get 50% off if I pay cash?');
     expect(item?.session).toMatchObject({ session_id: session.session_id, kind: 'visitor', verified: false });
 
@@ -1425,9 +1426,21 @@ describe('the scripted Desk', () => {
     record.decision.card_ids = [defaultAsk.card_id, 'rv-refund'];
     expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
 
-    // Held by the default ask alone, it names the default ask.
+    // Held by the default ask alone, it names no rule: no rule of the owner's decided it, and the
+    // headline already says so.
     record.decision.card_ids = [defaultAsk.card_id];
-    expect((await read())?.held_by).toBe(defaultAsk.reason);
+    expect((await read())?.held_by).toBeNull();
+  });
+
+  it('held_by_names_no_rule_past_an_automatic_limit', async () => {
+    // As the API reads it (`owner_reads._held_by`): the seed's quote at 15% off went past the
+    // automatic list-price quote card, so Needs you names no rule. The mock keeps the fixture's headline.
+    const quote = rivera.ruleCards['rv-quote'];
+    expect(quote.mode).toBe('auto');
+    const items = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const seeded = items.find((item) => item.decision?.card_ids.includes(quote.card_id));
+    expect(seeded?.decision?.card_ids).toContain('rv-quote');
+    expect(seeded?.held_by).toBeNull();
   });
 
   it.each([
@@ -2063,6 +2076,74 @@ describe('the owner in the chat', () => {
     // Read in step with the stream: a stream opened after `last_seq` repeats none of them.
     expect(typesOf(events)).toEqual(['owner_joined', 'message', 'owner_left']);
     expect(read.last_seq).toBe(events.at(-1)?.[0]);
+  });
+
+  it('a_code_confirmed_while_the_owner_has_the_chat_waits_for_the_hand_back', async () => {
+    // As the API: the visitor is verified, but while the owner has the chat Claude takes no turn, so
+    // it doesn't answer for him and the chat stays his. Handed back, Claude goes on with the invoice, once.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation } })).status).toBe(200);
+    const before = events.length;
+    const checked = await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } });
+    expect(checked).toMatchObject({ status: 200, body: { state: { verified: true, mode: 'owner' } } });
+    await drain();
+    expect(typesOf(events.slice(before)).filter((type) => ['writing', 'message', 'turn_end'].includes(type))).toEqual([]);
+    expect((await call('visitorSession', { params: { slug } })).body).toMatchObject({ state: { mode: 'owner' } });
+
+    const handedBack = events.length;
+    expect((await call('handback', { params: { session_id: session.session_id }, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    const after = events.slice(handedBack).map(([, ev]) => ev);
+    expect(after.map((ev) => ev.type)).toEqual(['owner_left', 'writing', 'receipt', 'message', 'turn_end']);
+    const reply = after.find((ev) => ev.type === 'message');
+    expect(reply?.type === 'message' && reply.blocks.map((b) => b.template)).toContain('document_link');
+    // A second hand-back after another take-over has nothing left to go on with.
+    const again = events.length;
+    expect((await call('takeover', { params: { session_id: session.session_id }, body: { generation: session.generation + 2 } })).status).toBe(200);
+    expect((await call('handback', { params: { session_id: session.session_id }, body: { generation: session.generation + 3 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events.slice(again))).toEqual(['owner_joined', 'owner_left']);
+  });
+
+  it('a_code_held_for_the_hand_back_survives_a_take_over_before_its_turn_and_comes_before_a_waiting_line', async () => {
+    // The owner takes the chat back before Claude's turn starts: that turn never runs, and the next
+    // hand-back has the code still. A line the visitor wrote meanwhile doesn't use it up: Claude goes
+    // on with the invoice, once.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    const at = (step: number) => ({ params: { session_id: session.session_id }, body: { generation: session.generation + step } });
+    expect((await call('takeover', at(0))).status).toBe(200);
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await send('Did it work?');
+    const before = events.length;
+    expect((await call('handback', at(1))).status).toBe(200);
+    expect((await call('takeover', at(2))).status).toBe(200);
+    await drain();
+    expect((await call('handback', at(3))).status).toBe(200);
+    await drain();
+    const replies = events.slice(before).flatMap(([, ev]) => (ev.type === 'message' ? [ev.blocks.map((b) => b.template)] : []));
+    expect(replies.filter((templates) => templates.includes('document_link'))).toHaveLength(1);
+    expect(replies).toHaveLength(1);
+  });
+
+  it('a_code_confirmed_in_a_paused_chat_gets_the_kernels_handoff', async () => {
+    // As a message in a paused chat: no "writing" and no invoice, only the kernel's handoff card.
+    const { session, events } = await openChat();
+    await send('Can you send my invoice?');
+    await drain();
+    const record = mockStore.world.sessions.get(session.session_id);
+    if (!record) throw new Error('the chat is in the copy');
+    mockStore.world.pause(record);
+    const before = events.length;
+    expect((await call('verifyCheck', { params: { slug }, body: { code: DEMO_CODE } })).status).toBe(200);
+    await drain();
+    const shown = events.slice(before).map(([, ev]) => ev);
+    expect(shown.map((ev) => ev.type)).toEqual(['message', 'turn_end']);
+    const [message] = shown;
+    expect(message?.type === 'message' && [message.author, message.handoff, message.blocks.map((b) => b.template)]).toEqual(['claude', true, ['handoff']]);
   });
 
   it('typing_shows_both_ways', async () => {

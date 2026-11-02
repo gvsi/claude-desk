@@ -144,6 +144,24 @@ export const Answering: Story = {
   },
 };
 
+export const TakeOverAbove: Story = {
+  args: { takeOverAbove: true },
+  render: (args) => <Screen {...args} />,
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      "Board REV-720 C, nearest N-Conv-Run1: in the owner's open conversation Take over sits in the conversation's bar at the top, so while Claude answers this bar keeps only its line about whispers above the composer.",
+  },
+  play: async ({ args, canvas, canvasElement }) => {
+    await expect(await expectWhisperLine(canvasElement, 'Dana Whitfield')).toBeVisible();
+    // No Take over here, and no line about what the visitor sees when the owner joins.
+    await expect(canvas.queryAllByRole('button')).toEqual([]);
+    await expect(canvasElement.querySelector('.cd-take-over__action')).toBeNull();
+    await expect(canvasElement).not.toHaveTextContent('joined the chat');
+    await expect(args.onTakeOver).not.toHaveBeenCalled();
+  },
+};
+
 export const AvailableWidth: Story = {
   args: { visitorName: 'Visitor' },
   decorators: [(Story) => <div style={{ width: 'var(--size-reading)', maxWidth: '100%' }}><Story /></div>],

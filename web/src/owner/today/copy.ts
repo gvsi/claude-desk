@@ -60,8 +60,6 @@ export const TODAY_COPY = {
   waiting: 'A request is waiting for your answer.',
   /** The same, before the rule that held it: "A request is waiting for your answer: {rule}." */
   waitingFor: 'A request is waiting for your answer: ',
-  /** The Needs you approval card's line before its rule, as Today's loading shape measures it. */
-  heldBy: 'Held by your rule: ',
   /** "Answer a held request" before anything is held. */
   heldNone: 'When a request waits for your answer, it shows up here.',
   createDetail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',

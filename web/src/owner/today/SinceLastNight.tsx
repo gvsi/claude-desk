@@ -84,6 +84,8 @@ function nightLine(briefing: Today['briefing']): string | null {
 /**
  * Today's "Since last night", always shown: its one line, one row of each kind, and "See all {n}"
  * when the night has more than those rows, or a quiet night. Read with Today and polled with it.
+ * While the latest read has failed, the card says so first, with "Try again", over the night read
+ * before, as "Last 7 days" does; a quiet night isn't said then, since the page couldn't check it.
  */
 export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   const { desk } = useOwnerDesk();
@@ -105,11 +107,13 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
       </p>
     );
   } else if (briefing.total === 0) {
-    body = <QuietNight since={briefing.since} />;
+    // A quiet night is a zero, so it waits for a read that works.
+    body = failure !== null ? <ReadFailed failure={failure} /> : <QuietNight since={briefing.since} />;
   } else {
     const line = nightLine(briefing);
     body = (
       <>
+        <ReadFailed failure={failure} />
         {line !== null ? <p className="cd-since__line cd-type-summary">{line}</p> : null}
         {rows.length > 0 ? <BriefingRows items={rows} /> : null}
         {briefing.total > rows.length ? (
