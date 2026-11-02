@@ -129,8 +129,8 @@ export const WithABadge: Story = {
     await expect(title).toHaveAccessibleName('Knowledge');
     await expect(Math.round(pill.getBoundingClientRect().left - title.getBoundingClientRect().right)).toBe(8);
     await expect(Math.round(middle(pill))).toBe(Math.round(middle(title)));
-    // The title keeps its 32 px line, and the subtitle its place 4 px under it.
-    await expect(title.getBoundingClientRect().height).toBe(32);
+    // The title keeps its 34 px line, and the subtitle its place 4 px under it.
+    await expect(title.getBoundingClientRect().height).toBe(34);
     const subtitle = canvas.getByText(knowledgeHeader.subtitle);
     await expect(Math.round(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(4);
   },
