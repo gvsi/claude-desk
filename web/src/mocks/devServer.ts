@@ -16,6 +16,7 @@ import { getResponse } from 'msw';
 import type { Plugin } from 'vite';
 
 import { createHandlers } from './handlers.ts';
+import type { StreamSettings } from './ownerStreams.ts';
 import { MockStore } from './store.ts';
 
 export interface MockApi {
@@ -41,10 +42,13 @@ function allowSseHandlers(): void {
   });
 }
 
-/** A new mock API with no copies, answering through MSW over the mock's handlers. */
-export function createMockApi(): MockApi {
+/**
+ * A new mock API with no copies, answering through MSW over the mock's handlers. Its streams go at
+ * a model's pace, every setup turn streamed; a test can write them faster (`streams`).
+ */
+export function createMockApi({ streams }: { streams?: StreamSettings } = {}): MockApi {
   allowSseHandlers();
-  const handlers = createHandlers(new MockStore({ cookies: 'real' }));
+  const handlers = createHandlers(new MockStore({ cookies: 'real', streams }));
   return {
     async handle(request) {
       // `quiet`: no console line per request; `baseUrl`: the handlers' paths are relative.
