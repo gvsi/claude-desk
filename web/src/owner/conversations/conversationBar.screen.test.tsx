@@ -346,6 +346,39 @@ describe('the open conversation bar', () => {
     await expect.poll(() => document.activeElement?.textContent).toBe(`${DANA} never sees whispers. Whispers steer Claude, and your rules still apply.`);
   });
 
+  it.each([[390, 844], [1440, 560]] as const)('shows_a_failed_bar_take_over_below_the_bar_without_moving_focus_at_%sx%s', async (width, height) => {
+    const last = lengthen(named(DANA_LIVE, DANA));
+    let answer!: () => void;
+    mockStore.inject({ route: 'takeover', status: 409, until: new Promise<void>((resolve) => { answer = resolve; }) });
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width, height } });
+    const bar = await opened(screen, DANA);
+    const pane = landed('.cd-conversations__open');
+    await expect.element(screen.getByRole('log').getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
+    expect(scrollerOf(screen.getByRole('log').element())).toBe(pane);
+    pane.scrollTop = 0;
+    await nextFrames();
+
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    const button = takeOver.element() as HTMLElement;
+    button.focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(takeOver).toHaveAttribute('aria-busy', 'true');
+    expect(pane.scrollTop).toBe(0);
+    answer();
+
+    const alert = screen.getByRole('alert');
+    await expect.element(alert).toHaveTextContent(CHANGED_WHILE_ACTING);
+    await expect.element(takeOver).not.toHaveAttribute('aria-busy');
+    await expect.poll(() => rect(alert.element()).bottom).toBeLessThanOrEqual(height);
+    const box = rect(alert.element());
+    expect(box.top).toBeGreaterThanOrEqual(rect(bar).bottom);
+    expect(box.left).toBeGreaterThanOrEqual(0);
+    expect(box.right).toBeLessThanOrEqual(width);
+    await expect.element(takeOver).toBeInViewport({ ratio: 1 });
+    expect(document.activeElement).toBe(button);
+    expectNoWindowScroll();
+  });
+
   it('a_take_over_from_elsewhere_moves_no_focus', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));

@@ -200,7 +200,13 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   // Take over sits in the bar. While the change it sent is out it spins, and only then: a change sent
   // from the owner's controls at the foot leaves it waiting, as TakeOverBar's own buttons do.
   const [takeOverSent, setTakeOverSent] = useState(false);
-  if (takeOverSent && !controls.changing) setTakeOverSent(false);
+  useLayoutEffect(() => {
+    if (!takeOverSent || controls.changing) return;
+    setTakeOverSent(false);
+    // In a short pane the existing error is below the chat. Reveal it without moving focus from
+    // Take over; nearest leaves an error already on screen where it is.
+    if (controls.modeError !== null) controlsRef.current?.querySelector('.cd-take-over [role="alert"]')?.scrollIntoView({ block: 'nearest' });
+  }, [takeOverSent, controls.changing, controls.modeError]);
   const takeOver = () => {
     setTakeOverSent(true);
     controls.takeOver();
