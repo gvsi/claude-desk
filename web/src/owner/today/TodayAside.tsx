@@ -6,7 +6,7 @@ export interface TodayAsideProps {
 
 /**
  * Today's right column: the last 7 days. The public page is a new tab away from the greeting's
- * "Chat as a customer", and the Demo inbox is in the demo bar; nothing here opens a chat on Today.
+ * "Chat as a customer", and the notifications have their own page; nothing here opens a chat on Today.
  */
 export function TodayAside({ deskId }: TodayAsideProps) {
   return (

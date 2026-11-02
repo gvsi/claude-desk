@@ -737,40 +737,22 @@ describe('Today', () => {
     needsYou.release();
   });
 
-  it('demo_inbox_opens_from_the_demo_bar_on_every_page', async () => {
-    // The Demo inbox is in the demo bar, just before Start over, on every page of a Desk: read once as
-    // the bar first draws, and not again as the owner moves between pages.
+  it('notifications_are_counted_in_the_sidebar_on_every_page', async () => {
+    // Notifications is the sidebar's, under Safety, on every page of a Desk: read once as the frame
+    // first draws, and not again as the owner moves between pages. The demo bar keeps Start over alone.
     const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
-    const inbox = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
-    await expect.element(inbox).toBeVisible();
-    expect(inbox.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
-    const startOver = screen.getByRole('button', { name: 'Start over', exact: true });
-    expect(box(startOver.element()).left - box(inbox.element()).right).toBeCloseTo(16, 0);
-    expect(box(inbox.element()).top).toBeCloseTo(box(startOver.element()).top, 0);
-    // Start over's look, its count 6 px after its words.
-    expect(inbox.element().classList.contains('cd-button--ghost')).toBe(true);
-    const words = inbox.element().querySelector('.cd-demo-inbox-sheet__button')!;
-    expect(getComputedStyle(words).columnGap).toBe('6px');
+    const row = mainNav(screen).getByRole('link', { name: 'Notifications 1 unread', exact: true });
+    await expect.element(row).toBeVisible();
+    expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Start over']);
     expect(requests('ownerInbox')).toHaveLength(1);
 
-    // It opens here, and focus comes back to it as the sheet closes.
-    await inbox.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet).toBeVisible();
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    await expect.element(sheet).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(inbox.element());
-    const afterSheet = requests('ownerInbox').length;
-
-    // On to Today, which opens without reading it again; the bar keeps it.
+    // On to Today, which opens without reading them again; the sidebar keeps the count.
     await mainNav(screen).getByRole('link', { name: 'Today' }).click();
     await expect.element(region(screen, 'Needs you')).toBeVisible();
-    await expect.element(inbox).toBeVisible();
+    await expect.element(row).toBeVisible();
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(requests('ownerInbox')).toHaveLength(afterSheet);
-    // Today's right column no longer holds it.
-    expect(document.querySelector('.cd-today-aside .cd-owner-inbox')).toBeNull();
+    expect(requests('ownerInbox')).toHaveLength(1);
   });
 
   it('today_later_in_a_reloaded_visit_holds_on_its_own', { timeout: 15_000 }, async () => {
@@ -4038,9 +4020,29 @@ describe("Today's unfinished setup", () => {
   });
 });
 
-describe("Today's Demo inbox", () => {
-  /** The sheet's button, with its count. */
-  const inboxButton = (screen: RenderResult) => screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
+describe('Notifications from Today', () => {
+  /** The sidebar's Notifications row, once the frame's read counts what is unread there. */
+  const notificationsRow = (screen: RenderResult) => mainNav(screen).getByRole('link', { name: /^Notifications \d+ unread$/ });
+
+  /** The Notifications page's heading, there while the page is open. */
+  const notificationsHeading = (screen: RenderResult) => screen.getByRole('heading', { level: 1, name: 'Notifications' });
+
+  /** Goes to Notifications from the sidebar, on a phone from the Menu sheet, and gives its page. */
+  async function openNotifications(screen: RenderResult) {
+    if (window.innerWidth < 768) await screen.getByRole('button', { name: 'Menu' }).click();
+    await mainNav(screen).getByRole('link', { name: /^Notifications/ }).click();
+    await expect.element(notificationsHeading(screen)).toBeVisible();
+    return screen.getByRole('main');
+  }
+
+  /** Leaves Notifications for Today, from the sidebar. */
+  async function leaveNotifications(screen: RenderResult): Promise<void> {
+    await mainNav(screen).getByRole('link', { name: 'Today' }).click();
+    await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();
+  }
+
+  /** The rows that link to a held request, each with "Open the request" under its alert. */
+  const requestRows = (page: ReturnType<RenderResult['getByRole']>) => page.getByRole('link', { name: /Open the request/ });
 
   /** Where a held request's alert links to: its card on Today. */
   const requestLink = (decisionId: string) => `${TODAY}#request-${encodeURIComponent(decisionId)}`;
@@ -4055,7 +4057,7 @@ describe("Today's Demo inbox", () => {
     expect(box.top).toBeLessThan(window.innerHeight);
   }
 
-  /** Settles once the app has an answer to its next Demo inbox read and has taken it in. */
+  /** Settles once the app has an answer to its next read of the notifications and has taken it in. */
   function nextInboxAnswer(): Promise<void> {
     const answered = new Promise<void>((resolve) => {
       const stop = observeRequests((outcome) => {
@@ -4069,16 +4071,18 @@ describe("Today's Demo inbox", () => {
   }
 
   /**
-   * Every timer the page starts from now on at the Demo inbox's poll interval, for as long as the
+   * Every timer the page starts from now on at the notifications' poll interval, for as long as the
    * page keeps it: `started()` lists them, oldest first, `kept()` the ones it keeps now, and
    * `due()` runs each one still kept (or each of `only` still kept) at once, as if all came due at
-   * that moment, and returns the ones it ran.
+   * that moment, and returns the ones it ran. `late(ids)` runs each of `ids` whether or not the page
+   * has stopped it yet, as a timer that fired just as it was stopped would, and returns them.
    */
-  function inboxPacedPolls(): { started: () => number[]; kept: () => number[]; due: (only?: number[]) => number[] } {
+  function inboxPacedPolls(): { started: () => number[]; kept: () => number[]; due: (only?: number[]) => number[]; late: (ids: number[]) => number[] } {
     // The page's timers as the browser has them (the Node typings say otherwise).
     const timers = window as unknown as { setInterval: (run: () => void, ms?: number) => number; clearInterval: (id?: number) => void };
     const started: number[] = [];
     const running = new Map<number, () => void>();
+    const every = new Map<number, () => void>();
     const start = timers.setInterval.bind(window);
     const stop = timers.clearInterval.bind(window);
     const starting = vi.spyOn(timers, 'setInterval').mockImplementation((run, ms) => {
@@ -4086,6 +4090,7 @@ describe("Today's Demo inbox", () => {
       if (typeof run === 'function' && ms === pollMs('inbox')) {
         started.push(id);
         running.set(id, run);
+        every.set(id, run);
       }
       return id;
     });
@@ -4104,6 +4109,11 @@ describe("Today's Demo inbox", () => {
         const due = [...running].filter(([id]) => only === undefined || only.includes(id));
         for (const [, run] of due) run();
         return due.map(([id]) => id);
+      },
+      late: (ids) => {
+        const late = [...every].filter(([id]) => ids.includes(id));
+        for (const [, run] of late) run();
+        return late.map(([id]) => id);
       },
     };
   }
@@ -4149,57 +4159,53 @@ describe("Today's Demo inbox", () => {
     const card = heldCard(screen, SEEDED_REASON);
     await expect.element(card).toBeInTheDocument();
 
-    const open = inboxButton(screen);
-    await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet.getByText(alert.body)).toBeVisible();
-    await expect.element(sheet.getByText(others[0]?.body ?? '')).toBeVisible();
-    // "Open the request" under the hold's alert only, once its request is read.
-    const links = sheet.getByRole('link', { name: 'Open the request' });
+    const page = await openNotifications(screen);
+    await expect.element(page.getByText(alert.body)).toBeVisible();
+    await expect.element(page.getByText(others[0]?.body ?? '')).toBeVisible();
+    // The hold's alert only is a link, with "Open the request" under it, once its request is read.
+    const links = requestRows(page);
     await expect.element(links.first()).toBeVisible();
     expect(links.elements()).toHaveLength(1);
     const link = links.first();
-    expect(link.element().closest('li')?.textContent).toContain(alert.body);
+    expect(link.element().textContent).toContain(alert.body);
     expect(link.element().getAttribute('href')).toBe(requestLink(held.decision_id));
     await expectScreenBasics(screen.container, { owner: true });
 
-    // Following it closes the sheet and lands on the held request's card, in view.
-    const closedReads = closedInboxReads(sheet);
+    // Following it leaves the page and lands on the held request's card, in view.
+    const closedReads = closedInboxReads(notificationsHeading(screen));
     await link.click();
-    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(TODAY);
     expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
-    // Focus stays there, and the closed sheet reads no more, a whole poll on.
+    // Focus stays there, and the page, left, reads no more, a whole poll on.
     await aPollPasses();
     expect(focusIsOn(card.element())).toBe(true);
     expect(closedReads()).toBe(0);
   });
 
   it('inbox_alert_links_to_its_own_desk', async () => {
-    // The Demo inbox is the whole copy's. On Emergencies, Main line's hold alert links to Main
+    // The notifications are the whole copy's. On Emergencies, Main line's hold alert links to Main
     // line's Today, as the held decision itself says, and following it lands on that card.
     const { screen, router } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
     const held = seededHold();
-    const open = inboxButton(screen);
-    await expect.element(open).toBeVisible();
-    // Nothing is read about the alert's request while the sheet is closed.
+    await expect.element(notificationsRow(screen)).toBeVisible();
+    // Nothing is read about the alert's request until the page opens.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(requests('decision')).toEqual([]);
 
-    await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    const link = sheet.getByRole('link', { name: 'Open the request' });
+    const page = await openNotifications(screen);
+    const link = requestRows(page);
     await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
     expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
 
     const todayRead = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
     await link.click();
-    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
-    // The inbox read Main line's Needs you, but not its Today. Hold that read so this always
+    // The page read Main line's Needs you, but not its Today. Hold that read so this always
     // exercises the loading state after navigation, even when the mock answers quickly.
     await expect.poll(todayRead.held).toBeGreaterThan(0);
     expectTodayOpening();
@@ -4217,37 +4223,36 @@ describe("Today's Demo inbox", () => {
     const held = seededHold();
     const alert = mockStore.world.inbox.find((record) => record.entry.decision_id === held.decision_id)?.entry;
     if (!alert) throw new Error('the seeded hold alerted the owner, naming it');
-    const openSheet = async (screen: RenderResult) => {
-      await inboxButton(screen).click();
-      const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-      await expect.element(sheet.getByText(alert.body)).toBeVisible();
-      return sheet;
+    const openPage = async (screen: RenderResult) => {
+      const page = await openNotifications(screen);
+      await expect.element(page.getByText(alert.body)).toBeVisible();
+      return page;
     };
 
-    // While the request is read, the alert shows no link; once it answers, it does.
+    // While the request is read, the alert is no link; once it answers, it is.
     const read = holdReads(decisionPath(held.decision_id));
     const first = await renderRoute(TODAY);
-    let sheet = await openSheet(first.screen);
+    let page = await openPage(first.screen);
     await vi.waitFor(() => expect(read.held()).toBe(1));
-    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+    expect(requestRows(page).elements()).toHaveLength(0);
     read.release();
-    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toBeVisible();
+    await expect.element(requestRows(page)).toBeVisible();
 
-    // A read that fails shows none.
+    // A read that fails makes none.
     const second = await renderRoute(TODAY, { seed: 'rivera' });
     mockStore.inject({ route: 'decision', status: 503 });
-    sheet = await openSheet(second.screen);
+    page = await openPage(second.screen);
     await vi.waitFor(() => expect(requests('decision')).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+    expect(requestRows(page).elements()).toHaveLength(0);
 
     // Nor does a decision that names no action, so no Desk.
     const third = await renderRoute(TODAY, { seed: 'rivera' });
     mockStore.inject({ route: 'decision', status: 200, body: { ...seededHold(), action: null } });
-    sheet = await openSheet(third.screen);
+    page = await openPage(third.screen);
     await vi.waitFor(() => expect(requests('decision')).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(sheet.getByRole('link').elements()).toHaveLength(0);
+    expect(requestRows(page).elements()).toHaveLength(0);
   });
 
   it('request_link_waits_for_a_read_that_works', async () => {
@@ -4297,25 +4302,6 @@ describe("Today's Demo inbox", () => {
     (todayLink.element() as HTMLElement).focus();
     await router.navigate(1);
     await vi.waitFor(() => expect(router.state.location.hash).toBe(`#request-${held.decision_id}`));
-    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
-  });
-
-  it('request_link_waits_for_the_sheet_to_close', async () => {
-    // An address that changes under the open sheet lands once the sheet has closed and handed focus
-    // back to its button, not while the page behind it is out of reach.
-    const held = seededHold();
-    const { screen, router } = await renderRoute(TODAY);
-    const card = heldCard(screen, SEEDED_REASON);
-    await expect.element(card).toBeVisible();
-    await inboxButton(screen).click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet).toBeVisible();
-
-    await router.navigate(requestLink(held.decision_id), { flushSync: true });
-    await nextFrames();
-    expect(focusIsOn(card.element())).toBe(false);
-    await userEvent.keyboard('{Escape}');
-    await expect.element(sheet).not.toBeInTheDocument();
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 
@@ -4449,37 +4435,32 @@ describe("Today's Demo inbox", () => {
     await expect.element(region(screen, 'Needs you')).toBeVisible();
   });
 
-  it('inbox_read_that_fails_while_open_says_so_in_the_sheet', async () => {
-    // The page behind an open sheet is out of reach, so a read that fails while it is open says so
-    // inside it, under its subtitle and above the entries, with its own Try again.
+  it('notifications_read_that_fails_says_so_on_the_page', async () => {
+    // A read that fails as the page opens says so on it, under its subtitle and above the entries,
+    // with its own Try again.
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
-    const open = inboxButton(screen);
-    await expect.element(open).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
     // The read as it opens fails, and so does its one retry.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
-    await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    const line = sheet.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    const page = await openNotifications(screen);
+    const line = page.getByText(`Couldn't open your notifications. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
-    const subtitle = sheet.getByText('What Claude would have sent you by text or email. Nothing is really sent.').element();
-    const entries = sheet.getByRole('list').element();
+    const subtitle = page.getByText('What Claude would have sent you and your customers by text or email. Nothing is really sent.').element();
+    const entries = page.getByRole('list').element();
     expect(subtitle.compareDocumentPosition(line.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(line.element().compareDocumentPosition(entries) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await expectScreenBasics(screen.container, { owner: true });
 
-    // Its Try again is busy while it reads; once a read works the line goes and the sheet stays open.
+    // Its Try again is busy while it reads; once a read works the line goes.
     const retry = holdReads(ROUTES.ownerInbox.path);
-    const again = sheet.getByRole('button', { name: 'Try again', exact: true });
+    const again = page.getByRole('button', { name: 'Try again', exact: true });
     await again.click();
     await vi.waitFor(() => expect(retry.held()).toBe(1));
     await expect.element(again).toHaveAttribute('aria-busy', 'true');
     await expect.element(line).toBeVisible();
     retry.release();
     await expect.element(line).not.toBeInTheDocument();
-    await expect.element(sheet).toBeVisible();
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    await expect.element(sheet).not.toBeInTheDocument();
-    expect(screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(notificationsHeading(screen)).toBeVisible();
   });
 
   it('request_link_lands_on_the_card_once_needs_you_reads', async () => {
@@ -4525,47 +4506,39 @@ describe("Today's Demo inbox", () => {
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 
-  it('inbox_polls_only_while_the_sheet_is_open', async () => {
+  it('notifications_poll_only_while_their_page_is_open', async () => {
     const { screen } = await renderRoute(TODAY);
-    const open = inboxButton(screen);
-    await expect.element(open).toBeVisible();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    const closedReads = closedInboxReads(sheet);
-    // Read once as Today opens, and not again while the sheet is closed.
+    await expect.element(notificationsRow(screen)).toBeVisible();
+    const closedReads = closedInboxReads(notificationsHeading(screen));
+    // Read once as Today opens, and not again while the page is shut.
     expect(requests('ownerInbox')).toHaveLength(1);
     await aPollPasses();
     expect(closedReads()).toBe(0);
 
     // Read as it opens, and every few seconds while it is open.
-    await open.click();
-    await expect.element(sheet).toBeVisible();
+    await openNotifications(screen);
     await readsMore('ownerInbox', 3);
 
-    // Close stops it.
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    await expect.element(sheet).not.toBeInTheDocument();
-    await expect.element(open).toHaveFocus();
+    // Leaving it stops it.
+    await leaveNotifications(screen);
     await aPollPasses();
     expect(closedReads()).toBe(0);
 
-    // Opened again, it reads again at once, and stops again once Escape closes it.
-    await open.click();
-    await expect.element(sheet).toBeVisible();
+    // Opened again, it reads again at once, and stops again once left.
+    await openNotifications(screen);
     await readsMore('ownerInbox', 2);
-    await userEvent.keyboard('{Escape}');
-    await expect.element(sheet).not.toBeInTheDocument();
+    await leaveNotifications(screen);
     await aPollPasses();
     expect(closedReads()).toBe(0);
   });
 
-  it.each(['read', 'failed'] as const)('inbox_polls_a_whole_poll_after_each_answer_%s', async (answer) => {
-    // As React Query's own polls do, the open sheet's poll counts again from each read's answer, read
+  it.each(['read', 'failed'] as const)('notifications_poll_a_whole_poll_after_each_answer_%s', async (answer) => {
+    // As React Query's own polls do, the open page's poll counts again from each read's answer, read
     // or failed, so a read that answers late isn't followed by another at once. A failed read is
     // tried once more at once, and the answer that counts is that try's.
     const tries = answer === 'read' ? 1 : 2;
     const { screen } = await renderRoute(TODAY, { retryScale: 0 });
-    const open = inboxButton(screen);
-    await expect.element(open).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
     if (answer === 'failed') mockStore.inject({ route: 'ownerInbox', status: 503, times: 2 });
     // When each try of the read as it opens answers, from here on.
     const answeredAt: number[] = [];
@@ -4576,7 +4549,7 @@ describe("Today's Demo inbox", () => {
 
     // The read as it opens answers a poll and a half late.
     const opening = holdReads(ROUTES.ownerInbox.path);
-    await open.click();
+    await openNotifications(screen);
     await vi.waitFor(() => expect(opening.held()).toBe(1));
     await new Promise((resolve) => setTimeout(resolve, pollMs('inbox') * 1.5));
     const sent: number[] = [];
@@ -4596,17 +4569,15 @@ describe("Today's Demo inbox", () => {
     expect((sent[tries - 1] ?? 0) - (answeredAt[tries - 1] ?? 0)).toBeGreaterThanOrEqual(pollMs('inbox') - 2);
   });
 
-  it('inbox_poll_counts_from_an_answer_as_it_comes', async () => {
+  it('notifications_poll_counts_from_an_answer_as_it_comes', async () => {
     // A read that answers just as the poll comes due, here one on the owner's return to the tab,
     // starts the count again as it answers, before Today has drawn it: the poll that was running
     // then sends nothing. No poll lands by itself here, so the test brings it due.
     const polls = inboxPacedPolls();
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
-    const open = inboxButton(screen);
-    await expect.element(open).toBeVisible();
+    await expect.element(notificationsRow(screen)).toBeVisible();
     const answered = nextInboxAnswer();
-    await open.click();
-    await expect.element(screen.getByRole('dialog', { name: 'Demo inbox' })).toBeVisible();
+    await openNotifications(screen);
     await answered;
 
     // The reads sent from the moment the poll comes due.
@@ -4635,40 +4606,37 @@ describe("Today's Demo inbox", () => {
     document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
     await vi.waitFor(() => expect(counting).toBe(true));
     await nextFrames();
-    expect(sentSince, 'Demo inbox reads sent as the poll came due, just after an answer').toBe(0);
+    expect(sentSince, 'notifications reads sent as the poll came due, just after an answer').toBe(0);
   });
 
-  it('inbox_reads_nothing_from_the_moment_it_closes', async () => {
-    // The sheet is closed from the moment it closes, before Today has drawn it closed: a poll that
-    // comes due then, or the owner coming back to the tab or to the network then, reads nothing. No
-    // poll lands by itself here, so the test brings them due.
+  it('notifications_read_nothing_from_the_moment_the_page_goes', async () => {
+    // The page is shut from the moment it goes: a poll that comes due then, or the owner coming back
+    // to the tab or to the network then, reads nothing. No poll lands by itself here, so the test
+    // brings them due.
     const polls = inboxPacedPolls();
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
-    const open = inboxButton(screen);
-    await expect.element(open).toBeVisible();
-    // The read as it opens is answered, so none is still out as it closes. The polls started from
-    // the click until then are the sheet's own, started as it opened and again at that answer.
+    await expect.element(notificationsRow(screen)).toBeVisible();
+    // The read as it opens is answered, so none is still out as it goes. The polls started from
+    // the click until then are the page's own, started as it opened and again at that answer.
     const answered = nextInboxAnswer();
     const before = polls.started().length;
-    await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet).toBeVisible();
+    await openNotifications(screen);
     await answered;
-    const sheetsOwn = polls.started().slice(before);
+    const pagesOwn = polls.started().slice(before);
 
-    const closedReads = closedInboxReads(sheet);
+    const heading = notificationsHeading(screen);
+    const closedReads = closedInboxReads(heading);
+    // The page's own polls come due the moment it goes, whether or not they are stopped yet.
     let ran: number[] = [];
-    onceGone(sheet.element(), () => {
-      ran = polls.due();
+    onceGone(heading.element(), () => {
+      ran = polls.late(pagesOwn);
       document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
       window.dispatchEvent(new Event('offline'));
       window.dispatchEvent(new Event('online'));
     });
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    await expect.element(sheet).not.toBeInTheDocument();
-    await expect.element(open).toHaveFocus();
+    await leaveNotifications(screen);
     await nextFrames();
-    expect(ran.filter((id) => sheetsOwn.includes(id)), "the sheet's own poll came due as it closed").not.toEqual([]);
-    expect(closedReads(), 'Demo inbox reads sent once its sheet had closed').toBe(0);
+    expect(ran, "the page's own poll came due as it went").not.toEqual([]);
+    expect(closedReads(), 'notifications reads sent once their page had gone').toBe(0);
   });
 });

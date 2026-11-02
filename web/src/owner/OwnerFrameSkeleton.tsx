@@ -73,8 +73,8 @@ export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setu
     <AppShell
       skeleton
       business=""
-      banner={<ReviewerBarSkeleton inbox />}
-      sidebar={<SidebarSkeleton rows={9} about={SIDEBAR_ABOUT.links.length} />}
+      banner={<ReviewerBarSkeleton />}
+      sidebar={<SidebarSkeleton rows={10} about={SIDEBAR_ABOUT.links.length} />}
       fill={fill}
     >
       <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}${centered ? ' cd-owner-layout--centered' : ''}`}>

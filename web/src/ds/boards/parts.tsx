@@ -1132,7 +1132,7 @@ export function AgentsCard({ title, lead, holdsCards = false, children }: { titl
 /** Settings' sections, in order. Connectors have their own tab, so there is no Integrations entry. */
 export const SETTINGS_SECTIONS: readonly SubNavItem[] = [
   { key: 'general', label: 'General', href: '#settings-general' },
-  { key: 'notifications', label: 'Notifications', href: '#settings-notifications' },
+  { key: 'alerts', label: 'Alerts', href: '#settings-alerts' },
   { key: 'channels', label: 'Channels', href: '#settings-channels' },
   { key: 'billing', label: 'Billing', href: '#settings-billing' },
 ];
