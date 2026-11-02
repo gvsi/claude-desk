@@ -1387,19 +1387,26 @@ def test_handoff_kinds_come_back_from_their_rows_under_forced_row_security(scrat
 
 
 def test_the_previous_release_writes_call_backs_as_it_did(scratch):
-    """During a deploy the previous release's kernel serves beside the migrated database, and it
-    writes a call-back's handoff naming no kind, beside any other open handoff of the session's, as
-    it always has: each insert still succeeds, as a call-back. One open handoff per session is kept
-    by this release's code, under the session row, not by the table."""
+    """During a deploy the previous release's kernel serves beside the migrated database. A
+    call-back's handoff written naming no kind is still a call-back, and a call-back request that
+    closes the session's open handoff, then writes its own in the same transaction, as the kernel
+    has since #238, still succeeds: the table's one open handoff per session
+    (kernel_one_open_handoff) admits it, and refuses only a second open one beside the first."""
     admin = scratch.conn
+
+    def insert(handoff_id: str) -> None:
+        admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
+                      " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
+                      (handoff_id, f"act-{handoff_id}"))
+
     try:
-        for handoff_id in ("handoff-old-a", "handoff-old-b"):
-            admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
-                          " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
-                          (handoff_id, f"act-{handoff_id}"))
+        insert("handoff-old-a")
+        with admin.transaction():
+            admin.execute("UPDATE kernel.handoffs SET status = 'done' WHERE handoff_id = 'handoff-old-a'")
+            insert("handoff-old-b")
         rows = admin.execute("SELECT handoff_id, kind, status, created_at FROM kernel.handoffs"
                              " WHERE copy_id = 'copy-old' ORDER BY handoff_id").fetchall()
-        assert rows == [("handoff-old-a", "callback", "open", None), ("handoff-old-b", "callback", "open", None)]
+        assert rows == [("handoff-old-a", "callback", "done", None), ("handoff-old-b", "callback", "open", None)]
     finally:
         admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-old'")
 
@@ -1637,6 +1644,32 @@ def test_business_tools_view_migration_goes_down_and_up(scratch):
                                    " WHERE oid = 'kernel_ro.tools'::regclass").fetchone()
     assert owner == "desk_ro_owner" and "security_barrier=true" in options
     assert not admin.execute("SELECT has_column_privilege('desk_api', 'kernel.tools', 'profile', 'SELECT')").fetchone()[0]
+
+
+def test_the_conversation_reads_revision_goes_down_and_up(scratch):
+    """api_conversation_reads adds the owner's read markers, a table of the API's own that desk_api reads and writes and
+    no other role reaches, and an index of the visitors' and agents' words for the unread reads. Its downgrade takes
+    both away, and head brings them back."""
+    admin = scratch.conn
+    below = ScriptDirectory.from_config(alembic_config()).get_revision("api_conversation_reads").down_revision
+
+    def present() -> tuple[bool, bool]:
+        return admin.execute("SELECT to_regclass('app.conversation_reads') IS NOT NULL,"
+                             " to_regclass('app.messages_said') IS NOT NULL").fetchone()
+
+    assert present() == (True, True)
+    scratch.migrate(command.downgrade, below)
+    try:
+        assert present() == (False, False)
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    assert present() == (True, True)
+    assert columns(admin, "app", "conversation_reads") == ["copy_id", "desk_id", "session_id", "read_through_n",
+                                                           "read_at", "created_at"]
+    for role, expected in (("desk_api", set(DML)), ("desk_kernel", set()), ("desk_mockpay", set())):
+        held = {privilege for privilege in (*DML, "TRUNCATE", "REFERENCES", "TRIGGER")
+                if has(admin, "has_table_privilege", role, "app.conversation_reads", privilege)}
+        assert held == expected, role
 
 
 def test_kernel_ro_reads_need_no_role_that_bypasses_row_security(admin):

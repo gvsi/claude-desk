@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProposalCard, SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
-import { decisionBody, isCard, liveChoices } from './conversation.ts';
+import { decisionBody, isCard, liveChoices, pickedAnswer } from './conversation.ts';
 
 const payment: ProposalCard = {
   proposal_id: 'p-000000000001', kind: 'job', state: 'proposed', superseded_by: null, connector: null,
@@ -58,8 +58,8 @@ describe('setup conversation', () => {
   it('keeps_only_the_latest_choices_live_until_an_owner_answers', () => {
     const choices = [{ text: 'New clients', recommended: true }, { text: 'Existing clients', recommended: false }];
     const messages = [message({ choices }), message({ text: '', card: payment }), message({ role: 'tool_label' }), message()];
-    expect(liveChoices(state(messages))).toEqual({ index: 0, choices });
-    expect(liveChoices(state([...messages, message({ choices })]))).toEqual({ index: 4, choices });
+    expect(liveChoices(state(messages))).toEqual({ index: 0, choices, several: false });
+    expect(liveChoices(state([...messages, message({ choices })]))).toEqual({ index: 4, choices, several: false });
     expect(liveChoices(state([...messages, message({ role: 'owner' }), message()]))).toBeNull();
     expect(liveChoices(state([message({ text: '', card: payment, choices })]))).toBeNull();
     expect(liveChoices(state([message({ role: 'owner', choices })]))).toBeNull();
@@ -67,13 +67,22 @@ describe('setup conversation', () => {
     for (const fields of [{ step: 'tools' as const }, { consent: null }, { question: null }]) {
       expect(liveChoices({ ...state(messages), ...fields })).toBeNull();
     }
-    expect(liveChoices({ ...state(messages), consent: false })).toEqual({ index: 0, choices });
+    expect(liveChoices({ ...state(messages), consent: false })).toEqual({ index: 0, choices, several: false });
+  });
+
+  it('says_when_the_live_choices_can_be_picked_together_and_previews_the_picked_answer', () => {
+    const choices = [{ text: 'Scheduling intro calls', recommended: false }, { text: 'Chasing missing documents', recommended: false }, { text: 'Collecting retainers', recommended: false }];
+    expect(liveChoices(state([message({ choices, several: true })]))).toEqual({ index: 0, choices, several: true });
+    // As the API writes it: the picks in the listed order, then the typed words on their own line.
+    expect(pickedAnswer(choices, ['Collecting retainers', 'Scheduling intro calls'], '  Prepping for tax season ')).toBe('Scheduling intro calls, Collecting retainers\nPrepping for tax season');
+    expect(pickedAnswer(choices, ['Chasing missing documents'], '')).toBe('Chasing missing documents');
+    expect(pickedAnswer(choices, [], 'Prepping for tax season')).toBe('Prepping for tax season');
   });
 
   it('keeps_the_test_client_offers_choices_live_and_answers_it_by_name', () => {
     const choices = [{ text: 'Add me as a test client', recommended: true }, { text: 'Not now', recommended: false }];
     const offer: SetupState = { ...state([message({ text: 'Want to try your Desk the way a client would?', choices })]), question: 'test_client' };
-    expect(liveChoices(offer)).toEqual({ index: 0, choices });
+    expect(liveChoices(offer)).toEqual({ index: 0, choices, several: false });
     const answer: SetupAnswerBody = { question: 'test_client', text: 'Not now' };
     expect(answer.question).toBe(offer.question);
   });
