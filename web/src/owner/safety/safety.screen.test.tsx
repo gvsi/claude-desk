@@ -525,6 +525,13 @@ describe('Safety', () => {
     await expect.element(next).toBeVisible();
     await expect.element(next.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
     expect(next.element().querySelector('pre')).toBeNull();
+
+    // Back to entry 2: its record is closed again, not left as it was.
+    await recordRow(screen, 2).click();
+    const again = region(screen, 'Full trace of entry 2');
+    await expect.element(again).toBeVisible();
+    await expect.element(again.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    expect(again.element().querySelector('pre')).toBeNull();
   });
 
   it('dev_key_is_labelled', async () => {

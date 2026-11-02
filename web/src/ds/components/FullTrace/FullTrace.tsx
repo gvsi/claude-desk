@@ -27,6 +27,33 @@ function shorten(value: string): string {
   return value.length > SHORTEN_OVER ? `${value.slice(0, KEEP)}…${value.slice(-KEEP)}` : value;
 }
 
+/** What was recorded: the entry's raw summary as indented JSON, closed under its label until it's asked for. */
+function Recorded({ summary }: { summary: LedgerEntry['event']['summary'] }) {
+  const recordId = useId();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="cd-full-trace__record">
+      <button
+        type="button"
+        className="cd-full-trace__record-toggle cd-type-caption"
+        aria-expanded={open}
+        aria-controls={recordId}
+        onClick={() => setOpen((was) => !was)}
+      >
+        <Icon name="chevron-down" size={16} className="cd-full-trace__chevron" />
+        What was recorded
+      </button>
+      <div id={recordId} hidden={!open}>
+        {open ? (
+          <pre className="cd-full-trace__summary cd-type-trace" translate="no">
+            {JSON.stringify(summary, null, 2)}
+          </pre>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /**
  * One ledger entry in full, for the owner: a plain line saying what it records, then the signed
  * record in mono (the only mono in Claude Desk) and the chain's state. Nothing is computed:
@@ -35,11 +62,6 @@ function shorten(value: string): string {
  */
 export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
   const titleId = useId();
-  const recordId = useId();
-  // Which entry's record is open, by its hash: a screen that shows another entry in the same trace
-  // opens it closed, as every trace opens.
-  const [openRecord, setOpenRecord] = useState<string | null>(null);
-  const recordOpen = openRecord === entry.hash;
   const status = traceChainLine(chain, entry.seq);
   const fields: readonly [label: string, value: string, full?: string][] = [
     ['Entry', String(entry.seq)],
@@ -76,25 +98,8 @@ export function FullTrace({ entry, chain, devKey, onClose }: FullTraceProps) {
           </div>
         ))}
       </dl>
-      <div className="cd-full-trace__record">
-        <button
-          type="button"
-          className="cd-full-trace__record-toggle cd-type-caption"
-          aria-expanded={recordOpen}
-          aria-controls={recordId}
-          onClick={() => setOpenRecord(recordOpen ? null : entry.hash)}
-        >
-          <Icon name="chevron-down" size={16} className="cd-full-trace__chevron" />
-          What was recorded
-        </button>
-        <div id={recordId} hidden={!recordOpen}>
-          {recordOpen ? (
-            <pre className="cd-full-trace__summary cd-type-trace" translate="no">
-              {JSON.stringify(entry.event.summary, null, 2)}
-            </pre>
-          ) : null}
-        </div>
-      </div>
+      {/* Keyed by the entry, so every entry the trace shows, the one before included, opens its record closed. */}
+      <Recorded key={entry.hash} summary={entry.event.summary} />
       <p className="cd-full-trace__chain cd-type-caption">
         <StatusDot tone={status.tone} />
         <span>{status.line}</span>
