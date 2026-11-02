@@ -4738,18 +4738,28 @@ describe('consultant setup', () => {
     expectNoHorizontalScroll();
 
     // It opens the message box, focused, under the plan; "Continue" without sending goes back to the closing plan.
+    const steps = setupSteps(screen);
+    await expect.element(steps.nth(0)).toHaveAttribute('aria-current', 'step');
+    if (viewport === 'phone') await expect.element(screen.getByText('Step 1 of 5: Questions', { exact: true })).toBeVisible();
     const mark = mockStore.requests.length;
     await change.click();
     await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(changeSomethingPath(state.interview_id));
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await expect.element(box).toBeVisible();
     await expect.poll(() => document.activeElement).toBe(box.element());
+    await expect.element(steps.nth(0)).toHaveAttribute('aria-current', 'step');
+    if (viewport === 'phone') await expect.element(screen.getByText('Step 1 of 5: Questions', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('That’s everything I need, Linda. Here’s how your Desk will work.', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('button', { name: 'Change something', exact: true })).toBeVisible();
     expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
     expect(requests('setupReopen', mark)).toHaveLength(0);
+    await expect.element(steps.nth(0)).toHaveAttribute('aria-current', 'step');
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    await expect.element(steps.nth(1)).toHaveAttribute('aria-current', 'step');
+    if (viewport === 'phone') await expect.element(screen.getByText('Step 2 of 5: Tools', { exact: true })).toBeVisible();
   });
 
   it('a_page_opened_at_tools_skips_the_closing', async () => {

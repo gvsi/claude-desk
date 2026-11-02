@@ -381,8 +381,9 @@ function SetupInterview({ setupId }: { setupId: string }) {
   return (
     <SetupShell
       business={business}
-      // The chat over a later step changes nothing until a change lands: the bar keeps the steps done.
-      step={STEP_INDEX[changing ? state.step : shownStep]}
+      // The closing plan still belongs to Questions, including while its change chat is open.
+      // Over later steps, the bar keeps the steps done until a change lands.
+      step={STEP_INDEX[closingQuestions ? 'questions' : changing ? state.step : shownStep]}
       live={state.step !== 'live' ? undefined : wentLiveHere ? 'draw' : 'drawn'}
       exitTo={todayPath(state.desk_id)}
       wide={state.step === 'preview' && !changing}
