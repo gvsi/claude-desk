@@ -21,7 +21,9 @@
  * this check disagrees with one. What it doesn't read, which the kernel does: canaries, since no
  * board quotes a private document; the Desk's own names, which `mixed_script` spares, and a business
  * tool's approved free names, since the boards name neither; and the reading of a reply as Markdown
- * renders it, since the vision pages show Claude's words as written.
+ * renders it, since the vision pages show Claude's words as written. And it reads with Node's
+ * Unicode, newer than the kernel's Python (15.1), so NFKC and the categories can differ on a
+ * character added since: U+1CCDE, a stroke the kernel reads as l, is an ASCII I after Node's NFKC.
  */
 
 import { LOOKALIKES } from './lookalikes.ts';
@@ -233,6 +235,15 @@ function readings(text: string): Reading[] {
   })).values()];
 }
 
+/**
+ * Where in `text` a match ends whose last character came from `text[last]`: after the whole
+ * character, which outside the Basic Multilingual Plane is two UTF-16 units (the kernel's
+ * `origin[end - 1] + 1`, which counts code points).
+ */
+function endAfter(text: string, last: number): number {
+  return last + ((text.codePointAt(last) ?? 0) > 0xffff ? 2 : 1);
+}
+
 /** Whether `text` writes a combining mark anywhere (`_marked`): "sí", not "si". */
 function marked(text: string): boolean {
   return [...text.normalize('NFKD')].some((part) => MARK.test(part));
@@ -384,9 +395,13 @@ function numberEnd(chars: readonly string[], start: number): number {
 const SCRIPT_LETTER = /^[\p{Lu}\p{Ll}\p{Lt}\p{Lo}]$/u;
 /**
  * A Latin letter. The kernel asks whether its Unicode name starts with "LATIN ", which JavaScript
- * can't read; on text after NFKC, the Latin script property is an acceptable stand-in.
+ * can't read; on text after NFKC, the Latin script property stands in for it. Across the letters
+ * NFKC keeps, the two disagree on three, Latin by script but not by name, which are left out
+ * (`NAMED_OTHERWISE`): turned capital F, turned small f and the reversed Roman numeral one hundred.
  */
 const LATIN = /^\p{Script=Latin}$/u;
+const NAMED_OTHERWISE = new Set(['\u2132', '\u214e', '\u2183']);
+const latin = (ch: string) => LATIN.test(ch) && !NAMED_OTHERWISE.has(ch);
 
 /** Each run of letters and combining marks in `chars` (`_words`), and where it starts. */
 function words(chars: readonly string[]): { start: number; word: string }[] {
@@ -405,8 +420,8 @@ function words(chars: readonly string[]): { start: number; word: string }[] {
 
 /** Whether `word` has Latin letters and letters of another script (`_mixes_scripts`): "Tuеsday" with a Cyrillic е. */
 function mixesScripts(word: string): boolean {
-  const latin = [...word].filter((ch) => SCRIPT_LETTER.test(ch)).map((ch) => LATIN.test(ch));
-  return latin.some(Boolean) && !latin.every(Boolean);
+  const letters = [...word].filter((ch) => SCRIPT_LETTER.test(ch)).map(latin);
+  return letters.some(Boolean) && !letters.every(Boolean);
 }
 
 // ---- Booking claims ------------------------------------------------------------------------------
@@ -453,7 +468,7 @@ function bookingClaims(text: string, read: readonly Reading[]): FactHit[] {
     for (const match of matches) {
       if (conditioned(text, reading, origin, match.start)) reaches.set(match.category, Math.max(reaches.get(match.category) ?? -1, match.end));
       if ((reaches.get(match.category) ?? -1) < match.end) {
-        const claim = { start: origin[match.start] as number, end: (origin[match.end - 1] as number) + 1, rule: match.rule, category: match.category };
+        const claim = { start: origin[match.start] as number, end: endAfter(text, origin[match.end - 1] as number), rule: match.rule, category: match.category };
         found.set(`${claim.start} ${claim.end} ${claim.rule}`, claim);
       }
     }
@@ -512,7 +527,7 @@ export function factsInProse(text: string, { bookingCard = false, callbackCard =
       for (const match of reading.matchAll(entry.regex)) {
         if (match[0] === '') continue;
         const start = origin[match.index] as number;
-        const end = (origin[match.index + match[0].length - 1] as number) + 1;
+        const end = endAfter(seen, origin[match.index + match[0].length - 1] as number);
         const key = `${entry.rule} ${start} ${end}`;
         if (counted.has(key)) continue;
         counted.add(key);

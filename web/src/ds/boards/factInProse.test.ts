@@ -163,6 +163,12 @@ describe('fact_in_prose', () => {
     expect(factsInProse('See you on Tu\u0435sday.')).toContainEqual({ rule: 'lex.en.date', span: 'Tu\u0435sday' });
   });
 
+  it('ends_a_span_after_a_whole_character', () => {
+    // A lookalike outside the Basic Multilingual Plane is two UTF-16 units: the span holds both.
+    const astral = String.fromCodePoint(0x118c1);
+    expect(factsInProse(`It costs a few buck${astral}.`)).toContainEqual({ rule: 'lex.en.money', span: `buck${astral}` });
+  });
+
   it('reads_a_bare_stroke_as_i', () => {
     // Greek capitals spelling NINE: the iota is a bare stroke, which the kernel reads as l and as I.
     expect(factsInProse('It takes \u039d\u0399\u039d\u0395 visits.')).toEqual([{ rule: 'lex.en.number', span: '\u039d\u0399\u039d\u0395' }]);
@@ -190,6 +196,12 @@ describe('fact_in_prose', () => {
     // other script alone, such as the Greek NINE above, mixes nothing.
     expect(factsInProse('Ask M\u0456ke about it.')).toEqual([{ rule: 'mixed_script', span: 'M\u0456ke' }]);
     expect(factsInProse('See you on Tu\u0435sday.')).toContainEqual({ rule: 'mixed_script', span: 'Tu\u0435sday' });
+    // Turned capital F, turned small f and the reversed Roman numeral one hundred belong to the Latin
+    // script, but their names don't start with "LATIN ", which is how the kernel tells a Latin letter:
+    // to it, these words mix scripts.
+    for (const [text, word] of [['It’s \u2132ree.', '\u2132ree'], ['Ask a\u214e about it.', 'a\u214e'], ['Ask \u2183a about it.', '\u2183a']] as const) {
+      expect(factsInProse(text), text).toEqual([{ rule: 'mixed_script', span: word }]);
+    }
   });
 
   it('passes_every_signed_vision_line', () => {
