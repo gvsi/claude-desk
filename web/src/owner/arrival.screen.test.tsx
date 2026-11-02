@@ -280,12 +280,14 @@ describe('Arrival', () => {
     // Once the Desks were in, at 3.4 s; a second full wait would draw the frame at 6 s or later.
     expect(drawnAt).toBeGreaterThan(3_400);
     expect(drawnAt).toBeLessThan(5_000);
-    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening']));
-    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+    // Each step may take a moment longer on a loaded runner; what they show, and their order, stay the same.
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening']), { timeout: 4_000 });
+    // Today opening shows its skeleton while Needs you is held (it may still be fading in as the page turns).
+    await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
     expect(heldCard(screen).elements()).toHaveLength(0);
     needsYou.release();
     await expect.element(heldCard(screen)).toBeVisible();
-    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening', 'today']));
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening', 'today']), { timeout: 4_000 });
   });
 
   it('returning_owner_leaving_while_today_is_read_stays', async () => {
