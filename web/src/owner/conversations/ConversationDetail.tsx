@@ -373,7 +373,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
           variant="whisper"
           label="Whisper to Claude"
           placeholder={sampleDesk ? WHISPER_PLACEHOLDER_SAMPLE : WHISPER_PLACEHOLDER}
-          helper={whisperHelper(summary ? nameOf(summary) : null, read.visitor_here === true)}
+          helper={whisperHelper(summary ? nameOf(summary) : null, read.visitor_here === true, state.kind === 'agent' && !summary?.owner_preview)}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}
           onSend={whisper}
