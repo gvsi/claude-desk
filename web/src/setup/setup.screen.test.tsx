@@ -2028,6 +2028,10 @@ describe('setup', () => {
     await expect.poll(() => document.activeElement).toBe(box.element());
     expect(requests('setupReopen', mark)).toHaveLength(0);
     expect(requests('setupAnswer', mark)).toHaveLength(0);
+    // Leaving this chat without sending returns to the same situations, rather than their draft.
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Real situations' })).toBeVisible();
+    expect(requests('setupReopen', mark)).toHaveLength(0);
   });
 
   it.each(['response', 'stream', 'lost response'] as const)('a_change_sent_from_real_situations_reopens_the_chat_and_setup_moves_forward_again_%s', async (delivery) => {

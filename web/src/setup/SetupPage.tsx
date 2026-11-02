@@ -326,7 +326,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const answering = desk?.answering === true;
   let body: ReactNode;
   const shownStep = closingQuestions || changing ? 'questions' : state.step;
-  const backToStep = () => void navigate(setupPath(setupId));
+  const backToStep = () => {
+    // The situations request may have advanced the API while the page still held its rules step.
+    // Restore that confirmed step so cancelling the chat reopens the same view of the rules.
+    update((now) => now === undefined ? now : asConfirmed(now));
+    void navigate(setupPath(setupId));
+  };
   switch (shownStep) {
     case 'questions':
       body = <QuestionsStep state={state} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
