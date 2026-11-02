@@ -2587,8 +2587,8 @@ def test_turns_capture_business_policies_with_short_bounded_fields():
     # A turn's schema compiles into a grammar of capped size, so each policy field's description is short: what it
     # holds, and that it is customer copy in words without numbers. The turn's guidance holds the full rules
     # (test_setup_prompt_keeps_policy_text_public_and_free_of_numbers).
-    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, percentages, times, days, numbers "
-                                 "(even spelled out) or promise words.")
+    assert POLICY_FIELD_RULE == ("Written to customers, in words: no amounts, digits, number words but one or a, "
+                                 "hours, dates or promise words.")
     descriptions = {
         "pricing": 'How the business prices (a fixed menu, "from" prices, or per case after a consult).',
         "intake": "What new customers are asked or should have ready before the owner takes them on.",
@@ -2662,7 +2662,7 @@ def test_setup_summary_is_customer_copy_from_the_opening_parse():
                     **{key: output.model_fields["summary"].description for key, output in SETUP_TURNS.items()
                        if "summary" in output.model_fields}}
     missing = {name: description for name, description in descriptions.items()
-               if POLICY_FIELD_RULE not in description or "spelled out" not in description}
+               if POLICY_FIELD_RULE not in description or "number words" not in description}
     assert not missing, missing
     assert 'say "a small CPA firm", not "a two-person firm"' in summary_line
 
@@ -2672,9 +2672,103 @@ def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
             "answer; price_items holds only the prices that answer names.") in SETUP_TURN_SYSTEM
     # summary is published as the public About line (`policy:about`), which the kernel's public-text check refuses
     # with a number in it, spelled out or not ("a two-person firm"), so the customer-copy rule covers it too.
-    assert ("For summary, pricing, intake, after_hours and urgent, write them in words; keep amounts, percentages, "
-            "times, days and numbers (even spelled out), and promise words such as free, guaranteed, discount, "
-            "refund or confirmed out. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    # The owner's own time frames stay word for word where that check allows them (seen live: "we reply within one
+    # business day" became "the team replies once the office reopens"); otherwise reply names the change.
+    assert ("For summary, pricing, intake, after_hours and urgent, write them in words, and keep the owner's own "
+            "words for a time frame, a threshold or what they commit to, word for word: \"we reply within one "
+            "business day\" and \"the next business day\" stay as they are. These lines can't carry amounts, "
+            "percentages, digits, number words other than one or a, hours or minutes, dates or days such as today, "
+            "tomorrow, the same day, a weekday's name, the weekend or this or next week, or promise words such as "
+            "free, guaranteed, discount, refund or confirmed. When the owner's words have one, write the closest "
+            "wording without it (\"within a day\" for \"within 24 hours\", \"a deadline within a week\" for \"a "
+            "deadline in the next week\"), and add one sentence to reply saying which words you changed, that lines "
+            "customers read can't carry numbers, hours or dates, and that they can change it under What customers "
+            "will read. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    assert ("When a customer line changes the owner's words, reply also has the sentence the rule for those lines "
+            "asks for.") in SETUP_TURN_SYSTEM
+
+
+def test_setup_public_line_examples_hold_against_the_kernel_check():
+    # The rule's examples and the kinds of words it rules out match the kernel's public-text check itself, so setup
+    # never keeps a time frame the kernel would hold, nor rewrites one it would publish.
+    from desk.kernel_service.reply_check import scan_public_text
+
+    for kept in ("we reply within one business day", "the next business day", "within a day",
+                 "a deadline within a week"):
+        assert f'"{kept}"' in SETUP_TURN_SYSTEM and scan_public_text(f"{kept}.") == [], kept
+    for changed in ("within 24 hours", "a deadline in the next week"):
+        assert f'"{changed}"' in SETUP_TURN_SYSTEM and scan_public_text(f"{changed}.") != [], changed
+    for words in ("within two days", "within the hour", "in a few minutes", "today", "tomorrow", "the same day",
+                  "on Monday", "over the weekend", "this week", "next week", "free", "guaranteed"):
+        assert scan_public_text(f"We reply {words}.") != [], words
+    for words in ("within one day", "within a week", "the next business day", "within a few days"):
+        assert scan_public_text(f"We reply {words}.") == [], words
+
+
+@pytest.mark.parametrize(("text", "frames"), [
+    ("Take the message; we reply within one business day.", ["one business day"]),
+    ("Nothing is urgent except an IRS notice with a deadline in the next week.", ["next week"]),
+    ("Same-day for emergencies, otherwise the next business day.", ["same day", "next business day"]),
+    ("Call 555-123-4567. We're open 7 days a week, 24/7 by email; we reply within 24 hours.", ["24 hours"]),
+    ("Fuera de horario dejen mensaje; respondemos en un día hábil. Abrimos por la mañana.", ["un día hábil"]),
+    ("Un aviso del IRS con plazo la próxima semana es urgente.", ["próxima semana"]),
+    ("We do tax returns for families and small firms.", []),
+])
+def test_owner_time_frames_are_read_from_the_answer(text, frames):
+    assert desk_setup.owner_time_frames(text) == frames
+
+
+IRS_ANSWER = "Tax returns for families. Nothing is urgent except an IRS notice with a deadline in the next week."
+SOFTENED = "An IRS notice with a deadline coming up soon counts as urgent."
+NAMED = ('Customer lines can\'t name dates, so "in the next week" reads "within a week"; you can change it under '
+         'What customers will read.')
+
+
+@pytest.mark.parametrize("second", ["named", "still_unnamed"])
+async def test_a_turn_that_drops_the_owners_time_frame_gets_one_fresh_draft(app, browser, kernel_http, model,
+                                                                            engine, second):
+    # Seen live: "a deadline in the next week" became "a deadline coming up soon", with nothing said. A time frame the
+    # owner states is kept word for word in a customer line or named in reply; otherwise the turn gets one fresh
+    # draft, whose answer stands either way. The retry never repeats the owner's words.
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    retried = turn(NAMED, urgent="An IRS notice with a deadline within a week counts as urgent.") \
+        if second == "named" else turn(urgent=SOFTENED)
+    before = len(model.requests)
+    response = await answer(owner, model, interview_id, IRS_ANSWER, turn(urgent=SOFTENED), retried)
+    assert response.status_code == 200, response.text
+    assert len(model.requests) == before + 2
+    retry = model.requests[-1].messages[-1]["content"][0]["text"]
+    assert TIME_FRAME_UNACCOUNTED in retry and "next week" not in retry and "IRS" not in retry
+    row = await stored(engine, interview_id)
+    if second == "named":
+        assert row["answers"]["urgent"] == "An IRS notice with a deadline within a week counts as urgent."
+        assert NAMED in [entry["text"] for entry in row["transcript"]]
+    else:
+        assert row["answers"]["urgent"] == SOFTENED
+
+
+@pytest.mark.parametrize(("text", "first"), [
+    ("New clients send last year's return; we reply within one business day.",
+     turn(intake="New clients send last year's return, and we reply within one business day.")),
+    (IRS_ANSWER, turn(NAMED, urgent="An IRS notice with a deadline within a week counts as urgent.")),
+    ("We do tax returns for families, and we reply within one business day.", turn()),
+])
+async def test_a_turn_that_keeps_or_names_the_owners_time_frame_answers_at_once(app, browser, kernel_http, model,
+                                                                                engine, text, first):
+    # Kept word for word, named in reply, or no customer line drafted this turn: no retry.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    before = len(model.requests)
+    response = await answer(owner, model, interview_id, text, first)
+    assert response.status_code == 200, response.text
+    assert len(model.requests) == before + 1
     assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "
             "customers on the public page. Write them as the business speaking to its customers; never "
             "instructions to the Desk, private owner instructions, or a contact route other than the contact "

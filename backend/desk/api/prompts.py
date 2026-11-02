@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.29"
+PROMPT_VERSION = "2026-10-31.30"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -664,8 +664,8 @@ MoneyCap = Annotated[StrictInt, Field(ge=0, le=AUTO_MONEY_HARD_CAP_CENTS)]
 CLOCK_PATTERN = r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
 
 # Keep schema descriptions short: the setup turn's grammar has a strict size budget.
-POLICY_FIELD_RULE = ("Written to customers, in words: no amounts, percentages, times, days, numbers (even spelled out) "
-                     "or promise words.")
+POLICY_FIELD_RULE = ("Written to customers, in words: no amounts, digits, number words but one or a, hours, dates or "
+                     "promise words.")
 
 SETUP_START_SYSTEM = f"""\
 You are Claude, helping a business owner set up a Claude Desk: an AI that answers for their business on a public \
@@ -970,7 +970,8 @@ What you answer
 words, so they know you got it. When something technical comes up (a payment link, confirming who someone is, \
 "asks you first"), explain it in a plain clause. If the answer doesn't cover the question yet, reply is your \
 short follow-up question instead. If the owner raises something new, answer it and ask only about that; the \
-topic you were on waits for a later turn.
+topic you were on waits for a later turn. When a customer line changes the owner's words, reply also has the \
+sentence the rule for those lines asks for.
 - Fields: everything this answer tells you, read with this question's exchange, even a fact for another topic, in \
 the field this turn has for it (a phone number given while you asked about services goes in public_contact). A \
 turn has only the fields its question records, such as after_hours on the hours and contact questions and website \
@@ -980,9 +981,15 @@ clear_price_items false and anything else null when the answer doesn't give it. 
 facts about the business, never for limits.
 - pricing, intake and urgent record what the owner's answers and the business's own text say about how it works, \
 never limits.
-- For summary, pricing, intake, after_hours and urgent, write them in words; keep amounts, percentages, times, \
-days and numbers (even spelled out), and promise words such as free, guaranteed, discount, refund or confirmed \
-out. Leave hours to the hours question.
+- For summary, pricing, intake, after_hours and urgent, write them in words, and keep the owner's own words for a \
+time frame, a threshold or what they commit to, word for word: "we reply within one business day" and "the next \
+business day" stay as they are. These lines can't carry amounts, percentages, digits, number words other than one \
+or a, hours or minutes, dates or days such as today, tomorrow, the same day, a weekday's name, the weekend or this \
+or next week, or promise words such as free, guaranteed, discount, refund or confirmed. When the owner's words have \
+one, write the closest wording without it ("within a day" for "within 24 hours", "a deadline within a week" for "a \
+deadline in the next week"), and add one sentence to reply saying which words you changed, that lines customers \
+read can't carry numbers, hours or dates, and that they can change it under What customers will read. Leave hours \
+to the hours question.
 - summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to customers on the \
 public page. Write them as the business speaking to its customers; never instructions to the Desk, private owner \
 instructions, or a contact route other than the contact on record.
@@ -1113,6 +1120,12 @@ SETUP_CLIENT_CARDS = {
 SETUP_CLOSING_LINE = ("Every topic is covered and the plan is settled. Write the closing plan now. "
                       "Set next to done; only plan and reply will be read.")
 SETUP_RETRY = "That answer didn't fit the format:\n{errors}\nAnswer again in the same format, fixing those fields."
+# An answer turn's one retry when a time frame the owner stated is neither kept in a customer line nor named in reply
+# (`setup.owner_time_frame_errors`); it never repeats the owner's words.
+TIME_FRAME_UNACCOUNTED = ("- reply: a time frame from the owner's answer is neither kept word for word in a customer "
+                          "line nor named in reply. Keep their words where the rule for customer lines allows; "
+                          "otherwise use the closest wording it allows and say in reply which words you changed "
+                          "and why.")
 # The setup interview's wrappers (`setup.py`), named in `SETUP_START_SYSTEM` and `SETUP_TURN_SYSTEM`.
 OWNER_DESCRIPTION_TAG = "owner_description"
 OWNER_ANSWER_TAG = "owner_answer"
