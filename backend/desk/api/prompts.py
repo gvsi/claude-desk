@@ -811,9 +811,11 @@ plumbing".
 - business_type: trade, office, landlord or other.
 - summary: what the business does, in one or two plain sentences. {POLICY_FIELD_RULE} For example, say "a small CPA \
 firm", not "a two-person firm".
-- offers: each offer or discount the description states, such as "Students get 10% off with a student ID", in \
-the owner's own words, at most four; else empty. The summary can't carry them, so they go here: the owner hears at \
-the end that they aren't set up. Never one the description doesn't state.
+- offers: each discount or special price the description gives some customers, such as "Students get 10% off \
+with a student ID" or "Veterans get their first consultation free", in the owner's own words, at most four; else \
+empty. Not something anyone can book, such as a free consultation, estimate or meet and greet, and not a free \
+amenity such as parking. The summary can't carry them, so they go here: the owner hears at the end that they aren't \
+set up. Never one the description doesn't state.
 - website: the business's website address if the description gives one, else null. Never make one up.
 - memory: up to eight short notes the owner's Claude memory would plausibly hold about this business, written \
 as the owner's own notes. Cover its name, what it does, its customers, how it prices, its hours and area, how it \
@@ -990,9 +992,9 @@ turn.
 - plan: the closing plan, only when next is done; else empty."""
 
 # The closing plan leaves the owner's stated offers to code, which lists them after it as not set up
-# (`setup.offers_not_set_up`): no rule or customer line carries one.
-PLAN_OFFERS_RULE = ("Leave out the offers in <answers_so_far>: code lists them after your plan as not set up, so "
-                    "never say the Desk gives one.")
+# (`setup.offers_not_set_up`): no rule or customer line carries one, and no call after the start reads them.
+PLAN_OFFERS_RULE = ("Never say the Desk gives a discount or special price the owner mentioned for some customers: "
+                    "code tells them after your plan that those aren't set up.")
 
 _PLAN = f"""\
 The closing plan (reference)
@@ -1373,7 +1375,8 @@ class SetupStart(BaseModel):
                          description=f"What the business does, in one or two plain sentences. {POLICY_FIELD_RULE}")
     offers: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
         default_factory=list, max_length=4,
-        description="Each offer or discount the description states, in the owner's words; else empty.")
+        description="Each discount or special price the description gives some customers, in the owner's "
+                    "words; else empty.")
     website: str | None = Field(None, max_length=2048, description="The business's website address, else null.")
     memory: list[MemoryDraft] = Field(default_factory=list, max_length=8)
     connected_apps: list[ConnectorKey] = Field(default_factory=list, max_length=4)
@@ -1963,8 +1966,9 @@ class SetupAnswers(BaseModel):
     refunds: Refunds | None = None
     public_contact: str | None = Field(None, max_length=200)
     price_items: list[PriceAnswer] = Field([], max_length=PRICE_ITEMS_MAX)
-    # The offers the owner's description states (`SetupStart.offers`), in their words: no customer line or rule can
-    # carry one, so setup only tells the owner at the end that they aren't set up (`setup.offers_not_set_up`).
+    # The discounts or special prices for some customers that the owner's description states (`SetupStart.offers`),
+    # in their words: no customer line or rule can carry one, so no call after the start reads them, and setup only
+    # tells the owner at the end that they aren't set up (`setup.offers_not_set_up`).
     offers: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field([], max_length=4)
     # Written by code when setup fills from suggestions, never by a model turn or patch.
     suggested_fields: list[SetupPolicyField | SuggestedFactField] = Field(

@@ -3298,6 +3298,9 @@ async def test_closing_says_the_offers_the_owner_stated_arent_set_up(proposals, 
     assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
         setup.PAYMENT_LINE, "The closing plan." if planned else setup.QUESTIONS_DONE, told]
     assert PLAN_OFFERS_RULE in setup.SETUP_NEXT_SYSTEM
+    # The closing call doesn't read the offers either: only code's note names them.
+    assert not any("Students get" in request.messages[0]["content"][0]["text"] for request in model.requests
+                   if request.output_schema is setup.SetupNextStep)
 
 
 async def test_closing_lists_no_offers_when_the_owner_stated_none(proposals, model, engine):

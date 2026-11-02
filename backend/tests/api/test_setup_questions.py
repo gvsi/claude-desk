@@ -1580,6 +1580,9 @@ async def test_setup_keeps_an_offer_the_owner_stated_for_the_owner_alone(app, br
     assert desk_setup.owner_rule_answers(answers).offers == []
     assert "offers" not in desk_setup.SETUP_POLICY_CLAIMS
     assert "- offers:" in SETUP_START_SYSTEM and "offers" in SetupStart.model_json_schema()["properties"]
+    # No later call reads them, so no turn can reword one into a customer line: a fact turn's message leaves them out.
+    interview = interview_with(answers, [desk_setup.Entry(role="owner", text=DESCRIPTION)])
+    assert "Students get" not in desk_setup._turn_message(interview, "what_you_do", "We fix bikes.")["content"][0]["text"]
 
 
 async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, kernel_http, model, engine, caplog):

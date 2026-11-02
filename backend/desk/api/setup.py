@@ -61,7 +61,8 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   are. A new website is read only with consent; a new owner or business
   name goes to the kernel (`PUT /desks/{id}/business`). Once the last question is answered, the interview moves on to
   step `tools`: settle the cards, append Claude's closing plan, then finish. Only a failed or empty closing plan
-  after its retry gets the fixed transition line instead. When the owner typed their own contact on the contact
+  after its retry gets the fixed transition line instead. When the owner's description stated discounts or special
+  prices for some customers, code's note that they aren't set up follows (`offers_not_set_up`). When the owner typed their own contact on the contact
   question, setup first asks, with code's two choices, whether to add them as a test client (`TEST_CLIENT_OFFER`).
   Code reads a yes or a no with no model turn: only a yes puts them on record as a client with that contact
   (`PUT /desks/{id}/people`), and either moves on to step `tools`. Any other answer, such as a request for another
@@ -1903,7 +1904,8 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     """The answer turn's one message: a fact's actual question is wrapped; a limit keeps its fixed head. A limit
     turn (`LIMIT_QUESTIONS`) leaves out what the memory and the website said, and of the answers so far reads only the
     limits already answered (each taken on its own turn), never a fact an earlier turn may have taken from them: not
-    even the price list the quote question's prices merge into, whose titles may be website or memory text. Every
+    even the price list the quote question's prices merge into, whose titles may be website or memory text. No turn
+    reads the offers the owner stated (`offers_not_set_up`), so none rewords one into a customer line. Every
     turn includes earlier owner answers and Claude replies since this topic began, including its follow-up asks.
     With more than one ask, the exchange includes the first ask too. It never includes tool labels or their content.
     On a limit question these replies were made under the same isolation;
@@ -1911,7 +1913,7 @@ def _turn_message(interview: Interview, key: QuestionKey, text: str, *, run_id: 
     entries never enter history: its current answer appears only in `owner_answer`."""
     transcript = _history(interview, run_id)
     limit_turn = key in LIMIT_QUESTIONS.values()
-    so_far = interview.answers.model_dump_json(exclude_defaults=True, exclude={"suggested_fields"})
+    so_far = interview.answers.model_dump_json(exclude_defaults=True, exclude={"suggested_fields", "offers"})
     if limit_turn:
         so_far = interview.answers.model_dump_json(include=set(LIMIT_QUESTIONS), exclude_defaults=True)
     asked = next((entry.text for entry in reversed(transcript) if entry.question == key), "")
@@ -2351,7 +2353,7 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
                                covered=", ".join(key for key in QUESTION_KEYS if closing or key in interview.covered),
                                uncovered="" if closing else ", ".join(key for key in QUESTION_KEYS
                                                                     if key not in interview.covered)),
-        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields"})),
+        wrap(ANSWERS_SO_FAR_TAG, interview.answers.model_dump_json(exclude={"suggested_fields", "offers"})),
         wrap(SETUP_PLAN_TAG, json.dumps(_setup_plan(interview), ensure_ascii=False)),
     ]
     if not interview.business_tools_enabled:
@@ -3034,8 +3036,9 @@ def settle_plan(interview: Interview) -> None:
 
 
 async def close_setup(owner, engine, model, interview: Interview, *, answered: bool = False) -> None:
-    """Settle cards, end with the closing plan (or a fixed line without one), then finish, and offer to add the owner as
-    a test client when they typed their own contact (`_offer_test_client`): setup then waits on that answer.
+    """Settle cards, end with the closing plan (or a fixed line without one) and code's note on the offers the owner
+    stated (`offers_not_set_up`), then finish, and offer to add the owner as a test client when they typed their own
+    contact (`_offer_test_client`): setup then waits on that answer.
 
     The closing call's own reply comes before the plan unless `answered`: a reply of this run already answered the
     owner (`_TurnReplies.answered`), so it would say the same again. A run shows only its first call's text, so a
