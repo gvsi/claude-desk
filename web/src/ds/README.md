@@ -66,7 +66,7 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 
 ### Scrollbars
 
-S1 applies to every app scroll area, on both axes: a 6 px thumb inset 3 px in a transparent 12 px track, at least 32 px long, with `radius-full` corners. Its token pair is `--line-control` at rest (decoration) and `--text-tertiary` while the scroll area is hovered or the thumb is dragged; its width never changes. Firefox uses its native thin bar with the resting token, only where WebKit scrollbar selectors are unsupported. SubNav keeps its hidden bar, and the About pages' paper and standalone vision pages keep the browser's own scrollbar. Scrolling behaviour stays native.
+S1 applies to every app scroll area, on both axes: a 6 px thumb inset 3 px in a transparent 12 px track, at least 32 px long, with `radius-full` corners. Its token pair is `--line-control` at rest (decoration) and `--text-tertiary` while the scroll area is hovered or the thumb is dragged; its width never changes. Firefox uses its native thin bar with the resting and hover tokens, only where WebKit scrollbar selectors are unsupported. SubNav keeps its hidden bar, and the About pages' paper and standalone vision pages keep the browser's own scrollbar. Scrolling behaviour stays native.
 
 ### Motion
 

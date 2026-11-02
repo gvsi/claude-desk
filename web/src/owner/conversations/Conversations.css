@@ -41,6 +41,8 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  /* The caption line and both padded edges of the stuck day band stay above keyboard focus. */
+  scroll-padding-top: calc(var(--size-caption-line) + 2 * var(--space-8));
   padding: var(--space-24) var(--space-12);
 }
 

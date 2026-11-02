@@ -15,13 +15,18 @@ html {
 }
 
 /* S1: a 6 px thumb inset 3 px in a 12 px track, on every app scroll area and both axes.
-   The About set and the standalone vision pages keep the browser's own scrollbar, including the page's bar. */
-*::-webkit-scrollbar {
+   The About set and the standalone vision pages keep the browser's own scrollbar, including the page's bar.
+   Never match their pseudo-elements: even all: revert opts Chromium into custom rendering.
+   Keep :has() on root/body only, off the app's descendant selectors, to avoid invalidating
+   every scrollbar during skeleton measurements. */
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame))::-webkit-scrollbar,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar {
   width: var(--space-12);
   height: var(--space-12);
 }
 
-*::-webkit-scrollbar-thumb {
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame))::-webkit-scrollbar-thumb,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-thumb {
   min-width: var(--space-32);
   min-height: var(--space-32);
   border: calc(var(--space-6) / 2) solid transparent;
@@ -30,35 +35,36 @@ html {
   background-clip: padding-box;
 }
 
-*:hover::-webkit-scrollbar-thumb,
-*::-webkit-scrollbar-thumb:active {
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame)):hover::-webkit-scrollbar-thumb,
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame))::-webkit-scrollbar-thumb:active,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *):hover::-webkit-scrollbar-thumb,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-thumb:active {
   background-color: var(--text-tertiary);
 }
 
-*::-webkit-scrollbar-track,
-*::-webkit-scrollbar-corner {
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame))::-webkit-scrollbar-track,
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame))::-webkit-scrollbar-corner,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-track,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-*::-webkit-scrollbar-button {
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame))::-webkit-scrollbar-button,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-button {
   display: none;
-}
-
-/* Only the About set, standalone vision pages and the page around them reset to native bars. Keeping :has() off the app's
-   descendant selectors avoids invalidating every scrollbar during skeleton measurements. */
-:is(:root:has(.cd-about-paper, .cd-vision-frame), body:has(.cd-about-paper, .cd-vision-frame), .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar,
-:is(:root:has(.cd-about-paper, .cd-vision-frame), body:has(.cd-about-paper, .cd-vision-frame), .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-thumb,
-:is(:root:has(.cd-about-paper, .cd-vision-frame), body:has(.cd-about-paper, .cd-vision-frame), .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-track,
-:is(:root:has(.cd-about-paper, .cd-vision-frame), body:has(.cd-about-paper, .cd-vision-frame), .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-corner,
-:is(:root:has(.cd-about-paper, .cd-vision-frame), body:has(.cd-about-paper, .cd-vision-frame), .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-button {
-  all: revert;
 }
 
 /* Chromium 121+ ignores the WebKit styling if either standard property is set. */
 @supports not selector(::-webkit-scrollbar) {
-  * {
+  :is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame)),
+  :not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *) {
     scrollbar-width: thin;
     scrollbar-color: var(--line-control) transparent;
+  }
+
+  :is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame)):hover,
+  :not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *):hover {
+    scrollbar-color: var(--text-tertiary) transparent;
   }
 
   :is(:root:has(.cd-about-paper, .cd-vision-frame), body:has(.cd-about-paper, .cd-vision-frame), .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *) {

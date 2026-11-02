@@ -234,6 +234,37 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it.each([[1440, 900], [390, 844]])('backward_keyboard_focus_stays_below_the_sticky_day_at_%sx%s', async (width, height) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const [base] = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const rows = Array.from({ length: 36 }, (_, i): ConversationSummary => ({
+      ...base!, session_id: `keyboard-${i}`, display_name: `${DANA} ${i}`,
+      replayed: false, outcome_counts: {}, last_activity: new Date(Date.now() - i * 1000).toISOString(),
+    }));
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: new RegExp(`^${DANA}`) }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const list = document.querySelector<HTMLElement>('.cd-conversations__list')!;
+    const days = list.querySelectorAll<HTMLElement>('.cd-conversations__day');
+    expect(days).toHaveLength(1);
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(parseFloat(getComputedStyle(list).scrollPaddingTop)).toBe(days[0]!.getBoundingClientRect().height);
+    const links = [...list.querySelectorAll<HTMLElement>('.cd-conversation-item')];
+    links.at(-1)!.focus();
+    expect(list.scrollTop).toBeGreaterThan(0);
+    for (const link of links.slice(0, -1).reverse()) {
+      await userEvent.tab({ shift: true });
+      expect(document.activeElement).toBe(link);
+      expect(link.getBoundingClientRect().top).toBeGreaterThanOrEqual(days[0]!.getBoundingClientRect().bottom);
+      expect(link.getBoundingClientRect().bottom).toBeLessThanOrEqual(list.getBoundingClientRect().bottom);
+    }
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
+
   it.each([[1440, 900], [390, 844]])('day_headers_keep_their_resting_layout_and_push_each_other_out_at_%sx%s', async (width, height) => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
