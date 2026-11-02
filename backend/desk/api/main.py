@@ -13,7 +13,8 @@ job queue's loggers (`procrastinate` and its children) to WARNING and filters th
 each job with its arguments below WARNING and when a job fails, and the resume job's signed decision quotes the
 visitor. It also redacts link tokens from every log record the process makes (`log_redaction`), uvicorn's access log
 included, and logs an unexpected error in a route by its type and route only (`unexpected_errors`). In production
-the app refuses to start without its secrets (the API key, the passcode hash and the public origin, which `Settings` requires), with a Bedrock setting or credential (refused by `Settings`) and with any test
+the app refuses to start without its secrets (the API key, the passcode hash and the public origin, which `Settings`
+requires), with a Bedrock setting or credential (refused by `Settings`) and with any test
 hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model, kernel transport or job queue connector,
 or an A2A transport set on the runtime (refused when the lifespan starts). A passcode hash that isn't one refuses to
 start anywhere.

@@ -4,10 +4,12 @@ An exception no handler answers can carry owner data in its message or its trace
 text. The app's `Exception` handler answers it `500 {"error": "internal"}`, and Starlette then raises it on to the
 server, which logs it in full ("Exception in ASGI application", with the exception attached).
 
-`UnexpectedErrors`, the app's outermost middleware, logs such an exception as "unexpected <type> on <method> <route>",
-naming the route by its template, never its values, and raises it on unchanged. Answers stay the same, and so does
-the exception's path to the server: a 500 before the response starts, a stream cut off where it was after.
-`quiet_server_errors()` then keeps the server's own line about it and drops the exception attached to that line.
+`UnexpectedErrors`, the outermost of the app's own middleware, logs such an exception as "unexpected <type> on
+<method> <route>", naming the route by its template, never its values, and raises it on unchanged. It sits inside
+FastAPI's `ServerErrorMiddleware`, which still answers the 500, so answers stay the same, and so does the exception's
+path to the server: a 500 before the response starts, a stream cut off where it was after. `quiet_server_errors()`
+then keeps the server's own line about it, naming the exception's type when it can, and drops the exception attached
+to that line.
 """
 
 import logging
@@ -51,6 +53,12 @@ class _ServerAppErrors(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         if str(record.msg).startswith(APP_ERROR):
+            # The type is code, not data, and is the only record left of an error the middleware doesn't see: a
+            # cancellation, or one raised by the 500 handler itself.
+            if isinstance(record.exc_info, tuple) and record.exc_info[0] is not None:
+                error = record.exc_info[1]
+                kind = record.exc_info[0] if error is None else _innermost(error)
+                record.msg, record.args = f"{APP_ERROR} ({kind.__name__})", ()
             record.exc_info = record.exc_text = None
         return True
 

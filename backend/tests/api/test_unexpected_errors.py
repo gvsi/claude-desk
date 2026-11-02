@@ -72,11 +72,12 @@ async def test_a_stream_that_fails_part_way_logs_only_its_type_and_route(api, br
 async def test_the_servers_own_record_of_an_app_error_drops_the_exception(api, caplog):
     """uvicorn logs an exception the app raised as "Exception in ASGI application" with the exception attached
     (uvicorn/protocols/http/h11_impl.py and httptools_impl.py). Building the app keeps that line and drops the
-    exception; the API's own line has already named its type and route. Its other records keep their exceptions."""
+    exception, naming only its type; the API's own line has already named its type and route. Its other records keep
+    their exceptions."""
     caplog.set_level(logging.DEBUG)
     server = logging.getLogger("uvicorn.error")
     server.error("Exception in ASGI application\n", exc_info=RuntimeError(PRIVATE))
-    assert [record.getMessage() for record in caplog.records] == ["Exception in ASGI application\n"]
+    assert [record.getMessage() for record in caplog.records] == ["Exception in ASGI application (RuntimeError)"]
     assert PRIVATE not in logged(caplog)
 
     # A traceback that also names a link has had its token redacted into formatted text by then: dropped too.
