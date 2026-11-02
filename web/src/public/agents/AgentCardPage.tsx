@@ -2,7 +2,8 @@
  * `/d/:slug/agents`: the page for people's AI agents. It reads the public Desk (the kernel's names,
  * brand and Agent Card blocks) and the API's code-built Agent Card (the address agents send to, how
  * a request is signed, an example request), and shows them as written, in the browser's language,
- * under the business's brand header and the AI disclosure. The built-in agent sent on a task
+ * under the business's brand header and the AI disclosure. Each ability shows its outcome under it,
+ * a status dot and the kernel's words, as board B5 draws it. The built-in agent sent on a task
  * (`SendAgentPanel`) leads; what agents can do, how they prove who they are, and connecting your
  * own agent with a demo key (`ConnectYourOwn`) follow. No model text is shown here but the Desk's
  * checked replies to the built-in agent and the agent's requests as it sent them, quoted as its own
@@ -11,7 +12,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useParams } from 'react-router';
 
-import type { PublicDesk } from '../../api/contracts.ts';
+import type { AgentOutcome, PublicDesk } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
 import type { AgentCardOut } from '../../api/views.ts';
 import {
@@ -21,11 +22,14 @@ import {
   EmptyState,
   SkeletonScreen,
   Notice,
+  OUTCOME_TONE,
   PageHeader,
   PublicBrandHeader,
+  StatusLabel,
   TextLink,
   UNREACHABLE_COPY,
   type CopyLanguage,
+  type StatusTone,
 } from '../../ds/index.ts';
 import { browserLanguage } from '../../lib/language.ts';
 import { useDocumentTitle } from '../../lib/useDocumentTitle.ts';
@@ -40,6 +44,13 @@ import { AGENTS_COPY } from './copy.ts';
 import { SendAgentPanel } from './SendAgentPanel.tsx';
 
 import './AgentCardPage.css';
+
+/** Each ability's outcome as the rules' own dots show it: allowed is handled, asks first held, never refused. */
+const ABILITY_TONE = {
+  allowed: OUTCOME_TONE.auto,
+  asks_first: OUTCOME_TONE.ask,
+  never: OUTCOME_TONE.never,
+} as const satisfies Record<AgentOutcome, StatusTone>;
 
 type Load = { kind: 'loading' } | { kind: 'not_found' } | { kind: 'unavailable' } | { kind: 'ready'; desk: PublicDesk; card: AgentCardOut };
 
@@ -142,10 +153,17 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
           <SendAgentPanel slug={slug} business={business} ownerName={desk.owner_display_name} session={session} language={language} />
           <AgentsCard title={copy.canDoTitle}>
             {skills.length > 0 ? (
-              <ul className="cd-agents-page__list cd-type-body">
-                {/* The kernel's Agent Card, each block's words as written. */}
+              <ul className="cd-agents-page__abilities">
+                {/* The kernel's Agent Card, each block's words as written, its outcome's dot and words under them. */}
                 {skills.map((block, index) => (
-                  <li key={index}>{block.text}</li>
+                  <li key={index} className="cd-agents-page__ability">
+                    <span className="cd-agents-page__ability-text cd-type-body">{block.text}</span>
+                    {block.outcome != null && block.outcome_text != null ? (
+                      <span className="cd-agents-page__outcome cd-type-meta">
+                        <StatusLabel tone={ABILITY_TONE[block.outcome]}>{block.outcome_text}</StatusLabel>
+                      </span>
+                    ) : null}
+                  </li>
                 ))}
               </ul>
             ) : (
