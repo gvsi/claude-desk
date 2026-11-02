@@ -76,7 +76,9 @@ export function ConversationsPage() {
   const deskId = desk.desk_id;
   const queryClient = useQueryClient();
   const desks = useDesks(deskId, { passive: true });
-  const recordedHistory = desks.data === undefined || isStartingSampleDesk(queryClient, desks.data, deskId);
+  // The copy's starting sample Desk, the plumbing demo, as Knowledge tells it; not yet known while the Desks are read.
+  const sampleDesk = desks.data !== undefined && isStartingSampleDesk(queryClient, desks.data, deskId);
+  const recordedHistory = desks.data === undefined || sampleDesk;
   const navigate = useNavigate();
   const location = useLocation();
   const navigationType = useNavigationType();
@@ -217,6 +219,7 @@ export function ConversationsPage() {
               summary={open}
               listRead={listRead}
               notice={arrivalNotice(location.state)}
+              sampleDesk={sampleDesk}
               demoVisitorRun={arrivalRun(location.state)}
             />
           </>

@@ -13,7 +13,8 @@ it.each(['desktop', 'phone'] as const)('knowledge_sources_and_previews_%s', asyn
   await expect.poll(() => list.getByRole('listitem').elements().length).toBe(6);
   await expect.element(main.getByText('6 sources. Customers can see 5.', { exact: true })).toBeVisible();
   const rows = list.getByRole('listitem').elements();
-  expect(rows.slice(2).map((row) => row.querySelector('.cd-pill')?.textContent)).toEqual(['Mock', 'Mock', 'Mock', 'Mock']);
+  // The sample rows carry no pill: the one "Mock" beside the page's title says what they are.
+  expect(rows.slice(2).map((row) => row.querySelector('.cd-pill'))).toEqual([null, null, null, null]);
   expect(rows.slice(2).map((row) => row.querySelector('.cd-knowledge-list__title')?.textContent)).toEqual([
     'Maintenance plan.pdf', 'Warranty terms.docx', 'Service area map.pdf', 'turner-plumbing.example/faq',
   ]);
@@ -28,8 +29,8 @@ it.each(['desktop', 'phone'] as const)('knowledge_sources_and_previews_%s', asyn
   const known = main.getByRole('region', { name: 'What Claude knows' }).element();
   const questions = main.getByRole('region', { name: 'Questions Claude couldn’t answer' }).element();
   const more = main.getByRole('region', { name: 'More sources' }).element();
-  expect(questions.querySelector('.cd-pill')?.textContent).toBe('Mock');
-  expect(more.querySelector('.cd-pill')?.textContent).toBe('Mock');
+  expect(questions.querySelector('.cd-pill')).toBeNull();
+  expect([...more.querySelectorAll('.cd-pill')].filter((pill) => pill.closest('li') === null)).toHaveLength(0);
   expect(questions.textContent).toContain('Sample questions, to show what this will do. It doesn’t work in this prototype yet.');
   expect(more.textContent).toContain('Connecting these doesn’t work in this prototype yet.');
   expect([...more.querySelectorAll('li')].map((row) => row.textContent)).toEqual([
@@ -150,8 +151,15 @@ it.each(['phone', 'desktop'] as const)('source_titles_keep_their_room_beside_pil
   const website = list.getByText('turner-plumbing.example', { exact: true }).element();
   expect(website.scrollWidth).toBeLessThanOrEqual(website.clientWidth);
 
-  // Real sources and the Mock sources give their words the same space.
-  for (const row of list.getByRole('listitem').elements()) {
+  // The real sources keep their readers pill and room beside it; the sample rows have no pill, so
+  // their words run to the row's padding.
+  const rowsShown = list.getByRole('listitem').elements();
+  expect(rowsShown.map((row) => row.querySelector('.cd-pill') !== null)).toEqual([true, true, false, false, false, false]);
+  for (const row of rowsShown.slice(2)) {
+    const words = row.querySelector('.cd-knowledge-list__words')!.getBoundingClientRect();
+    expect(Math.round(row.getBoundingClientRect().right - words.right)).toBe(16);
+  }
+  for (const row of rowsShown.slice(0, 2)) {
     const rowBox = row.getBoundingClientRect();
     const words = row.querySelector('.cd-knowledge-list__words')!.getBoundingClientRect();
     const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
@@ -188,13 +196,18 @@ it('the_phone_source_list_keeps_its_skeleton_until_knowledge_arrives', async () 
   const pendingTop = add.getBoundingClientRect().top;
   const pendingRows = [...known.querySelectorAll('.cd-knowledge-list__row')];
   expect(pendingRows).toHaveLength(6);
+  // A pill's place under its row's words, or null for a row that draws none: the two setup sources
+  // have their readers pill, and the four sample rows none, before the list arrives and after.
   const pillPlace = (row: Element) => {
-    const words = row.querySelector('.cd-knowledge-list__words')!.getBoundingClientRect();
-    const pill = row.lastElementChild!.getBoundingClientRect();
-    return { left: pill.left - words.left, gap: pill.top - words.bottom };
+    const words = row.querySelector('.cd-knowledge-list__words')!;
+    const pill = row.lastElementChild!;
+    if (pill === words) return null;
+    const wordsBox = words.getBoundingClientRect();
+    const pillBox = pill.getBoundingClientRect();
+    return { left: pillBox.left - wordsBox.left, gap: pillBox.top - wordsBox.bottom };
   };
   const pendingPills = pendingRows.map(pillPlace);
-  expect(pendingPills).toEqual(Array.from({ length: 6 }, () => ({ left: 0, gap: 8 })));
+  expect(pendingPills).toEqual([{ left: 0, gap: 8 }, { left: 0, gap: 8 }, null, null, null, null]);
   release();
   await expect.element(screen.getByRole('list', { name: 'What Claude knows' })).toBeVisible();
   const loadedTop = add.getBoundingClientRect().top;
@@ -207,4 +220,45 @@ it('the_phone_source_list_keeps_its_skeleton_until_knowledge_arrives', async () 
   }
   // The unknown rows can be taller than their shapes, but the source list never collapses to a line.
   expect(Math.abs(loadedTop - pendingTop)).toBeLessThan(250);
+});
+
+
+it.each(['desktop', 'phone'] as const)('knowledge_says_mock_once_beside_its_title_%s', async (viewport) => {
+  // The page says it is a mock once, with a Pill beside its title, in place of one on each mock part.
+  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { viewport, pollScale: 100 });
+  const main = screen.getByRole('main');
+  const list = main.getByRole('list', { name: 'What Claude knows' });
+  await expect.poll(() => list.getByRole('listitem').elements().length).toBe(6);
+  await expect.element(main.getByRole('region', { name: 'More sources', exact: true })).toBeVisible();
+  const title = main.getByRole('heading', { level: 1, name: 'Knowledge', exact: true }).element();
+  const mocks = main.getByText('Mock', { exact: true }).elements();
+  expect(mocks).toHaveLength(1);
+  const pill = mocks[0]!;
+  expect(pill.classList.contains('cd-pill')).toBe(true);
+  // Beside the title, outside its name: 8 px after it, centred on its line.
+  expect(title.contains(pill)).toBe(false);
+  const titleBox = title.getBoundingClientRect();
+  const pillBox = pill.getBoundingClientRect();
+  expect(Math.round(pillBox.left - titleBox.right)).toBe(8);
+  expect(Math.round(pillBox.top + pillBox.height / 2)).toBe(Math.round(titleBox.top + titleBox.height / 2));
+  // No pill on the sample rows, the two notes or the add form.
+  expect(list.getByRole('listitem').elements().slice(2).map((row) => row.querySelector('.cd-pill'))).toEqual([null, null, null, null]);
+  for (const name of ['Questions Claude couldn’t answer', 'More sources']) {
+    const region = main.getByRole('region', { name, exact: true }).element();
+    expect([...region.querySelectorAll('.cd-pill')].filter((el) => el.closest('li') === null), name).toHaveLength(0);
+  }
+  expect(main.getByRole('region', { name: 'Add something', exact: true }).element().querySelectorAll('.cd-pill')).toHaveLength(0);
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+});
+
+it.each([
+  ['alerts', 'In this prototype, alerts arrive in Notifications.'],
+  ['billing', 'Nothing is billed in this prototype. The usage and invoices below are samples.'],
+] as const)('settings_%s_keeps_its_own_mock_pill', async (section, line) => {
+  // Knowledge's notes drop their pill; Settings' Alerts and Billing keep theirs, beside their note.
+  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/settings/${section}`, { pollScale: 100 });
+  const note = screen.getByText(line, { exact: true });
+  await expect.element(note).toBeVisible();
+  const vision = note.element().closest('.cd-settings__vision')!;
+  expect([...vision.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Mock']);
 });
