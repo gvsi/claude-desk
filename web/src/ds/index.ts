@@ -170,7 +170,8 @@ export { SetupToolsList, type SetupToolsListProps, type SetupToolsRow, type Setu
 // Agents
 export { CodeBlock, type CodeBlockProps } from './components/CodeBlock/CodeBlock.tsx';
 export { CopyField, type CopyFieldProps } from './components/CopyField/CopyField.tsx';
-export { COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
+export { COPIED_FOR_MS, COPY_RESULT_COPY, copyResultLine, useCopyText, type CopyState, type CopyWhat } from './components/CopyField/useCopyText.ts';
+export { CopyResult, type CopyResultProps } from './components/CopyResult/CopyResult.tsx';
 export { SignedLimitPanel, type SignedLimitPanelProps } from './components/SignedLimitPanel/SignedLimitPanel.tsx';
 export { SIGNED_LIMIT_COPY } from './components/SignedLimitPanel/signedLimitCopy.ts';
 
