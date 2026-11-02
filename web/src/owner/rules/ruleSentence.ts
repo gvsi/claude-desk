@@ -7,11 +7,12 @@
  * `RuleSentence` in the design system draws them. They read the rules and decide nothing: the
  * kernel decides every request.
  */
-import { MONEY_EFFECTS, type Effect, type RuleCard } from '../../api/contracts.ts';
+import { MONEY_EFFECTS, type RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut, ToolRow } from '../../api/views.ts';
 import type { RuleMeta, SentencePart } from '../../ds/index.ts';
 import { formatCents, hoursParts, listWords } from '../../lib/format.ts';
 import { TOOL_NAMES, isBusinessToolName, toolDisplayName, type BusinessTools } from '../connectors/catalog.ts';
+import { coveredTools } from './changeRows.ts';
 import { percent, targetWords, whoWords, type AgentNames } from './ruleWords.ts';
 
 export type { RuleMeta, SentencePart };
@@ -27,6 +28,13 @@ export interface SentenceWords {
    * group in the app's words ("Every tool that charges money").
    */
   tools?: readonly Pick<ToolRow, 'tool' | 'effects'>[];
+  /**
+   * The rules an effect group's rule is read among: the active version's cards, or one side of a
+   * draft. An automatic rule on a group covers a tool with several effects only together with an
+   * automatic rule for each of the others (`coveredTools`), so the line names only the tools it
+   * governs. Without them, the row's own cards are read alone.
+   */
+  cards?: readonly RuleCard[];
 }
 
 /** A phrase: plain words, or runs with key values set off. */
@@ -136,15 +144,34 @@ function joinRuns(phrases: readonly SentencePart[][], last: 'and' | 'or'): Sente
   });
 }
 
-/** The phrase for a row's targets: one target's, a joined row's from `JOINED_PHRASES`, else each target's joined. */
-function rowPhrase(targets: readonly string[], business: BusinessTools): ToolPhrase {
+/** A row's phrase, with its actions after "Claude never " each in the third person. */
+interface RowPhrase extends ToolPhrase {
+  never: SentencePart[];
+}
+
+/** One phrase as a row's, its action after "Claude never " in the third person. */
+function onePhrase(phrase: ToolPhrase): RowPhrase {
+  return { ...phrase, never: thirdPerson(runs(phrase.can)) };
+}
+
+/**
+ * The phrase for a row's targets: one target's, a joined row's from `JOINED_PHRASES`, else each
+ * target's joined, each keeping its own trailing words and, after "Claude never ", its own verb in
+ * the third person ("sends quotes from your price list and books visits").
+ */
+function rowPhrase(targets: readonly string[], business: BusinessTools): RowPhrase {
   const [only] = targets;
-  if (only !== undefined && targets.length === 1) return targetPhrase(only, business);
+  if (only !== undefined && targets.length === 1) return onePhrase(targetPhrase(only, business));
   const keys = new Set(targets.map((target) => joinKey(target, business)));
   const joined = JOINED_PHRASES.find((row) => row.targets.length === keys.size && row.targets.every((target) => keys.has(target)));
-  if (joined !== undefined) return joined.phrase;
+  if (joined !== undefined) return onePhrase(joined.phrase);
   const phrases = targets.map((target) => targetPhrase(target, business));
-  return { can: joinRuns(phrases.map((phrase) => runs(phrase.can)), 'and'), before: joinRuns(phrases.map((phrase) => runs(phrase.before)), 'or') };
+  const withAfter = (parts: SentencePart[], phrase: ToolPhrase) => (phrase.after === undefined ? parts : [...parts, { text: phrase.after }]);
+  return {
+    can: joinRuns(phrases.map((phrase) => withAfter(runs(phrase.can), phrase)), 'and'),
+    before: joinRuns(phrases.map((phrase) => withAfter(runs(phrase.before), phrase)), 'or'),
+    never: joinRuns(phrases.map((phrase) => withAfter(thirdPerson(runs(phrase.can)), phrase)), 'and'),
+  };
 }
 
 /** Runs with their first word in the third person, after "Claude never ": "send" → "sends", "search" → "searches". */
@@ -237,7 +264,7 @@ export function ruleSentence(card: RuleCard | readonly RuleCard[], words: Senten
   const parts: SentencePart[] = [];
   if (first.mode === 'auto') parts.push({ text: 'Claude can ' }, ...runs(phrase.can));
   else if (first.mode === 'ask') parts.push({ text: 'Claude asks you before ' }, ...runs(phrase.before));
-  else parts.push({ text: 'Claude never ' }, ...thirdPerson(runs(phrase.can)));
+  else parts.push({ text: 'Claude never ' }, ...phrase.never);
 
   const amount = first.max_amount_cents;
   if (amount != null) parts.push({ text: ' up to ' }, key(formatCents(amount)));
@@ -264,11 +291,16 @@ function merged(parts: readonly SentencePart[]): SentencePart[] {
   return out;
 }
 
-/** The titles of the Desk's tools with this effect, in the screen's order. */
-function toolsWithEffect(effect: string, tools: SentenceWords['tools'], business: BusinessTools): string[] {
-  return (tools ?? [])
-    .filter((row) => row.effects.includes(effect as Effect))
-    .map((row) => toolDisplayName(row.tool, business))
+/**
+ * The titles of the Desk's tools, in the screen's order, that an effect group's `card` governs
+ * among `words.cards` (else among the row's own cards), as Rules reads coverage (`coveredTools`):
+ * an automatic one covers a tool with several effects only with an automatic rule for each other.
+ */
+function toolsCovered(card: RuleCard, row: readonly RuleCard[], words: SentenceWords): string[] {
+  const among = words.cards ?? row;
+  const pool = among.some((other) => other.card_id === card.card_id) ? among : [...among, card];
+  return coveredTools(card, pool, words.tools ?? [])
+    .map((tool) => toolDisplayName(tool, words.business))
     .filter((title): title is string => title !== null && title.trim() !== '');
 }
 
@@ -289,9 +321,9 @@ function whoLine(card: RuleCard, words: SentenceWords): string {
 export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWords): RuleMeta {
   const cards = asCards(card);
   const named: { titles: string[]; words: string }[] = targetsOf(cards).map((target) => {
-    if (target.startsWith('effect:')) {
-      const titles = toolsWithEffect(target.slice('effect:'.length), words.tools, words.business);
-      return { titles, words: targetWords(target, words.business) };
+    const effectCard = target.startsWith('effect:') ? cards.find((c) => c.applies_to === target) : undefined;
+    if (effectCard !== undefined) {
+      return { titles: toolsCovered(effectCard, cards, words), words: targetWords(target, words.business) };
     }
     const title = toolDisplayName(target, words.business);
     return { titles: title === null ? [] : [title], words: targetWords(target, words.business) };
@@ -311,34 +343,80 @@ export function holdLine(card: RuleCard): SentencePart[] | null {
   return [{ text: 'Over ' }, key(formatCents(limit)), { text: ', Claude asks you first' }];
 }
 
-/**
- * One Ask me first sentence for every automatic card with an amount limit, joined as C1 joins them:
- * "Claude asks you before payment links over **$300** or agent payments over **$20**". A tool the
- * table has no requests for reads as payments, since only a rule that moves money takes a limit.
- * Null when none has a limit.
- */
-export function holdSentence(cards: readonly RuleCard[]): SentencePart[] | null {
-  const each = cards.flatMap((card): SentencePart[][] => {
-    const limit = limitOf(card);
-    if (limit === null) return [];
+/** Who a card is for as a key: its group, or the one person or agent it names. */
+const audienceKey = (card: RuleCard): string => JSON.stringify([card.who, card.person_id ?? null, card.agent_key_id ?? null]);
+
+/** The automatic cards with an amount limit, grouped by whom they are for, in card order. */
+function holdGroups(cards: readonly RuleCard[]): RuleCard[][] {
+  const groups = new Map<string, RuleCard[]>();
+  for (const card of cards) {
+    if (limitOf(card) === null) continue;
+    const group = groups.get(audienceKey(card));
+    if (group === undefined) groups.set(audienceKey(card), [card]);
+    else group.push(card);
+  }
+  return [...groups.values()];
+}
+
+/** One group's hold: "Claude asks you before payment links over **$300** or agent payments over **$20**". */
+function holdParts(group: readonly RuleCard[]): SentencePart[] {
+  const each = group.map((card): SentencePart[] => {
     const over = Object.hasOwn(TOOL_PHRASES, card.applies_to) ? TOOL_PHRASES[card.applies_to]?.over : undefined;
-    return [[{ text: `${over ?? 'payments'} over ` }, key(formatCents(limit))]];
+    return [{ text: `${over ?? 'payments'} over ` }, key(formatCents(limitOf(card) ?? 0))];
   });
-  if (each.length === 0) return null;
   return merged([{ text: 'Claude asks you before ' }, ...joinRuns(each, 'or')]);
 }
 
 /**
- * The line under `holdSentence`: the tools of the automatic cards with an amount limit, each named
- * once, and "Anyone", since past a rule's limit the owner is asked whoever the request is from.
- * Null when none has a limit.
+ * One group's hold line: its tools, each named once, and whom its cards are for. Past an automatic
+ * rule's limit the kernel's hold keeps that rule's audience, so a hold for anyone reads "Anyone" and
+ * one person's reads their name.
+ */
+function holdGroupMeta(group: readonly RuleCard[], words: SentenceWords): RuleMeta {
+  const [first] = group;
+  const titles = [...new Set(group.map((card) => toolDisplayName(card.applies_to, words.business) ?? targetWords(card.applies_to, words.business)))];
+  const named = group.every((card) => toolDisplayName(card.applies_to, words.business) !== null);
+  // Read as a group, not as one tool's, so a hold for anyone isn't "Signed agents".
+  const who = first === undefined ? 'Anyone' : whoLine({ ...first, applies_to: '' }, words);
+  return { tools: named ? { titles } : listWords(titles), who };
+}
+
+/**
+ * The Ask me first rows past the automatic rules' amount limits: one per group of people, its
+ * limits joined as C1 joins them ("Claude asks you before payment links over **$300** or agent
+ * payments over **$20**", Payment link and Charge within a signed limit · Anyone), and a person's
+ * or agent's own limits in a row of their own. Empty when no card has a limit.
+ */
+export function holdRows(cards: readonly RuleCard[], words: SentenceWords): { parts: SentencePart[]; meta: RuleMeta }[] {
+  return holdGroups(cards).map((group) => ({ parts: holdParts(group), meta: holdGroupMeta(group, words) }));
+}
+
+/** The one group of limits a single hold sentence can word; holds for different people are refused. */
+function oneHoldGroup(cards: readonly RuleCard[]): RuleCard[] | null {
+  const groups = holdGroups(cards);
+  if (groups.length > 1) throw new Error("holds for different people can't read as one sentence: give each its own (holdRows)");
+  return groups[0] ?? null;
+}
+
+/**
+ * One Ask me first sentence for the automatic cards with an amount limit, when they are all for
+ * the same people, each keeping its own amount: "Claude asks you before payment links over
+ * **$300** or agent payments over **$20**". A tool the table has no requests for reads as
+ * payments, since only a rule that moves money takes a limit. Null when none has a limit; limits
+ * for different people are refused with an error (`holdRows` gives each its own row).
+ */
+export function holdSentence(cards: readonly RuleCard[]): SentencePart[] | null {
+  const group = oneHoldGroup(cards);
+  return group === null ? null : holdParts(group);
+}
+
+/**
+ * The line under `holdSentence`: the limited cards' tools, each named once, and whom they are for.
+ * Null when none has a limit; limits for different people are refused with an error (`holdRows`).
  */
 export function holdMeta(cards: readonly RuleCard[], words: SentenceWords): RuleMeta | null {
-  const limited = cards.filter((card) => limitOf(card) !== null);
-  if (limited.length === 0) return null;
-  const titles = [...new Set(limited.map((card) => toolDisplayName(card.applies_to, words.business) ?? targetWords(card.applies_to, words.business)))];
-  const named = limited.every((card) => toolDisplayName(card.applies_to, words.business) !== null);
-  return { tools: named ? { titles } : listWords(titles), who: 'Anyone' };
+  const group = oneHoldGroup(cards);
+  return group === null ? null : holdGroupMeta(group, words);
 }
 
 /**
