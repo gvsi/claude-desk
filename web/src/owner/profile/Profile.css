@@ -1,0 +1,16 @@
+.cd-profile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  max-width: calc(var(--size-content) - var(--size-sub-nav) - var(--space-40));
+  min-width: 0;
+}
+
+.cd-profile p,
+.cd-profile h2 {
+  margin: 0;
+}
+
+@media (max-width: 767.98px) {
+  .cd-profile { gap: var(--space-16); }
+}

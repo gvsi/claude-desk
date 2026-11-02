@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
 import { expectComputed } from '../test/expectComputed.ts';
-import { ANSWERING_LINE, GENERAL_DETAILS, GeneralSettings, SettingsPage } from './parts.tsx';
+import { ANSWERING_LINE, GeneralSettings, SettingsPage } from './parts.tsx';
 import { SETTINGS_SECTION_NAMES, SPEC, expectFooter, one } from './spec.ts';
 
 /** Settings › General on a phone: the top bar, then one column. */
@@ -55,22 +55,11 @@ export const Board: Story = {
     await expect([Math.round(nav.getBoundingClientRect().left), Math.round(nav.getBoundingClientRect().width)]).toEqual([0, 390]);
     await expect(Math.round(links[0]!.getBoundingClientRect().left)).toBe(16);
 
-    // The details 16 px under the hairline, as wide as the page's column; the hours on two lines.
-    const business = page.getByRole('region', { name: 'Your business' });
-    await expect(top(business) - bottom(nav)).toBe(16);
-    const card = one(business, '.cd-card');
-    await expect([Math.round(card.getBoundingClientRect().left), Math.round(card.getBoundingClientRect().width)]).toEqual([16, 358]);
-    await expect(within(business).getAllByRole('definition').map((value) => value.textContent)).toEqual(GENERAL_DETAILS.map(({ value }) => value));
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(346);
-
     // Claude acts for you 16 px under, with the one short line.
     const answering = page.getByRole('region', { name: 'Claude acts for you' });
-    await expect(top(answering) - bottom(card)).toBe(16);
+    await expect(top(answering) - bottom(nav)).toBe(16);
     await expect(page.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
     const switchRow = within(answering).getByRole('switch', { name: 'Claude acts for you' });
-    await expect(Math.round(within(switchRow).getByText('Claude acts for you', { exact: true }).getBoundingClientRect().left)).toBe(
-      Math.round(within(business).getByText('Business', { exact: true }).getBoundingClientRect().left),
-    );
     await expect(Math.round(answering.getBoundingClientRect().height)).toBe(91);
     await expect(top(switchRow) - top(answering)).toBe(21);
     await expect(bottom(answering) - bottom(switchRow)).toBe(21);

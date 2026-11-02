@@ -8,6 +8,8 @@ export interface TextFieldProps {
   /** What to type, shown above the field and naming it: "Passcode", "Your business". */
   label: string;
   value: string;
+  /** An example shown while the field is empty. */
+  placeholder?: string;
   /** Called with the new text on every change; the field shows whatever `value` the form passes back. */
   onChange: (value: string) => void;
   /** `text` (the default) or `password`. Not used with `multiline`. */
@@ -37,7 +39,7 @@ const COUNTER_FROM = 0.9;
  * counter describe the field (`aria-describedby`), and an error also marks it `aria-invalid`. The
  * error line is announced when it appears.
  */
-export function TextField({ label, value, onChange, type = 'text', multiline = false, hint, error, autoComplete, maxLength, readOnly, fieldRef }: TextFieldProps) {
+export function TextField({ label, value, placeholder, onChange, type = 'text', multiline = false, hint, error, autoComplete, maxLength, readOnly, fieldRef }: TextFieldProps) {
   const id = useId();
   const fieldId = `${id}-field`;
   const hintId = `${id}-hint`;
@@ -55,6 +57,7 @@ export function TextField({ label, value, onChange, type = 'text', multiline = f
     id: fieldId,
     className: 'cd-text-field__input cd-type-body',
     value,
+    placeholder,
     autoComplete,
     maxLength,
     readOnly,

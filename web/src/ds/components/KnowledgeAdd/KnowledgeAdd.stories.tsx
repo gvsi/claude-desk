@@ -105,7 +105,7 @@ export const Added: Story = {
   play: async ({ args, canvas, userEvent }) => {
     const card = canvas.getByRole('region', { name: 'Added' });
     // 20 px under the form's last line, as the board draws it: 121 px, its words 20 px in.
-    const filesLine = canvas.getByText(FILES_LINE);
+    const filesLine = canvas.getByText('Claude doesn’t read websites you add in this prototype yet.');
     await expect(Math.round(card.getBoundingClientRect().top - filesLine.getBoundingClientRect().bottom)).toBe(20);
     await expect(Math.round(card.getBoundingClientRect().height)).toBe(121);
     expectComputed(card, { backgroundColor: 'rgba(250, 249, 245, 0.03)', paddingTop: '20px', paddingLeft: '20px' });
@@ -229,7 +229,7 @@ export const FileTooBig: Story = {
     // The screen's words, read out at once, 12 px under the line about files.
     const alert = canvas.getByRole('alert');
     await expect(alert).toHaveTextContent(TOO_BIG);
-    const filesLine = canvas.getByText(FILES_LINE);
+    const filesLine = canvas.getByText('Claude doesn’t read websites you add in this prototype yet.');
     await expect(Math.round(alert.getBoundingClientRect().top - filesLine.getBoundingClientRect().bottom)).toBe(12);
   },
 };

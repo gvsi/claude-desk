@@ -1,7 +1,7 @@
 /* ConversationListItem: a row link at the control radius, at least 48 px tall: the name and the
-   time on the first line, the status dot and its words on the second, then a replayed
-   conversation's Recorded tag at that line's end. A row with no status and no tag may quote what
-   the person last wrote on its second line instead; with no quote either it has no second line,
+   time on the first line, an optional visitor preview next, then the status dot and its words,
+   with a replayed conversation's Recorded tag at that line's end. Live now keeps status in place
+   of the quote. With neither quote nor status it has no second line,
    and its one line sits centered in the row. Each line stays on one line with an ellipsis,
    and the status words give way before the tag. The open conversation is on the selected fill; others fill on hover at
    motion-instant. Nothing moves under reduced motion. */
@@ -12,6 +12,7 @@
   justify-content: center;
   box-sizing: border-box;
   min-width: 0;
+  overflow: hidden;
   min-height: calc(var(--size-control) + var(--space-16));
   padding: var(--space-6) var(--space-10);
   border-radius: var(--radius-control);
