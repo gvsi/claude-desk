@@ -50,13 +50,13 @@ export const visitorCalledBack = (ownerFirstName: string): string => `${ownerFir
 /**
  * The whisper box's line: Claude reads a whisper in its next reply, which runs while the visitor
  * is in the chat, or else when they next write. `name` is the one the conversation's bar shows,
- * null when it has none.
+ * null when it has none. The owner's preview is never an agent.
  */
-export function whisperHelper(name: string | null, here: boolean): string {
-  const who = name ?? 'The visitor';
+export function whisperHelper(name: string | null, here: boolean, agent: boolean): string {
+  const who = name ?? (agent ? 'The agent' : 'The visitor');
   return here
     ? `${who} is in the chat now. Claude will use your whisper in its reply right away.`
-    : `${who} isn't in the chat now. Claude will use your whisper when they next write.`;
+    : `${who} isn't in the chat now. Claude will use your whisper when ${agent ? 'it next writes' : 'they next write'}.`;
 }
 
 /**

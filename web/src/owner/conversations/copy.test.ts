@@ -5,13 +5,23 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ConversationSummary } from '../../api/views.ts';
-import { agentLine, takeOverPlaceholder } from './copy.ts';
+import { agentLine, takeOverPlaceholder, whisperHelper } from './copy.ts';
 
 const LA = 'America/Los_Angeles';
 
 type Facts = Pick<ConversationSummary, 'latest_outcome' | 'latest_outcome_starts_at' | 'latest_outcome_cents' | 'latest_outcome_cause'>;
 
 const none: Facts = { latest_outcome: null, latest_outcome_starts_at: null, latest_outcome_cents: null, latest_outcome_cause: null };
+
+describe('whisperHelper', () => {
+  it('names_an_agent_and_uses_it_while_away_or_the_shared_line_while_here', () => {
+    for (const name of [null, "Alex Kim's assistant"]) {
+      const who = name ?? 'The agent';
+      expect(whisperHelper(name, false, true)).toBe(`${who} isn't in the chat now. Claude will use your whisper when it next writes.`);
+      expect(whisperHelper(name, true, true)).toBe(`${who} is in the chat now. Claude will use your whisper in its reply right away.`);
+    }
+  });
+});
 
 describe('agentLine', () => {
   it('says_when_a_booked_visit_starts_on_the_business_clock', () => {
