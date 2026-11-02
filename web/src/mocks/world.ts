@@ -626,7 +626,7 @@ export class MockWorld {
         discount_bp: spec.discountBp ?? null,
         amount_cents: spec.amountCents ?? null,
         recipient: null,
-        starts_at: null,
+        starts_at: spec.startsAt ?? null,
       },
       outcome: spec.outcome,
       state,
