@@ -55,7 +55,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards, each as its kind's label and its text (`render.check_text`,
    "Payment link card: ..."; never the visitor's words), and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
+   (`soft.denies_ai`). It also reads, as untrusted owner data, the approved service names the
+   prose scan found repeated in the prose with a free word to lend (`free_names_used`): a free
+   word used within such a name alone is no promise. One try
+   within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
    fallback (the owner's decision of 2026-10-31), inside the API's 12 s for the route: no
    verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
    (`soft.unavailable`), which gets one rewrite like the other prose kinds (the owner's ruling
@@ -131,7 +134,7 @@ import logging
 import re
 import unicodedata
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -418,28 +421,56 @@ def _real_spelling(text: str) -> tuple[str, list[int]]:
     return "".join(chars), origin
 
 
-def _free_name_reach(text: str, names: Iterable[str]) -> list[int] | None:
-    """`_named_reach` for the names of a Desk's enabled business tools, each found in `text` as
-    `_real_spelling` reads both; None when no name is there. A name made only of free words is
-    never looked for: it would be every free word (the owner's decision of 2026-10-31)."""
-    keys = [key for key, _ in (_real_spelling(shown(name).strip()) for name in names)
+def _free_name_keys(names: Iterable[str]) -> list[tuple[str, str]]:
+    """Each of the names of a Desk's enabled business tools that the scan looks for, with its key,
+    the name as `_real_spelling` reads it. A name made only of free words is never looked for: it
+    would be every free word (the owner's decision of 2026-10-31)."""
+    return [(name, key) for name, key in ((name, _real_spelling(shown(name).strip())[0]) for name in names)
             if not all(word in FREE_WORDS for word in re.findall(r"\w+", key))]
+
+
+def _free_name_repeats(text: str, names: Iterable[str]) -> Iterator[tuple[str, int, int]]:
+    """Each repeat in `text` of one of `names` (`_free_name_keys`), as `_real_spelling` reads both,
+    that starts at a word's start: the name, and the repeat's start and end in `text`."""
+    keys = _free_name_keys(names)
     if not keys:
-        return None
+        return
     folded, origin = _real_spelling(text)
-    reach = [0] * (len(text) + 1)
-    for name in keys:
-        start = folded.find(name)
+    for name, key in keys:
+        start = folded.find(key)
         while start != -1:
             if start == 0 or not folded[start - 1].isalnum():   # a repeat starts at a word's start
-                low, high = origin[start], origin[start + len(name) - 1] + 1
-                reach[low] = max(reach[low], high)
-            start = folded.find(name, start + 1)
-    if not any(reach):
+                yield name, origin[start], origin[start + len(key) - 1] + 1
+            start = folded.find(key, start + 1)
+
+
+def _free_name_reach(text: str, names: Iterable[str]) -> list[int] | None:
+    """`_named_reach` for the names of a Desk's enabled business tools, each found in `text` as
+    `_free_name_repeats` finds it; None when no name is there."""
+    reach: list[int] | None = None
+    for _, low, high in _free_name_repeats(text, names):
+        if reach is None:
+            reach = [0] * (len(text) + 1)
+        reach[low] = max(reach[low], high)
+    if reach is None:
         return None
     for i in range(1, len(reach)):
         reach[i] = max(reach[i], reach[i - 1])
     return reach
+
+
+def free_names_used(text: str, names: Iterable[str]) -> list[str]:
+    """The names of `names` (`scan_prose`'s `approved_free_names`) that `text` repeats with a free
+    word inside: each holding a free word, not made of free words alone, and repeated in `text` at
+    a word's start as the scan finds it (`_free_name_repeats`); each once, in `names`' order. That's
+    a superset of the names whose free word the scan let through, which also needs the word to be a
+    lexicon match ("feel free" isn't one). The soft-promise check reads these alone, so a reply
+    that repeats no such name shows it none."""
+    names = list(names)
+    lending = [name for name, key in _free_name_keys(names)
+               if any(word in FREE_WORDS for word in re.findall(r"\w+", key))]
+    found = {name for name, _, _ in _free_name_repeats(text, lending)}
+    return [name for name in dict.fromkeys(names) if name in found]
 
 
 def _span(text: str) -> str:
@@ -1265,9 +1296,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     cards, refused, rendered_claims = await check_clauses(
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     names = await desk_names(ctx, desk_id)
+    approved_names = await context.business_free_names(ctx, desk_id)
     passed = {"booking_card": any(card.template == "booking_confirmed" for card in cards),
               "callback_card": any(card.template == "callback_confirmed" for card in cards),
-              "approved_free_names": await context.business_free_names(ctx, desk_id)}
+              "approved_free_names": approved_names}
     reading = markdown_reading(prose)
     # A passing list's typed markers are no number (the owner's decision of 2026-11-01): the raw scan
     # reads the prose with them blanked, and otherwise the draft's prose as ever.
@@ -1292,6 +1324,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
         found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing,
+                                                        approved_names=approved_names,
                                                         receipts=await request_receipts(ctx, session_row, language))
         violations += found
     if violations:
@@ -1308,13 +1341,16 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
                         cards: Sequence[RenderedBlock], *,
+                        approved_names: Sequence[str] = (),
                         receipts: Sequence[str] = ()) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card), each shown to Sonnet and Jev alike as its kind's
     label and its text (`render.check_text`), then the session's request receipts as they read
     them (`receipts`, from `request_receipts`), with the session's fixed next steps from its
-    resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
-    no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
+    resolved tools. Sonnet also reads, as labelled owner data, the approved service names whose
+    repeat lends a free word in the prose (`free_names_used`, of `approved_names`, the scan's);
+    Jev's calibrated input is unchanged. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`,
+    with no recheck and no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
     error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). Optional
     Jev runs beside it, bounded on its own, and adds `soft.jev` (a `soft_promise`), also spanning
@@ -1324,7 +1360,7 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     tools = await session_tools(ctx, session_row)
     data = SoftPromiseInput(language=language, prose=prose,
                             cards=[*(render.check_text(card) for card in cards), *receipts],
-                            next_steps=next_steps(tools))
+                            next_steps=next_steps(tools), approved_names=free_names_used(prose, approved_names))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
         (verdict, usage), jev_result = await asyncio.gather(

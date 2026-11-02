@@ -136,6 +136,45 @@ def results_file(deps: Deps) -> dict[str, Any]:
 
 # The case file
 
+def test_approved_names_are_optional_case_data_and_back_only_the_prose_scan():
+    ordinary = Case(**case("ordinary", "May I help?"))
+    assert ordinary.approved_names == []
+    named = Case(**case("named", "Would you like me to book a free intro call?"),
+                 approved_names=["Book a free intro call"])
+    assert not code_blocked(named)
+    assert code_blocked(named.model_copy(update={"approved_names": []}))
+    assert call_input(named).approved_names == named.approved_names
+    assert call_input(ordinary).approved_names == []
+    # As in the kernel, the call carries only the names whose repeat in the prose lends a free word.
+    elsewhere = named.model_copy(update={"prose": "The intro call costs nothing.",
+                                         "approved_names": ["Book a free intro call", "Book a consult"]})
+    assert call_input(elsewhere).approved_names == []
+    assert call_input(named.model_copy(update={"approved_names": ["Book a consult", "Book a free intro call"]})
+                      ).approved_names == ["Book a free intro call"]
+    # Historical measurements keep their original wire shape and input hashes.
+    assert "approved_names" not in call_input(named, "new").model_dump()
+
+
+def test_approved_name_cases_cover_honest_names_and_added_promises_in_both_languages():
+    cases = [c for c in load_cases(CASES_FILE) if c.group == "approved_names"]
+    assert Counter((c.language, c.expected) for c in cases) == {
+        ("en", "pass"): 4, ("es", "pass"): 4, ("en", "flag"): 7, ("es", "flag"): 7}
+    assert all(c.approved_names and c.next_steps for c in cases)
+    # Only an intake offer, whose step is taking a message, has no card beside it yet.
+    assert all(c.cards for c in cases if c.next_steps != ["taking a message"])
+    assert all(not code_blocked(c) for c in cases if c.expected == "pass")
+    assert all(c.majority_required for c in cases if c.expected == "pass")
+    desk = DeskInfo(owner_display_name="Mike Turner", timezone="America/Los_Angeles")
+    for language, renderer, name in (("en", render_en, "Free consultation"),
+                                     ("es", render_es, "Consulta gratis")):
+        fact = SimpleNamespace(claims=[SimpleNamespace(key=key, value=value) for key, value in {
+            "starts_at": "2026-11-02T18:00:00Z", "minutes": 30,
+            "appointment_type": name, "appointment_minutes": 30}.items()])
+        card = renderer.booking_confirmed(fact, desk)
+        text = "Booking confirmed card: " + "\n".join([card.title, *card.lines])
+        assert next(c.cards for c in cases if c.id == f"names-booked-{language}") == [text]
+
+
 def test_default_candidate_is_the_production_sonnet_request(deps):
     from evals.calibration.soft_promise import Config, run
 
@@ -195,7 +234,7 @@ def test_the_case_file_holds_every_group():
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
         "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4,
-        "request_receipts": 38}
+        "request_receipts": 38, "approved_names": 22}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
@@ -203,7 +242,8 @@ def test_the_case_file_holds_every_group():
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
         "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
-        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 16, "flag": 22}}
+        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 16, "flag": 22},
+        "approved_names": {"pass": 8, "flag": 14}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
     from desk.api.prompts import VOICE_EXAMPLES
@@ -352,7 +392,7 @@ def test_every_flag_group_and_pass_group_has_a_case_in_each_language_the_model_a
 def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path: Path):
     cases = load_cases(CASES_FILE)
     blocked = {c.id for c in cases if code_blocked(c)}
-    assert blocked == {c.id for c in cases if reply_check.scan_prose(c.prose)}
+    assert blocked == {c.id for c in cases if reply_check.scan_prose(c.prose, approved_free_names=c.approved_names)}
     # the four drafts blocked for a day word still are, and none of the offers or plain promises is
     assert {c.id for c in cases if c.expected == "code"} <= blocked
     assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises", "price_waivers")}
@@ -360,7 +400,7 @@ def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path
     # retain their exact words even when the code check would block those too.
     original = [c for c in cases if c.group not in {
         "available_steps", "unavailable_steps", "added_promises", "completed_steps", "underway_steps",
-        "refund_rules", "voice", "voice_ai"}]
+        "refund_rules", "voice", "voice_ai", "approved_names"}]
     assert blocked & {c.id for c in original} == {c.id for c in original if c.expected == "code"} | {"claim-es-booked"}
     # a case can't state it, nor anything else the runner doesn't read
     with pytest.raises(Refused, match="code_blocked"):
