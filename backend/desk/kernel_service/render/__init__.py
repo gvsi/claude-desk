@@ -28,11 +28,13 @@ once (`register_template`) with the fact kinds it renders, the fact ID (or ID pr
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line; the soft checks read it after
-its kind's fixed label (`CHECK_LABELS`, `check_text`). A template that names no fact
-kinds (handoff, verify_prompt) renders without one. `Template.current` says
-whether a fact may still be shown (a status the template renders, not expired), and a fact with
-nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an empty
-card.
+its kind's fixed label (`CHECK_LABELS`, `check_text`), and a session's request receipts after a label
+of their own (`RECEIPT_LABEL`, `receipt_check_text`), each carrying what was asked for and a
+decision's status line. A
+template that names no fact kinds (handoff, verify_prompt) renders without one. `Template.current`
+says whether a fact may still be shown (a status the template renders, not expired), and a fact
+with nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an
+empty card.
 
 A card that links somewhere (a document or payment link) registers `href_for`, which the reply
 check awaits once the cited fact has passed its checks, and passes to `render_clause` as the card's
@@ -270,3 +272,62 @@ def check_text(card: RenderedBlock) -> str:
     """A card as the soft checks (Sonnet's and Jev's) read it: its kind's label, then its text
     ("Payment link card: Service call deposit, $20.00")."""
     return f"{CHECK_LABELS[card.template]} card: {card.text}"
+
+
+# The label of the session's request receipts the soft checks read beside a reply's cards, though the reply
+# doesn't show them again (`reply_check.request_receipts`): a decision's status line, its `visitor_plain`,
+# which the chat already shows as its own event, one label whether the request is held or resolved, since
+# the line itself says which. Not a template's, so kept apart from `CHECK_LABELS`; English, as those are.
+RECEIPT_LABEL = "Request receipt"
+# What was asked for, named before the status line, which alone ("Waiting for Mike Turner to approve") would
+# back a claim about any request; for the checks alone, never shown, in the reply's language, so a Spanish
+# reply about another request reads as one. Keyed by the request's tool, every native and payments tool,
+# since the compiler's default ask can hold any enabled tool, and by `block:<name>` for a business tool's
+# block. A tool named in neither (none today) has no receipt, the stricter way.
+RECEIPT_SUBJECTS: dict[str, dict[str, str]] = {
+    "en": {
+        "native.quote": "Quote request",
+        "native.find_slots": "Open times request",
+        "native.book": "Booking request",
+        "native.release_document": "Document request",
+        "native.payment_link": "Payment link request",
+        "native.charge_mandate": "Charge request",
+        "native.capture_lead": "Contact details request",
+        "native.request_callback": "Callback request",
+        "native.start_verification": "Verification request",
+        "native.fetch_website": "Website request",
+        "native.read_memory": "Records request",
+        "native.web_search": "Web search request",
+        "payments.list_charges": "Payment history request",
+        "payments.create_refund": "Refund request",
+        "block:intake": "Details request",
+        "block:typed_booking": "Booking request",
+        "block:purpose_payment": "Payment request",
+        "block:urgent": "Urgent request",
+    },
+    "es": {
+        "native.quote": "Solicitud de presupuesto",
+        "native.find_slots": "Solicitud de horarios",
+        "native.book": "Solicitud de reserva",
+        "native.release_document": "Solicitud de documento",
+        "native.payment_link": "Solicitud de enlace de pago",
+        "native.charge_mandate": "Solicitud de cobro",
+        "native.capture_lead": "Solicitud de datos de contacto",
+        "native.request_callback": "Solicitud de llamada",
+        "native.start_verification": "Solicitud de verificación",
+        "native.fetch_website": "Solicitud de sitio web",
+        "native.read_memory": "Solicitud de registros",
+        "native.web_search": "Solicitud de búsqueda web",
+        "payments.list_charges": "Solicitud de historial de pagos",
+        "payments.create_refund": "Solicitud de reembolso",
+        "block:intake": "Solicitud de datos",
+        "block:typed_booking": "Solicitud de reserva",
+        "block:purpose_payment": "Solicitud de pago",
+        "block:urgent": "Solicitud urgente",
+    },
+}
+def receipt_check_text(asked: str, visitor_plain: str, lang: Language) -> str:
+    """A request receipt as the soft checks read it: its English label, what was asked for (`asked`, a tool
+    or `block:<name>`, `RECEIPT_SUBJECTS`) in `lang`, then the decision's status line ("Request receipt card:
+    Quote request: Waiting for Mike Turner to approve"). An `asked` with no subject raises KeyError."""
+    return f"{RECEIPT_LABEL} card: {RECEIPT_SUBJECTS[lang][asked]}: {visitor_plain}"
