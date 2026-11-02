@@ -946,13 +946,18 @@ const SERVED: ServedRoutes = {
   },
   // The payment link's token is the only credential the checkout carries: no cookie is read.
   paymentLink(sv, req) {
-    const link = sv.world.links.get(req.params.token ?? '');
-    return link ? ok(withSetupBusinessName(sv.world, link, paymentLinkOut(link))) : NOT_FOUND;
+    const token = req.params.token ?? '';
+    const link = sv.world.links.get(token);
+    if (!link) return NOT_FOUND;
+    // A read settles the link first, as the kernel's does: one whose quote was paid another way is cancelled.
+    sv.world.settleLink(token, link);
+    return ok(withSetupBusinessName(sv.world, link, paymentLinkOut(link)));
   },
   completePayment(sv, req) {
     const token = req.params.token ?? '';
     const link = sv.world.links.get(token);
     if (!link) return NOT_FOUND;
+    sv.world.settleLink(token, link);
     // The kernel completes a link only while it is open, so a second payment is refused.
     if (link.view.state !== 'issued') return linkClosed(link);
     const verdict = sv.world.payLink(token, link);

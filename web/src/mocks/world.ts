@@ -255,6 +255,8 @@ export interface LinkRecord {
   view: PaymentLinkView;
   deskId: string;
   sessionId: string;
+  /** The quote the link pays, as the kernel's link names one; the script's links name none. */
+  quoteId?: string;
 }
 
 /** What verified Dana writes when she asks for her drain clearing payment back. Untrusted, as any visitor's words. */
@@ -288,6 +290,8 @@ export class MockWorld {
   keepsKnowledgeOwnerOnly: (item: KnowledgeItem) => boolean = () => false;
   readonly inbox: InboxRecord[] = [];
   readonly links = new Map<string, LinkRecord>();
+  /** The quotes a payment of has landed (one of their links, or an agent's mandate charge): each is paid once. */
+  readonly paidQuotes = new Set<string>();
   /** The document links this copy's document cards handed out, by token (documents.ts), opened or not. */
   readonly documentLinks = new Map<string, DocumentLink>();
   /**
@@ -976,6 +980,7 @@ export class MockWorld {
     const session = this.sessions.get(link.sessionId);
     if (!session) throw new Error(`payment link ${token} has no session`);
     link.view = { ...link.view, state: 'paid', customer_name: null };
+    if (link.quoteId !== undefined) this.quotePaid(link.quoteId);
     this.appendLedger(this.deskOf(session), {
       kind: 'payment',
       origin: 'kernel',
@@ -986,14 +991,31 @@ export class MockWorld {
     return this.fromTheDesk(session, [rivera.blocks.payment_confirmed[session.language]]);
   }
 
+  /** A payment of the quote landed, as the kernel marks a quote paid: an agent's mandate charge of it, or one of its links. */
+  quotePaid(quoteId: string): void {
+    this.paidQuotes.add(quoteId);
+  }
+
+  /**
+   * The link as the kernel's read or completion settles it first: an `issued` link whose quote
+   * another payment has paid can never be paid now, so it is cancelled (`quote_paid`), naming no
+   * rule change and telling the chat nothing.
+   */
+  settleLink(token: string, link: LinkRecord): void {
+    if (link.view.state === 'issued' && link.quoteId !== undefined && this.paidQuotes.has(link.quoteId)) {
+      this.cancelLink(token, link, 'quote_paid');
+    }
+  }
+
   /**
    * The link is cancelled: by the visitor on the checkout, which the chat isn't told of; by its
-   * Desk's delete, whose chat is closed; or by a change to the business's rules, as the kernel
+   * Desk's delete, whose chat is closed; by a payment of its quote another way (`settleLink`), which
+   * the chat isn't told of either; or by a change to the business's rules, as the kernel
    * cancels an open link the new rules no longer allow when the owner confirms them. That one says
    * why on the checkout (`cancel_reason`), and its chat gets the kernel's `link_cancelled` card,
    * author `desk`, with the link's amount and title.
    */
-  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'desk_deleted' | 'rules_changed'): void {
+  cancelLink(token: string, link: LinkRecord, by: 'visitor' | 'desk_deleted' | 'quote_paid' | 'rules_changed'): void {
     const session = this.sessions.get(link.sessionId);
     if (!session) throw new Error(`payment link ${token} has no session`);
     link.view = { ...link.view, state: 'cancelled', customer_name: null, cancel_reason: by === 'rules_changed' ? 'rules_changed' : null };
