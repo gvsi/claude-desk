@@ -6,12 +6,11 @@ import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
 import { Dialog, type DialogProps } from './Dialog.tsx';
 
-const TITLE = "Delete Emergencies for Turner Plumbing?";
+const TITLE = "Delete “Emergencies” for Turner Plumbing?";
 const BODY = 'Its public link stops working and its chats close. Its safety record is kept.';
 
 /**
- * The dialog as Settings › General opens it, in the default tone: a neutral question with neutral
- * buttons, as deleting a Desk asks (owner decision, 2026-10-30). "Delete this Desk" opens it,
+ * A dialog in the default tone, with its confirm variant supplied by each story. "Delete this Desk" opens it,
  * "Keep it" or Escape closes it, and "Delete Desk" waits for the screen's answer. It starts open,
  * so the story shows the dialog.
  */
@@ -20,7 +19,7 @@ function Settings(props: DialogProps) {
   const [pending, setPending] = useState(false);
   return (
     <div style={{ padding: 'var(--space-24) var(--space-40)' }}>
-      <Button variant="secondary" onClick={() => setOpen(true)}>
+      <Button variant="danger" onClick={() => setOpen(true)}>
         Delete this Desk
       </Button>
       {open ? (
@@ -48,6 +47,7 @@ const meta = {
     title: TITLE,
     body: BODY,
     confirmLabel: 'Delete Desk',
+    confirmVariant: 'danger',
     cancelLabel: 'Keep it',
     onConfirm: fn(),
     onCancel: fn(),
@@ -57,7 +57,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote:
-      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too. The board draws a refused dot and red buttons; deleting a Desk uses the default tone with neutral buttons (owner decision, 2026-10-30). The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
+      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too. Redrawn on 2026-11-02, the delete board quotes the Desk name and shows both delete buttons in red with no refused dot (owner decision, replacing the earlier neutral-delete rule). Default and DeleteDesk below use that red confirm with the default tone. The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
   },
 } satisfies Meta<typeof Dialog>;
 
@@ -93,11 +93,11 @@ export const Default: Story = {
     await expect(Math.round(body.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12);
     for (const button of within(dialog).getAllByRole('button')) expectComputed(button, { height: '40px' });
 
-    // The default tone: no dot beside the title, and neutral buttons.
+    // The delete look: red confirm, secondary cancel, and no dot in the default tone.
     await expect(dialog.querySelector('.cd-status-dot')).toBeNull();
     const keep = within(dialog).getByRole('button', { name: 'Keep it' });
     const remove = within(dialog).getByRole('button', { name: 'Delete Desk' });
-    expectComputed(remove, { backgroundColor: 'rgb(239, 236, 228)' });
+    expectComputed(remove, { backgroundColor: 'rgba(220, 130, 144, 0.16)', color: 'rgb(235, 163, 174)' });
     expectComputed(keep, { backgroundColor: 'rgba(250, 249, 245, 0.1)' });
 
     // dialog_traps_focus_and_escapes: focus starts on the least destructive answer, and Tab and
@@ -153,20 +153,36 @@ export const Default: Story = {
   },
 };
 
+export const DeleteDesk: Story = {
+  play: async ({ args, canvas, userEvent }) => {
+    const dialog = canvas.getByRole('dialog', { name: TITLE });
+    await expect(dialog.querySelector('.cd-status-dot')).toBeNull();
+    const confirm = within(dialog).getByRole('button', { name: 'Delete Desk' });
+    await expect(confirm).toHaveClass('cd-button--danger');
+    expectComputed(confirm, { backgroundColor: 'rgba(220, 130, 144, 0.16)', color: 'rgb(235, 163, 174)' });
+    await expect(within(dialog).getByRole('button', { name: 'Keep it' })).toHaveFocus();
+    await userEvent.click(confirm);
+    await expect(args.onConfirm).toHaveBeenCalledTimes(1);
+    await expect(confirm).toHaveAttribute('aria-busy', 'true');
+    await expect(confirm.querySelector('.cd-button__spinner')).not.toBeNull();
+    await waitFor(() => expectComputed(confirm, { backgroundColor: 'rgba(220, 130, 144, 0.24)', opacity: '1' }));
+  },
+};
+
 export const Danger: Story = {
   args: { tone: 'danger' },
   parameters: {
     canvas: 'none',
     canvasNote:
-      'No signed screen uses the danger tone: deleting a Desk asks in the default tone (owner decision, 2026-10-30). Nearest is N-Run2-Settings-DeleteDesk, which drew the dot before that decision.',
+      'No signed screen uses the danger tone: deleting a Desk uses the default tone with a red confirm button (owner decision, 2026-11-02). Nearest is N-Run2-Settings-DeleteDesk, redrawn that day with a quoted Desk name, red delete buttons and no dot.',
   },
   play: async ({ canvas }) => {
-    // Danger adds a refused dot beside the title, hidden from screen readers; the buttons stay neutral.
+    // The danger tone adds only a refused dot, hidden from screen readers; the red confirm is independent.
     const dialog = canvas.getByRole('dialog', { name: TITLE });
     const dot = within(dialog).getByRole('heading', { name: TITLE }).querySelector('.cd-status-dot--refused');
     await expect(dot).not.toBeNull();
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(within(dialog).getByRole('button', { name: 'Delete Desk' }), { backgroundColor: 'rgb(239, 236, 228)' });
+    expectComputed(within(dialog).getByRole('button', { name: 'Delete Desk' }), { backgroundColor: 'rgba(220, 130, 144, 0.16)', color: 'rgb(235, 163, 174)' });
     expectComputed(within(dialog).getByRole('button', { name: 'Keep it' }), { backgroundColor: 'rgba(250, 249, 245, 0.1)' });
   },
 };

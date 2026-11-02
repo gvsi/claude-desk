@@ -524,7 +524,7 @@ describe('design tokens', () => {
     // card; and the primary's, drawn in bg-app on its fill, at rest and hovered.
     add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'bg-app');
     add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'fill-card', 'bg-app');
-    add(['line-focus'], ['fill-secondary', 'fill-secondary-hover'], 3, 'bg-surface');
+    add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'bg-surface');
     add(['bg-app'], ['button-primary', 'button-primary-hover'], 3);
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
     // top bar, and the intro dialog's surface, in the dark theme; its dark ink on the same grounds in
@@ -570,6 +570,8 @@ describe('design tokens', () => {
     // The same buttons straight on the app background.
     add(['button-danger-text'], ['bg-app'], 4.5);
     add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'bg-app');
+    // A delete that cannot be undone, in its confirmation dialog: label at rest, hover and busy.
+    add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'bg-surface');
     // Every answer while it is sent, in its card: a busy danger answer on its hover fill or the
     // hover ground (listed above), a busy secondary answer's text-secondary label on its fill.
     add(['text-secondary'], ['fill-secondary'], 4.5, 'fill-card', 'bg-app');
@@ -586,7 +588,7 @@ describe('design tokens', () => {
     // A busy button's spinner, a graphic (3:1) in its busy label color, on every ground its busy pair
     // is listed for: the primary's on its own fill, a secondary's on its fill on a page, a dialog and
     // a card, a ghost's on the page, the sidebar, a dialog, the reviewer bar and a card, and the red
-    // answers' on their busy grounds on a page and in a card (danger-ghost in a dialog too).
+    // buttons' on their busy grounds on a page, in a card and in a dialog.
     add(['button-primary-text'], ['button-primary-hover'], 3);
     for (const over of ['bg-app', 'bg-surface']) add(['text-secondary'], ['fill-secondary'], 3, over);
     add(['text-secondary'], ['fill-secondary'], 3, 'fill-card', 'bg-app');
@@ -594,7 +596,7 @@ describe('design tokens', () => {
     add(['text-secondary'], ['fill-card'], 3, 'bg-app');
     add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'bg-app');
     add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'fill-card', 'bg-app');
-    add(['button-danger-text'], ['fill-hover'], 3, 'bg-surface');
+    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'bg-surface');
 
     // Every required pair is listed, at no lower a minimum and in every theme it is required in, so
     // dropping one can't pass.

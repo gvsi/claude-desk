@@ -193,7 +193,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
     'fill-card',
     { under: 'bg-app' },
   ),
-  ...pairs(['line-focus'], ['fill-secondary', 'fill-secondary-hover'], 3, 'The focus edge just inside a secondary button in a dialog or a menu, at rest and hovered.', 'bg-surface'),
+  ...pairs(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'The focus edge just inside a secondary or danger button in a dialog or a menu, at rest and hovered.', 'bg-surface'),
   ...pairs(['bg-app'], ['button-primary', 'button-primary-hover'], 3, "The primary button's focus edge, 2 px of the page's own dark just inside its fill, at rest and hovered."),
   ...pairs(
     ['mark-ink-light', 'mark-clay'],
@@ -255,6 +255,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "The count on the Demo inbox's button.", 'fill-secondary', { under: 'bg-app' }),
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Code in a card on the agents page: a CodeBlock or a CopyField's box, and a secondary button's label beside it.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['text-primary', 'text-secondary'], ['fill-card'], 4.5, "An agent's signed limit in the agents page's \"Send an agent\" card: its amounts, their names and whose wallet signed it, on its own fill over the card's.", 'fill-card', { under: 'bg-app' }),
+  ...pairs(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'A delete that cannot be undone in its dialog: the danger confirm button at rest, on hover and while busy; its spinner uses the same color at full strength.', 'bg-surface'),
   ...pairs(['button-danger-text'], ['bg-surface'], 4.5, "Deny's answers in its menu on a held request, This time and Always, in red words on the raised surface."),
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),
 ]);

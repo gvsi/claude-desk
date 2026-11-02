@@ -845,7 +845,7 @@ async def test_a_client_that_stops_reading_never_keeps_more_than_the_cap_open(ap
     slug = await new_slug(kernel_http, fake)
     _, token, opened = await open_session(app, browser, slug)
     session_id = opened["state"]["session_id"]
-    async with engine.begin() as conn:                    # an event to replay, so each stream's first send waits
+    async with engine.begin() as conn:                    # an event to replay after each stream's opening comment
         await emit(conn, ids_of(fake, session_id), EvTurnEnd(type="turn_end"))
     runtime = app.state.runtime
     streams: list[Stream] = []
@@ -880,6 +880,7 @@ async def test_a_closed_stream_whose_client_stops_reading_after_the_close_still_
     _, token, opened = await open_session(app, browser, slug)
     slots = app.state.runtime.stream_slots
     streams = [await Stream(app, events_path(slug), headers=[cookie(token)]).open() for _ in range(3)]
+    await until(lambda: streams[0].frames)                # its opening comment has been read
     streams[0].stop_reading()                             # idle, with no send waiting: its next one will
     fourth = await Stream(app, events_path(slug), headers=[cookie(token)]).open()
 

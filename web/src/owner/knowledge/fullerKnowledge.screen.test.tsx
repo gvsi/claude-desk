@@ -110,7 +110,7 @@ it('mock_sources_do_not_follow_the_deleted_starting_desk', async () => {
   await expect.element(screen.getByText('Maintenance plan.pdf', { exact: true })).toBeVisible();
   await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
   await screen.getByRole('button', { name: 'Delete this Desk', exact: true }).click();
-  await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk', exact: true }).click();
+  await screen.getByRole('dialog', { name: "Delete “Main line” for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk', exact: true }).click();
   await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
   await router.navigate(`/app/${RIVERA.emergenciesDeskId}/knowledge`);
   await expect.poll(() => mockStore.requests.filter(({ key, path }) => key === 'knowledge' && path.includes(RIVERA.emergenciesDeskId)).length).toBeGreaterThan(0);
