@@ -9,6 +9,7 @@ import { useToday } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { BriefingRow, isShown } from './BriefingRow.tsx';
 import { sinceLastNightLine } from './sinceLastNightLine.ts';
+import { useReadRecoveryFocus } from './useReadRecoveryFocus.ts';
 
 /** The full briefing's page under the Desk. */
 export function briefingPath(deskId: string): string {
@@ -93,6 +94,7 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   const today = useToday(deskId, { retryOnMount: false });
   const failure = useReadFailure(today, { pausedRoute: 'today' });
   const titleId = useId();
+  const retryRef = useReadRecoveryFocus(() => document.getElementById(titleId));
   const briefing = today.data?.briefing;
   const replayed = today.data?.recorded_history?.briefing === true;
   const rows = briefing ? shortForm(briefing).filter(isShown) : [];
@@ -100,7 +102,7 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   let body;
   if (briefing === undefined) {
     body = failure !== null ? (
-      <ReadFailed failure={failure} />
+      <ReadFailed failure={failure} buttonRef={retryRef} />
     ) : (
       <p className="cd-today__loading cd-type-meta" role="status">
         Reading what happened since last night
@@ -108,12 +110,12 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
     );
   } else if (briefing.total === 0) {
     // A quiet night is a zero, so it waits for a read that works.
-    body = failure !== null ? <ReadFailed failure={failure} /> : <QuietNight since={briefing.since} />;
+    body = failure !== null ? <ReadFailed failure={failure} buttonRef={retryRef} /> : <QuietNight since={briefing.since} />;
   } else {
     const line = nightLine(briefing);
     body = (
       <>
-        <ReadFailed failure={failure} />
+        <ReadFailed failure={failure} buttonRef={retryRef} />
         {line !== null ? <p className="cd-since__line cd-type-summary">{line}</p> : null}
         {rows.length > 0 ? <BriefingRows items={rows} /> : null}
         {briefing.total > rows.length ? (
