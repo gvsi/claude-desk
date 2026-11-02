@@ -366,10 +366,11 @@ describe('design tokens', () => {
   test('light_blocks_hold_exactly_the_listed_tokens', () => {
     // The light theme's values, as the design system set them: warm paper, the dark theme's ink at its
     // alpha steps, an ink primary button, darker steps of the status hues, a darker clay, a lighter
-    // scrim and shadows. The aliases (line-field-focus, line-focus, button-primary-text, status-info)
-    // follow the light values by themselves; the mark, the connectors, the illustration's other inks
-    // and the QR tile and its hairline are the same in both themes. The illustration's ink and the QR
-    // code's, which alias bg-app in dark, stay dark ink on paper.
+    // scrim and shadows, and Stripe's mark in Stripe's own purple, since its white would vanish on
+    // paper. The aliases (line-field-focus, line-focus, button-primary-text, status-info) follow the
+    // light values by themselves; the mark, Google Calendar's blue, the illustration's other inks, the
+    // QR tile and its hairline, and the inks on an owner's colour are the same in both themes. The
+    // illustration's ink and the QR code's, which alias bg-app in dark, stay dark ink on paper.
     const expected = {
       'bg-app': '#f6f4ee',
       'bg-panel': '#efece4',
@@ -405,6 +406,7 @@ describe('design tokens', () => {
       'illustration-ink': '#1c1b19',
       'illustration-arc': 'rgba(28,27,25,0.08)',
       'qr-ink': '#1c1b19',
+      'connector-stripe': '#635bff',
       'shadow-composer': '0 4px 20px rgba(28,27,25,0.08)',
       'shadow-dialog': '0 4px 8px rgba(28,27,25,0.05), 0 12px 28px -2px rgba(28,27,25,0.14)',
       'shadow-illustration-card': '0 1px 2px rgba(28,27,25,0.12)',
@@ -627,6 +629,10 @@ describe('design tokens', () => {
     };
     const actual = Object.fromEntries(Object.keys(expected).map((name) => [name, tokenValue(name)]));
     expect(actual).toEqual(expected);
+    // On the light theme's paper, Stripe's white mark would vanish: it takes Stripe's own purple there,
+    // with no outline and no tile. Google Calendar's blue stays.
+    const light = (name: string) => tokens.color.tokens.find((t) => t.name === name)?.value as { light?: string } | undefined;
+    expect([light('connector-stripe')?.light, light('connector-google-blue')?.light]).toEqual(['#635bff', undefined]);
 
     const connectorColors = colorNames.filter((name) => name.startsWith('connector-'));
     expect(connectorColors.sort()).toEqual(['connector-google-blue', 'connector-stripe']);
