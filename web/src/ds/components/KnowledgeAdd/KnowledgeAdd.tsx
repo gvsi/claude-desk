@@ -33,6 +33,8 @@ export interface KnowledgeAddedView {
 }
 
 export interface KnowledgeAddProps {
+  /** The Desk's website example, supplied by the screen. */
+  websitePlaceholder?: string;
   /** The note, as typed. */
   note: string;
   /** Each change to the note, with the raw text. */
@@ -51,6 +53,8 @@ export interface KnowledgeAddProps {
   busy?: 'note' | 'file' | 'switch';
   /** What went wrong, in the screen's plain words, never a code: "That file is too big. Add files up to 100 KB." */
   error?: string;
+  /** Validation for the note, shown under and associated with its field. */
+  noteError?: string;
   /** The item just added: the "Added" card with its "Customers can see this" switch. */
   added?: KnowledgeAddedView;
 }
@@ -64,7 +68,7 @@ const FILE_TYPES = '.txt,.md,text/plain,text/markdown';
  * switch, and the line above it, show the readers the kernel returned. Nothing here reads, checks or
  * sends anything: the screen does, and passes back what came of it.
  */
-export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, error, added }: KnowledgeAddProps) {
+export function KnowledgeAdd({ websitePlaceholder, note, onNoteChange, onAddNote, onAddFile, busy, error, noteError, added }: KnowledgeAddProps) {
   const [website, setWebsite] = useState('');
   const ids = useId();
   const headingId = `${ids}-heading`;
@@ -83,7 +87,7 @@ export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, e
     <div className="cd-knowledge-add">
       <section className="cd-knowledge-add__form" aria-labelledby={headingId}>
         <SectionHeader id={headingId} title="Add something" />
-        <TextField label="A note" value={note} onChange={onNoteChange} multiline hint="Up to a few paragraphs. Only you can see it until you make it public." />
+        <TextField label="A note" value={note} onChange={onNoteChange} multiline hint="Up to a few paragraphs. Only you can see it until you make it public." {...(noteError === undefined ? {} : { error: noteError })} />
         <div className="cd-knowledge-add__actions">
           <Button variant="primary" size="main" busy={busy === 'note'} waiting={inFlight} onClick={() => onAddNote()}>
             Add a note
@@ -96,7 +100,7 @@ export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, e
         <p id={filesId} className="cd-knowledge-add__files cd-type-caption">
           Text or Markdown files, up to 100 KB.
         </p>
-        <TextField label="A website" placeholder="turner-plumbing.example/blog" value={website} onChange={setWebsite} />
+        <TextField label="A website" {...(websitePlaceholder === undefined ? {} : { placeholder: websitePlaceholder })} value={website} onChange={setWebsite} />
         <div className="cd-knowledge-add__actions">
           <Button variant="secondary" size="main">Add a website</Button>
           <Pill>Mock</Pill>

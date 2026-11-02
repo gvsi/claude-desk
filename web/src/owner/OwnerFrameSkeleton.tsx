@@ -1,6 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
+import type { BusinessOut } from '../api/views.ts';
+import { DESKS_KEY } from './useDesks.ts';
+import { isStartingSampleDesk } from './knowledge/sampleDesk.ts';
 import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { AppShell, ConceptFooter, ReviewerBarSkeleton, SidebarSkeleton, type NavKey } from '../ds/index.ts';
 import { ConversationsSkeleton } from './conversations/ConversationsSkeleton.tsx';
@@ -13,7 +17,13 @@ import { SafetySkeleton } from './safety/SafetySkeleton.tsx';
 import { TodaySkeleton, type SkeletonSetup } from './today/TodaySkeleton.tsx';
 
 /** The page's shapes at an exact route; detail pages (a customer, All rules, a draft) keep an empty area. */
-function pageShapes(page: string, rest: readonly string[], search: string, setup: SkeletonSetup | undefined): ReactNode | null {
+function pageShapes(
+  page: string,
+  rest: readonly string[],
+  search: string,
+  showSampleQuestions: boolean,
+  setup: SkeletonSetup | undefined,
+): ReactNode | null {
   const exact = rest.every((part) => part === '');
   if ((page === '' || page === 'today') && exact) return <TodaySkeleton setup={setup} />;
   if (page === 'rules' && exact) return <RulesSkeleton withHeader />;
@@ -22,7 +32,7 @@ function pageShapes(page: string, rest: readonly string[], search: string, setup
   if (page === 'safety' && safetyRoute && new URLSearchParams(search).get('view') !== 'entries') return <SafetySkeleton withHeader />;
   if (page === 'people' && exact) return <PeopleSkeleton withHeader />;
   if (page === 'profile' && exact) return <ProfileSkeleton />;
-  if (page === 'knowledge' && exact) return <KnowledgeSkeleton />;
+  if (page === 'knowledge' && exact) return <KnowledgeSkeleton showSampleQuestions={showSampleQuestions} />;
   if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} />;
   // One conversation open beside the list: `/conversations/:id`.
   const [conversation = '', ...after] = rest;
@@ -37,10 +47,15 @@ function pageShapes(page: string, rest: readonly string[], search: string, setup
 export function pageSkeletonFor(
   pathname: string,
   search: string,
+  showSampleQuestions = true,
   setup?: SkeletonSetup,
 ): { page: ReactNode | null; fill: boolean; centered: boolean } {
   const [page = '', ...rest] = pathname.split('/').slice(3);
-  return { page: pageShapes(page, rest, search, setup), fill: FILL_PAGES.has(page as NavKey), centered: CENTERED_PAGES.has(page as NavKey) };
+  return {
+    page: pageShapes(page, rest, search, showSampleQuestions, setup),
+    fill: FILL_PAGES.has(page as NavKey),
+    centered: CENTERED_PAGES.has(page as NavKey),
+  };
 }
 
 /**
@@ -49,7 +64,11 @@ export function pageSkeletonFor(
  */
 export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setup?: SkeletonSetup }) {
   const { search } = useLocation();
-  const { page, fill, centered } = pageSkeletonFor(pathname, search, setup);
+  const queryClient = useQueryClient();
+  const businesses = queryClient.getQueryData<BusinessOut[]>(DESKS_KEY);
+  const deskId = decodeURIComponent(pathname.split('/')[2] ?? '');
+  const showSampleQuestions = businesses === undefined || isStartingSampleDesk(queryClient, businesses, deskId);
+  const { page, fill, centered } = pageSkeletonFor(pathname, search, showSampleQuestions, setup);
   return (
     <AppShell
       skeleton
