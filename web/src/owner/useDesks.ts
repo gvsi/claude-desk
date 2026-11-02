@@ -73,11 +73,13 @@ export interface UseDesksOptions {
 /**
  * The copy's businesses, each with its Desks, for a page of `deskId`. A list that doesn't hold that
  * Desk is read again on mount however fresh it is: only a read made now can say it isn't the owner's.
+ * Polling while visible keeps each Desk's unread conversation count current across owner screens.
  */
 export function useDesks(deskId: string, { passive = false }: UseDesksOptions = {}) {
   return useQuery({
     ...desksQuery(),
     staleTime: FRESH_MS,
+    refetchInterval: passive ? false : pollMs('list'),
     refetchOnMount: (query) => (query.state.data !== undefined && findDesk(query.state.data, deskId) !== null ? true : 'always'),
     enabled: !passive,
   });

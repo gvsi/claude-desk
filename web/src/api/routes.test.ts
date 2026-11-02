@@ -30,6 +30,7 @@ const PLAN_02: Record<RouteKey, string> = {
   // Conversations
   conversations: 'GET /api/owner/desks/{desk_id}/conversations',
   conversation: 'GET /api/owner/conversations/{session_id}',
+  markConversationRead: 'POST /api/owner/conversations/{session_id}/read',
   takeover: 'POST /api/owner/conversations/{session_id}/takeover',
   handback: 'POST /api/owner/conversations/{session_id}/handback',
   resume: 'POST /api/owner/conversations/{session_id}/resume',

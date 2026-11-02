@@ -72,6 +72,8 @@ export interface BusinessOut {
 // Today
 
 export interface ConversationSummary {
+  /** Visitor or visiting agent words beyond the owner's read marker; absent is false. */
+  unread?: import('./openapi.gen.ts').ConversationSummary['unread'];
   /** Confirmed agent result from stored decisions/cards; a later hold or handoff clears it. */
   latest_outcome?: import('./openapi.gen.ts').ConversationSummary['latest_outcome'];
   session_id: string;

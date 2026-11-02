@@ -657,6 +657,16 @@ const SERVED: ServedRoutes = {
     if (session.state.mode === 'owner') return failWith(409, 'kernel', { code: 'mode_owner' });
     return ok(sv.world.takeOver(session));
   },
+  markConversationRead(sv, req) {
+    if (!req.cookies.owner) return NO_OWNER;
+    const session = sv.world.sessions.get(req.params.session_id ?? '');
+    if (!session) return NOT_FOUND;
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
+    const through = isRecord(req.body) ? req.body.through : undefined;
+    if (req.malformed || typeof through !== 'number' || !Number.isSafeInteger(through) || through < 0) return INVALID;
+    sv.world.markRead(session, through);
+    return NO_CONTENT;
+  },
   handback(sv, req) {
     const session = ownerSession(sv, req);
     if (isFailure(session)) return session;

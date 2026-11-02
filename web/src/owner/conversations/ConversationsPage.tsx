@@ -144,6 +144,7 @@ export function ConversationsPage() {
                 status={conversationListStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id), firstName(business.owner_display_name)) ?? undefined}
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
+                unread={s.unread}
                 recorded={s.replayed === true}
                 demoVisitor={s.demo_visitor === true}
                 quote={s.kind === 'visitor' && !s.owner_preview ? s.latest_visitor_text ?? undefined : undefined}

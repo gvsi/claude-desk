@@ -170,6 +170,8 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(TEXT, ['fill-card', 'fill-bubble', 'fill-count', 'fill-hover', 'fill-secondary'], 4.5, "Text and links in cards, bubbles, count pills, hovered rows and secondary buttons on the app background, a busy secondary button's text-secondary label included.", 'bg-app'),
   ...pairs(TEXT, ['fill-secondary', 'fill-hover'], 4.5, "Text and links on secondary buttons and hovered rows inside the composer, menus and dialogs, a busy secondary button's text-secondary label included.", 'bg-surface'),
   ...pairs(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'Text on a hovered secondary button on the app background.', 'bg-app'),
+  ...pairs(['accent-blue'], ['fill-secondary-hover'], 4.5, 'The time on a hovered unread conversation row.', 'bg-app'),
+  ...pairs(MARKS, ['fill-secondary-hover'], 3, 'Unread and status dots, and the focus edge, on a hovered unread conversation row.', 'bg-app'),
   ...pairs(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'Text on a hovered secondary button inside the composer and menus.', 'bg-surface'),
   ...pairs(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5, 'Text on the primary button, at rest, on hover and while busy.'),
   ...pairs(MARKS, SURFACES, 3, 'Focus edges and status dots on the app, panels, raised surfaces and the selected row.'),
