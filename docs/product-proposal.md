@@ -61,7 +61,7 @@ Limits: we wrote the scenarios, real attackers adapt, 23 held-out tasks make a s
 
 **Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: `estimate:` $0.20 a conversation, until the measured cost in the table above replaces it, so 100 conversations cost all of [Pro](https://claude.com/pricing)'s $20 monthly price.
 
-**Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them but don't act under rules checked in code: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
+**Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
 
 **Go-to-market.** Start with owners who already pay for Claude. The share kit puts a Desk where customers look: a link, a QR code, and words for a Google profile, an email signature and a voicemail. Try it at [desk.alcantara.xyz](https://desk.alcantara.xyz).
 
