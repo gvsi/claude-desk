@@ -191,7 +191,9 @@ async def texts_before_held(ctx: OwnerCtx, desk_id: str, decisions: Iterable[Dec
     newest `count` rows of `kinds` before the request's held status in its chat (its session's first `status` row
     naming the decision, written when the turn's call was held), oldest first, read for every decision in one query.
     A request whose chat has its status but nothing of `kinds` before it maps to `[None]`; one whose status isn't
-    in the chat (held before the API showed it) is left out."""
+    in the chat (held before the API showed it) is left out. If the API restarts after the kernel holds a request
+    but before the chat shows it, the next request recovers the turn (`loop._drain` through `tools.recover_call`
+    and `_settle`) and writes the held status after that request's own message, so that message can be quoted too."""
     wanted = sorted({(decision.decision_id, decision.session_id) for decision in decisions})
     if not wanted:
         return {}
