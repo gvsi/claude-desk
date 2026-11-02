@@ -680,6 +680,7 @@ class ConversationRead(Base):
     desk_id: Mapped[str] = mapped_column(Text)
     read_through_n: Mapped[int] = mapped_column(BigInteger)        # an app.messages.n of the session
     read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)   # when it last moved
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
 class RunEvent(Base):

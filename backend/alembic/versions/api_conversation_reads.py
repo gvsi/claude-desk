@@ -3,7 +3,8 @@
 A conversation is unread while a visitor or a visiting agent wrote a message (`visitor_text`, `agent_text`) after the
 transcript cursor the owner has seen (`read_through_n`, an `app.messages.n`), or wrote any and the owner never opened
 it. Each copy has one owner, so the key is the copy and the session. The marker only moves forward, and never past the
-session's newest message (`desk.api.conversation_reads`). It holds no secret, only IDs, a cursor and a time.
+session's newest message (`desk.api.conversation_reads`). It holds no secret, only IDs, a cursor and times: when the
+marker last moved (`read_at`) and when it was first set (`created_at`, which every `app.*` table has).
 
 `messages_said` indexes the visitors' and agents' words by copy, Desk and session, so the unread reads the owner's
 pages poll (the conversations list, and the count for each Desk in the Desk switcher) read only those rows.
@@ -33,6 +34,7 @@ def upgrade() -> None:
             session_id text NOT NULL,
             read_through_n bigint NOT NULL,
             read_at timestamptz NOT NULL DEFAULT now(),
+            created_at timestamptz NOT NULL DEFAULT now(),
             PRIMARY KEY (copy_id, session_id),
             CONSTRAINT conversation_reads_cursor CHECK (read_through_n >= 0)
         );

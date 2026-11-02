@@ -86,7 +86,7 @@ APP_COLUMNS = {
                   "through_seq", "created_at", "updated_at"},
     "model_calls": {"model_call_id", "copy_id", "session_id", "route", "model", "input_tokens", "cached_tokens",
                     "cache_write_tokens", "output_tokens", "latency_ms", "stop_reason", "created_at"},
-    "conversation_reads": {"copy_id", "desk_id", "session_id", "read_through_n", "read_at"},
+    "conversation_reads": {"copy_id", "desk_id", "session_id", "read_through_n", "read_at", "created_at"},
 }
 
 

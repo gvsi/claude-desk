@@ -1658,7 +1658,7 @@ def test_the_conversation_reads_revision_goes_down_and_up(scratch):
         scratch.migrate(command.upgrade, "head")
     assert present() == (True, True)
     assert columns(admin, "app", "conversation_reads") == ["copy_id", "desk_id", "session_id", "read_through_n",
-                                                           "read_at"]
+                                                           "read_at", "created_at"]
     for role, expected in (("desk_api", set(DML)), ("desk_kernel", set()), ("desk_mockpay", set())):
         held = {privilege for privilege in (*DML, "TRUNCATE", "REFERENCES", "TRIGGER")
                 if has(admin, "has_table_privilege", role, "app.conversation_reads", privilege)}
