@@ -17,12 +17,13 @@ import { AttemptDetail } from './AttemptDetail.tsx';
 import {
   CATEGORY_LABELS,
   NOT_SORTED,
+  SAFETY_SUBTITLE,
   anythingStoppedIn,
   anythingTurnedDownIn,
   attemptTime,
   categoryLabel,
-  causeLabel,
   originCopy,
+  rowLabel,
   stoppedBy,
   triageOf,
   turnedDownHeadline,
@@ -246,7 +247,7 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
               <li key={a.ref_id} onClick={() => setPicked({ refId: a.ref_id })}>
                 <AttemptRow
                   time={formatWhen(attemptTime(a, page), timezone, now)}
-                  why={causeLabel(a) ?? undefined}
+                  why={rowLabel(a) ?? undefined}
                   title={triageOf(a)?.summary ?? a.reason_plain}
                   who={originCopy(a.origin)}
                   stoppedBy={stoppedBy(a)}
@@ -315,7 +316,7 @@ export function SafetyPage() {
 
   return (
     <div className="cd-safety" onClick={followInAppLinks(navigate)}>
-      <PageHeader title={TITLE} actions={<HeldForYou deskId={deskId} />} />
+      <PageHeader title={TITLE} subtitle={SAFETY_SUBTITLE} actions={<HeldForYou deskId={deskId} />} />
       <SkeletonScreen loading={view === 'attempts' && !ready} status="Reading what was stopped" skeleton={<SafetySkeleton withHeader={false} />} className="cd-safety__region">
         <Headline deskId={deskId} slug={desk.slug} />
         <div className="cd-safety__bar">

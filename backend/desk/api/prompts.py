@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.28"
+PROMPT_VERSION = "2026-10-31.29"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -708,6 +708,9 @@ haven't seen yet."""
 # The `<setup_plan>` status (`_setup_plan` in setup.py) of an accepted app whose Stripe connection didn't go through.
 # Defined here, ahead of the setup prompts and their tags below, because `_HOW_YOU_WORK` quotes it.
 SETUP_PLAN_NOT_CONNECTED = "accepted, not connected"
+# The `<setup_plan>` status of a payment job that "Use your suggestions" settled as declined because it had no amount
+# (`settle_plan`), not by the owner's own no, so Claude doesn't say they turned it down.
+SETUP_PLAN_NO_AMOUNT = "left out: no amount was entered on its card"
 
 _HOW_YOU_WORK = f"""\
 How you work

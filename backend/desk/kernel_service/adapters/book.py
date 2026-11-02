@@ -18,7 +18,9 @@ id], closed_by: "booking"}` once the booking's rows are written, before the exec
 a call-back's closing is. A call-back stays open, since it promises the visitor a call. The owner's
 own preview closes them the same way. These are the session's own rows, so the execution holds the
 session row `FOR UPDATE` (`locks_session`), as a call-back's does: two bookings in one session take
-turns, and so do a booking and any other execution in it. A typed booking
+turns, and so do a booking and any other execution in it. A booking's held discount quotes from
+earlier in the session aren't touched here: their next read cancels them
+(`decide.supersede_if_booked`), so this transaction takes no decision row. A typed booking
 (`blocks.TypedBookingAdapter`) inherits all of it.
 """
 

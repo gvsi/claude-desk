@@ -329,7 +329,7 @@ export async function expectRulesComposer(
   const composer = within(root).getByRole('textbox', { name: placeholder });
   await expect(composer).toHaveAttribute('placeholder', placeholder);
   expectComputed(composer.closest<HTMLElement>('.cd-composer__box') as HTMLElement, SPEC.composer);
-  await expect(within(root).getByText('Claude shows you the change and example situations before anything applies.')).toBeVisible();
+  await expect(within(root).getByText('Claude shows you the change before anything applies.')).toBeVisible();
   const group = within(root).getByRole('group', { name: 'Suggestions' });
   const buttons = within(group).getAllByRole('button');
   await expect(buttons.map((chip) => chip.textContent)).toEqual([...chips]);

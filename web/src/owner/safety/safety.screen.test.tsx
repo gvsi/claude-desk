@@ -177,6 +177,7 @@ const STOPPED_REPLY = 'A reply was stopped before it was shown.';
 const NOTHING = "When a request is turned down or a reply is stopped, you'll see here what was asked and why. Try it yourself from your public page.";
 const HEADLINE = /^I turned down \d+ requests? this week\.$/;
 const NONE_TURNED_DOWN = "I didn't turn down any requests this week.";
+const SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
 
 /**
  * One of Claude's drafts the reply check stopped at `at`: entry `seq` of the record, and its
@@ -433,6 +434,14 @@ describe('Safety', () => {
     expect(refused).toHaveLength(Number.parseInt(/\d+/.exec(headline.element().textContent ?? '')?.[0] ?? '', 10));
     expect(list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()).toHaveLength(1);
     expect(list.getByRole('link').elements()).toHaveLength(refused.length + 1);
+    // So the list reads as the requests the headline counts, and the replies: each stopped reply says
+    // what it is beside it, where a turned-down request says why.
+    for (const row of list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ }).elements()) {
+      expect(row.querySelector('.cd-attempt-row__why')?.textContent).toBe('A reply was stopped before it was shown');
+    }
+    for (const row of refused) {
+      expect(row.querySelector('.cd-attempt-row__why')?.textContent).not.toBe('A reply was stopped before it was shown');
+    }
 
     // Newest first, by the time each row shows.
     const ledger = await mockLedger();
@@ -473,6 +482,10 @@ describe('Safety', () => {
     await expect.poll(() => document.activeElement).toBe(trace.element());
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     expect(main.scrollTop).toBe(before);
+    // Its record opened, the trace is taller than the window, and still the page stays where it was.
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    expect(main.scrollTop).toBe(before);
     const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
     if (!beside) throw new Error('the trace sits in the column beside the list');
     expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
@@ -481,56 +494,44 @@ describe('Safety', () => {
     expect(Math.abs(beside.getBoundingClientRect().height - (main.clientHeight - 44))).toBeLessThanOrEqual(1);
   });
 
-  it('a_long_trace_on_a_phone_opens_with_its_title_and_close_in_view', async () => {
-    // On a phone the trace is drawn under the whole list. Opening a trace taller than the window,
-    // from partway down a long list, shows its title and "Close the full trace" just under the
-    // header, never above the window with the owner partway through the recorded JSON (#679).
-    const checks = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`check_${i}`, { status: 'ok', blocked: false, latency_ms: i }]));
-    const entries = Array.from({ length: 40 }, (_, i) =>
-      entry(i + 1, `2026-10-20T16:${String(10 + i).padStart(2, '0')}:00.000000Z`, { kind: 'session', session_id: `ses-${i}`, summary: { kind: 'visitor' } }),
-    );
-    entries[34] = entry(35, '2026-10-20T16:44:00.000000Z', { kind: 'reply', session_id: 'ses-1', summary: { author: 'claude', ok: true, language: 'en', violations: [], soft_checks: checks } });
-    injectLedger(ledgerPage(entries));
-    const { screen } = await renderRoute(`${SAFETY}?view=entries`, { viewport: 'phone' });
-    await expect.element(recordRow(screen, 35)).toBeVisible();
-    const main = recordRow(screen, 35).element().closest<HTMLElement>('.cd-app-shell__main');
-    if (!main) throw new Error('the owner app scrolls its main area');
-    main.scrollTop = 180;
-
-    await recordRow(screen, 35).click();
-    const trace = region(screen, 'Full trace of entry 35');
-    await expect.element(trace).toBeVisible();
-    await expect.poll(() => document.activeElement).toBe(trace.element());
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    expect(trace.element().getBoundingClientRect().height).toBeGreaterThan(main.clientHeight);
-    const view = main.getBoundingClientRect();
-    const top = trace.element().querySelector<HTMLElement>('.cd-full-trace__top');
-    if (!top) throw new Error('the trace has a title row');
-    const title = top.getBoundingClientRect();
-    expect(title.top).toBeGreaterThanOrEqual(view.top);
-    expect(title.bottom).toBeLessThanOrEqual(view.bottom);
-    await expect.element(trace.getByRole('button', { name: 'Close the full trace' })).toBeInViewport();
-    // The title row sits the main area's own top padding under its edge, as the side-by-side column does.
-    expect(Math.abs(trace.element().getBoundingClientRect().top - view.top - Number.parseFloat(getComputedStyle(main).paddingTop))).toBeLessThanOrEqual(1);
+  it.each(['desktop', 'phone'] as const)('header_says_what_the_page_is_on_%s', async (viewport) => {
+    // Under its title, as the other owner pages do, one quiet line says what Safety holds: both of
+    // its views, before the headline's count.
+    const { screen } = await renderRoute(SAFETY, { viewport });
+    const title = screen.getByRole('heading', { level: 1, name: 'Safety', exact: true });
+    await expect.element(title).toBeVisible();
+    const subtitle = screen.getByText(SUBTITLE, { exact: true });
+    await expect.element(subtitle).toBeVisible();
+    expect(subtitle.element().className).toBe('cd-page-header__subtitle cd-type-body');
+    const headline = screen.getByText(/^I (turned down \d+ requests?|didn't turn down any requests) this week\.$/);
+    await expect.element(headline).toBeVisible();
+    expect(subtitle.element().compareDocumentPosition(headline.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
-  it('a_trace_whose_title_already_shows_on_a_phone_leaves_the_page_still', async () => {
-    // With a short list the trace opens under it with its title row in view, so nothing scrolls.
+  it('record_is_closed_for_each_entry_opened', async () => {
+    // The owner opens entry 2's record, then picks entry 3 in the same list: its trace opens with
+    // the record closed, as every trace does, rather than keeping the last one's open.
     injectLedger(ledgerPage(threeEntries()));
-    const { screen } = await renderRoute(`${SAFETY}?view=entries`, { viewport: 'phone' });
-    await expect.element(recordRow(screen, 2)).toBeVisible();
-    const main = recordRow(screen, 2).element().closest<HTMLElement>('.cd-app-shell__main');
-    if (!main) throw new Error('the owner app scrolls its main area');
-    const before = main.scrollTop;
-
+    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
     await recordRow(screen, 2).click();
-    const trace = region(screen, 'Full trace of entry 2');
-    await expect.poll(() => document.activeElement).toBe(trace.element());
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    const top = trace.element().querySelector<HTMLElement>('.cd-full-trace__top');
-    if (!top) throw new Error('the trace has a title row');
-    expect(top.getBoundingClientRect().bottom).toBeLessThanOrEqual(main.getBoundingClientRect().bottom);
-    expect(main.scrollTop).toBe(before);
+    const first = region(screen, 'Full trace of entry 2');
+    const recorded = first.getByRole('button', { name: 'What was recorded', exact: true });
+    await recorded.click();
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
+    await recordRow(screen, 3).click();
+    const next = region(screen, 'Full trace of entry 3');
+    await expect.element(next).toBeVisible();
+    await expect.element(next.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    expect(next.element().querySelector('pre')).toBeNull();
+
+    // Back to entry 2: its record is closed again, not left as it was.
+    await recordRow(screen, 2).click();
+    const again = region(screen, 'Full trace of entry 2');
+    await expect.element(again).toBeVisible();
+    await expect.element(again.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    expect(again.element().querySelector('pre')).toBeNull();
   });
 
   it('dev_key_is_labelled', async () => {
@@ -609,7 +610,8 @@ describe('Safety', () => {
 
   it('mock_refusal_says_why', async () => {
     // The built-in agent's charge over its signed limit, refused by the baseline's signed-limit
-    // policy, as the mock decides it: its row says why. The seeded stopped draft says nothing more.
+    // policy, as the mock decides it: its row says why. The seeded stopped draft, which Claude has
+    // sorted, says it's a reply that was stopped.
     await refuseTheAgentsCharge();
     const { screen } = await renderRoute(SAFETY);
     const list = screen.getByRole('list', { name: 'Stopped, newest first' });
@@ -618,7 +620,7 @@ describe('Safety', () => {
     await expect.element(refused.getByText("Outside the agent's spending limit", { exact: true })).toBeVisible();
     const draft = list.getByRole('link', { name: /Stopped by: Reply checkpoint$/ });
     await expect.element(draft).toBeVisible();
-    expect(draft.element().querySelector('.cd-status-label')).toBeNull();
+    expect(draft.element().querySelector('.cd-status-label')?.textContent).toBe('A reply was stopped before it was shown');
   });
 
   it('attempt_detail_tiers', async () => {
@@ -649,6 +651,9 @@ describe('Safety', () => {
     await expect.element(full).toHaveAttribute('aria-expanded', 'true');
     const trace = region(screen, 'Full trace of entry 2');
     await expect.element(trace).toBeVisible();
+    expect(trace.element().textContent).not.toContain('payments.create_refund');
+    // What was recorded opens under its label.
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     const values = [...document.querySelectorAll('.cd-type-trace')].map((el) => el.textContent);
     expect(values).toContain('2');
     expect(values.join('\n')).toContain('payments.create_refund');
@@ -768,7 +773,12 @@ describe('Safety', () => {
     await expectScreenBasics(screen.container, { owner: true });
     await recordRow(screen, returned.seq).click();
     const trace = region(screen, `Full trace of entry ${returned.seq}`);
-    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeVisible();
+    // The raw record waits, closed, under its label: the trace opens on its plain line and the chain.
+    const recorded = trace.getByRole('button', { name: 'What was recorded', exact: true });
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'false');
+    expect(trace.element().textContent).not.toContain('"from"');
+    await recorded.click();
+    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
     expect(trace.element().textContent).toContain('"from": "owner"');
     expect(trace.element().textContent).toContain('"to": "ai"');
   });
@@ -1001,6 +1011,7 @@ describe('Safety', () => {
     const values = () => [...trace.element().querySelectorAll('.cd-type-trace')].map((el) => el.textContent ?? '');
     await expect.element(trace.getByText('Recorded at', { exact: true })).toBeVisible();
     expect(values()).toContain(decide.created_at);
+    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     expect(values().join('\n')).toContain(replayedAt);
 
     // The attempt kept in that entry says the same, at the same time.

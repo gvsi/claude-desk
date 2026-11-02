@@ -31,9 +31,9 @@ from .fakes import FakeAdapter
 from .helpers import TEST_CAP, CopyRows, activate_cards, compile_at, kernel_ctx, ledger_rows, rows_of, verify_session
 from .test_adapters import Rivera, add_slot, book, local, quote_args, rivera, visitor_of
 from .test_compiler import card
-from .test_decide import (Visitor, by_call, decided, desk_with, open_visitor, payment_link, priced, set_mode,
+from .test_decide import (PASS, Visitor, by_call, decided, desk_with, open_visitor, payment_link, priced, set_mode,
                           set_session, verify_signature)
-from .test_execute import activate, change_records, committed, reservations
+from .test_execute import activate, change_records, committed, executed, reservations
 
 
 async def post_answer(client: httpx.AsyncClient, headers: dict[str, str], decision_id: str,
@@ -282,6 +282,87 @@ async def test_answers_after_cancel_are_409(app, client):
                                           "refused": "cancelled"}),
     ]
     assert cancelled.ledger_seq == [e.seq for e in await ledger_rows(app, copy) if e.event.kind == "decide"][-1]
+
+
+async def book_and_run(client: httpx.AsyncClient, visitor: Visitor, slot_id: str = "S-20261102-1000") -> Decision:
+    """A booking of `slot_id` (Monday at 10:00 unless given) that rv-book-wk allows, executed; the reviewer passes."""
+    booking = await book(client, visitor, slot_id)
+    assert booking.state == "allowed", booking.reason_plain
+    assert (await executed(client, visitor, booking)).state == "succeeded"
+    return booking
+
+
+@pytest.mark.parametrize("first", ["read", "answer"])
+async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(app, client, reviewer, frozen_clock, first):
+    # The visitor asked for half off, which Mike's rules hold, then said list price was fine and booked: approving
+    # the discount now would hand them a half-price quote for a job booked at list price. The next read settles it,
+    # whether the visitor's card or Mike's answer comes first.
+    reviewer.answer = PASS
+    copy, visitor = await visitor_of(app, client)
+    held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=5000))
+    assert held.state == "held"
+    frozen_clock.advance(60)
+    booking = await book_and_run(client, visitor)
+    [booked] = await rows_of(app, copy.copy_id, select(Booking))
+
+    if first == "read":
+        assert (await read_id(client, visitor.headers, held.decision_id)).state == "cancelled"
+    response = await post_answer(client, copy.owner, held.decision_id, "allow_once")
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+
+    decision = await read_id(client, visitor.headers, held.decision_id)
+    assert (decision.state, decision.visitor_plain, decision.answers) == ("cancelled", "Cancelled", [])
+    verify_signature(await public_key(client), decision)
+    assert await read_id(client, copy.owner, held.decision_id) == decision
+    # nothing ran: no approval, no quote, and the booking's is the only execution
+    assert await approvals_of(app, copy.copy_id) == []
+    assert await rows_of(app, copy.copy_id, select(Quote)) == []
+    assert [run.action_id for run in await rows_of(app, copy.copy_id, select(Execution))] == [booking.action.action_id]
+    # cancelled once, naming the booking and the rules in force, then the answer refused
+    entries = [e for e in await ledger_rows(app, copy)
+               if e.event.ref_id == held.decision_id and e.seq > held.ledger_seq]
+    assert [(e.event.kind, e.event.session_id, e.event.summary) for e in entries] == [
+        ("decide", visitor.session_id, {"decision_id": held.decision_id, "action_id": held.action.action_id,
+                                        "state": "cancelled", "cancelled_by": "booking",
+                                        "booking_id": booked.booking_id, "policy_version": 1,
+                                        "auto_money_cap_cents": 50_000}),
+        ("approval", visitor.session_id, {"decision_id": held.decision_id, "answer": "allow_once",
+                                          "refused": "cancelled"}),
+    ]
+    assert decision.ledger_seq == entries[0].seq
+
+
+@pytest.mark.parametrize("case", ["booked_first", "another_session", "list_price", "not_confirmed"])
+async def test_a_held_quote_stays_held_unless_its_session_booked_after_a_discount(app, client, reviewer, frozen_clock,
+                                                                                   case):
+    # A booking made before the discount was asked leaves it a real question about a booked job; another session's
+    # booking isn't this visitor's; a held quote at list price (quotes ask Mike first here) isn't made stale by a
+    # booking; and a booking that isn't confirmed books nothing.
+    reviewer.answer = PASS
+    copy, visitor = await visitor_of(app, client)
+    if case == "list_price":
+        await activate(app, copy, [c for c in RIVERA_CARDS if c.card_id != "rv-quote"]
+                       + [card("ask-quotes", "native.quote", mode="ask")])
+    booker = await open_visitor(client, copy) if case == "another_session" else visitor
+    if case == "booked_first":
+        await book_and_run(client, booker)
+        frozen_clock.advance(60)
+    held = await decided(client, visitor, "native.quote",
+                         quote_args(("drain", 1), discount_bp=None if case == "list_price" else 5000))
+    assert held.state == "held", held.reason_plain
+    if case != "booked_first":
+        frozen_clock.advance(60)
+        await book_and_run(client, booker)
+    if case == "not_confirmed":
+        async with kernel_ctx(app) as ctx:
+            ctx.bind(copy.copy_id)
+            [booked] = (await ctx.db.scalars(ctx.repo.scoped(select(Booking)))).all()
+            booked.status = "cancelled"
+
+    for headers in (visitor.headers, copy.owner):
+        decision = await read_id(client, headers, held.decision_id)
+        assert (decision.state, decision.ledger_seq) == ("held", held.ledger_seq)
+    assert (await answered(client, copy.owner, held.decision_id, "allow_once")).decision.state == "executed"
 
 
 async def test_answers_after_a_rule_change_are_re_decided(app, client):

@@ -1386,6 +1386,59 @@ describe('public chat page', () => {
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
   });
 
+  it('newest_row_follows_a_composer_grown_as_a_row_lands', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'desktop', seed: 'rivera' });
+    await ready(screen);
+    for (const text of ['How much is drain clearing?', 'Can someone come Tuesday afternoon?', 'Book the first one', 'Can I get 15% off if I pay cash?']) {
+      await say(screen, text);
+      await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+    }
+    await frames();
+
+    // Mike joins, and his row rises into place, reaching a little below the end until it settles.
+    // The visitor, at the end, scrolls to the very bottom as it lands, so the browser takes the
+    // conversation back up a pixel at a time as the row settles, each scroll's event coming only
+    // with the next frame. Between one of those scrolls and its event, a pasted message grows the
+    // composer over the end. The browser's scroll isn't the visitor leaving the end, so the end
+    // comes back above the composer.
+    const region = chatScroller();
+    const box = screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).element() as HTMLTextAreaElement;
+    let tookBack = false;
+    let grownOver = 0;
+    await new Promise<void>((resolve) => {
+      const watcher = new MutationObserver(() => {
+        if (!document.body.textContent?.includes('Mike Turner joined the chat')) return;
+        watcher.disconnect();
+        region.scrollTo({ top: region.scrollHeight, behavior: 'instant' });
+        let was = region.scrollTop;
+        const since = performance.now();
+        // Looked at between frames, so the paste comes right after the browser's scroll, before its event.
+        const look = (): void => {
+          const now = region.scrollTop;
+          if (now >= was && performance.now() - since < 1_000) {
+            was = now;
+            realSetTimeout(look, 0);
+            return;
+          }
+          tookBack = now < was;
+          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, 'one\ntwo\nthree\nfour\nfive\nsix');
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+          grownOver = endUnderTheComposer(screen);
+          resolve();
+        };
+        realSetTimeout(look, 0);
+      });
+      onTestFinished(() => watcher.disconnect());
+      watcher.observe(document.body, { subtree: true, childList: true, characterData: true });
+      mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
+    });
+    expect(tookBack, 'the browser took the conversation back up as the row settled').toBe(true);
+    expect(grownOver, 'the composer grew over the end').toBeGreaterThan(48);
+    await frames();
+    expect(box.value.split('\n'), 'the pasted lines are in the composer').toHaveLength(6);
+    await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+  });
+
   it('newest_row_follows_a_narrower_window', async () => {
     const { screen } = await renderRoute(PAGE, { viewport: 'desktop', seed: 'rivera' });
     await page.viewport(700, VIEWPORTS.desktop.height);
