@@ -71,13 +71,14 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    card is checked again in step 7. The session's request receipts are cards of it too, after the
    reply's own, though the reply doesn't show them again and cites no fact for them
    (`request_receipts`, never another session's), each as "Request receipt card: ", what was
-   asked for, named from the request's tool (`render.RECEIPT_SUBJECTS`, a business tool's by its
-   block; a tool named in neither has no receipt), then the decision's status line: each held
-   request awaiting the owner ("Quote request: Waiting for Mike Turner to approve"), and each
-   request that has left `held` since Claude's latest reply in the session that passed, in ledger
-   order ("Quote request: Cancelled", when the visitor's booking closed a held discount). A receipt
-   backs what it says and nothing more: never another request, an outcome, a time or an approval it
-   doesn't state. They are read without a lock, in a savepoint, and a read that fails adds none. A
+   asked for in the reply's language, named from the request's tool (`render.RECEIPT_SUBJECTS`, a
+   business tool's by its block; a tool named in neither has no receipt), the decision's status
+   line, then a note in the reply's language that the card states a status only and not whether or
+   when the owner will answer: each held request awaiting the owner ("Quote request: Waiting for
+   Mike Turner to approve (this card states ...)"), and each request that has left `held` since
+   Claude's latest reply in the session that passed, in ledger order ("Quote request: Cancelled",
+   when the visitor's booking closed a held discount). A receipt backs what it says and nothing
+   more: never another request, a follow-up, an outcome, a time or an approval it doesn't state. They are read without a lock, in a savepoint, and a read that fails adds none. A
    receipt only restates a status the chat already shows and updates, so unlike the handoff's card
    it isn't checked again in step 7: a change while the model reads leaves the reply true to what
    the chat showed moments before, an accepted race. When configured,
@@ -1289,7 +1290,7 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
         found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing,
-                                                        receipts=await request_receipts(ctx, session_row))
+                                                        receipts=await request_receipts(ctx, session_row, language))
         violations += found
     if violations:
         blocks = blocked_blocks(cards, violations, language, desk, call_back=await call_back_offered(
@@ -1557,13 +1558,13 @@ async def _last_passed_reply(ctx: KernelCtx, session_row: SessionRow, *, after: 
 
 
 async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str]]:
-    """The session's request receipts, oldest request first, each as what was asked for and its
-    decision's status line (`visitor_plain`), read without a lock: each held request awaiting the
-    owner, as `_awaiting_holds` reads them (held and not expired), and each request that has left
-    `held` (answered, cancelled, timed out, run or settled) after Claude's latest reply in the session
-    that passed the check, by ledger order (its decision's `ledger_seq`, `_last_passed_reply`). A hold
-    past its expiry that no read has expired yet is neither, and so is a request whose tool names no
-    subject (`_receipt_subjects`)."""
+    """The session's request receipts, oldest request first, each as what was asked for (its key in
+    `render.RECEIPT_SUBJECTS`) and its decision's status line (`visitor_plain`), read without a lock:
+    each held request awaiting the owner, as `_awaiting_holds` reads them (held and not expired), and
+    each request that has left `held` (answered, cancelled, timed out, run or settled) after Claude's
+    latest reply in the session that passed the check, by ledger order (its decision's `ledger_seq`,
+    `_last_passed_reply`). A hold past its expiry that no read has expired yet is neither, and so is a
+    request whose tool names no subject (`_receipt_asked`)."""
     rows = (await ctx.db.execute(ctx.repo.scoped(select(
         DecisionRow.tool, DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at,
         DecisionRow.ledger_seq).where(
@@ -1574,29 +1575,29 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     now = ctx.clock.now()
     shown = [row for row in rows
              if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
-    subjects = await _receipt_subjects(ctx, session_row, {row.tool for row in shown})
-    return [(subjects[row.tool], row.visitor_plain) for row in shown if row.tool in subjects]
+    asked = await _receipt_asked(ctx, session_row, {row.tool for row in shown})
+    return [(asked[row.tool], row.visitor_plain) for row in shown if row.tool in asked]
 
 
-async def _receipt_subjects(ctx: KernelCtx, session_row: SessionRow, tools: set[str]) -> dict[str, str]:
-    """What each of `tools` asks for, as a receipt names it: a native or payments tool's from
-    `render.RECEIPT_SUBJECTS`, and a business tool's from its block (`render.RECEIPT_BLOCK_SUBJECTS`), read
-    from the Desk's tool row without a lock. A tool named in neither, or a business tool with no such
-    row, has none."""
-    subjects = {tool: render.RECEIPT_SUBJECTS[tool] for tool in tools if tool in render.RECEIPT_SUBJECTS}
+async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, tools: set[str]) -> dict[str, str]:
+    """What each of `tools` asks for, as its key in `render.RECEIPT_SUBJECTS`: a native or payments tool
+    by itself, and a business tool by its block (`block:<name>`), read from the Desk's tool row without a
+    lock. A tool named in neither, or a business tool with no such row, has none."""
+    named = render.RECEIPT_SUBJECTS["en"]
+    asked = {tool: tool for tool in tools if tool in named}
     business = sorted(tool for tool in tools if is_business_tool(tool))
     if business:
         for tool, profile in (await ctx.db.execute(ctx.repo.scoped(select(Tool.tool, Tool.profile).where(
                 Tool.desk_id == session_row.desk_id, Tool.tool.in_(business))))).all():
             block = profile.business.config.block if profile is not None and profile.business is not None else None
-            if block in render.RECEIPT_BLOCK_SUBJECTS:
-                subjects[tool] = render.RECEIPT_BLOCK_SUBJECTS[block]
-    return subjects
+            if f"block:{block}" in named:
+                asked[tool] = f"block:{block}"
+    return asked
 
 
-async def request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[str]:
-    """The session's request receipts as the soft checks read them (`render.receipt_check_text`), never
-    another session's: backing the reply doesn't show again and cites no fact for, as an open handoff's
+async def request_receipts(ctx: KernelCtx, session_row: SessionRow, language: render.Language) -> list[str]:
+    """The session's request receipts as the soft checks read them (`render.receipt_check_text`), what was
+    asked for and the status-only note in the reply's `language`, never another session's: backing the reply doesn't show again and cites no fact for, as an open handoff's
     card is. A read that fails adds none, in a savepoint of its own, so the transaction goes on: the
     receipts only widen what backs a reply, so not knowing fails toward the stricter check."""
     try:
@@ -1605,7 +1606,7 @@ async def request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[str]
     except SQLAlchemyError as error:
         log_error(logger, error, "request_receipts_unread")
         return []
-    return [render.receipt_check_text(subject, line) for subject, line in found]
+    return [render.receipt_check_text(asked, line, language) for asked, line in found]
 
 
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:

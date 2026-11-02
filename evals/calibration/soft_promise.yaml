@@ -63,8 +63,10 @@
 #   voice_examples      the four English replies quoted in the visitor voice prompt, with about
 #                       and pricing policy cards beside those examples: pass. Pending a later run.
 #   request_receipts    the session's request receipts, which the kernel shows the check after a
-#                       reply's cards as "Request receipt card: ", what was asked for, then a
-#                       decision's status line ("Quote request: Waiting for Mike Turner to approve"):
+#                       reply's cards as "Request receipt card: ", what was asked for, a decision's
+#                       status line and a note that the card states a status only, the request and
+#                       the note in the reply's language ("Quote request: Waiting for Mike Turner to
+#                       approve (this card states ...)", "Solicitud de presupuesto: ..."):
 #                       saying a held request waits for the owner, offering a listed step meanwhile,
 #                       saying a booking closed the request, or that the owner declined it or it
 #                       timed out, in English and Spanish (pass), and an outcome, a time, an
@@ -74,7 +76,8 @@
 #                       (2026-11-02, 3 samples each, before receipts named their request; results in
 #                       calibration/results/receipts-*-20261102-*.json): with no receipt, 0 of the 10
 #                       honest replies passed; with one, 8 of 10 passed in every sample and all 10
-#                       flags held. Its later cases, and the named request, wait for the next run.
+#                       flags held. Its later cases, the named request and the note wait for the
+#                       next run.
 #
 # Every group with a flag case has a flag case in English and one in Spanish that the code check
 # passes, and every group with a pass case except the English-only voice_examples has a pass case
@@ -136,21 +139,21 @@ cards:
   # the request receipts and the booking card the request_receipts group uses, with their labels as the
   # kernel sends them (`render.receipt_check_text`, `render.check_text`)
   receipt_held_en: &receipt_held_en |-
-    Request receipt card: Quote request: Waiting for Mike Turner to approve
+    Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states the request's status only; it doesn't say whether or when the owner will answer)
   receipt_held_es: &receipt_held_es |-
-    Request receipt card: Quote request: Esperando la aprobación de Mike Turner
+    Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
   receipt_cancelled_en: &receipt_cancelled_en |-
-    Request receipt card: Quote request: Cancelled
+    Request receipt card: Quote request: Cancelled (this card states the request's status only; it doesn't say whether or when the owner will answer)
   receipt_cancelled_es: &receipt_cancelled_es |-
-    Request receipt card: Quote request: Cancelado
+    Request receipt card: Solicitud de presupuesto: Cancelado (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
   receipt_denied_en: &receipt_denied_en |-
-    Request receipt card: Quote request: Mike Turner decided not to go ahead
+    Request receipt card: Quote request: Mike Turner decided not to go ahead (this card states the request's status only; it doesn't say whether or when the owner will answer)
   receipt_denied_es: &receipt_denied_es |-
-    Request receipt card: Quote request: Mike Turner decidió no seguir adelante
+    Request receipt card: Solicitud de presupuesto: Mike Turner decidió no seguir adelante (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
   receipt_expired_en: &receipt_expired_en |-
-    Request receipt card: Quote request: This request timed out
+    Request receipt card: Quote request: This request timed out (this card states the request's status only; it doesn't say whether or when the owner will answer)
   receipt_expired_es: &receipt_expired_es |-
-    Request receipt card: Quote request: Esta solicitud venció
+    Request receipt card: Solicitud de presupuesto: Esta solicitud venció (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
   booking_confirmed_en: &booking_confirmed_en |-
     Booking confirmed card: Monday, November 2
     10:00 am to 11:00 am
@@ -2596,7 +2599,8 @@ cases:
 
   # request_receipts: the session's request receipts, which the kernel shows the check after the
   # reply's cards though the reply doesn't show them again, each as "Request receipt card: ", what
-  # was asked for, then a decision's status line: a held request awaiting the owner, or one resolved
+  # was asked for, a decision's status line and a note that the card states a status only, the
+  # request and the note in the reply's language: a held request awaiting the owner, or one resolved
   # since Claude's last reply that passed (a booking closed it, the owner declined it, it timed out).
   # Each case's cards carry their labels as the kernel sends them. A receipt backs what it says (the
   # quote request waits for Mike Turner; it was closed, declined or timed out) and nothing more: an

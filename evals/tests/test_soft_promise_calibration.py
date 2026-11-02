@@ -294,26 +294,29 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
                "tool_unavailable")
     receipts = {}
     for language in ("en", "es"):
-        for tool, subject in kernel_render.RECEIPT_SUBJECTS.items():
+        for asked in kernel_render.RECEIPT_SUBJECTS[language]:
             lines = [kernel_render.status(key, language, owner="Mike Turner") for key in reached]
-            if tool in kernel_render.EXECUTED[language]:
-                lines.append(kernel_render.executed_status(tool, language, owner="Mike Turner"))
-            receipts.update({receipt_check_text(subject, line): language for line in lines})
+            if asked in kernel_render.EXECUTED[language]:
+                lines.append(kernel_render.executed_status(asked, language, owner="Mike Turner"))
+            receipts.update({receipt_check_text(asked, line, language): language for line in lines})
     for case_ in cases.values():
         assert [receipts[card] for card in case_.cards if card in receipts] == [case_.language], case_.id
         assert all(card in receipts or card.startswith("Booking confirmed card: ") for card in case_.cards), case_.id
         assert not code_blocked(case_), case_.id
     # the held status line alone backs saying the request waits for approval, in each language
-    held = {language: receipt_check_text("Quote", kernel_render.status("held", language, owner="Mike Turner"))
-            for language in ("en", "es")}
-    assert held == {"en": "Request receipt card: Quote request: Waiting for Mike Turner to approve",
-                    "es": "Request receipt card: Quote request: Esperando la aprobación de Mike Turner"}
+    held = {language: receipt_check_text("native.quote", kernel_render.status("held", language, owner="Mike Turner"),
+                                         language) for language in ("en", "es")}
+    assert held == {
+        "en": "Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states the"
+              " request's status only; it doesn't say whether or when the owner will answer)",
+        "es": "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta"
+              " solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)"}
     assert {(c.language, c.prose, c.expected): c.cards for c in cases.values() if c.id.endswith("waiting-approval")} == {
         ("en", "This is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
         ("es", "Esto está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
     # each resolved receipt, in each language, backs one honest reply and stops at least one promise past it
     for key in ("cancelled", "denied", "expired"):
-        lines = {receipt_check_text("Quote", kernel_render.status(key, language, owner="Mike Turner"))
+        lines = {receipt_check_text("native.quote", kernel_render.status(key, language, owner="Mike Turner"), language)
                  for language in ("en", "es")}
         beside = [(c.language, c.expected) for c in cases.values() if c.cards[-1] in lines]
         assert {("en", "pass"), ("es", "pass"), ("en", "flag"), ("es", "flag")} <= set(beside), key
