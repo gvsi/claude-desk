@@ -57,30 +57,15 @@ Limits: we wrote the scenarios, real attackers adapt, 23 held-out tasks make a s
 
 ## Business path
 
-**Who pays and why.** The owner, through their Claude plan; visitors and their agents never pay to ask. Owners pay for answering today in time or money: [Ruby](https://www.ruby.com/pricing/)'s live receptionists start at $250 a month for 50 minutes, and [Smith.ai](https://smith.ai/pricing)'s at $300 for 30 calls. A Desk sells requests closed while the owner works.
+**Who pays and why.** The owner, through their Claude plan; visitors and their agents never pay to ask. Owners already pay to have requests answered: [Ruby](https://www.ruby.com/pricing/)'s live receptionists start at $250 a month for 50 minutes. A Desk sells requests closed while the owner works.
 
-**Pricing and unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the plans, the allowance and the price above it are open. Model use is most of the cost: `estimate:` $0.20 a conversation, until the measured cost in the table above replaces it. Hosting is shared: `estimate:` $90 to $100 a month runs the whole prototype at Amazon's list prices ([deploy guide](https://github.com/gvsi/claude-desk/blob/main/docs/deploy.md)). At $0.20, 100 conversations cost all of [Pro](https://claude.com/pricing)'s $20 monthly price. One workable shape, `estimate:` 25 included conversations cost $5 of the $20, and $0.50 for each one above keeps 60% after model cost. That is half Fin's $0.99 per outcome, a quarter of [Agentforce](https://www.salesforce.com/agentforce/pricing/)'s $2 per conversation and a twentieth of Smith.ai's $10 a call.
+**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: `estimate:` $0.20 a conversation, until the measured cost in the table above replaces it, so 100 conversations cost all of [Pro](https://claude.com/pricing)'s $20 monthly price.
 
-**Market and competing options.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. `estimate:` 1% of those owners paying $20 a month is about $72 million a year (298,000 × $240). Their options today:
+**Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them but don't act under rules checked in code: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
 
-- Answering services such as Ruby and Smith.ai have people answer calls 24/7, book and take payments; the owner's rules hold only as well as the person.
-- AI receptionists, such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on and [Rosie](https://heyrosie.com/pricing) at $49 a month for 250 minutes, answer calls and texts, take messages and book; neither lists taking payments.
-- AI support agents, such as Fin and Agentforce, resolve conversations for support teams; Fin needs 50 outcomes a month.
+**Go-to-market.** Start with owners who already pay for Claude. The share kit puts a Desk where customers look: a link, a QR code, and words for a Google profile, an email signature and a voicemail. Try it at [desk.alcantara.xyz](https://desk.alcantara.xyz).
 
-None of these pages mentions other people's agents, which a Desk serves under rules checked in code.
-
-**Go-to-market.**
-
-- Start with owners who already pay for Claude; for those on the free plan, a Desk is a reason to upgrade.
-- The share kit puts the Desk where customers look: a link, a QR code, and words for a Google profile, an email signature and a voicemail. Try it on the prototype's Share page at [desk.alcantara.xyz](https://desk.alcantara.xyz).
-- Each Desk shows Claude at work to customers who may not use it yet.
-
-**Risks.**
-
-- **A wrong answer under Claude's name.** The reply check stops a made-up price, date or booking, not a wrong fact without one, like saying Mike serves a town he doesn't. The customer hears it from Claude; the business answers for it.
-- **Hostile traffic using up an owner's allowance.** Anyone can spend a public Desk: `estimate:` 1,000 scripted conversations at $0.20 cost $200, ten months of Pro. The prototype caps its conversations' model spend at $150 a day; past it, turns hand off with no model call. A real Desk needs that cap per owner, and blocked attempts shouldn't count against the allowance.
-- **Owners who never let Claude act alone.** With every rule on ask, a Desk sells what a $29 receptionist already does: messages and a queue.
-- **Customers who phone.** Every receptionist above answers calls. A Desk, with no voice in the first release, sits beside the phone line, and its voicemail words send callers to the link.
+**Risks.** A wrong answer under Claude's name: the reply check stops a made-up price, date or booking, not a wrong fact without one. Hostile traffic using up an owner's allowance: anyone can spend a public Desk, so a real Desk needs a spend cap per owner, and blocked attempts shouldn't count against it.
 
 ## The prototype
 
