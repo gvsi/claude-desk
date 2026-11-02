@@ -1027,7 +1027,39 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
+  padding-right: calc(var(--space-20) + var(--size-icon) + var(--space-16));
   transition: border-color var(--motion-instant) var(--motion-ease);
+}
+
+/* The arrow at the card's trailing edge: quiet at rest, a step toward the next page when the card is pointed
+   at or its link has keyboard focus. */
+.cd-about-next__arrow {
+  position: absolute;
+  pointer-events: none; /* a click on it goes to the card's link beneath */
+  top: 50%;
+  right: var(--space-20);
+  margin-top: calc(var(--size-icon) / -2);
+  color: var(--text-secondary);
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    color var(--motion-fast) var(--motion-ease);
+}
+
+.cd-about-next:hover .cd-about-next__arrow,
+.cd-about-next:has(.cd-about-next__link:focus-visible) .cd-about-next__arrow {
+  color: var(--text-primary);
+  transform: translateX(var(--space-4));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-about-next__arrow {
+    transition: none;
+  }
+
+  .cd-about-next:hover .cd-about-next__arrow,
+  .cd-about-next:has(.cd-about-next__link:focus-visible) .cd-about-next__arrow {
+    transform: none;
+  }
 }
 
 /* The About pages' one exception to "hover is a fill" (owner, 2026-11-01): Read next darkens its border. */
