@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
+import type { Effect } from '../../../api/contracts.ts';
 import { describeEffects, effectPhrases } from './describeEffects.ts';
 
 describe('describeEffects', () => {
@@ -39,5 +40,17 @@ describe('describeEffects', () => {
     expect(effectPhrases(['private_data'], true)).toEqual(['Touches private data']);
     // No effect this build knows is never read as harmless.
     expect(effectPhrases([], false)).toEqual(['Changes something', "Can't be undone"]);
+  });
+
+  test('effect_phrases_keep_the_conservative_words_beside_an_unknown_effect', () => {
+    // An effect this build doesn't know may change something: it's said, with whether it can be undone,
+    // beside the effects it does know, never dropped because one of them is known.
+    const future = 'future_effect' as Effect;
+    expect(effectPhrases(['private_data', future], false)).toEqual(['Touches private data', 'Changes something', "Can't be undone"]);
+    expect(effectPhrases(['private_data', future], true)).toEqual(['Touches private data', 'Changes something', 'Can be undone']);
+    expect(effectPhrases(['read', future], false)).toEqual(['Changes something', "Can't be undone"]);
+    // Already said by a known change, it isn't said twice.
+    expect(effectPhrases(['change', future], false)).toEqual(['Changes something', "Can't be undone"]);
+    expect(effectPhrases(['charge', future], false)).toEqual(['Charges money', 'Changes something', "Can't be undone"]);
   });
 });
