@@ -214,6 +214,8 @@ from desk.contracts import (
 from desk.kernel_api import (
     KERNEL_ROUTES,
     TURN_TEXT_CHARS,
+    AgentAbility,
+    AgentOutcome,
     AnswerRequest,
     CancelRequest,
     CheckReplyRequest,
@@ -393,6 +395,8 @@ RIVERA_CARDS = [
           hours=RIVERA_HOURS[1], review=True),
     _card("rv-docs", "native.release_document", "auto", "record_owner",
           "Customers get their own documents after confirming it's them."),
+    _card("rv-charges", "payments.list_charges", "auto", "record_owner",
+          "Customers see their own past payments after confirming it's them."),
     _card("rv-link", "native.payment_link", "auto", "anyone", "Payment links for quotes up to $300, checked by the "
           "reviewer.", max_amount_cents=30_000, review=True),
     _card("rv-mandate", "native.charge_mandate", "auto", "anyone",
@@ -682,10 +686,51 @@ AGENT_TOOLS = {
 }
 
 
-def agent_card(language: str, tools: set[str]) -> list[RenderedBlock]:
+# What happens when an agent asks for each ability, in the kernel's words beside it (`render.en`, `render.es`).
+AGENT_OUTCOMES = {"en": {"allowed": "Allowed", "asks_first": "Asks first", "never": "Never"},
+                  "es": {"allowed": "Permitido", "asks_first": "Pregunta primero", "never": "Nunca"}}
+
+
+def agent_card(language: str, tools: set[str], outcomes: dict[str, AgentOutcome]) -> list[AgentAbility]:
     """The Agent Card in `language`: the kernel's prose blocks, one for each of `tools` an agent may ask for there, by
-    its label in the card's order, and none when there are none."""
-    return [RenderedBlock(kind="prose", text=label) for tool, label in AGENT_TOOLS[language].items() if tool in tools]
+    its label in the card's order, each with its outcome from `outcomes` and the words for it, and none when there are
+    none."""
+    return [AgentAbility(kind="prose", text=label, outcome=outcomes[tool],
+                         outcome_text=AGENT_OUTCOMES[language][outcomes[tool]])
+            for tool, label in AGENT_TOOLS[language].items() if tool in tools]
+
+
+# The abilities whose label names a verified customer: their outcome is read for that customer, so cards for verified
+# people and record owners count there too (the kernel's `public.STANDING`); every other reads the cards for anyone.
+VERIFIED_CUSTOMER_TOOLS = frozenset({"native.release_document", "payments.list_charges"})
+
+
+def agent_outcomes(cards: list[RuleCard], tools: dict[str, ToolProfile], asked: set[str]) -> dict[str, AgentOutcome]:
+    """Each of `asked`'s outcome for an agent with no standing of its own, by the cards for anyone (the kernel's
+    `compiler.outcome_for`, mirrored here), and for a verified customer's own documents and charges by the cards for
+    verified people and record owners too, never a person's or an agent key's: a never card on the tool or one of its
+    effects refuses it; an auto card on the tool, or auto effect cards naming every one of its effects, allows it
+    unless an ask card at its specificity or above covers it; anything else asks first."""
+    outcomes: dict[str, AgentOutcome] = {}
+    for tool in asked:
+        standings = {"anyone", "verified", "record_owner"} if tool in VERIFIED_CUSTOMER_TOOLS else {"anyone"}
+        anyone = [card for card in cards if card.who in standings and not card.is_default]
+        effects = set(tools[tool].effects)
+
+        def on(card: RuleCard) -> bool:
+            return card.applies_to == tool or card.applies_to in {f"effect:{effect}" for effect in effects}
+
+        if any(card.mode == "never" and on(card) for card in anyone):
+            outcomes[tool] = "never"
+            continue
+        asks = [card for card in anyone if card.mode == "ask" and on(card)]
+        autos = [card for card in anyone if card.mode == "auto" and card.applies_to == tool]
+        by_effect = [card for card in anyone if card.mode == "auto" and card.applies_to.startswith("effect:") and on(card)]
+        if effects and {card.applies_to.removeprefix("effect:") for card in by_effect} == effects:
+            autos += by_effect
+        allowed = any(all(_specificity(ask) < _specificity(card) for ask in asks) for card in autos)
+        outcomes[tool] = "allowed" if allowed else "asks_first"
+    return outcomes
 
 
 def open_window(hours: list[HoursWindow], tz: ZoneInfo, now: datetime) -> tuple[bool, datetime | None, datetime] | None:
@@ -2386,7 +2431,8 @@ class FakeKernelState:
         while refused := public_policy_fields([
                 (block.fact_id, block.text) for block in charter if block.template == "policy"]):
             charter = [block for block in charter if block.fact_id not in refused]
-        card = agent_card(language, self._agent_tools(desk))
+        tools = self._agent_tools(desk)
+        card = agent_card(language, tools, agent_outcomes(desk.cards, desk.tools, tools))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
                           owner_display_name=desk.owner_display_name, brand=effective_brand(desk.brand), charter=charter,
                           agent_card=card, open_status=self._open_status(desk, language),

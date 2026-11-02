@@ -10,10 +10,10 @@ import { http } from 'msw';
 import { StrictMode } from 'react';
 import { createMemoryRouter } from 'react-router';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { cdp, page, userEvent } from 'vitest/browser';
+import { cdp, page, userEvent, type Locator } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
-import type { CardBlock, EvReceipt, PublicDesk } from '../../api/contracts.ts';
+import type { AgentOutcome, CardBlock, EvReceipt, PublicDesk } from '../../api/contracts.ts';
 import type { DemoAgentRun } from '../../api/views.ts';
 import { App } from '../../app/App.tsx';
 import { setPollScale } from '../../app/poll.ts';
@@ -86,6 +86,34 @@ const TURNER_ABILITIES = {
     'Ver los cargos propios de un cliente verificado',
   ],
 };
+
+/**
+ * Each ability's outcome on Turner Plumbing's seed, as the kernel's contract test pins it
+ * (`test_public_agent_card_carries_each_abilitys_outcome_for_anyone`): its cards for anyone allow the
+ * first eight, and its cards for record owners a verified customer's documents and charges.
+ */
+const TURNER_OUTCOMES: readonly AgentOutcome[] = Array<AgentOutcome>(10).fill('allowed');
+const OUTCOME_LINES = {
+  en: { allowed: ['handled', 'Allowed'], asks_first: ['held', 'Asks first'], never: ['refused', 'Never'] },
+  es: { allowed: ['handled', 'Permitido'], asks_first: ['held', 'Pregunta primero'], never: ['refused', 'Nunca'] },
+} as const;
+
+/** Each ability line the card draws: its words, then its outcome's dot tone and words under them (null for none). */
+function abilityLines(region: Locator): { text: string | null; tone: string | null; outcome: string | null }[] {
+  return [...region.element().querySelectorAll('li')].map((li) => ({
+    text: li.querySelector('.cd-agents-page__ability-text')?.textContent ?? null,
+    tone: li.querySelector('.cd-status-dot')?.className.replace(/^.*cd-status-dot--/, '') ?? null,
+    outcome: li.querySelector('.cd-agents-page__outcome')?.textContent ?? null,
+  }));
+}
+
+/** Turner's ability lines in `lang`, as the seed's outcomes give them. */
+function turnerLines(lang: 'en' | 'es') {
+  return TURNER_ABILITIES[lang].map((text, i) => {
+    const [tone, outcome] = OUTCOME_LINES[lang][TURNER_OUTCOMES[i]!];
+    return { text, tone, outcome };
+  });
+}
 
 /** The signed limit panel's values and source, as the agents boards write them. */
 const LIMIT_VALUES = ['$20', '$100', 'One hour'];
@@ -296,7 +324,8 @@ describe('agents page', () => {
     const canDo = screen.getByRole('region', { name: 'What agents can do here' });
     await expect.element(canDo).toBeVisible();
     for (const block of AGENT_CARD_BLOCKS.en) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
-    expect([...canDo.element().querySelectorAll('li')].map((li) => li.textContent)).toEqual(TURNER_ABILITIES.en);
+    // Each one with its outcome under it: a status dot and the kernel's words, as board B5 draws them.
+    expect(abilityLines(canDo)).toEqual(turnerLines('en'));
     for (const protocol of ['POST /api/a2a', 'X-Agent-Sig']) expect(canDo.element().textContent).not.toContain(protocol);
 
     // Connecting your own: the API's address, its signing rules in plain lines and its example request.
@@ -447,7 +476,7 @@ describe('agents page', () => {
     await expect.element(es.screen.getByText('Turner Plumbing responde con Claude, una IA.', { exact: true })).toBeVisible();
     const canDo = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
     for (const block of AGENT_CARD_BLOCKS.es) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
-    expect([...canDo.element().querySelectorAll('li')].map((li) => li.textContent)).toEqual(TURNER_ABILITIES.es);
+    expect(abilityLines(canDo)).toEqual(turnerLines('es'));
     await expectScreenBasics(es.screen.container, { owner: false });
     // The signed limit and a run in Spanish: the panel's words and the signed request's pill.
     expect(limitIn(es.screen, 'Enviar un agente', 'Límite firmado')).toEqual({
@@ -1918,6 +1947,28 @@ describe('agents page', () => {
     expectNoHorizontalScroll();
     await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+  });
+
+  it('agent_card_ability_shows_each_outcome_in_the_kernels_words', async () => {
+    // Never reads refused, and an ability the kernel claims no outcome for (its rules couldn't be
+    // read) shows its words alone, with no dot and nothing guessed.
+    const [quote, slots, book] = AGENT_CARD_BLOCKS.en;
+    await plantDesk({ agent_card: [
+      { ...quote!, outcome: 'never', outcome_text: 'Never' },
+      { ...slots!, outcome: 'asks_first', outcome_text: 'Asks first' },
+      { ...book!, outcome: null, outcome_text: null },
+    ] });
+    const { screen } = await renderRoute(PAGE);
+    const canDo = screen.getByRole('region', { name: 'What agents can do here' });
+    await expect.element(canDo.getByText('Never', { exact: true })).toBeVisible();
+    expect(abilityLines(canDo)).toEqual([
+      { text: quote!.text, tone: 'refused', outcome: 'Never' },
+      { text: slots!.text, tone: 'held', outcome: 'Asks first' },
+      { text: book!.text, tone: null, outcome: null },
+    ]);
+    // The dot is decoration: the words say the outcome.
+    for (const dot of canDo.element().querySelectorAll('.cd-status-dot')) expect(dot.getAttribute('aria-hidden')).toBe('true');
     expectNoHorizontalScroll();
   });
 

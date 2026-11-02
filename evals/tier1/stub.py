@@ -45,7 +45,7 @@ from desk.contracts import (
     SessionCreated,
     ToolCall,
 )
-from desk.kernel_api import KernelError, OpenStatus, PublicDesk
+from desk.kernel_api import AgentAbility, KernelError, OpenStatus, PublicDesk
 from evals.tier1.harness import (
     PLANS,
     Auth,
@@ -85,6 +85,8 @@ STUB_OPEN_STATUS = OpenStatus(
     open=True, until=datetime(2026, 11, 3, 17, 0, tzinfo=_STUB_TZ), opens_at=None, text="Open until five this afternoon",
     as_of=datetime(2026, 11, 3, 10, 0, tzinfo=_STUB_TZ), refresh_at=datetime(2026, 11, 3, 17, 0, tzinfo=_STUB_TZ),
 )
+# An Agent Card ability that passes AgentAbility's validator (an outcome comes with its words).
+STUB_ABILITY = AgentAbility(kind="prose", text="Book a visit", outcome="allowed", outcome_text="Allowed")
 # Credentials a case can use on its next call: a visitor's session token, and an agent key that
 # signs (a fixed test key, not a secret). The stub's Desks share one slug.
 STUB_SESSION_TOKEN = "stub-session-token"
@@ -106,7 +108,7 @@ def _fixed_fields(model: type[BaseModel]) -> dict[str, Any]:
         ApprovalResult: {"card_diff": None},
         Fact: {"claims": []},
         ProbeResult: {"probe": STUB_PROBE},
-        PublicDesk: {"open_status": STUB_OPEN_STATUS},
+        PublicDesk: {"open_status": STUB_OPEN_STATUS, "agent_card": [STUB_ABILITY]},
         KernelError: {"detail": None},
         SessionCreated: {"session_token": STUB_SESSION_TOKEN},
         DemoAgentIssued: {"agent_private_key_hex": STUB_AGENT_KEY_HEX},
@@ -200,6 +202,8 @@ class _Builder:
             return STUB_PROBE.model_dump(mode="json")
         if tp is OpenStatus:
             return STUB_OPEN_STATUS.model_dump(mode="json")
+        if tp is AgentAbility:
+            return STUB_ABILITY.model_dump(mode="json")
         if isinstance(tp, type) and issubclass(tp, BaseModel):
             return _factory(tp, self.rng, _FAKER).build().model_dump(mode="json")
         if tp is dict or origin is dict:
