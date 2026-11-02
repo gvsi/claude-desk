@@ -105,7 +105,7 @@
 #                       grew to 44 cases. Each case whose input changed, or that is new, was run in
 #                       its final form (receipts-changed-final-20261102-155805: 10 of 10 met), and
 #                       every other case's input is unchanged since the runs above
-#                       (receipts-closed-line-probe-20261102-154239 reran four of them): honest 17 of
+#                       (receipts-closed-line-probe-20261102-154239 reran three of them): honest 17 of
 #                       18 pass and flags 23 of 26 hold. Its misses: honest receipts-es-passed-on,
 #                       and the accepted flags receipts-follow-up-here (en and es) and
 #                       receipts-es-other-request. Tried and not shipped: a sentence in the prompt on
