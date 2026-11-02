@@ -856,8 +856,8 @@ async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, st
 
 # ---- The session's request receipts back a later reply -----------------------------------------------
 
-# a held request's receipt as the check reads it: its label, then the decision's status line
-HELD_SEEN = "Request receipt card: Waiting for Mike Turner to approve"
+# a held quote's receipt as the check reads it: its label, what was asked for, then the decision's status line
+HELD_SEEN = "Request receipt card: Quote request: Waiting for Mike Turner to approve"
 
 
 async def test_the_soft_check_reads_a_held_requests_receipt(app, client, reviewer):
@@ -894,7 +894,8 @@ async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app
     prose = "Since you went ahead with the booking, your earlier request was closed. Your booking is below."
     verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
     card = verdict.blocks[-1]
-    assert reviewer.soft_inputs[-1].cards == [f"Booking confirmed card: {card.text}", "Request receipt card: Cancelled"]
+    assert reviewer.soft_inputs[-1].cards == [f"Booking confirmed card: {card.text}",
+                                              "Request receipt card: Quote request: Cancelled"]
     assert verdict.ok and [(block.kind, block.template) for block in verdict.blocks] == [
         ("prose", None), ("card", "booking_confirmed")]
 
@@ -921,7 +922,7 @@ async def test_the_soft_check_reads_no_receipt_without_a_held_or_just_resolved_r
     else:
         held = await held_quote(client, visitor)
         await answered(client, copy.owner, held.decision_id, "deny_once")
-        update = "Request receipt card: Mike Turner decided not to go ahead"
+        update = "Request receipt card: Quote request: Mike Turner decided not to go ahead"
         reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=False)
         assert not (await checked(client, visitor, CLEAN)).ok
         assert reviewer.soft_inputs[-1].cards == [update]
@@ -951,7 +952,8 @@ async def test_the_soft_check_never_reads_another_sessions_receipts(app, client,
     assert (await checked(client, visitor, CLEAN)).ok
     assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]
     assert (await checked(client, other, CLEAN)).ok               # and the other session reads its own
-    assert reviewer.soft_inputs[-1].cards == [HELD_SEEN, "Request receipt card: Mike Turner decided not to go ahead"]
+    assert reviewer.soft_inputs[-1].cards == [
+        HELD_SEEN, "Request receipt card: Quote request: Mike Turner decided not to go ahead"]
 
 
 async def test_a_receipt_read_that_fails_adds_nothing(app, client, reviewer, monkeypatch, caplog):
@@ -981,7 +983,7 @@ async def test_a_receipt_read_that_fails_adds_nothing(app, client, reviewer, mon
 @pytest.mark.parametrize(("prose", "language", "receipt"), [
     ("Your request is with Mike Turner now. Please check the request status in this chat.", "en", HELD_SEEN),
     ("Su solicitud está con Mike Turner. Consulte el estado de la solicitud en este chat.", "es",
-     "Request receipt card: Esperando la aprobación de Mike Turner"),
+     "Request receipt card: Quote request: Esperando la aprobación de Mike Turner"),
 ])
 async def test_an_honest_acknowledgement_of_a_hold_passes_on_its_receipt(app, client, reviewer, prose, language,
                                                                          receipt):
@@ -1005,3 +1007,26 @@ async def test_an_honest_acknowledgement_of_a_hold_passes_on_its_receipt(app, cl
     verdict = await checked(client, visitor, prose)
     assert (verdict.ok, verdict.language) == (True, language)
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", prose)]
+
+
+async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(app, client, reviewer, monkeypatch):
+    """A status line alone ("Waiting for Mike Turner to approve") would back a claim about any request, so the
+    check reads what was asked for before it, from the request's tool (`render.RECEIPT_SUBJECTS`): a held
+    quote is a "Quote request", a held booking a "Booking request". A tool the table doesn't name adds no
+    receipt at all, the stricter way."""
+    from desk.kernel_service import render
+
+    from .test_adapters import add_slot, book
+
+    copy, visitor = await visitor_of(app, client)
+    await held_quote(client, visitor)
+    await add_slot(app, copy, "S-20261030-2200")
+    held_booking = await book(client, visitor, "S-20261030-2200")            # outside the cards' hours: it holds
+    assert held_booking.state == "held"
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == [
+        HELD_SEEN, "Request receipt card: Booking request: Waiting for Mike Turner to approve"]
+
+    monkeypatch.delitem(render.RECEIPT_SUBJECTS, "native.book")             # a tool the table doesn't name
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]

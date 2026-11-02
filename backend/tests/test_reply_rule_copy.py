@@ -32,12 +32,30 @@ def test_every_card_template_has_a_label_for_the_soft_checks():
 
 def test_a_request_receipt_reaches_the_soft_checks_with_a_label_no_card_has():
     """The session's request receipts aren't templates: held or resolved, they share one label of their own,
-    which no card's label shares, so the checks can tell a request's status line from a card's text."""
+    which no card's label shares, then what was asked for and the status line, so the checks can tell a
+    request's status line from a card's text, and one request from another."""
     assert render.RECEIPT_LABEL == "Request receipt"
     assert render.RECEIPT_LABEL not in render.CHECK_LABELS.values()
-    assert render.receipt_check_text("Waiting for Mike Turner to approve") == (
-        "Request receipt card: Waiting for Mike Turner to approve")
-    assert render.receipt_check_text("Cancelado") == "Request receipt card: Cancelado"
+    assert render.receipt_check_text("Quote", "Waiting for Mike Turner to approve") == (
+        "Request receipt card: Quote request: Waiting for Mike Turner to approve")
+    assert render.receipt_check_text("Refund", "Cancelado") == "Request receipt card: Refund request: Cancelado"
+
+
+def test_every_tool_and_business_block_a_decision_can_hold_has_a_receipt_subject():
+    """Any enabled tool can be held (the compiler's default ask covers every tool no card for anyone does), so
+    every native and payments tool, and every business tool's block, names what was asked for: a new one
+    without a subject fails here (until it has one, its receipts back nothing)."""
+    from desk.contracts import BlockConfig, ToolName
+
+    assert set(render.RECEIPT_SUBJECTS) == set(get_args(ToolName))
+    blocks = {get_args(config.model_fields["block"].annotation)[0] for config in get_args(get_args(BlockConfig)[0])}
+    assert set(render.RECEIPT_BLOCK_SUBJECTS) == blocks
+    subjects = [*render.RECEIPT_SUBJECTS.values(), *render.RECEIPT_BLOCK_SUBJECTS.values()]
+    assert all(subject.strip() == subject and subject and "request" not in subject.lower() for subject in subjects)
+    assert (render.RECEIPT_SUBJECTS["native.quote"], render.RECEIPT_SUBJECTS["native.book"],
+            render.RECEIPT_SUBJECTS["native.payment_link"], render.RECEIPT_SUBJECTS["native.release_document"],
+            render.RECEIPT_SUBJECTS["payments.create_refund"]) == ("Quote", "Booking", "Payment link", "Document",
+                                                                     "Refund")
 
 
 async def test_both_soft_checkers_read_the_receipts_after_the_cards(monkeypatch):
@@ -50,7 +68,8 @@ async def test_both_soft_checkers_read_the_receipts_after_the_cards(monkeypatch)
     monkeypatch.setattr(reply_check, "principal_for", lambda session: None)
     monkeypatch.setattr(jev, "evaluate", evaluate)
     prose = "Your request is with Mike Turner now."
-    receipts = ["Request receipt card: Waiting for Mike Turner to approve", "Request receipt card: Cancelled"]
+    receipts = ["Request receipt card: Quote request: Waiting for Mike Turner to approve",
+                "Request receipt card: Quote request: Cancelled"]
 
     await reply_check.soft_promises(stub_ctx(soft_promise), SimpleNamespace(desk_id="desk"), "en", prose,
                                     DEPOSIT_CARDS[:1], receipts=receipts)

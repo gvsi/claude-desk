@@ -70,11 +70,13 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    each check one pooled connection, across the try. A reply that passes with the handoff's
    card is checked again in step 7. The session's request receipts are cards of it too, after the
    reply's own, though the reply doesn't show them again and cites no fact for them
-   (`request_receipts`, never another session's), each as "Request receipt card: " and its
-   decision's status line: each held request awaiting the owner ("Waiting for Mike Turner to
-   approve"), and each request that has left `held` since Claude's latest reply in the session that
-   passed, in ledger order ("Cancelled", when the visitor's booking closed a held discount). A
-   receipt backs what its line says and nothing more: never an outcome, a time or an approval it
+   (`request_receipts`, never another session's), each as "Request receipt card: ", what was
+   asked for, named from the request's tool (`render.RECEIPT_SUBJECTS`, a business tool's by its
+   block; a tool named in neither has no receipt), then the decision's status line: each held
+   request awaiting the owner ("Quote request: Waiting for Mike Turner to approve"), and each
+   request that has left `held` since Claude's latest reply in the session that passed, in ledger
+   order ("Quote request: Cancelled", when the visitor's booking closed a held discount). A receipt
+   backs what it says and nothing more: never another request, an outcome, a time or an approval it
    doesn't state. They are read without a lock, in a savepoint, and a read that fails adds none. A
    receipt only restates a status the chat already shows and updates, so unlike the handoff's card
    it isn't checked again in step 7: a change while the model reads leaves the reply true to what
@@ -143,8 +145,8 @@ from desk.public_person import future_person_direction
 from desk.public_contact import bare_host, valid_public_contact
 from desk.public_contact import contact_endpoints as public_contact_endpoints
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
-                            ReplyVerdict, ToolProfile, Violation)
-from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person
+                            ReplyVerdict, ToolProfile, Violation, is_business_tool)
+from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person, Tool
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import LedgerEntry as LedgerRow
@@ -1554,22 +1556,42 @@ async def _last_passed_reply(ctx: KernelCtx, session_row: SessionRow, *, after: 
         event["summary"]["ok"].astext == "true").order_by(LedgerRow.seq.desc()).limit(1)))).scalar_one_or_none()
 
 
-async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[str]:
-    """The status lines (`visitor_plain`) of the session's request receipts, oldest request first,
-    read without a lock: each held request awaiting the owner, as `_awaiting_holds` reads them (held
-    and not expired), and each request that has left `held` (answered, cancelled, timed out, run or
-    settled) after Claude's latest reply in the session that passed the check, by ledger order (its
-    decision's `ledger_seq`, `_last_passed_reply`). A hold past its expiry that no read has expired
-    yet is neither."""
+async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str]]:
+    """The session's request receipts, oldest request first, each as what was asked for and its
+    decision's status line (`visitor_plain`), read without a lock: each held request awaiting the
+    owner, as `_awaiting_holds` reads them (held and not expired), and each request that has left
+    `held` (answered, cancelled, timed out, run or settled) after Claude's latest reply in the session
+    that passed the check, by ledger order (its decision's `ledger_seq`, `_last_passed_reply`). A hold
+    past its expiry that no read has expired yet is neither, and so is a request whose tool names no
+    subject (`_receipt_subjects`)."""
     rows = (await ctx.db.execute(ctx.repo.scoped(select(
-        DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at, DecisionRow.ledger_seq).where(
+        DecisionRow.tool, DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at,
+        DecisionRow.ledger_seq).where(
         DecisionRow.session_id == session_row.session_id, DecisionRow.outcome == "hold")
         .order_by(DecisionRow.created_at, DecisionRow.decision_id)))).all()
     left = [row.ledger_seq for row in rows if row.state != "held"]
     passed = await _last_passed_reply(ctx, session_row, after=min(left)) if left else None
     now = ctx.clock.now()
-    return [row.visitor_plain for row in rows
-            if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
+    shown = [row for row in rows
+             if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
+    subjects = await _receipt_subjects(ctx, session_row, {row.tool for row in shown})
+    return [(subjects[row.tool], row.visitor_plain) for row in shown if row.tool in subjects]
+
+
+async def _receipt_subjects(ctx: KernelCtx, session_row: SessionRow, tools: set[str]) -> dict[str, str]:
+    """What each of `tools` asks for, as a receipt names it: a native or payments tool's from
+    `render.RECEIPT_SUBJECTS`, and a business tool's from its block (`render.RECEIPT_BLOCK_SUBJECTS`), read
+    from the Desk's tool row without a lock. A tool named in neither, or a business tool with no such
+    row, has none."""
+    subjects = {tool: render.RECEIPT_SUBJECTS[tool] for tool in tools if tool in render.RECEIPT_SUBJECTS}
+    business = sorted(tool for tool in tools if is_business_tool(tool))
+    if business:
+        for tool, profile in (await ctx.db.execute(ctx.repo.scoped(select(Tool.tool, Tool.profile).where(
+                Tool.desk_id == session_row.desk_id, Tool.tool.in_(business))))).all():
+            block = profile.business.config.block if profile is not None and profile.business is not None else None
+            if block in render.RECEIPT_BLOCK_SUBJECTS:
+                subjects[tool] = render.RECEIPT_BLOCK_SUBJECTS[block]
+    return subjects
 
 
 async def request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[str]:
@@ -1583,7 +1605,7 @@ async def request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[str]
     except SQLAlchemyError as error:
         log_error(logger, error, "request_receipts_unread")
         return []
-    return [render.receipt_check_text(line) for line in found]
+    return [render.receipt_check_text(subject, line) for subject, line in found]
 
 
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:

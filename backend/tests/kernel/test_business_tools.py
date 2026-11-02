@@ -1152,3 +1152,23 @@ async def test_business_free_names_are_enabled_resolving_titles_and_types_never_
         ctx.bind(copy.copy_id)
         assert await context.business_free_names(ctx, copy.desk_id) == ['Book a consult', 'Free consult', INTRO_CALL,
                                                                          'Urgent support']
+
+
+async def test_a_held_business_tool_request_names_its_block_on_its_receipt(app, client, reviewer):
+    """A business tool's request reaches the soft checks named by its block (`render.RECEIPT_BLOCK_SUBJECTS`):
+    a held intake is a "Details request", whatever the owner titled the tool."""
+    from .test_reply_check import checked
+
+    copy = await rivera(app, client)
+    assert (await put(client, copy, [intake()])).status_code == 200
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        [row] = await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.desk_id == copy.desk_id,
+                                                                      Tool.tool == 'desk.new-enquiry')))
+        row.status, row.review_reason = 'enabled', None
+        await activate_cards(ctx, copy.desk_id, [])
+    visitor = await open_visitor(client, copy)
+    held = await decided(client, visitor, 'desk.new-enquiry', {'name': 'Dana', 'answers': ['Need a consult']})
+    assert (held.outcome, held.state) == ('hold', 'held')
+    assert (await checked(client, visitor, 'I can help with that.')).ok
+    assert reviewer.soft_inputs[-1].cards == ['Request receipt card: Details request: Waiting for Mike Turner to approve']

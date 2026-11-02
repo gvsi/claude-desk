@@ -177,5 +177,5 @@ async def test_jev_reads_the_sessions_request_receipts_as_sonnet_does(app, clien
     assert verdict.ok
     sonnet = reviewer.soft_inputs[-1]
     assert sonnet.cards == [f"Quote card: {verdict.blocks[1].text}",
-                            "Request receipt card: Waiting for Mike Turner to approve"]
+                            "Request receipt card: Quote request: Waiting for Mike Turner to approve"]
     assert fake.inputs == [(sonnet.prose, sonnet.cards, sonnet.next_steps)]

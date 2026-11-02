@@ -278,9 +278,35 @@ def check_text(card: RenderedBlock) -> str:
 # which the chat already shows as its own event, one label whether the request is held or resolved, since
 # the line itself says which. Not a template's, so kept apart from `CHECK_LABELS`; English, as those are.
 RECEIPT_LABEL = "Request receipt"
+# What was asked for, named before the status line, which alone ("Waiting for Mike Turner to approve") would
+# back a claim about any request; for the checks alone, never shown. Every native and payments tool, since
+# the compiler's default ask can hold any enabled tool, and every business tool's block. A tool named in
+# neither (an MCP tool) has no receipt, the stricter way.
+RECEIPT_SUBJECTS: dict[str, str] = {
+    "native.quote": "Quote",
+    "native.find_slots": "Open times",
+    "native.book": "Booking",
+    "native.release_document": "Document",
+    "native.payment_link": "Payment link",
+    "native.charge_mandate": "Charge",
+    "native.capture_lead": "Contact details",
+    "native.request_callback": "Callback",
+    "native.start_verification": "Verification",
+    "native.fetch_website": "Website",
+    "native.read_memory": "Records",
+    "native.web_search": "Web search",
+    "payments.list_charges": "Charges",
+    "payments.create_refund": "Refund",
+}
+RECEIPT_BLOCK_SUBJECTS: dict[str, str] = {
+    "intake": "Details",
+    "typed_booking": "Booking",
+    "purpose_payment": "Payment",
+    "urgent": "Urgent",
+}
 
 
-def receipt_check_text(visitor_plain: str) -> str:
-    """A request receipt as the soft checks read it: its label, then the decision's status line
-    ("Request receipt card: Waiting for Mike Turner to approve")."""
-    return f"{RECEIPT_LABEL} card: {visitor_plain}"
+def receipt_check_text(subject: str, visitor_plain: str) -> str:
+    """A request receipt as the soft checks read it: its label, what was asked for, then the decision's
+    status line ("Request receipt card: Quote request: Waiting for Mike Turner to approve")."""
+    return f"{RECEIPT_LABEL} card: {subject} request: {visitor_plain}"
