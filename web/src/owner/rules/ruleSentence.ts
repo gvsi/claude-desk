@@ -43,35 +43,49 @@ type Phrase = string | readonly SentencePart[];
 /**
  * A tool's words inside a rule's sentence:
  * - `can`: what Claude does, after "Claude can " ("send payment links"); after "Claude never " its
- *   first word takes an s ("sends payment links");
+ *   first word takes an s ("sends payment links"), or `never`'s does when it has its own;
  * - `before`: what Claude asks about, after "Claude asks you before " ("any refund");
- * - `after`: words that follow the rule's limit ("Claude can take agent payments up to $20 from a signed limit");
+ * - `upTo`: the words before a rule's amount, " up to " unless the phrase says otherwise;
+ * - `after`: words that follow the rule's amount ("…, up to $20, from its signed limit");
+ * - `alone`: words that follow it when the rule has no amount ("… within its signed limit");
  * - `over`: its requests, plural, past an automatic rule's limit ("payment links over $300").
  */
 export interface ToolPhrase {
   can: Phrase;
   before: Phrase;
+  never?: Phrase;
+  upTo?: string;
   after?: string;
+  alone?: Phrase;
   over?: string;
 }
 
 const key = (text: string): SentencePart => ({ text, key: true });
 
 /**
- * Each built-in tool's and effect group's phrase, in the REV-RULES-C boards' words where a board
- * draws the tool, and in their pattern where none does.
+ * Each built-in tool's and effect group's phrase, in the words of option A's boards (REV-RULES-D and
+ * REV-SETUP-3, signed) where they draw the tool, else the REV-RULES-C boards', and in their pattern
+ * where none does. A signed-limit payment names no purpose: what an agent pays for is the
+ * business's own, which the rules don't carry.
  */
 export const TOOL_PHRASES: Readonly<Record<string, ToolPhrase>> = {
   'native.quote': { can: 'send quotes from your price list', before: [key('any quote')], over: 'quotes' },
-  'native.find_slots': { can: 'show your open times', before: 'showing your open times' },
-  'native.book': { can: 'book visits', before: [key('any booking')], over: 'bookings' },
-  'native.capture_lead': { can: 'take leads', before: 'saving a lead' },
-  'native.request_callback': { can: 'take callbacks', before: 'asking you to call someone back' },
-  'native.start_verification': { can: 'send codes to the contact on record', before: 'sending a code' },
-  'native.release_document': { can: "share customers' own documents", before: 'sharing a document' },
-  'native.payment_link': { can: 'send payment links', before: [key('any payment link')], over: 'payment links' },
-  'native.charge_mandate': { can: 'take agent payments', before: [key('any agent payment')], after: ' from a signed limit', over: 'agent payments' },
-  'payments.list_charges': { can: [{ text: 'show customers ' }, key('their own charges')], before: "showing a customer's charges" },
+  'native.find_slots': { can: 'show the times you have open', before: 'showing the times you have open' },
+  'native.book': { can: 'book visits', before: 'booking', over: 'bookings' },
+  'native.capture_lead': { can: 'take a name and a way to reach them', before: 'taking a name and a way to reach them' },
+  'native.request_callback': { can: 'take callback requests', before: 'taking a callback request' },
+  'native.start_verification': { can: "send a code when someone asks to confirm it's them", before: 'sending a code', never: 'send codes' },
+  'native.release_document': { can: [{ text: "share customers' " }, key('own documents')], before: [{ text: 'sharing ' }, key('documents')] },
+  'native.payment_link': { can: 'send payment links', before: [{ text: 'sending ' }, key('payment links')], over: 'payment links' },
+  'native.charge_mandate': {
+    can: "take a visiting agent's payment",
+    before: [key('any agent payment')],
+    upTo: ', up to ',
+    after: ', from its signed limit',
+    alone: [{ text: ' within ' }, key('its signed limit')],
+    over: 'agent payments',
+  },
+  'payments.list_charges': { can: [{ text: 'show customers ' }, key('their own charges')], before: [{ text: 'showing customers ' }, key('their own charges')] },
   'payments.create_refund': { can: 'send refunds', before: [key('any refund')], over: 'refunds' },
   'native.fetch_website': { can: 'read your website', before: 'reading your website' },
   'native.read_memory': { can: 'read the notes you brought in', before: 'reading your notes' },
@@ -114,13 +128,22 @@ function lowerFirst(title: string): string {
   return `${first.toLowerCase()}${title.slice(first.length)}`;
 }
 
+/** A Desk's urgent job, whatever its owner named it, in option A's words: "take **urgent callbacks**, which alert you at once". */
+const URGENT_PHRASE: ToolPhrase = {
+  can: [{ text: 'take ' }, key('urgent callbacks'), { text: ', which alert you at once' }],
+  before: [{ text: 'taking ' }, key('urgent callbacks')],
+  never: [{ text: 'take ' }, key('urgent callbacks')],
+};
+
 /**
- * A target's phrase: the table's; a listed business tool's own title, set off as user text, "use
- * {title}"; else the app's words for it ("use a connected tool"), never its raw name.
+ * A target's phrase: the table's; a Desk's urgent job's (`URGENT_PHRASE`); a listed business tool's
+ * own title, set off as user text, "use {title}"; else the app's words for it ("use a connected
+ * tool"), never its raw name.
  */
 function targetPhrase(target: string, business: BusinessTools): ToolPhrase {
   const phrase = Object.hasOwn(TOOL_PHRASES, target) ? TOOL_PHRASES[target] : undefined;
   if (phrase !== undefined) return phrase;
+  if (isBusinessToolName(target) && business.get(target)?.config.block === 'urgent') return URGENT_PHRASE;
   const title = isBusinessToolName(target) ? toolDisplayName(target, business) : null;
   if (title !== null && title.trim() !== '') {
     const named: SentencePart = { text: lowerFirst(title.trim()), user: true };
@@ -151,7 +174,7 @@ interface RowPhrase extends ToolPhrase {
 
 /** One phrase as a row's, its action after "Claude never " in the third person. */
 function onePhrase(phrase: ToolPhrase): RowPhrase {
-  return { ...phrase, never: thirdPerson(runs(phrase.can)) };
+  return { ...phrase, never: thirdPerson(runs(phrase.never ?? phrase.can)) };
 }
 
 /**
@@ -170,7 +193,7 @@ function rowPhrase(targets: readonly string[], business: BusinessTools): RowPhra
   return {
     can: joinRuns(phrases.map((phrase) => withAfter(runs(phrase.can), phrase)), 'and'),
     before: joinRuns(phrases.map((phrase) => withAfter(runs(phrase.before), phrase)), 'or'),
-    never: joinRuns(phrases.map((phrase) => withAfter(thirdPerson(runs(phrase.can)), phrase)), 'and'),
+    never: joinRuns(phrases.map((phrase) => withAfter(thirdPerson(runs(phrase.never ?? phrase.can)), phrase)), 'and'),
   };
 }
 
@@ -253,18 +276,16 @@ function knownTarget(target: string, words: SentenceWords): boolean {
   return (words.tools ?? []).some((row) => row.tool === target);
 }
 
-/** Whether any of the row's cards is for people who confirmed it's them. */
-const forVerified = (cards: readonly RuleCard[]) => cards.some((card) => card.who === 'verified' || card.who === 'record_owner');
-
 /**
  * A rule's sentence, from its card, or from the cards of one row that read as one rule
  * (`canJoin`: the same outcome, audience, limits and hours), as C1 joins leads and callbacks.
  * Cards that differ are refused with an error, never joined:
  * - led by its mode: `auto` "Claude can ", `ask` "Claude asks you before ", `never` "Claude never ";
  * - then its tool's phrase (`TOOL_PHRASES`, `JOINED_PHRASES`; a business tool "use {title}");
- * - then its conditions, each value set off: " up to **$300**"; on an automatic quote ", at **list
- *   price**" or " with up to **10%** off"; " on **weekdays, 8:00 am to 6:00 pm**"; and on an
- *   automatic rule for verified people or the record's owner, ", once they've confirmed it's them".
+ * - then its conditions, each value set off: " up to **$300**" (or the phrase's own words around an
+ *   amount, and its words without one); on an automatic quote ", at **list price**" or " with up to
+ *   **10%** off"; " on **weekdays, 8:00 am to 6:00 pm**".
+ * Who a rule is for is never in its sentence: the line under it says so (`ruleQualifiers`, `ruleMeta`).
  * A target that is neither the catalog's nor a tool on the Desk (`knownTarget`) reads "A rule for a
  * tool this version can't name", whatever its mode.
  */
@@ -281,8 +302,11 @@ export function ruleSentence(card: RuleCard | readonly RuleCard[], words: Senten
   else parts.push({ text: 'Claude never ' }, ...phrase.never);
 
   const amount = first.max_amount_cents;
-  if (amount != null) parts.push({ text: ' up to ' }, key(formatCents(amount)));
-  if (phrase.after !== undefined) parts.push({ text: phrase.after });
+  if (amount != null) {
+    parts.push({ text: phrase.upTo ?? ' up to ' }, key(formatCents(amount)));
+    if (phrase.after !== undefined) parts.push({ text: phrase.after });
+  } else if (phrase.alone !== undefined) parts.push(...runs(phrase.alone));
+  else if (phrase.after !== undefined) parts.push({ text: phrase.after });
   if (first.mode === 'auto') {
     const discount = first.max_discount_bp ?? 0;
     if (discount > 0) parts.push({ text: ' with up to ' }, key(percent(discount)), { text: ' off' });
@@ -290,7 +314,6 @@ export function ruleSentence(card: RuleCard | readonly RuleCard[], words: Senten
   }
   const hours = first.hours;
   if (hours != null) parts.push(...hoursRuns(hours));
-  if (first.mode === 'auto' && forVerified(cards)) parts.push({ text: ", once they've confirmed it's them" });
   return merged(parts);
 }
 

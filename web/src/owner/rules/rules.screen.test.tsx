@@ -319,7 +319,7 @@ describe('rules page', () => {
       'Claude can send payment links up to $300 / Anyone · Checked by the reviewer · Over $300, it asks you first',
     ]);
     expect(ruleCells(tools.getByRole('region', { name: 'See charges' }).element())).toEqual([
-      "Claude can show customers their own charges, once they've confirmed it's them / The customer, once verified",
+      'Claude can show customers their own charges / The customer, once verified',
       'Claude never shows private data to anyone but its verified owner',
     ]);
     for (const name of ['Quote', 'Find open times', 'Book a visit', 'Payment link', 'Refund']) {
@@ -380,7 +380,7 @@ describe('rules page', () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const jobs = screen.getByRole('region', { name: JOBS });
     const callback = () => jobs.element().querySelector('[data-rule-id="rv-urgent"]');
-    await expect.element(jobs.getByText('Claude can use emergency callback', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Claude can take urgent callbacks, which alert you at once', { exact: true })).toBeVisible();
     expect(callback()?.querySelector('.cd-status-dot--handled')).not.toBeNull();
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: label }).click();
@@ -397,7 +397,7 @@ describe('rules page', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(desk().policy.cards).toContainEqual(urgent);
-    await expect.element(jobs.getByText('Claude can use emergency callback', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Claude can take urgent callbacks, which alert you at once', { exact: true })).toBeVisible();
     expect(callback()?.querySelector('.cd-status-dot--handled')).not.toBeNull();
   });
 
@@ -775,7 +775,7 @@ describe('rules page', () => {
       'Claude can send payment links up to $400 / Anyone · Checked by the reviewer · Over $400, it asks you first',
     ]);
     await expect.element(screen.getByRole('region', { name: 'Refund' }).getByText('Claude never sends refunds', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Claude can show your open times', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Claude can show the times you have open', { exact: true })).toBeVisible();
     // A tool no rule covers asks.
     const quote = screen.getByRole('region', { name: 'Quote' });
     await expect.element(quote.getByText('Claude asks you before any quote', { exact: true })).toBeVisible();
@@ -955,8 +955,8 @@ describe('rules page', () => {
       await expect.element(band.getByText('Claude asks you before any payment', { exact: true })).toBeVisible();
       await expect.poll(() => band.element().querySelector('[data-money-limit] .cd-pill')?.textContent, { message: name }).toBe('Updated');
     }
-    await expectRules(screen, 'Payment link', (cells) => cells[0]?.startsWith('Claude asks you before any payment link') === true);
-    await expectRules(screen, 'Charge within a signed limit', (cells) => cells[0]?.startsWith('Claude asks you before any agent payment') === true);
+    await expectRules(screen, 'Payment link', (cells) => cells[0]?.startsWith('Claude asks you before sending payment links') === true);
+    await expectRules(screen, 'Charge within a signed limit', (cells) => cells[0]?.startsWith('Claude asks you before any agent payment within its signed limit') === true);
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
   });
 

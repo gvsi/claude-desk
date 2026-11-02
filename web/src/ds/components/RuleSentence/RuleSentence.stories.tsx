@@ -18,7 +18,7 @@ const ROWS: readonly RuleSentenceProps[] = [
     outcome: 'auto',
   },
   {
-    parts: [{ text: "Claude can share customers' own documents and charges, once they've confirmed it's them" }],
+    parts: [{ text: "Claude can share customers' own documents and charges" }],
     meta: { tools: { titles: ['Share a document', 'See charges'] }, who: "The record's owner, verified" },
     outcome: 'auto',
   },

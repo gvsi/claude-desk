@@ -47,7 +47,7 @@ it('an Allow private-data rule keeps its verified record-owner scope', async () 
   desk.policy.cards = [{ ...base, card_id: 'shared-owner', applies_to: 'effect:private_data', mode: 'auto', who: 'record_owner' }];
   const { screen } = await renderRoute(`${DESK}/rules`);
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
-  await expect.element(stripe.getByText("Claude can share private data, once they've confirmed it's them", { exact: true })).toBeVisible();
+  await expect.element(stripe.getByText('Claude can share private data', { exact: true })).toBeVisible();
   const rows = screen.container.querySelectorAll('[data-rule-id="shared-owner"]');
   expect(rows).toHaveLength(1);
   for (const row of rows) {
@@ -124,7 +124,7 @@ it('Payments and Stripe open with the money band, then each tool with its rules'
     'Claude can send payment links up to $300 / Anyone · Checked by the reviewer · Over $300, it asks you first',
   ]);
   expect(cells(payments.getByRole('region', { name: 'Charge within a signed limit' }).element())).toEqual([
-    'Claude can take agent payments up to $20 from a signed limit / Anyone · Over $20, it asks you first',
+    "Claude can take a visiting agent's payment, up to $20, from its signed limit / Anyone · Over $20, it asks you first",
   ]);
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
   await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();
@@ -133,7 +133,7 @@ it('Payments and Stripe open with the money band, then each tool with its rules'
     'Claude never moves money without your rule or a signed limit / Refund',
   ]);
   expect(cells(stripe.getByRole('region', { name: 'See charges' }).element())).toEqual([
-    "Claude can show customers their own charges, once they've confirmed it's them / The customer, once verified",
+    'Claude can show customers their own charges / The customer, once verified',
     'Claude never shows private data to anyone but its verified owner',
   ]);
   expect(cells(stripe.getByRole('region', { name: 'Refund' }).element())).toEqual(['Claude asks you before any refund / The customer, once verified']);

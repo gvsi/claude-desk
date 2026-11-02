@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
-import { NO_BUSINESS_TOOLS, businessTools } from '../connectors/catalog.ts';
+import { NO_BUSINESS_TOOLS, businessTools, type BusinessTools } from '../connectors/catalog.ts';
 import {
   ALWAYS_ON_SENTENCES,
   canJoin,
@@ -69,7 +69,7 @@ describe('the C1 rows', () => {
   });
 
   it('agent_payments_from_a_signed_limit', () => {
-    expect(read(ruleSentence(cards['rv-mandate'], words))).toBe('Claude can take agent payments up to **$20** from a signed limit');
+    expect(read(ruleSentence(cards['rv-mandate'], words))).toBe("Claude can take a visiting agent's payment, up to **$20**, from its signed limit");
     expect(line(ruleMeta(cards['rv-mandate'], words))).toBe('Charge within a signed limit · Anyone');
   });
 
@@ -132,9 +132,10 @@ describe('the C1 rows that join several tools', () => {
     expect(line(ruleMeta(row, turnerWords))).toBe('Save a lead, Request a callback and Emergency callback · Anyone');
   });
 
-  it('documents_and_charges_once_confirmed', () => {
+  it('documents_and_charges_for_the_verified_customer', () => {
+    // Who it is for is on the line under it, not in the sentence.
     const row = [cards['rv-docs'], cards['rv-charges']];
-    expect(read(ruleSentence(row, words))).toBe("Claude can share customers' own documents and charges, once they've confirmed it's them");
+    expect(read(ruleSentence(row, words))).toBe("Claude can share customers' own documents and charges");
     expect(line(ruleMeta(row, words))).toBe('Share a document and See charges · The customer, once verified');
   });
 });
@@ -179,15 +180,18 @@ describe('the always-on rules', () => {
 
 describe('any tool', () => {
   it('a_business_tool_reads_claude_can_use_its_title', () => {
-    const parts = ruleSentence(urgent, turnerWords);
-    expect(read(parts)).toBe('Claude can use emergency callback');
+    // A job that isn't the Desk's urgent one reads by its own title.
+    const intake: BusinessTools = new Map([['desk.new-client-intake', { title: 'New client intake', description: 'Asks new clients three questions.', config: { block: 'intake', questions: ['Which tax years?'] } }]]);
+    const job = { ...urgent, card_id: 'intake', applies_to: 'desk.new-client-intake' };
+    const parts = ruleSentence(job, { business: intake });
+    expect(read(parts)).toBe('Claude can use new client intake');
     // Its title is its own words, set off as user text inside the sentence.
-    expect(parts.filter((part) => part.user === true).map((part) => part.text)).toEqual(['emergency callback']);
-    expect(line(ruleMeta(urgent, turnerWords))).toBe('Emergency callback · Anyone');
-    expect(read(ruleSentence({ ...urgent, mode: 'ask' }, turnerWords))).toBe('Claude asks you before using emergency callback');
-    expect(read(ruleSentence({ ...urgent, mode: 'never' }, turnerWords))).toBe('Claude never uses emergency callback');
+    expect(parts.filter((part) => part.user === true).map((part) => part.text)).toEqual(['new client intake']);
+    expect(line(ruleMeta(job, { business: intake }))).toBe('New client intake · Anyone');
+    expect(read(ruleSentence({ ...job, mode: 'ask' }, { business: intake }))).toBe('Claude asks you before using new client intake');
+    expect(read(ruleSentence({ ...job, mode: 'never' }, { business: intake }))).toBe('Claude never uses new client intake');
     // An acronym keeps its capitals.
-    const sms = new Map([['desk.sms-reminder', { title: 'SMS reminder', description: 'Texts a reminder.', config: { block: 'urgent', urgent_when: 'x' } }]] as const);
+    const sms: BusinessTools = new Map([['desk.sms-reminder', { title: 'SMS reminder', description: 'Texts a reminder.', config: { block: 'intake', questions: ['x'] } }]]);
     expect(read(ruleSentence({ ...urgent, applies_to: 'desk.sms-reminder' }, { business: sms }))).toBe('Claude can use SMS reminder');
   });
 
@@ -249,7 +253,7 @@ describe('any tool', () => {
 
   it('a_person_rule_names_them', () => {
     const verified = card({ card_id: 'v', applies_to: 'native.book', mode: 'auto', who: 'verified' });
-    expect(read(ruleSentence(verified, words))).toBe("Claude can book visits, once they've confirmed it's them");
+    expect(read(ruleSentence(verified, words))).toBe('Claude can book visits');
     expect(line(ruleMeta(verified, words))).toBe('Book a visit · The customer, once verified');
   });
 });
@@ -376,5 +380,54 @@ describe("the rule cell's second line (REV-RULES-D, v354)", () => {
       ['ai', "Claude always says it's an AI", 'In every reply'],
       ['log', 'Claude logs every request, allowed or not, and shows it to you in Safety', null],
     ]);
+  });
+});
+
+describe("option A's sentences (REV-RULES-D and REV-SETUP-3, signed)", () => {
+  const anyone = (applies_to: string, mode: RuleCard['mode'], fields: Partial<RuleCard> = {}) => card({ card_id: `a:${applies_to}`, applies_to, mode, who: 'anyone', ...fields });
+
+  it('reads_each_built_in_tool_in_the_boards_words', () => {
+    expect(read(ruleSentence(anyone('native.find_slots', 'auto'), words))).toBe('Claude can show the times you have open');
+    expect(read(ruleSentence(anyone('native.capture_lead', 'auto'), words))).toBe('Claude can take a name and a way to reach them');
+    expect(read(ruleSentence(anyone('native.request_callback', 'auto'), words))).toBe('Claude can take callback requests');
+    expect(read(ruleSentence(anyone('native.start_verification', 'auto'), words))).toBe("Claude can send a code when someone asks to confirm it's them");
+    expect(read(ruleSentence(cards['rv-docs'], words))).toBe("Claude can share customers' **own documents**");
+    expect(read(ruleSentence(cards['rv-charges'], words))).toBe('Claude can show customers **their own charges**');
+    expect(read(ruleSentence(cards['rv-link'], words))).toBe('Claude can send payment links up to **$300**');
+    expect(read(ruleSentence(cards['rv-refund'], words))).toBe('Claude asks you before **any refund**');
+    expect(read(ruleSentence(cards['rv-quote'], words))).toBe('Claude can send quotes from your price list, at **list price**');
+  });
+
+  it('a_signed_limit_payment_reads_its_limit_or_the_signed_limit', () => {
+    // The agent's own signed limit bounds it; a card's amount, when it has one, is set off.
+    expect(read(ruleSentence(cards['rv-mandate'], words))).toBe("Claude can take a visiting agent's payment, up to **$20**, from its signed limit");
+    expect(read(ruleSentence(anyone('native.charge_mandate', 'auto'), words))).toBe("Claude can take a visiting agent's payment within **its signed limit**");
+  });
+
+  it('asks_in_the_setup_boards_words', () => {
+    expect(read(ruleSentence(anyone('native.quote', 'ask'), words))).toBe('Claude asks you before **any quote**');
+    expect(read(ruleSentence(anyone('native.payment_link', 'ask'), words))).toBe('Claude asks you before sending **payment links**');
+    expect(read(ruleSentence(anyone('native.release_document', 'ask'), words))).toBe('Claude asks you before sharing **documents**');
+    expect(read(ruleSentence(anyone('payments.list_charges', 'ask'), words))).toBe('Claude asks you before showing customers **their own charges**');
+    expect(read(ruleSentence(anyone('native.book', 'ask', { hours: { days: ['sat'], start: '09:00:00', end: '13:00:00' } }), words))).toBe('Claude asks you before booking on **Saturdays, 9:00 am to 1:00 pm**');
+  });
+
+  it('an_urgent_job_reads_as_urgent_callbacks_whatever_its_title', () => {
+    expect(read(ruleSentence(urgent, turnerWords))).toBe('Claude can take **urgent callbacks**, which alert you at once');
+    expect(read(ruleSentence({ ...urgent, mode: 'ask' }, turnerWords))).toBe('Claude asks you before taking **urgent callbacks**');
+    expect(read(ruleSentence({ ...urgent, mode: 'never' }, turnerWords))).toBe('Claude never takes **urgent callbacks**');
+    // Its own title still names it, above and on the meta line.
+    expect(line(ruleMeta(urgent, turnerWords))).toBe('Emergency callback · Anyone');
+  });
+
+  it('says_who_only_on_the_line_under_the_sentence', () => {
+    // The verified customer is on the cell's second line ("The customer, once verified"), so the
+    // sentence no longer says it.
+    const verified = card({ card_id: 'v', applies_to: 'native.book', mode: 'auto', who: 'verified' });
+    expect(read(ruleSentence(verified, words))).toBe('Claude can book visits');
+    expect(ruleQualifiers(verified, words)).toBe('The customer, once verified');
+    for (const sentence of [cards['rv-docs'], cards['rv-charges']].map((each) => read(ruleSentence(each, words)))) {
+      expect(sentence).not.toContain('confirmed');
+    }
   });
 });

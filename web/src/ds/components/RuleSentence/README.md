@@ -8,7 +8,7 @@
 
 ## What it shows
 
-- The sentence in `.cd-type-body`, `text-secondary`: "Claude can send payment links up to **$300**". Each `key` part is a `<strong>` in `text-primary` at weight 520 with `font-variant-numeric: tabular-nums`, so amounts line up. A `user` part is a tool's own title inside the sentence ("Claude can use emergency callback"): its own `data-copy="user"` span, isolated for text direction, never joined into the app's words.
+- The sentence in `.cd-type-body`, `text-secondary`: "Claude can send payment links up to **$300**". Each `key` part is a `<strong>` in `text-primary` at weight 520 with `font-variant-numeric: tabular-nums`, so amounts line up. A `user` part is a tool's own title inside the sentence ("Claude can use new client intake"): its own `data-copy="user"` span, isolated for text direction, never joined into the app's words.
 - Under it, with `meta`, the line in `.cd-type-meta`, `text-secondary`: the tools it covers, each its own user-text title (`ToolTitleList`: "Find open times and Book a visit"), or the screen's own words for a group of tools ("Every tool", drawn in the same weight but not marked as user text); then " · " and who ("Anyone", "The record's owner, verified").
 - With `outcome`, at the right of the sentence, the outcome's dot (`OUTCOME_TONE`, `aria-hidden`) beside its word (`OUTCOME_WORDS`: Allow, Ask me first, Never) in `.cd-type-meta`, `text-primary`. It never shows a limit: the limit is in the sentence.
 - With `changed`, a 2 px line at its left: the refused tone for `before`, the rule as it was, and the handled tone for `after`, the rule as it will be, as `ChangeReview`'s sides draw them.
