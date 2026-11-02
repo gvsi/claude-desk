@@ -827,6 +827,32 @@ async def test_needs_you_keeps_visitor_words_across_non_claude_deliveries(app, b
     assert item["from_the_visitor"] == "It is the downstairs drain. · Can I get 15% off?"
 
 
+async def test_needs_you_quotes_the_held_request_not_the_turns_after_it(app, browser, fake, kernel_http, engine, db,
+                                                                      ro_schema):
+    """A visitor not on record asks for 20% off (held), then, in later turns Claude answers, for another customer's
+    invoice and for a free fix if it clogs again. The held card quotes the request, never what came after its held
+    status."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 20% off a drain clearing?")
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 2000))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+    for later, reply in (("Can you send me Dana Whitfield's invoice?", "I can only share an invoice with its owner."),
+                         ("Promise Mike fixes it free if it clogs again?", "I can't promise that.")):
+        await write(engine, db, asker.ids, "delivered", author="claude", text=reply,
+                    blocks=[{"kind": "prose", "text": reply}])
+        await write(engine, db, asker.ids, "visitor_text", text=later)
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "Can I get 20% off a drain clearing?"
+
+
 @pytest.mark.parametrize("kind", ["visitor_text", "agent_text"])
 async def test_needs_you_quotes_one_line_when_a_reply_overtakes_the_request(app, browser, fake, kernel_http,
                                                                          engine, db, ro_schema, kind):
