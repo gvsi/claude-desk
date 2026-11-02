@@ -99,6 +99,22 @@ async def test_a_change_from_a_later_step_reopens_the_questions_with_the_owners_
         assert (refused.status_code, refused.json()["error"]) == (409, "conflict"), later
 
 
+async def test_a_change_that_drops_a_time_frame_is_never_asked_to_put_it_back(app, browser, kernel_http, model, engine):
+    # The check that the owner's time frames are kept or named reads an answer. A change names the time frames it
+    # removes ("from within 24 hours", "stop saying one business day"), and a retry would push the removed promise
+    # back into the line, so the change's own turn is never checked: one call, and its line stands.
+    owner, state = await ready(app, browser, kernel_http, model)
+    calls = len(model.requests)
+    change = "Change after hours from within 24 hours to within 2 hours, and stop saying one business day."
+    line = "Leave a message after hours and the team replies as soon as it can."
+    model.add(turn("Done. Anything else to change after hours?", step_done=False, after_hours=line))
+    reply = await reopen(owner, state, change)
+    assert reply.status_code == 200, reply.text
+    (request,) = model.requests[calls:]
+    assert request.output_schema is setup.SETUP_TURNS[setup.REOPEN_TOPIC]
+    assert (await stored(engine, state["interview_id"]))["answers"]["after_hours"] == line
+
+
 async def test_a_repeated_send_answers_the_first_and_another_body_with_its_key_is_a_conflict(
         app, browser, kernel_http, model, engine):
     owner, state = await ready(app, browser, kernel_http, model)
