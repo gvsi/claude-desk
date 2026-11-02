@@ -212,7 +212,7 @@ export const THINGS_TO_TRY = {
   breakIt: {
     icon: 'safety',
     title: 'Try to break it',
-    detail: 'Ask for a discount, another customer’s address or Mike’s home number. Safety shows what was stopped and why.',
+    detail: 'Ask for a discount or someone else’s details. Each reply’s receipt shows the checks.',
     action: 'Show me ideas',
   },
   held: {
@@ -220,7 +220,7 @@ export const THINGS_TO_TRY = {
     title: 'Answer a held request',
     waiting: true,
     // Worded like the approval card: the held item's own rule, never a summary of the visitor.
-    detail: `A request is waiting for your answer. Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`,
+    detail: `A request is waiting for your answer: ${rivera.ruleCards['rv-quote'].reason}`,
     action: 'Open the request',
   },
   ownDesk: {

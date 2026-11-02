@@ -8,6 +8,7 @@ import { useToday } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { RecordedHistoryLink } from './SinceLastNight.tsx';
 import { handledCount, steppedInCount, TODAY_COPY } from './copy.ts';
+import { useReadRecoveryFocus } from './useReadRecoveryFocus.ts';
 
 /** "1 booking", "2 bookings". */
 function plural(n: number, one: string, many: string): string {
@@ -164,6 +165,7 @@ export function ThisWeek({ deskId }: { deskId: string }) {
   const today = useToday(deskId, { retryOnMount: false });
   const failure = useReadFailure(today, { pausedRoute: 'today' });
   const titleId = useId();
+  const retryRef = useReadRecoveryFocus(() => document.getElementById(titleId));
   const week = today.data?.this_week;
   if (week === undefined) return null;
   const current = failure === null;
@@ -176,7 +178,7 @@ export function ThisWeek({ deskId }: { deskId: string }) {
       />
       <Card padding={16}>
         <div className="cd-week">
-          <ReadFailed failure={failure} />
+          <ReadFailed failure={failure} buttonRef={retryRef} />
           <Bookings week={week} current={current} />
           <Handled week={week} current={current} />
           <TurnedDown week={week} current={current} deskId={deskId} />

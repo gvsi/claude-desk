@@ -1,9 +1,10 @@
 import { useCallback, useId, type Ref } from 'react';
 
-import { Button, Notice, SectionHeader } from '../../ds/index.ts';
+import { Button, SectionHeader } from '../../ds/index.ts';
 import { HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
 import type { HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
+import { ReadFailed } from '../ReadFailed.tsx';
 import { heldOldestFirst } from '../useDesks.ts';
 import { useTodayNow } from './todayClock.ts';
 
@@ -36,6 +37,8 @@ export interface NeedsYouProps {
   answeredFocus: AnsweredFocus;
   /** The latest read failed: said first, over whatever was read before it. */
   readFailure: ReadFailure | null;
+  /** Tracks focus before the recovered read removes Try again, even if this section goes too. */
+  retryRef: Ref<HTMLButtonElement>;
   /** Lets Today check whether the section survived a dismissal after React commits. */
   sectionRef: Ref<HTMLElement>;
   /** Dismisses the answer, then focuses the adjacent answered card or section after React commits. */
@@ -50,7 +53,7 @@ export interface NeedsYouProps {
  * each open handoff. A request answered here stays where it was answered, with its final line and
  * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, sectionRef, onDismiss, onDone }: NeedsYouProps) {
+export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, retryRef, sectionRef, onDismiss, onDone }: NeedsYouProps) {
   const titleId = useId();
   const now = useTodayNow();
   const open = held.length + callbacks.length;
@@ -79,18 +82,7 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
   return (
     <section ref={sectionRef} className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
       <SectionHeader id={titleId} title="Needs you" count={open > 0 ? { n: open, label: countLabel(open) } : undefined} />
-      {readFailure !== null ? (
-        <Notice
-          tone="error"
-          action={
-            <Button variant="secondary" busy={readFailure.retrying} onClick={readFailure.retry}>
-              Try again
-            </Button>
-          }
-        >
-          {readFailure.line}
-        </Notice>
-      ) : null}
+      <ReadFailed failure={readFailure} buttonRef={retryRef} />
       {requests.length + callbacks.length > 0 ? (
         <ul className="cd-needs-you">
           {requests.map((item) => {

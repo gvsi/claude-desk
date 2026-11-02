@@ -15,7 +15,7 @@ import { routes } from '../app/routes.tsx';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
-import type { SetupState } from '../api/views.ts';
+import type { NeedsYouItem, SetupState } from '../api/views.ts';
 import { breakItIdeas } from '../lib/breakItIdeas.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
@@ -1862,7 +1862,9 @@ describe('Things to try ticks off', () => {
     draw.finish();
   });
 
-  it.each(['desktop', 'phone'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (viewport) => {
+  it.each(['desktop', 'phone', 'phone_under_a_long_rule'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (at) => {
+    const viewport = at === 'desktop' ? 'desktop' : 'phone';
+    if (at === 'phone_under_a_long_rule') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -1874,8 +1876,9 @@ describe('Things to try ticks off', () => {
     await allow.click();
     const frames = await watching;
 
-    // The phone row reserves its end line's room, so Needs you stays still through every frame.
-    expectHeldThenGlided(frames, row.element() as HTMLElement, viewport === 'phone');
+    // The phone row reserves its end line's room, so Needs you stays still through every frame;
+    // under a rule whose line runs past that room, it glides up once the check has drawn.
+    expectHeldThenGlided(frames, row.element() as HTMLElement, at === 'phone');
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
   });
@@ -2056,10 +2059,14 @@ describe('Things to try ticks off', () => {
   it.each([
     ['expired', 'desktop', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
     ['expired', 'phone', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
+    ['expired', 'phone_under_a_long_rule', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
     ['cancelled', 'desktop', 'The visitor cancelled before you answered. Nothing was done.', 'Cancelled before you answered. Nothing was done.'],
-  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, viewport, cardLine, rowLine) => {
+  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, at, cardLine, rowLine) => {
     // The answer comes back 409: the request had already ended. That isn't an answer, so nothing
-    // ticks; the row stays in its slot and says how it ended.
+    // ticks; the row stays in its slot and says how it ended. Under a long rule, its row on a phone
+    // is taller than the line it settles with, so what follows glides up.
+    const viewport = at === 'desktop' ? 'desktop' : 'phone';
+    if (at === 'phone_under_a_long_rule') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -2074,7 +2081,7 @@ describe('Things to try ticks off', () => {
     const frames = await watching;
 
     await expect.element(card.getByText(cardLine, { exact: true })).toBeVisible();
-    expectSettledInItsSlot(frames, item, viewport === 'phone');
+    expectSettledInItsSlot(frames, item, at === 'phone');
     expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
     await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
     // No check, no pill and no button, nor an empty place for one: the card right below has the request.
@@ -2502,8 +2509,8 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
     await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    // Safety lists what was stopped, not every request Claude declines in its own words.
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was stopped and why.", { exact: true })).toBeVisible();
+    // The detail points at each reply's receipt; Safety lists only what was stopped.
+    await expect.element(row.getByText("Ask for a discount or someone else's details. Each reply's receipt shows the checks.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.
@@ -2758,6 +2765,28 @@ interface ListFrame {
   rowTop: number;
   /** Where `next` starts, below the top of the list's section. */
   below: number;
+}
+
+/**
+ * A rule long enough that "Answer a held request" takes three lines on a phone, more than the room
+ * the row keeps for the longest line it can end on.
+ */
+const LONG_RULE = 'Quotes from your price list, at list price, with no discount unless you agree to it first.';
+
+/**
+ * Needs you names `LONG_RULE` for each held request, as it would for an owner's "Ask me first" rule
+ * worded that long. Every read is the mock's own, so an answered request leaves it as before.
+ */
+function holdUnderALongRule(): void {
+  worker.use(
+    http.get(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+      if ('network' in answer) return HttpResponse.error();
+      if (answer.status !== 200) return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+      const items = (answer.body as NeedsYouItem[]).map((item) => (item.decision ? { ...item, held_by: LONG_RULE } : item));
+      return HttpResponse.json(items as JsonBodyType, { status: 200 });
+    }),
+  );
 }
 
 /** A move this small (in px) can't show whether it eased: it fits in a frame or two whatever the curve. */
