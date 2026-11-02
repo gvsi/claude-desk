@@ -35,7 +35,8 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote: [
-      'Board signed on 2026-10-30; the title names the Desk and then the business, as the owner signed on 2026-11-02.',
+      'Signed on 2026-10-30.',
+      'The board\'s title is “Delete Main line?”; the title names the Desk and then its business, “Delete Main line for Turner Plumbing?” (owner decision, 2026-11-02).',
       "The general Dialog over Settings › General: “Delete Main line for Turner Plumbing?”, the body, and “Keep it” focused beside “Delete Desk”, fitted to this board (24 px padding, the body 12 px under the title, the answers at a screen’s main size).",
       'The board draws a refused dot beside the title and both delete buttons red; deleting a Desk is a neutral button over the general Dialog, not a danger dialog (owner decision, 2026-10-30), so there is no dot and the buttons are neutral.',
       'The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
