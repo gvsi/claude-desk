@@ -290,7 +290,9 @@ def cache_directory() -> Path:
 
 # Every lane's uploads queue on one shared connection, and Session Manager carries uploads slowly, so a keepalive
 # reply can wait minutes behind them. Allow ten minutes before giving up. A closed SSM stream still ends the master at
-# once, because the proxy process exits.
+# once, because the proxy process exits. A stream that goes silent without closing (a dropped network, a laptop
+# waking from sleep) is found only by these keepalives, so calls hang for up to ten minutes; docs/testbox.md says how
+# to close the connection by hand.
 MASTER_OPTIONS = ("ControlPersist=3600", "ConnectTimeout=30", "ServerAliveInterval=30", "ServerAliveCountMax=20")
 
 

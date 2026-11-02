@@ -94,11 +94,18 @@ keep their lane locks. sshd closes such a connection after ten minutes without a
 keepalive reply, which ends those calls and frees their lanes. A call that waits longer
 than that for its lane is stuck: tell the CI lane.
 
+A connection can also go silent without closing, after a dropped network or when the
+laptop wakes from sleep. Every lane's calls then hang until the keepalives give up, up to
+ten minutes. To close it at once, run
+`for s in ~/.cache/desk-testbox/*.sock; do ssh -S "$s" -O exit x; done`. This ends every
+running call from this laptop, and the next call opens a new connection.
+
 An upload over 1 MB, such as a lane's first (an 11 MB Git bundle and about 30 MB of
-source files), goes over a compressed connection of its own instead, which takes about
-6 seconds to open. The call then says "sending … MB over a connection of its own", and
+source files), goes over a compressed connection of its own instead, which takes a few
+seconds to open. The call then says "sending … MB over a connection of its own", and
 other lanes' calls don't wait behind it. Compression shrinks the source files about
-fourfold, so a new lane sends about 18 MB.
+fourfold. On a quiet network a new lane's whole upload took 34 seconds, and round trips
+on the shared connection stayed at 0.2 seconds throughout.
 
 The client compares source content hashes under the lane lock and sends only changed files,
 repairing sources edited or removed by a previous remote command and removing new
