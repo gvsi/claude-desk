@@ -1328,11 +1328,12 @@ describe('Conversations', () => {
     const on = seen;
 
     // A message arrives while focus is in the transcript: nothing moves under her. The held cards
-    // now quote her two latest lines, so the one above her can change height; the receipt she's on
+    // keep quoting the words that made each request, read again with the chat; the receipt she's on
     // stays where it was on screen.
     mockStore.world.visitorText(chat, 'Are you still there?');
     await expect.element(log(screen).getByText('Are you still there?', { exact: true })).toBeInTheDocument();
-    await expect.poll(() => heldCard(screen, REFUND_REASON).first().element().textContent).toContain('Are you still there?');
+    await readsMore('needsYou', 1);
+    expect(heldCard(screen, REFUND_REASON).first().element().textContent).not.toContain('Are you still there?');
     await readsMore('conversation', 2);
     expect(column.contains(lastReceipt.element())).toBe(true);
     await expect.poll(() => Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);

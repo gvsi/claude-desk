@@ -449,6 +449,27 @@ describe('the scripted Desk', () => {
     expect(answersFor({ ...DECISIONS.heldRefund, amountCents: 50_000 })).toContain('allow_person');
   });
 
+  it('a_held_request_quotes_the_words_that_made_it', async () => {
+    // The visitor keeps chatting after asking for a discount: the held request quotes their lines up
+    // to it, as the API's Needs you does, while the same chat's callback quotes its latest.
+    const { session } = await openChat();
+    await send('How much to clear a drain?');
+    await drain();
+    await send('Can I get 15% off?');
+    await drain();
+    await send('Can you come Tuesday?');
+    await drain();
+    await send('Please call me back');
+    await drain();
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    const chat = needsYou.filter((item) => item.session.session_id === session.session_id);
+    expect(chat.map((item) => [item.decision ? 'held' : 'handoff', item.from_the_visitor])).toEqual([
+      ['held', 'How much to clear a drain? · Can I get 15% off?'],
+      ['handoff', 'Can you come Tuesday? · Please call me back'],
+    ]);
+  });
+
   it('owner_alert_names_the_held_request', async () => {
     // Mike's Demo inbox alert for a hold names that held request; the code sent to a visitor names none.
     const before = mockStore.world.inbox.length;

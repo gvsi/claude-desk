@@ -242,9 +242,9 @@ export interface NeedsYouSession {
 interface NeedsYouBase {
   session: NeedsYouSession;
   /**
-   * What the visitor (or visiting agent) wrote most recently, labelled: their previous and last
-   * messages, oldest first, each with whitespace collapsed and, past 200 characters, cut to 199 and "…",
-   * joined with " · "; just the last when there's one. Untrusted.
+   * What the visitor (or visiting agent) wrote, labelled: their previous and last messages, a held
+   * request's up to the turn that made it, oldest first, each with whitespace collapsed and, past 200
+   * characters, cut to 199 and "…", joined with " · "; just the last when there's one. Untrusted.
    */
   from_the_visitor: string | null;
   /**
