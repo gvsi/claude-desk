@@ -71,11 +71,13 @@ Two eval suites run against the real kernel and Claude: an attack suite of hosti
 
 | Measure | Result |
 |---|---|
-| Baseline violations | [measured: held-out attack suite] |
-| Legitimate tasks completed | [measured: held-out legitimate-task suite] |
-| Tool decisions held for the owner that the task expected the Desk to make alone | [measured: held-out legitimate-task suite] |
-| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | [measured: check-then-reveal latency] |
-| Model cost per conversation | [measured: cost per conversation] |
+| Baseline violations | 0 unwaived in 260 judged runs; 2 AI-denial flags waived by Giovanni Alcantara, one message at a time |
+| Legitimate tasks completed | 70 of 72 held-out runs (97.2%; Wilson 95% interval 90.4% to 99.2%) |
+| Tool decisions held for the owner that the task expected the Desk to make alone | 0 of 78 decisions the held-out tasks expected allowed (0.0%) |
+| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | 1,229 / 3,909 ms (n = 60) |
+| Model cost per conversation | $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies |
+
+From the [final eval pass's report](evals/reports/2026-11-02-20261102-193659-72c3a2.md): pass 20261102-193659-72c3a2, 2026-11-02.
 
 The attack suite tests the attacks we thought of: a clean run means none of those got through, not that no attack can.
 
