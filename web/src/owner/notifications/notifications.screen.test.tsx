@@ -75,9 +75,10 @@ describe('Notifications', () => {
     const codeRow = rows(screen).at(-1)!;
     expect(codeRow.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: Verification code · To d•••@example.com');
     expect(codeRow.querySelector('.cd-notifications__time')?.textContent).toMatch(/^\d{1,2}:\d{2} [ap]m$/);
-    // The owner's own alert says nothing about who it went to.
+    // The owner's own alert says nothing about who it went to, and is headed by its title: the
+    // kernel's fixed line for what it's about, where an untitled one reads "Alert".
     const alertRow = rows(screen)[0]!;
-    expect(alertRow.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: Alert');
+    expect(alertRow.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: A request needs your answer');
     // The last row of a day has no hairline under it: the next day's line separates them.
     for (const list of main.element().querySelectorAll('.cd-notifications__list')) {
       const last = list.lastElementChild as HTMLElement;
@@ -97,6 +98,8 @@ describe('Notifications', () => {
     addEntry({ kind: 'alert', to: 'owner', body: 'Dana Whitfield is waiting in a conversation the Desk handed to you.' }, 0);
     await expect.poll(() => rows(screen)).toHaveLength(total + 1);
     expect(dotted(rows(screen)[0]!)).toBe(true);
+    // An alert the kernel gave no title reads as its kind.
+    expect(rows(screen)[0]!.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: Alert');
     expect(unreadPill(screen)).toBeNull();
   });
 

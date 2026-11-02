@@ -316,16 +316,18 @@ export const WithNotifications: Story = {
   },
 };
 
-const TEAM = { id: 'desk-rivera-team', name: 'Team' };
+const TEAM = { id: 'desk-lumen-sam', name: 'Sam Patel' };
 
 /** A team Desk, as N-R2-Vision-TeamDesk draws it: its own people's word, and Claude acts for you in the team's words. */
 export const TeamDesk: Story = {
   args: {
-    desks: [MAIN_LINE, TEAM],
+    business: 'Lumen Labs',
+    owner: { name: 'Sam Patel', status: 'Available for chats' },
+    desks: [{ id: 'desk-lumen-priya', name: 'Priya Nair' }, TEAM],
     currentDeskId: TEAM.id,
     current: 'conversations',
-    peopleLabel: 'Teammates',
-    counts: { conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
+    peopleLabel: 'Colleagues',
+    counts: { conversations: { n: 7, label: '7 colleague conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
     answeringDescription: 'Within your rules',
   },
   parameters: { canvas: 'N-R2-Vision-TeamDesk' },
@@ -334,11 +336,14 @@ export const TeamDesk: Story = {
     const answering = canvas.getByRole('switch', { name: 'Claude acts for you' });
     await expect(answering).toHaveAccessibleDescription('Within your rules');
     await expect(canvas.getByText('Within your rules')).toBeVisible();
-    await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Sam Patel' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: 'Switch business, current: Lumen Labs' })).toBeVisible();
+    await expect(canvas.getAllByText('Sam Patel', { exact: true })).toHaveLength(2);
+    await expect(canvas.getByRole('link', { name: 'Conversations 7 colleague conversations today' })).toBeVisible();
     await expect(navRows(canvasElement).map((row) => row.text)).toEqual([
       'Today',
       'Conversations',
-      'Teammates',
+      'Colleagues',
       'Rules',
       'Connectors',
       'Safety',

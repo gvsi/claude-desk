@@ -9,7 +9,7 @@
  * words and cut to 280 characters.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { useLocation, useParams } from 'react-router';
+import { useParams } from 'react-router';
 
 import type { PublicDesk } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -29,7 +29,7 @@ import {
 } from '../../ds/index.ts';
 import { browserLanguage } from '../../lib/language.ts';
 import { useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { brandFrom } from '../brand.ts';
+import { brandFrom, givenOwnerName } from '../brand.ts';
 import { PUBLIC_COPY } from '../copy.ts';
 import { useDocumentLanguage } from '../useDocumentLanguage.ts';
 import { useAgentSession } from './agentSession.ts';
@@ -37,7 +37,7 @@ import { AgentsCard } from './AgentsCard.tsx';
 import { AgentsSkeleton } from './AgentsSkeleton.tsx';
 import { ConnectYourOwn } from './ConnectYourOwn.tsx';
 import { AGENTS_COPY } from './copy.ts';
-import { SEND_ID, SendAgentPanel } from './SendAgentPanel.tsx';
+import { SendAgentPanel } from './SendAgentPanel.tsx';
 
 import './AgentCardPage.css';
 
@@ -117,17 +117,8 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
   const skills = desk.agent_card.filter((block) => block.text.trim() !== '');
   // The tab carries the page's title, in its language. Before the Desk shows, the app's name stays.
   useDocumentTitle(`${business} ${copy.forAgents}`);
-  const { hash } = useLocation();
   // One session for both actions, so a key and a run opened together belong to the same chat.
   const session = useAgentSession(slug);
-
-  // The public page's "Send an agent" link lands on the panel once the page has drawn it. The panel
-  // leads the page, so it is usually in view already: the page moves only when some of its card
-  // isn't, and as little as brings the card in (its top first, for a card taller than the window),
-  // so the title and the AI disclosure above it stay on screen when they can.
-  useLayoutEffect(() => {
-    if (hash === `#${SEND_ID}`) document.getElementById(SEND_ID)?.closest('section')?.scrollIntoView({ block: 'nearest' });
-  }, [hash]);
 
   return (
     <div className="cd-agents-page" lang={language}>
@@ -148,7 +139,8 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
         </div>
         <div className="cd-agents-page__cards">
           {/* The page's one live moment leads, right under the disclosure; the reference follows it. */}
-          <SendAgentPanel slug={slug} business={business} ownerName={desk.owner_display_name} session={session} language={language} />
+          {/* An owner who gave no name speaks as the business, "{business} said" (owner, 2026-11-02). */}
+          <SendAgentPanel slug={slug} business={business} ownerName={givenOwnerName(desk.owner_display_name) ?? business} session={session} language={language} />
           <AgentsCard title={copy.canDoTitle}>
             {skills.length > 0 ? (
               <ul className="cd-agents-page__list cd-type-body">

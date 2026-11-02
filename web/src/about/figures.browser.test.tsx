@@ -12,8 +12,9 @@ import { render } from 'vitest-browser-react';
 import { contrastRatio } from '../ds/contrast.ts';
 import { assertCleanCopy } from '../ds/test/copy.ts';
 import { loadWebFonts } from '../ds/test/fonts.ts';
+import { placeholderTexts } from '../test/about.ts';
 import { AXE_TAGS, tokenColor } from '../test/screen.ts';
-import { ABOUT_DOCUMENTS, type Block } from './documents.ts';
+import { ABOUT_DOCUMENTS, inlineText, type Block, type Inline } from './documents.ts';
 import { ReaderPage } from './ReaderPage.tsx';
 import { ARCHITECTURE_LABELS, ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
@@ -545,13 +546,7 @@ describe('ReadinessScale', () => {
 
 describe('MeasuresTable', () => {
   const measures = tableOf(ABOUT_DOCUMENTS.proposal.blocks, null);
-  const MEASURES = [
-    'Baseline violations',
-    'Legitimate tasks completed',
-    'False holds',
-    'Cost per conversation',
-    'Reveal delay, p50 and p95',
-  ];
+  const MEASURES = measures.rows.map((row) => inlineText(row[0] ?? []));
 
   it('measures_table_reads_as_a_list_on_a_phone', async () => {
     // On a desktop, a table: its header, then a row per measure led by the measure's name.
@@ -578,23 +573,55 @@ describe('MeasuresTable', () => {
       expect(shows?.querySelector('[data-label]')).toBeNull();
       expect(prototype?.querySelector('[data-label]')?.textContent).toBe('Prototype');
     }
-    // The placeholders stay visible as pills, the punctuation after one on its line, and nothing runs past the
-    // phone's width.
+    // Live placeholders follow the document, including none once its measurements are filled.
     const pills = [...narrow.container.querySelectorAll('dl .cd-pill')];
-    expect(pills).toHaveLength(5);
-    const glued = pills.map((pill) => pill.parentElement?.closest('.cd-about-nowrap')?.textContent?.slice(-1) ?? null);
-    expect(glued).toEqual([';', null, null, null, null]);
-    // The pill and its punctuation are one box that moves whole to the next line, as the owner's name does in the
-    // public chat's disclosure, so the punctuation sits on the pill's line.
-    const glue = pills[0]?.parentElement as HTMLElement;
-    expect([getComputedStyle(glue).display, getComputedStyle(glue).maxWidth]).toEqual(['inline-block', '100%']);
-    const mark = document.createRange();
-    mark.selectNodeContents(glue.lastChild as Node);
-    const [markBox, pillBox] = [mark.getBoundingClientRect(), (pills[0] as HTMLElement).getBoundingClientRect()];
-    expect(markBox.top < pillBox.bottom && markBox.bottom > pillBox.top, `"${glue.lastChild?.textContent}" beside the pill`).toBe(true);
+    expect(pills.map((pill) => pill.textContent)).toEqual(placeholderTexts([measures]));
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE.width);
     for (const el of narrow.container.querySelectorAll('dl *')) {
       expect(el.getBoundingClientRect().right, el.textContent ?? '').toBeLessThanOrEqual(PHONE.width);
+    }
+  });
+
+  it('measure_placeholders_render_until_filled', async () => {
+    const unfilled: Table = {
+      kind: 'table',
+      head: measures.head,
+      rows: [
+        [[{ kind: 'text', text: 'Violations' }], [{ kind: 'text', text: 'Actions outside the rules' }],
+          [{ kind: 'placeholder', text: 'measured: violations' }, { kind: 'text', text: '; the gate requires 0.' }]],
+        [[{ kind: 'text', text: 'Cost' }], [{ kind: 'text', text: 'Model cost' }],
+          [{ kind: 'placeholder', text: 'measured: cost' }]],
+      ],
+    };
+    const values = ['0', '$0.20'];
+    const filled: Table = {
+      ...unfilled,
+      rows: unfilled.rows.map((row, r) => row.map((cell) => cell.map((inline): Inline =>
+        inline.kind === 'placeholder' ? { kind: 'text', text: values[r] ?? '' } : inline))),
+    };
+    for (const [size, compact] of [[DESKTOP, false], [PHONE, true]] as const) {
+      await page.viewport(size.width, size.height);
+      const pending = await render(<MeasuresTable table={unfilled} compact={compact} />);
+      const pills = [...pending.container.querySelectorAll('.cd-pill')];
+      expect(pills.map((pill) => pill.textContent)).toEqual(['measured: violations', 'measured: cost']);
+      const glued = pills[0]?.closest<HTMLElement>('.cd-about-nowrap');
+      expect(glued?.textContent).toBe('measured: violations;');
+      // The pill and its punctuation are one box that moves whole to the next line, as the owner's name does in
+      // the public chat's disclosure, so the punctuation sits on the pill's line.
+      const glue = glued ?? document.body;
+      expect([getComputedStyle(glue).display, getComputedStyle(glue).maxWidth]).toEqual(['inline-block', '100%']);
+      const mark = document.createRange();
+      mark.selectNodeContents(glue.lastChild as Node);
+      const [markBox, pillBox] = [mark.getBoundingClientRect(), (pills[0] as HTMLElement).getBoundingClientRect()];
+      expect(markBox.top < pillBox.bottom && markBox.bottom > pillBox.top, `"${glue.lastChild?.textContent}" beside the pill`).toBe(true);
+      expect(pills[1]?.closest('.cd-about-nowrap')).toBeNull();
+      await pending.unmount();
+
+      const measured = await render(<MeasuresTable table={filled} compact={compact} />);
+      expect(measured.container.querySelectorAll('.cd-pill')).toHaveLength(0);
+      expect(measured.container.textContent).toContain('0; the gate requires 0.');
+      expect(measured.container.textContent).toContain('$0.20');
+      await measured.unmount();
     }
   });
 });

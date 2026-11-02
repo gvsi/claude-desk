@@ -11,15 +11,16 @@ import {
   type RefObject,
 } from 'react';
 
-import type { ApprovalAnswer, Decision, DecisionState } from '../../../api/contracts.ts';
+import type { ApprovalAnswer, Decision } from '../../../api/contracts.ts';
 import { Icon } from '../../icons/index.tsx';
 import { Button, type ButtonVariant } from '../Button/Button.tsx';
 import { Card } from '../Card/Card.tsx';
 import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { OWNER_STATE_WORDS, receiptTone } from '../MarginReceipt/receiptTone.ts';
-import { errorCopy } from '../Notice/errorCopy.ts';
 import { Notice } from '../Notice/Notice.tsx';
-import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
+import { Pill } from '../Pill/Pill.tsx';
+import type { StatusTone } from '../StatusDot/StatusDot.tsx';
+import { ApprovalStatus } from './ApprovalStatus.tsx';
 
 import './ApprovalCard.css';
 
@@ -61,21 +62,6 @@ const ANSWERS = {
 
 const ANSWER_ORDER = Object.keys(ANSWERS) as readonly ApprovalAnswer[];
 
-/** The card's status line in each state: waiting while held, then the final line. */
-const STATUS_LINES = {
-  held: 'Waiting for your answer',
-  approved: 'You allowed this.',
-  executed: "You allowed this. It's done.",
-  failed: "You allowed this, but it didn't go through. Nothing was done.",
-  unknown: 'You allowed this. Still confirming whether it went through.',
-  refused_at_execution: "Your rules changed before this ran, so it wasn't done.",
-  denied: 'You denied this.',
-  expired: 'This request expired before you answered. Nothing was done.',
-  cancelled: 'The visitor cancelled before you answered. Nothing was done.',
-  allowed: 'Your rules allowed this.',
-  refused: 'Your rules refused this.',
-} as const satisfies Record<DecisionState, string>;
-
 const SENDING_LINE = 'Sending your answer';
 const ERROR_LINE = "We couldn't confirm your answer. Try again, or reload to see where it stands.";
 
@@ -98,6 +84,11 @@ export interface ApprovalCardProps {
   context?: ReactNode;
   /** Where and when it was held: "Web chat, 2 min ago". */
   waiting: string;
+  /**
+   * The request came from a demo visitor's chat, an AI the owner started to play a customer: a "Demo
+   * visitor" pill after where and when it was held, so it's never taken for a real customer's.
+   */
+  demoVisitor?: boolean;
   /**
    * The verified person's name on record (`NeedsYouItem.session.display_name` when `verified`), so
    * Allow's rule answer reads "Only for {personName}, always". Leave it out for an agent or anyone
@@ -203,15 +194,6 @@ function itemWords(answer: ApprovalAnswer, personName: string | undefined): Reac
   return say(ANSWERS[answer].item, personName);
 }
 
-/**
- * The kernel's owner line for an execution refusal or a request the visitor's booking closed (a
- * `cancelled` one that carries it), else the state's line; unknown states ask for a reload.
- */
-function statusLine({ state, owner_plain }: Decision): string {
-  if ((state === 'refused_at_execution' || state === 'cancelled') && owner_plain != null) return owner_plain;
-  return Object.hasOwn(STATUS_LINES, state) ? STATUS_LINES[state] : errorCopy('conflict');
-}
-
 /** Each side the answers offer, in the card's order, with its answers. */
 function sidesOf(offered: readonly ApprovalAnswer[]): { side: Side; answers: ApprovalAnswer[] }[] {
   return SIDE_ORDER.map((side) => ({ side, answers: offered.filter((value) => ANSWERS[value].side === side) })).filter(
@@ -249,6 +231,7 @@ export function ApprovalCard({
   heldBy,
   context,
   waiting,
+  demoVisitor = false,
   personName,
   onAnswer,
   pending = false,
@@ -449,7 +432,7 @@ export function ApprovalCard({
 
   const sides = sidesOf(offered);
 
-  const words = { heldBy, context, waiting };
+  const words = { heldBy, context, waiting, demoVisitor };
   const regionClass = ['cd-approval-card', settle ? 'cd-approval-card--settling' : '', settle?.pulse ? 'cd-approval-card--pulse' : '']
     .filter(Boolean)
     .join(' ');
@@ -542,26 +525,25 @@ interface RequestWordsProps {
   heldBy: string | undefined;
   context: ReactNode;
   waiting: string;
+  demoVisitor: boolean;
   /** The answered layer's status line: the one `role="status"` node, which takes focus when the answers go. */
   statusRef?: RefObject<HTMLSpanElement>;
 }
 
 /** What the card says: its status line and when it was held, what was asked, and the rule that held it. */
-function RequestWords({ decision, tone, heldBy, context, waiting, statusRef }: RequestWordsProps) {
+function RequestWords({ decision, tone, heldBy, context, waiting, demoVisitor, statusRef }: RequestWordsProps) {
   return (
     <>
       <div className="cd-approval-card__top cd-type-caption">
-        <span className="cd-approval-card__status">
-          <StatusDot tone={tone} />
-          {statusRef ? (
-            <span ref={statusRef} role="status" tabIndex={-1} className="cd-approval-card__status-line">
-              {statusLine(decision)}
-            </span>
-          ) : (
-            <span className="cd-approval-card__status-line">{statusLine(decision)}</span>
-          )}
-        </span>
-        <span className="cd-approval-card__waiting">{waiting}</span>
+        <ApprovalStatus decision={decision} tone={tone} statusRef={statusRef} />
+        {demoVisitor ? (
+          <span className="cd-approval-card__waiting cd-approval-card__waiting--tagged">
+            {waiting}
+            <Pill>Demo visitor</Pill>
+          </span>
+        ) : (
+          <span className="cd-approval-card__waiting">{waiting}</span>
+        )}
       </div>
       <p className="cd-approval-card__reason cd-type-summary">{decision.reason_plain}</p>
       {context ? <p className="cd-approval-card__context cd-type-meta">{context}</p> : null}

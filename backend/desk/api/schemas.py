@@ -110,7 +110,9 @@ class DeskSummary(BaseModel):
     `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
     setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
     (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
-    Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."""
+    Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's.
+    `unread_conversations` is how many of the Desk's conversations are unread (`ConversationSummary.unread`), so the
+    owner's menu can show it on every page without reading the list."""
 
     desk_id: str
     slug: str
@@ -120,6 +122,7 @@ class DeskSummary(BaseModel):
     answering: bool
     setup: DeskSetup | None
     business_type: DemoTaskSet
+    unread_conversations: int
 
 
 class CopyOut(BaseModel):
@@ -246,7 +249,7 @@ class AgentCardSigning(BaseModel):
 
 class AgentCardOut(BaseModel):
     """`GET /api/public/desks/{slug}/agent_card`: built by code from `PUBLIC_ORIGIN` and the slug, with no model
-    text; what agents may do here, and the AI disclosure, are the kernel's `PublicDesk.agent_card`."""
+    text; what agents may do here, one block per ability, is the kernel's `PublicDesk.agent_card`."""
 
     endpoint: str
     signing: AgentCardSigning
@@ -297,6 +300,38 @@ class DemoAgentRun(BaseModel):
     task: DemoTask
     state: Literal["running", "done", "failed"]
     turns: list[AgentTurn]
+
+
+# How a demo visitor's run ended: its brief done (`finished`), the owner stopped it, the chat's session closed or its
+# stream ended (`chat_ended`), a cap (`limit`: ten messages, twelve model calls or fifteen minutes), the owner who took
+# the chat over stayed quiet (`owner_silent`), today's model budget (`budget`), or a model or HTTP failure (`failed`).
+DemoVisitorEnded = Literal["finished", "stopped_by_owner", "chat_ended", "limit", "owner_silent", "budget", "failed"]
+
+
+class DemoVisitorRun(BaseModel):
+    """A demo visitor's run: an AI that plays a customer in a visitor chat on the owner's own Desk
+    (`demo_visitors.py`), kept in the process's memory for an hour. `first_name` is its persona's, fixed text;
+    `session_id` is its visitor session, None until it is open; `messages_sent` counts the messages it sent the Desk;
+    `ended` says how a run that is no longer `running` ended (`done`: finished, limit or owner_silent; `stopped`:
+    stopped_by_owner or chat_ended; `failed`: budget or failed)."""
+
+    run_id: str
+    desk_id: str
+    first_name: str
+    session_id: str | None
+    state: Literal["running", "done", "stopped", "failed"]
+    messages_sent: int
+    ended: DemoVisitorEnded | None
+
+
+class DemoVisitorStarted(BaseModel):
+    """202 from `POST /api/owner/desks/{desk_id}/demo_visitor`: the demo visitor's run and its open visitor session,
+    on `desk_id`. While one runs in the copy, starting another answers that one, so `desk_id` can be another of the
+    copy's Desks. Poll `GET /api/owner/desks/{desk_id}/demo_visitor` for how it stands."""
+
+    run_id: str
+    desk_id: str
+    session_id: str
 
 
 # The owner's answers (Task 8) ------------------------------------------------------------------------------------
@@ -353,13 +388,16 @@ class AnsweringIn(BaseModel):
 
 class NeedsYouSession(BaseModel):
     """Who a held request or a callback request came from. `display_name` is the verified person's, else the name
-    the session's lead gave (untrusted text), else None."""
+    the session's lead gave (untrusted text), else a demo visitor's persona's first name, else None. `demo_visitor`
+    is true for a demo visitor's chat (`owner_reads.demo_visitors`), so Needs you never passes it off as a real
+    customer's."""
 
     session_id: str
     kind: ActorKind
     display_name: str | None
     verified: bool
     assurance: Assurance
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
 
 
 class Handoff(BaseModel):
@@ -451,7 +489,15 @@ class ConversationSummary(BaseModel):
     `latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored
     payment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide
     (`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its
-    outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview."""
+    outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview.
+
+    `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
+    `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
+    persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
+    runs were recorded there. `unread` is whether the visitor or the visiting agent wrote after the cursor the owner
+    last marked read (`POST /api/owner/conversations/{session_id}/read`), or wrote at all with nothing marked; what
+    Claude, the owner, the API and the kernel add never makes a conversation unread, and the owner's preview never
+    is."""
 
     session_id: str
     kind: ActorKind
@@ -469,18 +515,26 @@ class ConversationSummary(BaseModel):
     latest_outcome_starts_at: AwareDatetime | None = None
     latest_outcome_cents: int | None = None
     latest_outcome_cause: RefusalCause | None = None
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
+    demo_visitor_run_id: str | None = None  # the demo visitor run that opened the chat, when its mark names one
+    unread: bool
 
 
 class OwnerTranscript(BaseModel):
     """`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as
     the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).
     `typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,
-    kept in the API's memory and shown to the owner alone."""
+    kept in the API's memory and shown to the owner alone. `visitor_here`, presence too, is true while the visitor's
+    public chat stream is open, when a whisper reaches Claude at once; an agent holds no stream, so its session reads
+    false (Claude reads a whisper at its next request)."""
 
     state: SessionState
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
     replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
+    visitor_here: bool = False
+    demo_visitor: bool = False              # a demo visitor's chat: an AI the owner started plays the customer
+    demo_visitor_run_id: str | None = None  # the demo visitor run that opened it (`GET …/demo_visitor/{run_id}`)
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------
@@ -493,6 +547,15 @@ class GenerationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     generation: Annotated[int, Field(ge=0)]
+
+
+class ReadThroughIn(BaseModel):
+    """`POST /api/owner/conversations/{session_id}/read`: the transcript cursor the owner has seen (`TranscriptItem.n`,
+    the last item the screen showed). The marker only moves forward, and never past the session's newest row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    through: Annotated[int, Field(ge=0)]
 
 
 class OwnerMessageIn(BaseModel):
@@ -510,7 +573,9 @@ class BriefingItem(BaseModel):
     the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
     refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
     and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
-    refusals. Stopped drafts stay on Safety and out of the briefing."""
+    refusals. Stopped drafts stay on Safety and out of the briefing. `demo_visitor` is true for a thing in a demo
+    visitor's chat (`owner_reads.demo_visitors`), whose `display_name` is then its persona's first name when the chat
+    gave no name of its own."""
 
     kind: Literal["turned_down", "booking", "lead", "answer"]
     at: AwareDatetime
@@ -519,6 +584,7 @@ class BriefingItem(BaseModel):
     ref_id: str
     line: str | None
     cause: RefusalCause | None
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
 
 
 class BriefingNewest(BaseModel):
@@ -704,19 +770,28 @@ class SetupConsentIn(BaseModel):
 
 
 class SetupAnswerIn(BaseModel):
-    """`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
-    Naming the ask prevents a repeated answer from answering the next one."""
+    """`POST /api/owner/setup/{id}/answer`: the owner's answer to exactly one waiting question or card id, typed
+    (`text`), picked from the question's choices (`picks`) or both, never neither. Naming the ask prevents a repeated
+    answer from answering the next one. Picks answer a question, never a card: each is the exact text of one of its
+    choices, once, and more than one only when the question has `several` (422 `invalid` otherwise)."""
 
     model_config = ConfigDict(extra="forbid")
 
     question: SetupQuestion | None = None
     card: str | None = None
-    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    text: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = ""
+    picks: list[Annotated[str, StringConstraints(min_length=1, max_length=80)]] = Field([], max_length=4)
 
     @model_validator(mode="after")
     def one_ask(self) -> "SetupAnswerIn":
         if (self.question is None) == (self.card is None):
             raise ValueError("exactly one of question and card is required")
+        if not self.text and not self.picks:
+            raise ValueError("an answer needs text or picks")
+        if self.picks and self.card is not None:
+            raise ValueError("picks answer a question, never a card")
+        if len(set(self.picks)) != len(self.picks):
+            raise ValueError("each choice is picked at most once")
         return self
 
 
@@ -765,14 +840,16 @@ class SetupSuggestionsIn(BaseModel):
 
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
-    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
-    only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices, and `several`
+    marks one whose choices the owner may pick more than one of (`SetupAnswerIn.picks`); a card belongs only to a
+    card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
     themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
     false. Read-only: it only says what happened."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
     choices: list[Choice] = []
+    several: bool = False
     card: ProposalCard | None = None
     owner_decided: bool = False
 
@@ -1014,6 +1091,7 @@ class Lead(BaseModel):
     note: str | None
     created_at: AwareDatetime
     replayed: bool = False                  # recorded history: left in a session written into the copy, not a live one
+    demo_visitor: bool = False              # left in a demo visitor's chat (`owner_reads.demo_visitors`)
 
 
 class PeopleOut(BaseModel):

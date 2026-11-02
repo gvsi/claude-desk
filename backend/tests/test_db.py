@@ -814,6 +814,105 @@ def test_the_cap_edges_revision_runs_again_over_what_it_added(scratch):
                       " policy_version) VALUES ('act-again', 'copy-again', 'dec-again', 'intent', now(), 1)")
 
 
+DEMO_VISITOR_ROUTE_REVISION = "api_demo_visitor_route"
+
+
+def test_model_calls_take_the_demo_visitors_route(scratch):
+    """The demo visitor's model calls are recorded under a route of their own, and a route no code writes is still
+    refused. Its revision runs again over its own check, and a downgrade keeps the rows the route already holds (they
+    count toward the day's spend) while refusing new ones."""
+    admin = scratch.conn
+
+    def insert(route: str) -> None:
+        admin.execute("INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens,"
+                      " cache_write_tokens, output_tokens, latency_ms, stop_reason, created_at)"
+                      " VALUES ('copy-route', %s, 'claude-opus-5-5', 1200, 0, 0, 80, 2400, 'end_turn', now())", (route,))
+
+    def held() -> list[str]:
+        return [row[0] for row in admin.execute("SELECT route FROM app.model_calls WHERE copy_id = 'copy-route'")]
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DEMO_VISITOR_ROUTE_REVISION).down_revision
+    try:
+        insert("demo_visitor")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_agent")
+        scratch.migrate(command.stamp, before)
+        scratch.migrate(command.upgrade, DEMO_VISITOR_ROUTE_REVISION)     # again, over its own check
+        scratch.migrate(command.downgrade, before)
+        assert held() == ["demo_visitor"]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_visitor")
+        scratch.migrate(command.upgrade, "head")
+        insert("demo_visitor")
+        assert held() == ["demo_visitor", "demo_visitor"]
+    finally:
+        admin.execute("DELETE FROM app.model_calls WHERE copy_id = 'copy-route'")
+        scratch.migrate(command.upgrade, "head")
+
+
+def test_messages_take_the_demo_visitors_mark(scratch):
+    """The chat a demo visitor opens is marked in the API's transcript by a row of a kind of its own, and a kind no
+    code writes is still refused. Its revision runs again over its own check, and a downgrade keeps the marks already
+    written (the owner's reads still label those chats) while refusing new ones."""
+    admin = scratch.conn
+    written = iter(range(100))
+
+    def insert(kind: str) -> None:
+        admin.execute("INSERT INTO app.messages (message_id, copy_id, desk_id, session_id, kind, author, text,"
+                      " visibility) VALUES (%s, 'copy-mark', 'desk-mark', 'session-mark', %s, 'api', 'Riley', 'owner')",
+                      (f"m-mark-{next(written)}", kind))
+
+    def held() -> list[str]:
+        return [row[0] for row in admin.execute("SELECT kind FROM app.messages WHERE copy_id = 'copy-mark'")]
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DEMO_VISITOR_ROUTE_REVISION).down_revision
+    try:
+        insert("demo_visitor")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_agent")
+        scratch.migrate(command.stamp, before)
+        scratch.migrate(command.upgrade, DEMO_VISITOR_ROUTE_REVISION)     # again, over its own check
+        scratch.migrate(command.downgrade, before)
+        assert held() == ["demo_visitor"]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_visitor")
+        insert("annotation")                                              # the kinds before it still pass
+        scratch.migrate(command.upgrade, "head")
+        insert("demo_visitor")
+        assert held() == ["demo_visitor", "annotation", "demo_visitor"]
+    finally:
+        admin.execute("DELETE FROM app.messages WHERE copy_id = 'copy-mark'")
+        scratch.migrate(command.upgrade, "head")
+
+
+def test_the_demo_visitors_marks_are_indexed_and_both_checks_hold_for_every_row(scratch):
+    """The owner's reads find a Desk's demo visitor chats by a partial index over the marks alone, which the downgrade
+    drops; and both widened checks, added unvalidated so a live table is never locked for a full scan, are then
+    validated, so they hold for every row."""
+    admin = scratch.conn
+
+    def index() -> str | None:
+        row = admin.execute("SELECT indexdef FROM pg_indexes"
+                            " WHERE schemaname = 'app' AND indexname = 'messages_demo_visitor'").fetchone()
+        return row[0] if row else None
+
+    def validated() -> dict[str, bool]:
+        return dict(admin.execute("SELECT conname, convalidated FROM pg_constraint WHERE conname IN"
+                                  " ('messages_kind', 'model_calls_route')").fetchall())
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DEMO_VISITOR_ROUTE_REVISION).down_revision
+    try:
+        assert index() == ("CREATE INDEX messages_demo_visitor ON app.messages USING btree (copy_id, desk_id)"
+                           " WHERE (kind = 'demo_visitor'::text)")
+        assert validated() == {"messages_kind": True, "model_calls_route": True}
+        scratch.migrate(command.downgrade, before)
+        assert index() is None
+        scratch.migrate(command.upgrade, DEMO_VISITOR_ROUTE_REVISION)
+        assert index() is not None and validated() == {"messages_kind": True, "model_calls_route": True}
+    finally:
+        scratch.migrate(command.upgrade, "head")
+
+
 DOCUMENT_LINKS_REVISION = "01b_6_document_links"
 
 
@@ -1288,19 +1387,26 @@ def test_handoff_kinds_come_back_from_their_rows_under_forced_row_security(scrat
 
 
 def test_the_previous_release_writes_call_backs_as_it_did(scratch):
-    """During a deploy the previous release's kernel serves beside the migrated database, and it
-    writes a call-back's handoff naming no kind, beside any other open handoff of the session's, as
-    it always has: each insert still succeeds, as a call-back. One open handoff per session is kept
-    by this release's code, under the session row, not by the table."""
+    """During a deploy the previous release's kernel serves beside the migrated database. A
+    call-back's handoff written naming no kind is still a call-back, and a call-back request that
+    closes the session's open handoff, then writes its own in the same transaction, as the kernel
+    has since #238, still succeeds: the table's one open handoff per session
+    (kernel_one_open_handoff) admits it, and refuses only a second open one beside the first."""
     admin = scratch.conn
+
+    def insert(handoff_id: str) -> None:
+        admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
+                      " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
+                      (handoff_id, f"act-{handoff_id}"))
+
     try:
-        for handoff_id in ("handoff-old-a", "handoff-old-b"):
-            admin.execute("INSERT INTO kernel.handoffs (handoff_id, copy_id, desk_id, session_id, reason, status,"
-                          " action_id) VALUES (%s, 'copy-old', 'desk-old', 'session-old', 'Sam Lee', 'open', %s)",
-                          (handoff_id, f"act-{handoff_id}"))
+        insert("handoff-old-a")
+        with admin.transaction():
+            admin.execute("UPDATE kernel.handoffs SET status = 'done' WHERE handoff_id = 'handoff-old-a'")
+            insert("handoff-old-b")
         rows = admin.execute("SELECT handoff_id, kind, status, created_at FROM kernel.handoffs"
                              " WHERE copy_id = 'copy-old' ORDER BY handoff_id").fetchall()
-        assert rows == [("handoff-old-a", "callback", "open", None), ("handoff-old-b", "callback", "open", None)]
+        assert rows == [("handoff-old-a", "callback", "done", None), ("handoff-old-b", "callback", "open", None)]
     finally:
         admin.execute("DELETE FROM kernel.handoffs WHERE copy_id = 'copy-old'")
 
@@ -1538,6 +1644,32 @@ def test_business_tools_view_migration_goes_down_and_up(scratch):
                                    " WHERE oid = 'kernel_ro.tools'::regclass").fetchone()
     assert owner == "desk_ro_owner" and "security_barrier=true" in options
     assert not admin.execute("SELECT has_column_privilege('desk_api', 'kernel.tools', 'profile', 'SELECT')").fetchone()[0]
+
+
+def test_the_conversation_reads_revision_goes_down_and_up(scratch):
+    """api_conversation_reads adds the owner's read markers, a table of the API's own that desk_api reads and writes and
+    no other role reaches, and an index of the visitors' and agents' words for the unread reads. Its downgrade takes
+    both away, and head brings them back."""
+    admin = scratch.conn
+    below = ScriptDirectory.from_config(alembic_config()).get_revision("api_conversation_reads").down_revision
+
+    def present() -> tuple[bool, bool]:
+        return admin.execute("SELECT to_regclass('app.conversation_reads') IS NOT NULL,"
+                             " to_regclass('app.messages_said') IS NOT NULL").fetchone()
+
+    assert present() == (True, True)
+    scratch.migrate(command.downgrade, below)
+    try:
+        assert present() == (False, False)
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    assert present() == (True, True)
+    assert columns(admin, "app", "conversation_reads") == ["copy_id", "desk_id", "session_id", "read_through_n",
+                                                           "read_at", "created_at"]
+    for role, expected in (("desk_api", set(DML)), ("desk_kernel", set()), ("desk_mockpay", set())):
+        held = {privilege for privilege in (*DML, "TRUNCATE", "REFERENCES", "TRIGGER")
+                if has(admin, "has_table_privilege", role, "app.conversation_reads", privilege)}
+        assert held == expected, role
 
 
 def test_kernel_ro_reads_need_no_role_that_bypasses_row_security(admin):

@@ -2,17 +2,20 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, t
 import { useNavigate } from 'react-router';
 
 import type { Decision } from '../../api/contracts.ts';
+import { ApiError, newIdempotencyKey, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
 import { Button, Card, Icon, Notice, Pill, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
 import { breakItIdeas, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { VISION_ARTICLE } from '../../about/links.ts';
+import { conversationPath, type ConversationArrival } from '../conversations/status.ts';
 import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, isLive, useToday } from '../useDesks.ts';
 import { TODAY_COPY } from '../today/copy.ts';
 import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
-import { ANSWER_ROOM, THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
+import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
 import { useDoneSignals, type Done } from './useDoneSignals.ts';
 
 export interface ThingsToTryProps {
@@ -83,10 +86,12 @@ function routerClick(go: () => void) {
 }
 
 /**
- * Today's "Things to try": four ways into the demo, each with its next step, ticked off in place as
+ * Today's "Things to try": five ways into the demo, each with its next step, ticked off in place as
  * the owner does it, and counted in the line under the heading; then a link to the Vision article,
- * where a Desk could go next. From 640 px they are cards side by side, each next step at its foot;
- * on a phone they are rows in one card, each row the next step itself with a chevron at its right.
+ * where a Desk could go next. From 640 px they are cards, two across and three across from 1280 px,
+ * each next step at its foot; on a phone they are rows in one card, each row the next step itself
+ * with a chevron at its right. "Watch a demo visitor", second, starts an AI customer on the Desk and
+ * opens its conversation, wherever the run it answers is.
  * "Answer a held request" says where a request will show until something is held (no next step, so
  * the four keep their places), and stays once it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
  * it doesn't (a request that had expired or been cancelled, or an answer given on a Desk the list
@@ -136,7 +141,10 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
   }
 
   const link = customerLink(desk.slug, desk.desk_id);
-  const ownerName = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // The owner's first name, or null when they gave none: setup's fallback ("Owner") then stands in
+  // for a name, and the card says "the owner" instead, its idea speaking as the business.
+  const given = givenOwnerName(business.owner_display_name);
+  const ownerName = given === null ? null : (today.data?.greeting_name ?? firstName(given)).trim() || null;
   // "Answer a held request": done once answered; else waiting while a request is held (or its answer
   // is still out); else settled, in its slot, by an answer given here that the list doesn't count;
   // else empty: where a request will show, with no next step.
@@ -179,7 +187,8 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             end={rowDone(signals.done.chat, CHAT.done)}
             step={{ label: 'Open your public page', href: link, external: true }}
           />
-          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null, signals.onStartingDesk)} />
+          <DemoVisitorThing deskId={desk.desk_id} end={rowDone(signals.done.demo, null, false)} />
+          <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} business={business.name} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null, signals.onStartingDesk)} />
           <Thing
             icon="clock"
             title={ANSWER.title}
@@ -217,6 +226,8 @@ interface Step {
   onClick?: (event: MouseEvent<HTMLButtonElement | HTMLAnchorElement>) => void;
   /** A step that shows or hides something under the row: whether it is showing. */
   expanded?: boolean;
+  /** Waiting for what the step started: the card's button spins, and the row's chevron does nothing more. */
+  busy?: boolean;
 }
 
 interface ThingProps {
@@ -225,6 +236,11 @@ interface ThingProps {
   /** A held dot beside the title: something is waiting. */
   held?: boolean;
   detail: ReactNode;
+  /**
+   * The detail says something went wrong: it is an alert, drawn anew each time this changes, so a
+   * screen reader hears it again; undefined while it doesn't.
+   */
+  alert?: number;
   /** Keep room for the longest end line while an answer waits, so ending never grows the row. */
   detailRoom?: string;
   /** Shown under the detail, across the row. */
@@ -358,7 +374,7 @@ function useTickInPlace(done: boolean, eases: boolean) {
  * comes in, when the row ends in view; a row that ended at load, or before it was drawn (a list
  * shown again), is drawn still.
  */
-function Thing({ icon, title, held = false, detail, detailRoom, below, end = null, step }: ThingProps) {
+function Thing({ icon, title, held = false, detail, alert, detailRoom, below, end = null, step }: ThingProps) {
   const titleId = useId();
   const detailId = useId();
   // Ended when it was drawn: drawn still. A row that waits again (a new request held) ends in view next time.
@@ -380,7 +396,13 @@ function Thing({ icon, title, held = false, detail, detailRoom, below, end = nul
           {title}
           {held && end === null ? <StatusDot tone="held" /> : null}
         </h3>
-        <p id={detailId} className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'} data-room={end === null ? detailRoom : undefined}>
+        <p
+          key={alert === undefined || end !== null ? 'detail' : `alert-${alert}`}
+          id={detailId}
+          role={alert === undefined || end !== null ? undefined : 'alert'}
+          className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}
+          data-room={end === null ? detailRoom : undefined}
+        >
           <span className="cd-things__detail-now">{end?.line ?? detail}</span>
         </p>
       </div>
@@ -393,7 +415,7 @@ function Thing({ icon, title, held = false, detail, detailRoom, below, end = nul
                 {step.label}
               </Button>
             ) : (
-              <Button variant="secondary" onClick={step.onClick}>
+              <Button variant="secondary" busy={step.busy} onClick={step.onClick}>
                 {step.label}
               </Button>
             )}
@@ -446,10 +468,61 @@ function RowStep({ step, labelledBy, describedBy }: { step: Step; labelledBy: st
       aria-labelledby={labelledBy}
       aria-describedby={describedBy}
       aria-expanded={step.expanded}
-      onClick={step.onClick}
+      aria-busy={step.busy || undefined}
+      onClick={step.busy ? undefined : step.onClick}
     >
       {chevron}
     </button>
+  );
+}
+
+/**
+ * "Watch a demo visitor": starts an AI that plays a customer in a chat on this Desk, then opens that
+ * conversation, where Take over and Whisper are. The start answers the copy's demo visitor already
+ * going when there is one, possibly on another of its Desks, so the page opened is the answer's
+ * Desk and chat, never only this one's; the conversation is told which run it watches. Each click
+ * sends its own key. A start that fails for any reason says so in the detail's place, after a
+ * refused dot, as an alert, and the button stays to try again; a session that ended is the app's to
+ * handle.
+ */
+function DemoVisitorThing({ deskId, end }: { deskId: string; end: RowEnd | null }) {
+  const navigate = useNavigate();
+  const [starting, setStarting] = useState(false);
+  // How many starts have failed in this view: each failure draws its line anew, so it is heard again.
+  const [failures, setFailures] = useState(0);
+
+  const start = async () => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const run = await request('startDemoVisitor', { params: { desk_id: deskId }, body: { idempotency_key: newIdempotencyKey() } });
+      const arrival: ConversationArrival = { demoVisitorRun: run.run_id };
+      void navigate(conversationPath(run.desk_id, run.session_id), { state: arrival });
+    } catch (err) {
+      if (!(err instanceof ApiError && err.kind === 'unauthorized')) setFailures((n) => n + 1);
+      setStarting(false);
+    }
+  };
+
+  const failed = failures > 0;
+  return (
+    <Thing
+      icon={DEMO_VISITOR_THING.icon}
+      title={DEMO_VISITOR_THING.title}
+      detail={
+        failed ? (
+          <>
+            <StatusDot tone="refused" />
+            {DEMO_VISITOR_THING.startFailed}
+          </>
+        ) : (
+          DEMO_VISITOR_THING.detail
+        )
+      }
+      alert={failed ? failures : undefined}
+      end={end}
+      step={{ label: DEMO_VISITOR_THING.start, busy: starting, onClick: () => void start() }}
+    />
   );
 }
 
@@ -474,11 +547,12 @@ function openByHand(href: string): ReactNode {
   );
 }
 
-function BreakIt({ slug, deskId, ownerName, end }: { slug: string; deskId: string; ownerName: string; end: RowEnd | null }) {
+function BreakIt({ slug, deskId, ownerName, business, end }: { slug: string; deskId: string; ownerName: string | null; business: string; end: RowEnd | null }) {
   const [showing, setShowing] = useState(false);
   const [pick, setPick] = useState<Pick | null>(null);
-  // The ideas in this Desk's own words: the one that speaks as the owner names this Desk's owner.
-  const ideas = breakItIdeas(ownerName);
+  // The ideas in this Desk's own words: the one that speaks as the owner names this Desk's owner,
+  // or the business when the owner gave no name.
+  const ideas = breakItIdeas(ownerName, business);
 
   const onPick = (text: string) => {
     const idea = ideas.find((each) => each.text === text);

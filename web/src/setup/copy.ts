@@ -172,6 +172,8 @@ export const SETUP_COPY = {
     dismiss: 'Dismiss', other: 'Something else…',
     upArrow: 'Up arrow', downArrow: 'Down arrow',
     move: 'to move', pick: 'to pick', send: 'to send', typeInstead: 'to type instead',
+    /** A question that takes several answers: Space's line in its hint, and the button that sends the picks. */
+    toggle: 'to toggle', sendPicks: 'Send',
     allow: 'Yes, use it',
     decline: "No, I'll type it",
     composerLabel: 'Your answer',

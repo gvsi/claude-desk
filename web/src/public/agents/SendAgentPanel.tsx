@@ -17,7 +17,7 @@
  * The tasks take the Desk's own words (plan 09, C2): the panel reads the Desk's set once, with the
  * visitor's session (`agentTasks`), and offers the tasks once it has it; a set it can't read gives
  * plain words for any business (`FALLBACK_TASK_SET`). Only the tasks the Desk lists are offered;
- * older or unreadable lists offer all three. The set is a key, so every word is the page's.
+ * older or unreadable lists offer all four. The set is a key, so every word is the page's.
  *
  * Each of the agent's requests is titled by code, with the chosen task first and "Signed request"
  * after, and quotes the request as the agent sent it (its turn's `text`) under the title: the
@@ -30,7 +30,8 @@
  * transcript (`usePaymentLinks`). They are in English, the
  * language the built-in agent writes in, so their cards' chrome is too.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
 
 import { ApiError, isUncertain, newIdempotencyKey, request } from '../../api/http.ts';
 import type { AgentTasks, AgentTurn, DemoAgentRun } from '../../api/views.ts';
@@ -67,6 +68,7 @@ import {
   AGENTS_COPY,
   DEMO_TASKS,
   DEMO_TASK_COPY,
+  DEMO_TASK_ROWS,
   FALLBACK_TASK_SET,
   agentStartLostLine,
   isDemoTaskSet,
@@ -162,7 +164,7 @@ const IDLE: PanelState = { status: 'idle', task: null, key: null, keyMadeAt: nul
 
 const FALLBACK_TASKS: AgentTasks = { task_set: FALLBACK_TASK_SET, tasks: [...DEMO_TASKS] };
 
-/** Read keys only, keeping the page's order and all three tasks when the response isn't usable. */
+/** Read keys only, keeping the page's order and all four tasks when the response isn't usable. */
 function taskChoices(read: unknown): AgentTasks {
   if (read === null || typeof read !== 'object' || !('task_set' in read) || !isDemoTaskSet(read.task_set)) return FALLBACK_TASKS;
   const tasks = 'tasks' in read ? read.tasks : undefined;
@@ -250,6 +252,12 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
   // Which words the Desk's tasks take: read once with the visitor's session, null until then.
   const [choices, setChoices] = useState<AgentTasks | null>(null);
   const taskSet = choices?.task_set ?? null;
+  const { hash } = useLocation();
+  // Land on the finished task list: four chips can wrap differently from their loading shapes.
+  // Move only as far as needed, leaving the page's title and disclosure visible when they fit.
+  useLayoutEffect(() => {
+    if (choices !== null && hash === `#${SEND_ID}`) titleRef.current?.closest('section')?.scrollIntoView({ block: 'nearest' });
+  }, [hash, choices]);
   const setRead = useRef<Promise<AgentTasks> | null>(null);
   useEffect(() => {
     let live = true;
@@ -427,11 +435,19 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       </Notice>
     );
   }
-  // Until the Desk's set is read, the tasks' shapes hold their place, as the page's skeleton draws them.
+  // Each kind wraps on its own. Until the set is read, the same rows hold the chips' places, as the
+  // page's skeleton draws them.
   const chips = !OFFERS_TASKS.has(status) ? null : taskSet === null ? (
     <TaskChipShapes language={language} loading />
   ) : (
-    <SuggestionChips label={copy.tasksLabel} suggestions={(choices?.tasks ?? DEMO_TASKS).map((t) => words[t])} onPick={pick} />
+    <div className="cd-agents-card__tasks">
+      {DEMO_TASK_ROWS.map((row) => {
+        const tasks = row.filter((t) => (choices?.tasks ?? DEMO_TASKS).includes(t));
+        return tasks.length === 0 ? null : (
+          <SuggestionChips key={row[0]} label={copy.tasksLabel} suggestions={tasks.map((t) => words[t])} onPick={pick} />
+        );
+      })}
+    </div>
   );
   // After a run that finished, failed or is gone, the tasks come at its end, under its last line
   // (boards 04 and 05); otherwise they sit under the signed limit (board 03).

@@ -177,6 +177,7 @@ async def new_owner(app, browser, fake, kernel_http) -> Owner:
 
 # Activity, made as the kernel and the API make it ------------------------------------------------------------
 
+WHO = {"name": "Jane Doe", "contact": "jane@example.com"}    # who a stranger's booking is for (#740)
 _CALL_IDS = itertools.count(1)
 
 
@@ -296,7 +297,7 @@ class Scene:
         self.fake.now = when
         desk = self.fake.desks[self.owner.desk_id]
         slot = max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)
-        decision, result = await who.run("native.book", {"slot_id": slot})
+        decision, result = await who.run("native.book", {"slot_id": slot, **WHO})
         assert result.state == "succeeded"
         return decision
 
@@ -413,7 +414,7 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
                    "business_name": "Turner Plumbing",
                    "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,
-                   "setup": None, "business_type": "rivera"}]}]
+                   "setup": None, "business_type": "rivera", "unread_conversations": 0}]}]
     assert other.desk_id not in listed.text and fake.desks[other.desk_id].business_id not in listed.text
     assert (await browser(app).get("/api/owner/desks")).status_code == 401          # no owner cookie
 
@@ -672,13 +673,13 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
         "held_at": fake.decisions[seeded].created_at.isoformat().replace("+00:00", "Z"),
         "handoff": None,
         "session": {"session_id": fake.decisions[seeded].decision.session_id, "kind": "visitor",
-                    "display_name": None, "verified": False, "assurance": "none"},
+                    "display_name": None, "verified": False, "assurance": "none", "demo_visitor": False},
         "from_the_visitor": None, "claude_summary": None}
     assert first["decision"]["answers"] == ["allow_once", "deny_once"]        # a limit hold: no "Deny always"
     assert second["decision"]["decision_id"] == dana_hold.decision_id and second["handoff"] is None
     assert second["decision"]["answers"] == ["allow_once", "allow_person", "deny_once"]
     assert second["session"] == {"session_id": dana.session_id, "kind": "visitor", "display_name": "Dana Whitfield",
-                                 "verified": True, "assurance": "demo_code"}
+                                 "verified": True, "assurance": "demo_code", "demo_visitor": False}
     assert second["from_the_visitor"] == "Could you do 10% off the drain clearing?"
     assert third == {
         "decision": None, "held_by": None, "held_at": None,
@@ -686,7 +687,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                     "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None,
                     "status": "open", "kind": "callback"},
         "session": {"session_id": caller.session_id, "kind": "visitor", "display_name": "Sam Ortiz",
-                    "verified": False, "assurance": "none"},
+                    "verified": False, "assurance": "none", "demo_visitor": False},
         "from_the_visitor": "Water everywhere, please call me · It's the heater in the garage",   # the last two
         "claude_summary": None}
     # each held request was read from the kernel, with the owner's credential, which applies expiry
@@ -695,6 +696,30 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                                                          for decision_id in (seeded, dana_hold.decision_id))
     assert all(call.headers[OWNER] == owner.token for call in reads)
 
+
+
+async def test_needs_you_tags_a_demo_visitors_requests_by_its_persona(app, browser, fake, kernel_http, engine, db):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    seeded = seeded_hold(fake, owner)
+    fake.now += timedelta(minutes=5)
+    demo = await guest(kernel_http, fake, owner)
+    await write(engine, db, demo.ids, "demo_visitor", text="Riley")        # the mark its run writes as it opens
+    await write(engine, db, demo.ids, "visitor_text", text="Could I get 10% off as a returning customer?")
+    held = await demo.decide("native.quote", discounted_quote(fake, owner))
+    await demo.run("native.request_callback", {"name": "Riley Morgan", "contact": "riley.morgan@example.com",
+                                               "reason": "Kitchen sink leaking"})
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    # Its held request and its call-back request say it's the demo visitor, named by its persona as Conversations
+    # names it; the seed's real visitor's request never does.
+    seeded_item, held_item, callback = listed.json()
+    assert seeded_item["decision"]["decision_id"] == seeded and seeded_item["session"]["demo_visitor"] is False
+    assert held_item["decision"]["decision_id"] == held.decision_id
+    assert held_item["session"] == {"session_id": demo.session_id, "kind": "visitor", "display_name": "Riley",
+                                    "verified": False, "assurance": "none", "demo_visitor": True}
+    assert callback["handoff"]["session_id"] == demo.session_id and callback["session"] == held_item["session"]
 
 
 async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(app, browser, fake, kernel_http,
@@ -963,7 +988,7 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
                     "reason": "The Desk handed this to you.", "callback_window": None, "status": "open",
                     "kind": "card"},
         "session": {"session_id": handed.session_id, "kind": "visitor", "display_name": None, "verified": False,
-                    "assurance": "none"},
+                    "assurance": "none", "demo_visitor": False},
         "from_the_visitor": "How much is a new water heater?", "claude_summary": None}
     assert handoffs[caller.session_id]["handoff"] == {
         "handoff_id": opened[caller.session_id], "session_id": caller.session_id,
@@ -1003,6 +1028,26 @@ async def test_handoff_done_leaves_needs_you(app, browser, fake, kernel_http):
     assert (unknown.status_code, unknown.json()) == (404, {"error": "not_found"})
 
 
+async def test_a_superseded_handoff_is_not_waiting_for_the_owner(app, browser, fake, kernel_http):
+    """A handoff the one-open revision superseded (kernel_one_open_handoff) is `superseded` in kernel_ro.handoffs.
+    Needs you lists only open handoffs, so it never reaches the `Handoff` schema, whose status is open or done; and
+    the owner's mark of done on it is the kernel's 409, as on one already done."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    caller = await guest(kernel_http, fake, owner)
+    await caller.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                                 "reason": "Leaking water heater"})
+    (handoff_id,) = fake.handoffs
+    fake.handoffs[handoff_id]["status"] = "superseded"
+    fake._put("handoffs", (handoff_id,), dict(fake.handoffs[handoff_id]))
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    assert [item for item in listed.json() if item["handoff"] is not None] == []
+    done = await owner.browser.post(f"/api/owner/handoffs/{handoff_id}/done")
+    assert (done.status_code, done.json()) == (409, {"error": "kernel", "code": "conflict"})
+
+
 async def test_expired_hold_refreshes_on_read(app, browser, fake, kernel_http, ro_schema, api_conn):
     owner = await new_owner(app, browser, fake, kernel_http)
     seeded = seeded_hold(fake, owner)
@@ -1034,7 +1079,7 @@ async def test_a_booking_takes_its_sessions_earlier_discount_quote_off_needs_you
     fake.now += timedelta(minutes=2)
     desk = fake.desks[owner.desk_id]
     slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
-    await neighbour.run("native.book", {"slot_id": slot})
+    await neighbour.run("native.book", {"slot_id": slot, **WHO})
 
     listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
 
@@ -1042,7 +1087,8 @@ async def test_a_booking_takes_its_sessions_earlier_discount_quote_off_needs_you
     assert [item["decision"]["decision_id"] for item in listed.json() if item["decision"]] == [seeded]
     ro = KernelRO(api_conn, owner.copy_id, ro_schema)
     assert (await ro.one("decisions", decision_id=asked.decision_id))["state"] == "cancelled"
-    assert (await owner.get(f"decisions/{asked.decision_id}")).json()["visitor_plain"] == "Cancelled"
+    assert (await owner.get(f"decisions/{asked.decision_id}")).json()["visitor_plain"] == (
+        "Closed: your booking replaced this request")
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["needs_you_count"] == 1
 
 
@@ -1211,11 +1257,12 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert brief["newest"] == {
         "turned_down": {"kind": "turned_down", "at": stamp(local(2026, 10, 29, 20)),
                         "session_id": refused_chat.session_id, "display_name": None,
-                        "ref_id": refused.decision_id, "line": refused.reason_plain, "cause": "tool_not_available"},
+                        "ref_id": refused.decision_id, "line": refused.reason_plain, "cause": "tool_not_available", "demo_visitor": False},
         "booking": {"kind": "booking", "at": stamp(local(2026, 10, 29, 22)), "session_id": booked_chat.session_id,
-                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain, "cause": None},
+                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain, "cause": None, "demo_visitor": False},
         "lead_or_answer": {"kind": "answer", "at": stamp(local(2026, 10, 30, 7, 1)), "session_id": answered.session_id,
-                           "display_name": None, "ref_id": answered.session_id, "line": None, "cause": None}}
+                           "display_name": None, "ref_id": answered.session_id, "line": None, "cause": None,
+                           "demo_visitor": False}}
     listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()
     assert listed["since"] == brief["since"]
     assert [(item["kind"], item["ref_id"]) for item in listed["items"]] == [
@@ -1224,7 +1271,7 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert listed["items"][3]["line"] == refused.reason_plain
     assert listed["items"][4] == {"kind": "lead", "at": stamp(local(2026, 10, 29, 18)),
                                   "session_id": lead_chat.session_id, "display_name": "Sam Ortiz", "ref_id": lead_id,
-                                  "line": "Call after 5, the side gate", "cause": None}
+                                  "line": "Call after 5, the side gate", "cause": None, "demo_visitor": False}
     # computed from the rows on each read: polling gives the same briefing
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"] == brief
 
@@ -1477,7 +1524,7 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     visitor = await scene.visitor(when)
     await scene.text(visitor, when, 'Book a consult, using the side entrance.')
     slot = max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)
-    decision, result = await visitor.run(tool.tool, {'slot_id': slot, 'note': 'Use the side entrance.'})
+    decision, result = await visitor.run(tool.tool, {'slot_id': slot, 'note': 'Use the side entrance.', **WHO})
     assert result.state == 'succeeded'
     await scene.reply(visitor, when + timedelta(seconds=30))
     clock.now = local(2026, 10, 30, 9)
@@ -1487,10 +1534,67 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     assert today['briefing']['newest']['lead_or_answer'] is None
     [item] = (await owner.get(f'desks/{owner.desk_id}/briefing')).json()['items']
     assert (item['kind'], item['ref_id']) == ('booking', decision.decision_id)
-    assert 'Claude\'s note: “Use the side entrance.”' in item['line']
+    assert 'Claude\'s note: “jane@example.com”, “Jane Doe”, “Use the side entrance.”' in item['line']
     listed = (await owner.get(f'desks/{owner.desk_id}/conversations')).json()
     assert [row['latest_outcome'] for row in listed if row['session_id'] == visitor.session_id] == ['visit_booked']
 
+
+
+async def test_a_demo_visitors_booking_answer_and_lead_are_flagged_and_named_by_its_persona(scene, clock):
+    # Two demo visitors' chats since last night: one books and leaves a lead, the other is answered by Claude alone;
+    # beside them a real visitor's lead.
+    booking_demo = await scene.visitor(local(2026, 10, 29, 19))
+    await write(scene.engine, scene.admin, booking_demo.ids, "demo_visitor", local(2026, 10, 29, 19), text="Riley",
+                ref_id="visitor-one")
+    await scene.text(booking_demo, local(2026, 10, 29, 19))
+    booked = await scene.booking(booking_demo, local(2026, 10, 29, 19, 1))
+    demo_lead = await scene.lead(booking_demo, local(2026, 10, 29, 19, 2), name="Riley Morgan")
+    answered_demo = await scene.visitor(local(2026, 10, 29, 20))
+    await write(scene.engine, scene.admin, answered_demo.ids, "demo_visitor", local(2026, 10, 29, 20), text="Riley",
+                ref_id="visitor-two")
+    await scene.text(answered_demo, local(2026, 10, 29, 20))
+    await scene.reply(answered_demo, local(2026, 10, 29, 20, 1))
+    real = await scene.visitor(local(2026, 10, 29, 21))
+    real_lead = await scene.lead(real, local(2026, 10, 29, 21))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+    flagged = {(item["kind"], item["ref_id"]): (item["demo_visitor"], item["display_name"]) for item in listed}
+    # Its booking and answer say they're a demo visitor's, named by its persona where it gave no name of its own.
+    assert flagged[("booking", booked.decision_id)] == (True, "Riley Morgan")
+    assert flagged[("answer", answered_demo.session_id)] == (True, "Riley")
+    assert flagged[("lead", demo_lead)] == (True, "Riley Morgan")
+    assert flagged[("lead", real_lead)] == (False, "Sam Ortiz")
+    newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]
+    assert (newest["booking"]["demo_visitor"], newest["lead_or_answer"]["demo_visitor"]) == (True, False)
+    # People's leads too.
+    people = (await owner.get(f"desks/{owner.desk_id}/people")).json()
+    leads = {lead["lead_id"]: lead["demo_visitor"] for lead in people["leads"]}
+    assert (leads[demo_lead], leads[real_lead]) == (True, False)
+
+
+async def test_today_reads_the_demo_visitors_marks_once_for_its_briefing_and_live_rows(scene, clock, monkeypatch):
+    demo = await scene.visitor(local(2026, 10, 30, 8, 58))
+    await write(scene.engine, scene.admin, demo.ids, "demo_visitor", local(2026, 10, 30, 8, 58), text="Riley",
+                ref_id="visitor-one")
+    await scene.text(demo, local(2026, 10, 30, 8, 58))
+    await scene.reply(demo, local(2026, 10, 30, 8, 59))
+    clock.now = local(2026, 10, 30, 9)
+    reads = []
+    real = owner_reads.demo_visitors
+
+    async def counted(*args, **kwargs):
+        reads.append(args[1:])
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(owner_reads, "demo_visitors", counted)
+    today = (await scene.owner.get(f"desks/{scene.owner.desk_id}/today")).json()
+    # Needs you reads them for itself, first; the briefing and Live now share one read.
+    assert len(reads) == 2
+    assert [(row["session_id"], row["demo_visitor"]) for row in today["live"]] == [(demo.session_id, True)]
+    assert (today["briefing"]["newest"]["lead_or_answer"]["demo_visitor"],
+            today["briefing"]["newest"]["lead_or_answer"]["display_name"]) == (True, "Riley")
 
 
 async def test_briefing_list_is_the_window_newest_first(scene, clock):
@@ -1713,6 +1817,128 @@ async def test_conversations_name_a_verified_visitors_person(scene, clock):
     assert {session_id: live[session_id]["person_id"] for session_id in expected} == expected
 
 
+# Unread conversations: the owner's read marker, per conversation ---------------------------------------------------
+
+
+async def unread(owner: Owner) -> set[str]:
+    """The listed conversations that are unread (the seed's held request's session, which has no messages, never is)."""
+    listed = await owner.get(f"desks/{owner.desk_id}/conversations")
+    assert listed.status_code == 200, listed.text
+    return {summary["session_id"] for summary in listed.json() if summary["unread"]}
+
+
+async def unread_count(owner: Owner) -> int:
+    """The owner's Desk's `unread_conversations`, as the Desk switcher and `me` both give it."""
+    (business,) = (await owner.get("desks")).json()
+    (desk,) = business["desks"]
+    (mine,) = (await owner.get("me")).json()["desks"]
+    assert mine["unread_conversations"] == desk["unread_conversations"]
+    return desk["unread_conversations"]
+
+
+async def mark_read(owner: Owner, session_id: str, through: int) -> httpx.Response:
+    return await owner.browser.post(f"/api/owner/conversations/{session_id}/read", json={"through": through})
+
+
+async def test_a_visitors_message_after_the_owners_marker_is_unread(scene):
+    at = local(2026, 10, 30, 8, 57)
+    owner, chat = scene.owner, await scene.visitor(at)
+    first = await scene.text(chat, at, "Do you fix leaks?")
+    assert await unread(owner) == {chat.session_id}               # no marker yet
+    assert await unread_count(owner) == 1
+
+    marked = await mark_read(owner, chat.session_id, first)
+
+    assert (marked.status_code, marked.content) == (204, b"")
+    assert await unread(owner) == set()
+    assert await unread_count(owner) == 0
+    later = await scene.text(chat, at + timedelta(minutes=1), "Are you there?")
+    assert await unread(owner) == {chat.session_id}
+    assert await unread_count(owner) == 1
+    assert (await mark_read(owner, chat.session_id, later)).status_code == 204
+    assert await unread(owner) == set()
+    assert await unread_count(owner) == 0
+
+
+async def test_only_a_visitors_or_an_agents_words_make_a_conversation_unread(scene):
+    at = local(2026, 10, 30, 8, 57)
+    owner, chat = scene.owner, await scene.visitor(at)
+    said = await scene.text(chat, at, "Do you fix leaks?")
+    assert (await mark_read(owner, chat.session_id, said)).status_code == 204
+    then = at + timedelta(minutes=1)
+    await scene.reply(chat, then)                                                           # Claude's
+    await write(scene.engine, scene.admin, chat.ids, "owner_say", then, text="I can come at 3.")   # the owner's
+    await write(scene.engine, scene.admin, chat.ids, "whisper", then, text="Offer Tuesday.")
+    await write(scene.engine, scene.admin, chat.ids, "note", then, text="The owner took over.")    # the API's
+    await write(scene.engine, scene.admin, chat.ids, "annotation", then, ref_id="msg-earlier")
+    await write(scene.engine, scene.admin, chat.ids, "status", then, ref_id="decision-earlier")    # the kernel's
+
+    assert await unread(owner) == set()
+    assert await unread_count(owner) == 0
+
+    scene.fake.now = then                                                # another person's agent
+    agent, _ = scene.fake._new_session(owner.copy_id, owner.desk_id, "agent")
+    scene.fake.flush()
+    agent_ids = Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=agent.session_id)
+    await write(scene.engine, scene.admin, agent_ids, "agent_text", then, text="Book the earliest visit for Alex Kim.")
+    assert await unread(owner) == {agent.session_id}
+    assert await unread_count(owner) == 1
+
+
+async def test_marking_read_only_moves_forward_and_stops_at_the_newest_message(scene, db):
+    at = local(2026, 10, 30, 8, 57)
+    owner, chat = scene.owner, await scene.visitor(at)
+    first = await scene.text(chat, at, "Do you fix leaks?")
+    second = await scene.text(chat, at + timedelta(minutes=1), "Today?")
+
+    def marker() -> int:
+        (through,) = db.execute("SELECT read_through_n FROM app.conversation_reads WHERE session_id = %s",
+                                (chat.session_id,)).fetchone()
+        return through
+
+    assert (await mark_read(owner, chat.session_id, second)).status_code == 204
+    assert (await mark_read(owner, chat.session_id, first)).status_code == 204         # a stale or replayed call
+    assert marker() == second
+    assert await unread(owner) == set()
+    # A cursor past the newest message is held at it, so a message that comes later is still new.
+    assert (await mark_read(owner, chat.session_id, second + 1_000)).status_code == 204
+    assert marker() == second
+    third = await scene.text(chat, at + timedelta(minutes=2), "Hello?")
+    assert third < second + 1_000
+    assert await unread(owner) == {chat.session_id}
+    assert await unread_count(owner) == 1
+    for body in ({"through": -1}, {}, {"through": third, "all": True}, {"through": "all"}):
+        refused = await owner.browser.post(f"/api/owner/conversations/{chat.session_id}/read", json=body)
+        assert (refused.status_code, refused.json()) == (422, {"error": "invalid"}), body
+    assert marker() == second
+
+
+async def test_another_copys_conversation_is_not_found_and_a_preview_is_never_unread(app, browser, fake, kernel_http,
+                                                                                    scene, db):
+    at = local(2026, 10, 30, 8, 57)
+    other = await new_owner(app, browser, fake, kernel_http)
+    theirs = await guest(kernel_http, fake, other)
+    said = await write(scene.engine, scene.admin, theirs.ids, "visitor_text", at, text="Hi, are you open?")
+
+    for session_id in (theirs.session_id, "session-unknown"):
+        refused = await mark_read(scene.owner, session_id, said)
+        assert (refused.status_code, refused.json()) == (404, {"error": "not_found"}), session_id
+    assert db.execute("SELECT count(*) FROM app.conversation_reads").fetchone() == (0,)
+    assert await unread(other) == {theirs.session_id}             # still unread for its own owner
+    assert await unread_count(other) == 1
+
+    preview = await scene.visitor(at, preview=True)                     # the owner's own preview
+    await scene.text(preview, at, "Testing my own Desk")
+    listed = (await scene.owner.get(f"desks/{scene.owner.desk_id}/conversations")).json()
+    assert [(row["owner_preview"], row["unread"]) for row in listed if row["session_id"] == preview.session_id] == [
+        (True, False)]
+    assert await unread(scene.owner) == set()
+    assert await unread_count(scene.owner) == 0
+    refused = await mark_read(scene.owner, preview.session_id, 10**6)   # nor can it be marked read
+    assert (refused.status_code, refused.json()) == (404, {"error": "not_found"})
+    assert db.execute("SELECT count(*) FROM app.conversation_reads").fetchone() == (0,)
+
+
 async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     # Two quotes a second apart, then a booking: the second quote backs it.
     two_quotes = await scene.visitor(local(2026, 10, 29, 10))
@@ -1735,7 +1961,7 @@ async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     scene.fake.now = local(2026, 10, 29, 17)
     desk = scene.fake.desks[scene.owner.desk_id]
     held = await held_chat.decide("native.book", {
-        "slot_id": max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked)})
+        "slot_id": max(slot.slot_id for slot in desk.slots.values() if slot.slot_id not in desk.booked), **WHO})
     scene.fake.script("native.book")                         # back to the seed's rule
     assert held.state == "held"
     await scene.answer(held.decision_id, local(2026, 10, 29, 19))

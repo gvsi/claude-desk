@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
-import { Button, Card, Notice, StatusLabel } from '../../ds/index.ts';
+import { Button, Card, Notice, Pill, StatusLabel } from '../../ds/index.ts';
 import { callbackLine } from '../../lib/format.ts';
 import { conversationPath, type ConversationArrival } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -98,6 +98,8 @@ export function CallbackCard({ item, showJoin = true, onDone, showSummary = true
       <div className="cd-callback">
         <p className="cd-callback__top cd-type-caption">
           <StatusLabel tone="held">Wants you</StatusLabel>
+          {/* A demo visitor's handoff is tagged as one, never passed off as a real customer's. */}
+          {item.session.demo_visitor === true ? <Pill>Demo visitor</Pill> : null}
         </p>
         <p className="cd-callback__reason cd-type-body" data-copy="user">
           {handoff.reason}

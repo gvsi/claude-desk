@@ -36,7 +36,7 @@ from desk.kernel_service import adapters, execute, ledger, reply_check
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
-from .test_adapters import Rivera, book, quote_args, rivera, run, visitor_of
+from .test_adapters import WHO_NOTE, Rivera, book, quote_args, rivera, run, visitor_of
 from .test_approvals import answered, post_cancel
 from .test_context import context_of, fact_ids, owner_session_id
 from .test_decide import PASS, Visitor, decided, open_visitor, set_mode, set_session
@@ -911,7 +911,8 @@ async def test_two_call_back_requests_at_once_leave_one_open_handoff(app, client
 
 
 async def legacy_call_back(app: FastAPI, copy: Rivera, visitor: Visitor, handoff_id: str, action_id: str) -> None:
-    """An open call-back's handoff as an earlier kernel wrote it (no `created_at`), beside any other."""
+    """An open call-back's handoff as an earlier kernel wrote it (no `created_at`). The table
+    admits one open handoff per session (kernel_one_open_handoff), so it is the session's only one."""
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=copy.copy_id, desk_id=copy.desk_id,
@@ -919,25 +920,23 @@ async def legacy_call_back(app: FastAPI, copy: Rivera, visitor: Visitor, handoff
                            action_id=action_id))
 
 
-async def test_a_session_holding_several_open_handoffs_has_them_closed_by_the_next_call_back(app, client):
-    """A session may hold several open call-backs from before one open handoff per session was
-    kept, or from the previous release during a deploy. A card shown there opens none; the next
-    call-back request closes them all, each ledgered as the owner's mark is, and opens its own."""
+async def test_an_open_call_back_from_before_is_closed_by_the_next_call_back(app, client):
+    """An open call-back an earlier kernel wrote, with no `created_at`, is the session's open
+    handoff like any other: a card shown there opens none, and the next call-back request closes
+    it, ledgered as replaced, and opens its own. Sessions that rows from before left holding
+    several open were consolidated when the table took its one-open rule."""
     copy, visitor = await visitor_of(app, client)
-    for handoff_id, call_id in (("handoff-zzzz", "call-1"), ("handoff-aaaa", "call-2")):
-        earlier = await decided(client, visitor, "native.request_callback", CALLBACK, call_id=call_id)
-        await legacy_call_back(app, copy, visitor, handoff_id, earlier.action.action_id)
+    earlier = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
+    await legacy_call_back(app, copy, visitor, "handoff-earlier", earlier.action.action_id)
     await hand_over(client, visitor)
-    assert await handoff_alerts(app, copy) == []                                      # no card's handoff beside them
+    assert await handoff_alerts(app, copy) == []                                      # no card's handoff beside it
 
-    latest = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
+    latest = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
     result = await executed(client, visitor, latest)
     rows = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
-    assert rows == {"handoff-zzzz": ("callback", "done"), "handoff-aaaa": ("callback", "done"),
-                    result.model_view["handoff_id"]: ("callback", "open")}
     replacing = result.model_view["handoff_id"]
-    assert sorted(replaced_entries(await ledger_rows(app, copy))) == [(["handoff-aaaa"], replacing),
-                                                                     (["handoff-zzzz"], replacing)]
+    assert rows == {"handoff-earlier": ("callback", "done"), replacing: ("callback", "open")}
+    assert replaced_entries(await ledger_rows(app, copy)) == [(["handoff-earlier"], replacing)]
 
 
 # ---- A held request awaiting the owner (the owner's decision of 2026-10-31) ---------------------------
@@ -961,7 +960,7 @@ async def test_a_held_request_awaiting_the_owner_is_the_conversations_item(app, 
     copy, visitor = await visitor_of(app, client)
     await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     held = await held_quote(client, visitor)
-    status = await checked(client, visitor, BLOCKED)             # the visitor is told to check the request
+    status = await checked(client, visitor, BLOCKED)             # the visitor is told the request is waiting for approval
     assert [(block.kind, block.text) for block in status.blocks] == [("prose", STATUS_LINE["en"])]
     assert (await checked(client, visitor, "", [clause("handoff")])).ok          # nor a card Claude cites
     assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
@@ -1099,7 +1098,7 @@ async def test_the_owner_handling_the_conversation_leaves_a_call_back_open(app, 
 # ---- A booking closes the card's handoff (the owner's decision of 2026-11-01) --------------------------
 
 SLOT = "S-20261102-1000"                    # Monday 10:00 to 12:00, inside rv-book-wk's hours
-BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm."
+BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm." + WHO_NOTE
 
 
 async def preview_of(client, copy: Rivera) -> Visitor:
@@ -1245,8 +1244,8 @@ async def test_a_booking_that_fails_closes_nothing(app, client, reviewer, monkey
 
 
 # The kernel's status line, the API's signed `STATUS_LINES["check_status"]`.
-STATUS_LINE = {"en": "Please check the request status in this chat.",
-               "es": "Consulte el estado de la solicitud en este chat."}
+STATUS_LINE = {"en": "Your request is waiting for approval; you can see where it stands in this chat.",
+               "es": "Su solicitud está esperando aprobación; puede consultar su estado en este chat."}
 SERVICE_AREA_CLAUSE = ("policy", "charter:policy:service_area")
 
 

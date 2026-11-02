@@ -5,7 +5,7 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { givenOwnerName } from '../../public/brand.ts';
-import { ANSWER_ROOM, THINGS_TO_TRY } from '../arrival/ideas.ts';
+import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
@@ -32,11 +32,16 @@ const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control
 // A different Desk's names, request, rule or recorded activity may land with one accepted move.
 const DETAILS = [
   TODAY_COPY.chatDetail,
+  DEMO_VISITOR_THING.detail,
   TODAY_COPY.breakDetail,
   // The seed's hold went past an automatic rule's limit, so no rule is named (`owner_reads._held_by`).
   TODAY_COPY.waiting,
   TODAY_COPY.createDetail,
 ] as const;
+
+/** The things' titles in the list's order: the intro dialog's four, with "Watch a demo visitor" second. */
+const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
+const THING_TITLES = [CHAT.title, DEMO_VISITOR_THING.title, BREAK.title, ANSWER.title, CREATE.title] as const;
 
 /** The fresh copy's night (Decision 15): three conversations, Dana's booking and the agent's answer. */
 const FRESH_NIGHT = sinceLastNightLine({ conversations: 3, bookings: 1, answers: 1, turned_down: 0 }) ?? '';
@@ -412,11 +417,11 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
           </div>
           <SkeletonCard padding={16} anchor="things-card">
             <div className="cd-things__list">
-              {['Open your public page', 'Show me ideas', 'Open the request', 'Start a Desk'].map((label, i) => (
+              {['Open your public page', DEMO_VISITOR_THING.start, 'Show me ideas', 'Open the request', 'Start a Desk'].map((label, i) => (
                 <div key={i} className={`cd-things__item cd-today-skeleton__thing-${i}`}>
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
-                    <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
+                    <TextLines words={THING_TITLES[i]!} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
                     {label === 'Open the request' ? (
                       <span className="cd-things__detail cd-type-meta" data-room={ANSWER_ROOM}>
                         <span className="cd-things__detail-now">
@@ -427,7 +432,7 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
                   </div>
                   {/* From 640 px each card's button at its foot; on a phone each row's chevron. */}
                   <div className="cd-things__action">
-                    <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 3 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
+                    <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 4 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
                   </div>
                   <span className="cd-things__go">
                     <Skeleton shape="block" width={16} height={16} anchor={`thing-go-${i}`} />

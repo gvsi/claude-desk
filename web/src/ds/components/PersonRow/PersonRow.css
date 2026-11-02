@@ -47,8 +47,21 @@
 }
 
 .cd-lead-row__name,
+.cd-lead-row__who,
 .cd-lead-row__time {
   align-self: baseline;
+}
+
+/* A demo visitor's lead: its pill 8 px after the name, on the name's line; the name gives way first. */
+.cd-lead-row__who {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-lead-row__who > .cd-pill {
+  flex: none;
 }
 
 .cd-lead-row__time {

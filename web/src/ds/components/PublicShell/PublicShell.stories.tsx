@@ -229,7 +229,7 @@ export const Rivera: Story = {
     await expect(footer.getBoundingClientRect().top).toBeGreaterThan(input.getBoundingClientRect().bottom);
     await expect(within(main).getByText('Claude Desk')).toBeVisible();
 
-    // The about column at the right: the charter's cards, in order, in the page's language.
+    // The about column at the left: the charter's cards, in order, in the page's language.
     const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
     await expect(within(about).getByRole('heading', { level: 2, name: 'About Turner Plumbing' })).toBeVisible();
     const cards = [...about.querySelectorAll<HTMLElement>('.cd-reply-card')];
@@ -238,8 +238,8 @@ export const Rivera: Story = {
       await expect(card).toHaveAttribute('lang', 'en');
       await expect(card).toHaveTextContent(desk.en.charter[index]?.title ?? '');
     }
-    await expect(about.getBoundingClientRect().left).toBeGreaterThanOrEqual(main.getBoundingClientRect().right);
-    expectComputed(about, { width: '300px', backgroundColor: 'rgb(34, 34, 32)', borderLeftWidth: '1px' });
+    await expect(about.getBoundingClientRect().right).toBeLessThanOrEqual(main.getBoundingClientRect().left);
+    expectComputed(about, { width: '300px', backgroundColor: 'rgb(34, 34, 32)', borderLeftWidth: '0px', borderRightWidth: '1px' });
     await expect(canvasElement.querySelector('.cd-public-shell')).toHaveAttribute('lang', 'en');
 
     // At 1280 px the rows take the 680 px chat column, as the composer does.
@@ -467,7 +467,7 @@ export const WithAgentLinks: Story = {
   },
 };
 
-// The open status in the header: the kernel's words (`PublicDesk.open_status`), shown as written.
+// The open status in About or the narrow header: the kernel's words (`PublicDesk.open_status`), shown as written.
 
 /*
  * Each status whole, as the kernel serves it in `PublicDesk.open_status` for a business in
@@ -543,7 +543,7 @@ function partOf(header: HTMLElement, selector: string): HTMLElement {
 }
 
 /**
- * The header's open status reading `text`: the kernel's words as written, in meta type and the
+ * The shell's open status reading `text`: the kernel's words as written, in meta type and the
  * name's ink, with an `aria-hidden` dot on the middle of their first line.
  */
 async function openStatusIn(header: HTMLElement, text: string): Promise<{ status: HTMLElement; line: HTMLElement; dot: HTMLElement }> {
@@ -558,7 +558,7 @@ async function openStatusIn(header: HTMLElement, text: string): Promise<{ status
   expectComputed(line, {
     fontSize: '14px',
     lineHeight: '19px',
-    color: getComputedStyle(partOf(header, '.cd-public-shell__brand-name')).color,
+    color: getComputedStyle(partOf(header, '.cd-public-shell__brand-name, .cd-public-shell__heading')).color,
   });
   // The words keep 4.5:1 over the field, the dot 3:1.
   await expect(contrastRatio(getComputedStyle(line).color, groundOf(line))).toBeGreaterThanOrEqual(4.5);
@@ -589,7 +589,7 @@ async function expectClosed(header: HTMLElement, status: HTMLElement, line: HTML
   expectComputed(helpLine, {
     fontSize: '13px',
     lineHeight: '18px',
-    color: getComputedStyle(partOf(header, '.cd-public-shell__tagline')).color,
+    color: header.matches('.cd-public-shell__about') ? getComputedStyle(dot).borderTopColor : getComputedStyle(partOf(header, '.cd-public-shell__tagline')).color,
   });
   await expect(contrastRatio(getComputedStyle(helpLine).color, groundOf(helpLine))).toBeGreaterThanOrEqual(4.5);
   const words = line.getBoundingClientRect();
@@ -599,14 +599,12 @@ async function expectClosed(header: HTMLElement, status: HTMLElement, line: HTML
   await expect(status.querySelectorAll('p')).toHaveLength(2);
 }
 
-/** On a wide page: at the right end of the header's one row, level with the monogram, the header no taller. */
-async function expectAtTheRight(header: HTMLElement, status: HTMLElement): Promise<void> {
-  const box = header.getBoundingClientRect();
-  const statusBox = status.getBoundingClientRect();
-  const monogram = partOf(header, '.cd-public-shell__monogram').getBoundingClientRect();
-  await expect(statusBox.right).toBe(box.right - parseFloat(getComputedStyle(header).paddingRight));
-  await expect(statusBox.top + statusBox.height / 2).toBeCloseTo(monogram.top + monogram.height / 2, 0);
-  await expect(box.height).toBe(76);
+/** On a wide page the header has only the business identity; status sits below About's title. */
+async function expectInAbout(header: HTMLElement, about: HTMLElement, status: HTMLElement): Promise<void> {
+  await expect(header.querySelector('.cd-public-shell__open-status')).toBeNull();
+  await expect(header.getBoundingClientRect().height).toBe(76);
+  await expect(status.getBoundingClientRect().top).toBe(partOf(about, 'h2').getBoundingClientRect().bottom + 8);
+  await expect(partOf(about, '.cd-public-shell__blocks').getBoundingClientRect().top).toBe(status.getBoundingClientRect().bottom + 16);
 }
 
 /**
@@ -656,26 +654,28 @@ const ABOUT_NOTE = "The about column shows the charter's cards, not the board's 
 export const OpenNow: Story = {
   args: { openStatus: OPEN_EN },
   parameters: {
-    canvasNote: `The board's header with the open status at its right, as the "Open now" sign-off board places it: a filled dot and the kernel's words. ${ABOUT_NOTE}`,
+    canvasNote: `The wide page's open status under the About title: a filled dot and the kernel's words. ${ABOUT_NOTE}`,
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
-    const { status, dot } = await openStatusIn(header, OPEN_EN.text);
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
+    const { status, dot } = await openStatusIn(about, OPEN_EN.text);
     await expectOpen(status, dot);
-    await expectAtTheRight(header, status);
+    await expectInAbout(header, about, status);
   },
 };
 
 export const ClosedNow: Story = {
   args: { openStatus: CLOSED_EN },
   parameters: {
-    canvasNote: `The board's header with the closed status at its right, as the "Open now" sign-off board places it: a hollow dot, the kernel's words and "Claude can still help." under them. ${ABOUT_NOTE}`,
+    canvasNote: `The wide page's closed status under the About title: a hollow dot, the kernel's words and "Claude can still help." under them. ${ABOUT_NOTE}`,
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
-    const { status, line, dot } = await openStatusIn(header, CLOSED_EN.text);
-    await expectClosed(header, status, line, dot, STILL_HELPS.en);
-    await expectAtTheRight(header, status);
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
+    const { status, line, dot } = await openStatusIn(about, CLOSED_EN.text);
+    await expectClosed(about, status, line, dot, STILL_HELPS.en);
+    await expectInAbout(header, about, status);
   },
 };
 

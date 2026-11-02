@@ -11,7 +11,7 @@ import { SuggestionChips } from '../SuggestionChips/SuggestionChips.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
 import { VisionInertLine } from '../VisionBar/visionInert.tsx';
 import { aboutLinkHref } from './guards.ts';
-import { PublicBrandHeader } from './PublicBrandHeader.tsx';
+import { PublicBrandHeader, PublicBusinessStatus } from './PublicBrandHeader.tsx';
 import { useFirstView } from './useFirstView.ts';
 
 import './PublicShell.css';
@@ -58,9 +58,9 @@ export interface PublicShellProps {
   /** The visitor's language: every line of the shell's own copy, and `lang` on the page. */
   language: CopyLanguage;
   /**
-   * `PublicDesk.open_status` as served: the kernel's words in the header, with a filled dot when
-   * open, and a hollow one and "Claude can still help." under them when closed. Without it (null
-   * for a Desk without hours), or when it isn't whole, the header has no status line.
+   * `PublicDesk.open_status` as served: the kernel's words in About beside the chat, or in the header
+   * on narrow shells, with a filled dot when open, and a hollow one and "Claude can still help." under them when closed. Without it (null
+   * for a Desk without hours), or when it isn't whole, there is no status line.
    */
   openStatus?: PublicOpenStatus;
   /** Asks for the owner in the chat. */
@@ -201,7 +201,7 @@ const COPY = {
   },
 } satisfies Record<CopyLanguage, unknown>;
 
-/** From this width up, the about column stands at the right of the chat. */
+/** From this width up, the about column stands at the left of the chat. */
 const ABOUT_BESIDE_FROM = 900;
 
 /** Below this height the shell is short, whatever it holds. */
@@ -723,6 +723,7 @@ export function PublicShell({
       <h2 id={aboutId} className="cd-public-shell__heading cd-type-section">
         {copy.about(name)}
       </h2>
+      {aboutBeside ? <PublicBusinessStatus openStatus={openStatus} language={language} /> : null}
       {blocks.length > 0 ? (
         <div className="cd-public-shell__blocks">
           {blocks.map((block, index) =>
@@ -762,8 +763,9 @@ export function PublicShell({
       lang={language}
     >
       {banner ? <div className="cd-public-shell__banner">{banner}</div> : null}
-      <PublicBrandHeader brand={brand} language={language} openStatus={openStatus} landmark={!embedded} nameAsHeading={!embedded} />
+      <PublicBrandHeader brand={brand} language={language} openStatus={aboutBeside && hasAbout ? null : openStatus} landmark={!embedded} nameAsHeading={!embedded} />
       <div className="cd-public-shell__body">
+        {aboutBeside ? aboutColumn : null}
         <Chat className="cd-public-shell__chat">
           <div className="cd-public-shell__chat-head">
             <div className="cd-public-shell__chat-title">
@@ -818,7 +820,6 @@ export function PublicShell({
           )}
           {!aboutBeside && firstView ? aboutColumn : null}
         </Chat>
-        {aboutBeside ? aboutColumn : null}
       </div>
     </div>
   );

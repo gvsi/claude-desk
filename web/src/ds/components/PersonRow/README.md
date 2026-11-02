@@ -15,6 +15,7 @@
 - `time` as the screen writes it ("Today, 11:24 am", "Oct 26, 11:10 am"). The row formats nothing.
 - `note`: the lead's note, as written. It may come from a visitor, so it is shown as their words too.
 - `recorded` for a lead replayed from the recorded history: the `RecordedTag` at the end of the note's line.
+- `demoVisitor` for a lead a demo visitor left (an AI the owner started to play a customer): a `Pill` "Demo visitor" 8 px after the name, on its line; the name gives way before the pill.
 - `href` when the row opens something, such as the person's page: the whole row becomes one link.
 - Put each row in a list item, in a list named by its section ("Contacts on record", "Leads").
 
@@ -50,3 +51,4 @@
 | `note` | `string` | Required. As written. |
 | `recorded` | `boolean` | Replayed from the recorded history: the Recorded tag. |
 | `href` | `string` | Where the lead opens. The row becomes one link. |
+| `demoVisitor` | `boolean` | Left in a demo visitor's chat: the "Demo visitor" pill after the name. |

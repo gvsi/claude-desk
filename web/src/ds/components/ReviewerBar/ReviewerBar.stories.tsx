@@ -86,6 +86,21 @@ export const ReviewerBarSkeleton: Story = {
   },
 };
 
+/** An owner who gave no name: the bar calls them "the owner" rather than setup's fallback name. */
+export const NoOwnerName: Story = {
+  args: { ownerName: null },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'No board draws an owner who gave no name; the words are the owner’s (2026-11-02). Nearest reference board: N-Today-Run1.',
+  },
+  play: async ({ canvas }) => {
+    const words = canvas.getByRole('note').querySelector('.cd-reviewer-bar__text');
+    await expect(words?.textContent).toBe("You're the owner today. This is a concept prototype.");
+    // Not someone's name, so not marked as words the owner wrote.
+    await expect(words?.querySelector('[data-copy="user"]')).toBeNull();
+  },
+};
+
 /** The screen's own control before Reset demo, as the owner app has its Demo inbox. */
 export const WithActions: Story = {
   args: { actions: <Button variant="ghost">Demo inbox</Button> },

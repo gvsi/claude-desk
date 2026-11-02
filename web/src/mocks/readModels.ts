@@ -299,7 +299,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
   return {
     session_id: session.state.session_id,
     kind: session.state.kind,
-    display_name: session.displayName,
+    display_name: session.displayName ?? session.demoVisitor ?? null,
     verified: session.state.verified,
     person_id: session.state.kind === 'visitor' && !session.ownerPreview && session.state.verified ? (session.person?.personId ?? null) : null,
     mode: session.state.mode,
@@ -307,6 +307,8 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
+    demo_visitor: session.demoVisitor != null,
+    demo_visitor_run_id: session.demoVisitorRun ?? null,
     ...(session.state.kind === 'agent' ? latestAgentOutcome(world, session) : { ...NO_OUTCOME, latest_outcome: latestVisitorOutcome(world, session) }),
   };
 }
@@ -315,9 +317,10 @@ function needsYouSession(session: SessionRecord | undefined, sessionId: string):
   return {
     session_id: sessionId,
     kind: session?.state.kind ?? 'visitor',
-    display_name: session?.displayName ?? null,
+    display_name: session?.displayName ?? session?.demoVisitor ?? null,
     verified: session?.state.verified ?? false,
     assurance: session?.state.assurance ?? 'none',
+    demo_visitor: session?.demoVisitor != null,
   };
 }
 
@@ -373,7 +376,7 @@ export function decidingCard(desk: DeskRecord, decision: Decision): RuleCard | n
 export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
   const deskId = desk.summary.desk_id;
   const held = decisionsOf(world, deskId)
-    .filter((d) => d.decision.state === 'held')
+    .filter((d) => world.supersedeIfBooked(d).state === 'held')
     .map((d) => {
       const session = world.sessions.get(d.decision.session_id);
       return {
@@ -655,7 +658,10 @@ const KIND_ORDER: readonly BriefingKind[] = ['turned_down', 'booking', 'lead', '
 function briefingItems(a: Activity): BriefingItem[] {
   const { since, now } = a.window;
   const end = now + 1;
-  const nameOf = (sessionId: string) => a.world.sessions.get(sessionId)?.displayName ?? null;
+  const nameOf = (sessionId: string) => {
+    const session = a.world.sessions.get(sessionId);
+    return session?.displayName ?? session?.demoVisitor ?? null;
+  };
   const item = (kind: BriefingKind, h: Happened, refId: string, line: string | null, cause: RefusalCause | null = null): BriefingItem => ({
     kind,
     at: isoTime(h.at),
@@ -664,6 +670,7 @@ function briefingItems(a: Activity): BriefingItem[] {
     ref_id: refId,
     line,
     cause,
+    demo_visitor: a.world.sessions.get(h.sessionId)?.demoVisitor != null,
   });
   const refused = a.stopped.filter((s) => s.kind === 'refused');
   // An answer: Claude replied in the window, to a conversation with nothing else in it, and didn't
@@ -896,7 +903,10 @@ export function visitorTranscript(session: SessionRecord): VisitorTranscript {
   };
 }
 
-/** The owner's view of a chat: every item after `after`, whispers included, and whether the visitor is typing at `now`. */
+/**
+ * The owner's view of a chat: every item after `after`, whispers included, whether the visitor is
+ * typing at `now`, and whether they are in the chat now (their stream is open, as the API reads it).
+ */
 export function ownerTranscript(session: SessionRecord, after: number, now: number, world: MockWorld): OwnerTranscript {
   const typing = session.typingUntil;
   return {
@@ -910,6 +920,9 @@ export function ownerTranscript(session: SessionRecord, after: number, now: numb
       return { ...item, owner_translation: item.owner_translation ?? null, triage: item.triage ?? null, owner_plain: ownerPlain };
     }),
     typing_until: typing !== null && typing > now ? isoTime(typing) : null,
+    visitor_here: session.listeners.size > 0,
+    demo_visitor: session.demoVisitor != null,
+    demo_visitor_run_id: session.demoVisitorRun ?? null,
   };
 }
 
@@ -1018,6 +1031,7 @@ export function peopleOut(world: MockWorld, desk: DeskRecord): PeopleOut {
         note: lead.note,
         created_at: isoTime(lead.createdAt),
         ...(lead.replayed === true ? { replayed: true } : {}),
+        demo_visitor: world.sessions.get(lead.sessionId)?.demoVisitor != null,
       })),
   };
 }

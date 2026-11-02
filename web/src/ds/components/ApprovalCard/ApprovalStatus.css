@@ -1,0 +1,20 @@
+.cd-approval-card__status {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: flex-start;
+  gap: var(--space-8);
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+/* Centers the 6 px dot on the caption's 18 px first line. */
+.cd-approval-card__status > .cd-status-dot {
+  margin-top: var(--space-6);
+}
+
+/* Focus lands here only when the answers it replaced had it; it is not a control, so it draws nothing. */
+.cd-approval-card__status-line:focus {
+  outline: none;
+  box-shadow: none;
+}

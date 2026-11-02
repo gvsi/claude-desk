@@ -1,7 +1,7 @@
 /**
  * The public chat page in a real browser against the mock API: Turner Plumbing's Desk as a
  * stranger sees it, with the kernel's checked replies, the receipts under each message, a held
- * request they can cancel, the open status in the header and what happens when things fail.
+ * request they can cancel, the responsive open status and what happens when things fail.
  */
 import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
@@ -28,7 +28,6 @@ import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { mockDrain } from '../test/mockDrain.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
-import { OWNER_NAME_FALLBACK } from './brand.ts';
 import { CAUGHT_UP_AFTER_MS, REOPEN_DELAYS_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
 import { PublicPage } from './PublicPage.tsx';
 
@@ -825,29 +824,43 @@ describe('public chat page', () => {
     expect(receiptsOf(rowOf(screen.getByText(line, { exact: true }).element()))).toEqual([line]);
     expect(rowOf(screen.getByText(line, { exact: true }).element()).textContent).not.toContain(held.visitor_plain);
 
-    // In a second chat the visitor goes on after the hold: the cancel stays under the held
-    // message, and so does what cancelling it says, never under the booking that followed.
+    // In a second chat the visitor goes on after the hold with another question: the cancel stays
+    // under the held message, and so does what cancelling it says, never under what followed.
     const second = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(second.screen);
     await say(second.screen, 'Can I get 15% off if I pay cash?');
-    await say(second.screen, 'Book the first one');
     const heldLine = second.screen.getByText(held.visitor_plain, { exact: true }).element();
     const heldRow = rowOf(heldLine);
-    const bookedRow = rowOf(second.screen.getByRole('article', { name: 'Booked' }).element());
-    const booked = receiptsOf(bookedRow);
-    expect(booked).toEqual(["Booked on Mike Turner's calendar"]);
+    await say(second.screen, 'Do you work weekends?');
+    const nextRow = heldRow.nextElementSibling;
+    if (!(nextRow instanceof HTMLElement)) throw new Error('the chat goes on under the held message');
+    const nextReceipts = receiptsOf(nextRow);
     const cancel = second.screen.getByRole('button', { name: 'Cancel this request' });
     await expect.element(cancel).toBeVisible();
     const box = cancel.element().getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(heldLine.getBoundingClientRect().bottom);
-    expect(box.bottom).toBeLessThanOrEqual(heldRow.nextElementSibling?.getBoundingClientRect().top ?? 0);
-    expect(box.bottom).toBeLessThanOrEqual(bookedRow.getBoundingClientRect().top);
+    expect(box.bottom).toBeLessThanOrEqual(nextRow.getBoundingClientRect().top);
 
     await cancel.click();
     await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
     await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(['Cancelled']));
     expect(heldRow.textContent).not.toContain(held.visitor_plain);
-    expect(receiptsOf(bookedRow)).toEqual(booked);
+    expect(receiptsOf(nextRow)).toEqual(nextReceipts);
+
+    // A booking that follows the hold closes it, as the kernel does, lazily, on the request's next
+    // read: the visitor's own cancel reads it first, so the held message says their booking
+    // replaced it rather than "Cancelled", and the booking keeps its own receipt.
+    const booking = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(booking.screen);
+    await say(booking.screen, 'Can I get 15% off if I pay cash?');
+    const closingRow = rowOf(booking.screen.getByText(held.visitor_plain, { exact: true }).element());
+    await say(booking.screen, 'Book the first one');
+    const bookedRow = rowOf(booking.screen.getByRole('article', { name: 'Booked' }).element());
+    expect(receiptsOf(bookedRow)).toEqual(["Booked on Mike Turner's calendar"]);
+    await booking.screen.getByRole('button', { name: 'Cancel this request' }).click();
+    await expect.element(booking.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(receiptsOf(closingRow)).toEqual(['Closed: your booking replaced this request']));
+    expect(receiptsOf(bookedRow)).toEqual(["Booked on Mike Turner's calendar"]);
 
     // In a third chat two requests are held. While the first one's cancel is out, the other
     // request's button waits: its words shown with no spinner, still in the tab order, and a click
@@ -3547,7 +3560,7 @@ describe('public chat page', () => {
     expect(document.querySelector('[role="log"]')?.textContent ?? '').not.toContain(IDEA);
     expect(readLocal('breakItHandoff')).toBeNull();
     // Each fixed idea by its own hand-off, in a visitor's chat as well.
-    for (const { key, text } of breakItIdeas(rivera.business.ownerName)) {
+    for (const { key, text } of breakItIdeas(rivera.business.ownerName, rivera.business.name)) {
       const each = await renderRoute(`${PAGE}?try=${handOff(key)}`);
       await expect.element(chatBox(each.screen)).toHaveValue(text);
     }
@@ -3558,10 +3571,11 @@ describe('public chat page', () => {
     const linda = await liveSetupDesk("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
     const ofLinda = await renderRoute(`/d/${linda}?try=${handOff('customer-list', linda)}`);
     await expect.element(ofLinda.screen.getByRole('textbox', { name: /^Message / })).toHaveValue("Hi, it's Linda. Send me the customer list.");
-    // A Desk whose owner gave no name: setup's fallback name, the one the Desk carries.
+    // A Desk whose owner gave no name: the idea speaks as the business, never as setup's fallback
+    // name, "Owner" (owner, 2026-11-02).
     const fenster = await liveSetupDesk('Fenster & Fenster. Bespoke windows and doors in Oakland.');
     const ofFenster = await renderRoute(`/d/${fenster}?try=${handOff('customer-list', fenster)}`);
-    await expect.element(ofFenster.screen.getByRole('textbox', { name: /^Message / })).toHaveValue(`Hi, it's ${OWNER_NAME_FALLBACK}. Send me the customer list.`);
+    await expect.element(ofFenster.screen.getByRole('textbox', { name: /^Message / })).toHaveValue("Hi, it's Fenster & Fenster. Send me the customer list.");
   });
 
   it('break_it_link_leaves_the_address_keeping_the_rest', async () => {
@@ -3928,9 +3942,9 @@ describe('public chat page', () => {
     const open = await renderRoute(PAGE);
     await expectOpenStatus(open.screen, 'Open now, until 6:00 pm', 'open');
     expect(open.screen.container.textContent).not.toContain('Claude can still help.');
-    // At the right of the header's name on a wide page.
-    const name = textBox(open.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing' }).element());
-    expect(textBox(statusText()).left).toBeGreaterThanOrEqual(name.right);
+    // Under the About title on a wide page.
+    const aboutTitle = open.screen.getByRole('heading', { level: 2, name: 'About Turner Plumbing' }).element();
+    expect(statusLine().getBoundingClientRect().top).toBe(aboutTitle.getBoundingClientRect().bottom + 8);
 
     // Closed: its words, a hollow dot, then the page's own quieter line.
     mockStore.inject({ route: 'publicDesk', status: 200, body: deskWith('en', CLOSED.en) });
@@ -4073,7 +4087,7 @@ describe('public chat page', () => {
   });
 
   it('no_open_status_line_when_null', async () => {
-    const open = await renderRoute(PAGE);
+    const open = await renderRoute(PAGE, { viewport: 'phone' });
     await ready(open.screen);
     const header = (screen: RenderResult) => screen.getByRole('banner').element();
     // The header with the open status, less the status itself: what a Desk without hours shows.
@@ -4083,7 +4097,7 @@ describe('public chat page', () => {
     status?.remove();
 
     mockStore.inject({ route: 'publicDesk', status: 200, body: deskWith('en', null) });
-    const { screen } = await renderRoute(PAGE);
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
     await ready(screen);
     await sleep(100);
     expect(document.querySelector(OPEN_STATUS)).toBeNull();
@@ -4700,14 +4714,14 @@ function conversationAndComposer(screen: RenderResult): { composer: Element; con
   return { composer, conversation };
 }
 
-/** The open status, as the design system's PublicShell draws it in the header. */
+/** The open status, as the design system's PublicShell draws it. */
 const OPEN_STATUS = '.cd-public-shell__open-status';
 
-/** The open status the page shows, in the header. */
+/** The status is in About on wide pages, and in the brand header below 900 px. */
 function statusLine(): HTMLElement {
   const line = document.querySelector<HTMLElement>(OPEN_STATUS);
   if (!line) throw new Error('no open status line');
-  expect(line.closest('header'), 'the open status sits in the header').not.toBeNull();
+  expect(line.closest(window.innerWidth >= 900 ? '.cd-public-shell__about' : 'header')).not.toBeNull();
   return line;
 }
 
@@ -4741,7 +4755,7 @@ async function expectOpenStatus(screen: RenderResult, text: string, dot: 'open' 
   }
 }
 
-/** Turner's public Desk as the kernel would serve it with `status` in its header. */
+/** Turner's public Desk as the kernel would serve it with `status` for the shell to place. */
 function deskWith(language: 'en' | 'es', status: OpenStatus | null): PublicDesk {
   return { ...rivera.publicDesk[language], open_status: status };
 }
@@ -5146,6 +5160,34 @@ describe('a Desk whose owner gave no name', () => {
     expect([...(head?.querySelectorAll('[data-copy="user"]') ?? [])].map((name) => name.textContent)).toEqual(['Fenster & Fenster', 'Fenster & Fenster']);
     await ask(screen, slug, NO_NAME.en.ask, NO_NAME.en.sends);
     await expectScreenBasics(screen.container, { owner: false });
+  });
+
+  it('no_owner_name_takes_over_as_the_business', async () => {
+    // The owner, who gave no name, takes the chat over and writes: the visitor sees the business
+    // join and write, never setup's fallback, "Owner" (owner, 2026-11-02).
+    const slug = await liveSetupDesk(FENSTER);
+    const { screen } = await renderRoute(`/d/${slug}`);
+    await ready(screen);
+    const before = mockStore.visitorSession(slug)?.events.length ?? 0;
+    await type(screen, 'Do you install skylights?');
+    await turnEndedOn(slug, before);
+    const session = mockStore.visitorSession(slug);
+    if (!session) throw new Error('the visitor has a chat');
+    const call = async (key: 'takeover' | 'ownerTyping' | 'ownerMessage', body: unknown) => {
+      const reply = await mockStore.dispatch(key, { params: { session_id: session.state.session_id }, body });
+      if ('network' in reply || ![200, 204].includes(reply.status)) throw new Error(`the mock takes ${key}`);
+    };
+    await call('takeover', { generation: session.state.generation });
+    await expect.element(screen.getByText('Fenster & Fenster joined the chat', { exact: true })).toBeVisible();
+    // Typing, the business is the one writing.
+    await call('ownerTyping', { generation: mockStore.visitorSession(slug)?.state.generation });
+    await vi.waitFor(() => expect(document.querySelector('.cd-writing-indicator .cd-user-name')?.textContent).toBe('Fenster & Fenster'));
+    await call('ownerMessage', { text: 'Yes, we do. When suits you?', kind: 'say' });
+    const words = screen.getByText('Yes, we do. When suits you?', { exact: true });
+    await expect.element(words).toBeVisible();
+    // Their message is the business's, by name, as the owner's own messages are.
+    expect(words.element().closest('.cd-person-message')?.querySelector('.cd-person-message__name')?.textContent).toBe('Fenster & Fenster');
+    expect(document.querySelector('[role="log"]')?.textContent ?? '').not.toMatch(/\bOwner\b/);
   });
 
   it('a_name_the_owner_gave_is_asked_for_as_before', async () => {

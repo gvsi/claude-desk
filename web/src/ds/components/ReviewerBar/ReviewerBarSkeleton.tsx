@@ -11,11 +11,11 @@ import './ReviewerBar.css';
 const START_OVER_CLASS = 'cd-button cd-button--ghost cd-button--inline cd-type-control';
 
 /** The demo bar's naturally wrapped line boxes and its Reset demo control. */
-export function ReviewerBarSkeleton({ ownerName = SEED_OWNER_NAME }: { ownerName?: string } = {}) {
+export function ReviewerBarSkeleton({ ownerName = SEED_OWNER_NAME }: { ownerName?: string | null } = {}) {
   const text = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState({ lines: 1, controlWidth: 0 });
   const words = reviewerBarWords(ownerName);
-  const copy = `${words.beforeName}${words.ownerName}${words.afterName}${words.disclosure}`;
+  const copy = `${words.beforeName}${words.ownerName ?? words.noOwner}${words.afterName}${words.disclosure}`;
   const { startOver } = words;
   useLayoutEffect(() => {
     const container = text.current!;

@@ -5,13 +5,14 @@ kernel's `GET /whoami` answer for the owner cookie (`deps.owner_ctx`), never fro
 
 A new copy (`copies`, `start_over`) stores the seeded hold's visitor question and signed held receipt. It also asks
 the kernel for the recorded night when the settings do (Plan 01d), and stores what the kernel replayed into it
-(`store_replayed_night`) before answering: recorded history for the owner's reads, never a turn.
+(`store_replayed_night`) before answering: recorded history for the owner's reads, never a turn. It then marks the
+seeded conversations read but for the newest few (`conversation_reads.seed_reads`).
 """
 
 import asyncio
 import logging
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -21,14 +22,17 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from desk.api.cookies import set_owner_cookie, set_visitor_cookie
 from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown, visitor_safe
-from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
+from desk.api.demo_visitors import KeyReused, TooManyStarts
+from desk.api.deps import (ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, require_model_budget,
+                           runtime)
+from desk.api.idempotency import IdempotencyKey
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
-from desk.api import owner_reads
-from desk.api.agents import demo_task_sets
+from desk.api import conversation_reads, owner_reads
+from desk.api.agents import demo_task_set, demo_task_sets
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
 from desk.api.prompts import NOTES, DemoTaskSet
-from desk.api.ratelimit import RateLimitLedger
+from desk.api.ratelimit import RateLimited, RateLimitLedger
 from desk.api.ro import KernelRO
 from desk.api.schemas import (
     AlreadyResolved,
@@ -41,6 +45,8 @@ from desk.api.schemas import (
     BusinessOut,
     ConversationSummary,
     CopyOut,
+    DemoVisitorRun,
+    DemoVisitorStarted,
     DeskSetup,
     DeskSummary,
     GenerationIn,
@@ -49,6 +55,7 @@ from desk.api.schemas import (
     OwnerTranscript,
     PeopleOut,
     PersonOnRecord,
+    ReadThroughIn,
     Reports,
     Today,
     VisitorSession,
@@ -90,29 +97,40 @@ class CopyRequest(BaseModel):
     passcode: Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
-async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup], dict[str, DemoTaskSet]]:
+class _Desks(NamedTuple):
+    desks: list[dict]
+    businesses: dict[str, dict]
+    setups: dict[str, DeskSetup]
+    types: dict[str, DemoTaskSet]
+    unread: dict[str, set[str]]
+
+
+async def _desks(ctx: OwnerCtx) -> _Desks:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
-    unfinished setup interviews and business types by Desk ID, from the API's own rows."""
+    unfinished setup interviews, business types and unread conversations by Desk ID, from the API's own rows."""
     # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
     all_desks = await ctx.ro.desks()
     desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
     types = await demo_task_sets(ctx.ro.conn, ctx.ro, [desk["desk_id"] for desk in desks], all_desks=all_desks)
-    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks), types
+    return _Desks(desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks), types,
+                  await conversation_reads.unread(ctx, [desk["desk_id"] for desk in desks]))
 
 
-def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup], types: dict[str, DemoTaskSet]) -> DeskSummary:
-    return DeskSummary(desk_id=desk["desk_id"], slug=desk["slug"], name=desk["name"], business_name=business["name"],
-                       hours=desk["hours"], answering=desk["answering"], setup=setups.get(desk["desk_id"]),
-                       business_type=types[desk["desk_id"]])
+def _summary(desk: dict, found: _Desks) -> DeskSummary:
+    desk_id = desk["desk_id"]
+    return DeskSummary(desk_id=desk_id, slug=desk["slug"], name=desk["name"],
+                       business_name=found.businesses[desk["business_id"]]["name"], hours=desk["hours"],
+                       answering=desk["answering"], setup=found.setups.get(desk_id), business_type=found.types[desk_id],
+                       unread_conversations=len(found.unread.get(desk_id, ())))
 
 
 async def copy_out(ctx: OwnerCtx) -> CopyOut:
-    """The copy's Desks, from its kernel_ro rows, in the order they were made, each with its unfinished setup."""
-    desks, businesses, setups, types = await _desks(ctx)
-    return CopyOut(copy_id=ctx.copy_id,
-                   desks=[_summary(desk, businesses[desk["business_id"]], setups, types) for desk in desks])
+    """The copy's Desks, from its kernel_ro rows, in the order they were made, each with its unfinished setup and
+    its count of unread conversations."""
+    found = await _desks(ctx)
+    return CopyOut(copy_id=ctx.copy_id, desks=[_summary(desk, found) for desk in found.desks])
 
 
 # A replayed visitor's words, by the kind of session they were said in; and the record each event kind carries
@@ -232,13 +250,28 @@ async def _create_copy(state: Runtime) -> CopyCreated:
     return await kernel.call("POST /copies", CreateCopyRequest())
 
 
+async def _seed_reads(state: Runtime, created: CopyCreated) -> None:
+    """Mark the conversations stored for the new copy read, but for the newest few (`conversation_reads.seed_reads`),
+    in a transaction of its own. It never fails the copy: when marking fails, the error's type alone is logged and
+    every seeded conversation stays unread."""
+    try:
+        async with state.database().connect() as conn:
+            await conversation_reads.seed_reads(conn, created.copy_id)
+            await conn.commit()
+    except Exception as error:
+        logger.error("the seeded conversations couldn't be marked read (%s); they all show as unread",
+                     type(error).__name__)
+
+
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
     """A new copy of the Turner seed, read back through its own owner token, which goes only into the cookie. It asks
     for the recorded night when the settings do (`replay_night`). The seeded hold's chat commits first, then the
-    replayed night in its own transaction, so either can be stored even if the other fails."""
+    replayed night in its own transaction, so either can be stored even if the other fails; then whatever was stored
+    is marked read but for the newest visitor conversations."""
     created = await _create_copy(state)
     await _store_seeded(state, created)
     await _store_replayed(state, created)
+    await _seed_reads(state, created)
     async with owner_context(state, created.owner_token) as ctx:
         copy = await copy_out(ctx)
     set_owner_cookie(response, created.owner_token)
@@ -278,17 +311,17 @@ async def me(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> CopyOut:
 @router.get("/desks", response_model=list[BusinessOut], responses=error_responses(401, 503))
 async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOut]:
     """The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk
-    names its setup interview while that isn't finished."""
-    found, businesses, setups, types = await _desks(ctx)
+    names its setup interview while that isn't finished, and counts its unread conversations, all read in one query."""
+    found = await _desks(ctx)
     listed: dict[str, BusinessOut] = {}
-    for desk in found:
-        business = businesses[desk["business_id"]]
+    for desk in found.desks:
+        business = found.businesses[desk["business_id"]]
         if business["business_id"] not in listed:
             listed[business["business_id"]] = BusinessOut(
                 business_id=business["business_id"], name=business["name"],
                 owner_display_name=business["owner_display_name"], timezone=business["timezone"],
                 brand=effective_brand(business["brand"] or {}), desks=[])
-        listed[business["business_id"]].desks.append(_summary(desk, business, setups, types))
+        listed[business["business_id"]].desks.append(_summary(desk, found))
     return list(listed.values())
 
 
@@ -459,9 +492,11 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
                        after: Annotated[int, Query(ge=0)] = 0) -> OwnerTranscript:
     """A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).
     The cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the
-    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored).
+    visitor's typing dots stop, while they are typing, and `visitor_here` whether their public stream is open now
+    (presence in this process's memory, never stored).
     Status reasons are read concurrently with the owner's kernel credential, with bounded caching for final
-    execution refusals; an unreadable reason is null, so the stored transcript still renders."""
+    execution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true
+    for a demo visitor's chat (`owner_reads.demo_visitors`)."""
     session = await ctx.ro.session(session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         raise ApiProblem(404, "not_found")
@@ -475,9 +510,12 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
         ctx, item.event.decision_id, session_id, item.event.state, item.event.ledger_seq) for item in statuses))
     for item, reason in zip(statuses, reasons, strict=True):
         item.owner_plain = reason
+    mark = (await owner_reads.demo_visitors(ctx, session["desk_id"], session_id)).get(session_id)
     return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()),
-                           replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id))
+                           visitor_here=process.listener is not None and process.listener.streaming(session_id),
+                           replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id),
+                           demo_visitor=mark is not None, demo_visitor_run_id=mark.run_id if mark else None)
 
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))
@@ -711,12 +749,17 @@ async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionSt
         await append_message(conn, ids, "note", text=NOTES["taken_over"], wake=False)
         await clear_hand_back_wake(conn, ids.session_id)   # the owner answers what an earlier hand-back woke for
         return
-    if before == "owner":
-        await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))
+    pending = await has_pending(conn, ids.session_id)
+    # A visitor's line the owner left unanswered wakes Claude on the hand-back, so it is resumed work too: the
+    # visitor's stream is told to wait for the turn of this generation, not take the hand-back as an answer.
     waiting = before == "owner" and await has_unanswered_message(conn, ids.session_id)
+    resuming = pending or waiting
+    if before == "owner":
+        await _transcribed(conn, ids, EvOwnerLeft(type="owner_left", resuming=resuming,
+                                                generation=now.generation if resuming else None))
     await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
                          wake=waiting)
-    if await has_pending(conn, ids.session_id):
+    if await has_pending(conn, ids.session_id):           # read again: the note above can be the waiting work
         await append_control(conn, ids, "run_resumable", {"generation": now.generation})
 
 
@@ -842,3 +885,124 @@ async def typing(session_id: SessionId, body: GenerationIn, request: Request,
     except BaseException:
         await conn.rollback()
         raise
+
+
+@router.post("/conversations/{session_id}/read", status_code=204, response_class=Response,
+             responses=error_responses(401, 404, 422, 503))
+async def mark_read(session_id: SessionId, body: ReadThroughIn,
+                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> None:
+    """The owner has seen the conversation through the transcript cursor `through` (the `n` of the last item their
+    screen showed): its read marker moves there, held at the session's newest row, and never moves back, so a stale or
+    replayed call marks nothing unread again and a message that arrived after the screen drew stays unread. A session
+    that isn't a visitor's or an agent's on one of the copy's Desks is 404, and so is the owner's own preview, which is
+    never unread. No kernel call and no ledger entry: the marker is the API's own row, for the owner's reads alone."""
+    ids = await _conversation(ctx, session_id)
+    if (await ctx.ro.session(session_id))["preview"]:
+        raise ApiProblem(404, "not_found")
+    conn = ctx.ro.conn
+    try:
+        await conversation_reads.mark_read(conn, ids, body.through)
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
+
+
+# Demo visitors -----------------------------------------------------------------------------------------------
+#
+# A demo visitor is an AI that plays a customer in a visitor chat on one of the copy's own Desks, so the owner can
+# watch a live chat and take it over, whisper to Claude or hand it back (`demo_visitors.py`). It talks to the Desk
+# only through the public visitor endpoints, as any visitor does; these routes start it, read it and stop it, in the
+# owner cookie's copy alone. Its runs live in this process's memory for an hour; the chat it opens is marked in the
+# API's own transcript, so the owner's reads still flag it once the run is gone (`owner_reads.demo_visitors`).
+
+
+class DemoVisitorIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: IdempotencyKey                     # one per click, required (`idempotency`)
+
+
+@router.post("/desks/{desk_id}/demo_visitor", status_code=202, response_model=DemoVisitorStarted,
+             responses=error_responses(401, 404, 409, 422, 429, 503))
+async def start_demo_visitor(desk_id: DeskId, body: DemoVisitorIn, request: Request,
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorStarted:
+    """Start a demo visitor on one of the copy's Desks, answered once its visitor session is open: open that
+    conversation to watch it. It plays the fixed persona of the Desk's set (`agents.demo_task_set`: its setup business
+    type, or Turner's for the copy's own Desk), read with the Desk's slug from the copy's own rows. A Desk of another
+    copy, or none, is 404 before anything starts.
+
+    One runs at a time in a copy: starting another meanwhile answers the running one, on whichever of the copy's Desks
+    it runs, and starts nothing. Each start carries an `idempotency_key`, one per click (422 without one); a repeat in
+    the copy within the hour answers the run its key started, however it ended, and the same key on another Desk is
+    409 `conflict`. Neither counts as a start. A copy starts at most three an hour: past that, 429 `rate_limited` with
+    the seconds until another fits (`retry_after`). In production, 503 `demo_budget` once today's model budget is
+    spent. A run whose visitor session never opened, or whose chat couldn't be marked, is 503
+    `demo_visitor_unavailable`."""
+    state = runtime(request).started()
+    desk = await ctx.ro.one("desks", desk_id=ctx.desk(desk_id))
+    if desk is None:
+        raise ApiProblem(404, "not_found")
+    task_set = await demo_task_set(ctx.ro.conn, ctx.ro, desk_id)
+    await ctx.ro.conn.commit()
+    visitors = state.demo_visitors
+    try:
+        # Only a start that launches a run spends today's budget: the click's own run, or the one already going, is
+        # answered whatever the budget, so a click sent again gets the answer it got the first time. These are the
+        # lookups `start` makes first; nothing is awaited between them and `start` unless a launch is coming.
+        answered = visitors.existing(ctx.copy_id, body.idempotency_key, desk_id)
+        if answered is None:
+            await require_model_budget(request)
+        run = await visitors.start(ctx.copy_id, ctx.owner_session_id, desk_id, desk["slug"], task_set,
+                                   key=body.idempotency_key)
+    except TooManyStarts as refused:
+        raise RateLimited(refused.retry_after) from None
+    except KeyReused:
+        raise ApiProblem(409, "conflict") from None
+    # A run whose chat's mark couldn't be written has failed before it said anything: a start error, never an empty,
+    # unlabelled chat to open. Only a run that opened and is going, or ended having chatted, leads to a conversation.
+    if run.session_id is None or (run.state == "failed" and run.messages_sent == 0):
+        raise ApiProblem(503, "demo_visitor_unavailable")
+    return DemoVisitorStarted(run_id=run.run_id, desk_id=run.desk_id, session_id=run.session_id)
+
+
+@router.get("/desks/{desk_id}/demo_visitor", response_model=DemoVisitorRun,
+            responses=error_responses(401, 404, 422, 503))
+async def demo_visitor(desk_id: DeskId, request: Request,
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorRun:
+    """The copy's newest demo visitor on the Desk as it stands (`state`, and how it `ended` once it has), while this
+    process keeps it (an hour); 404 when there is none."""
+    run = runtime(request).started().demo_visitors.newest(ctx.copy_id, ctx.desk(desk_id))
+    if run is None:
+        raise ApiProblem(404, "not_found")
+    return run
+
+
+@router.get("/desks/{desk_id}/demo_visitor/{run_id}", response_model=DemoVisitorRun,
+            responses=error_responses(401, 404, 422, 503))
+async def demo_visitor_run(desk_id: DeskId, run_id: Annotated[str, Path(max_length=64)], request: Request,
+                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorRun:
+    """One of the copy's demo visitors on the Desk as it stands, by its ID, so a conversation reads its own run after a
+    newer one has started. A run of another copy or another Desk, or one this process no longer keeps (an hour), is
+    404."""
+    run = runtime(request).started().demo_visitors.run(run_id, ctx.copy_id)
+    if run is None or run.desk_id != ctx.desk(desk_id):
+        raise ApiProblem(404, "not_found")
+    return run
+
+
+@router.post("/desks/{desk_id}/demo_visitor/{run_id}/stop", response_model=DemoVisitorRun,
+             responses=error_responses(401, 404, 422, 503))
+async def stop_demo_visitor(desk_id: DeskId, run_id: Annotated[str, Path(max_length=64)], request: Request,
+                            ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorRun:
+    """Stop the copy's demo visitor on the Desk: a running one ends `stopped` (`stopped_by_owner`) with no further
+    model call and its event stream closed, and is answered once it has; one that has ended is answered as it is. A
+    run of another copy or another Desk, or one this process no longer keeps, is 404."""
+    visitors = runtime(request).started().demo_visitors
+    found = visitors.run(run_id, ctx.copy_id)
+    if found is None or found.desk_id != ctx.desk(desk_id):
+        raise ApiProblem(404, "not_found")
+    stopped = await visitors.stop(run_id, ctx.copy_id)
+    if stopped is None:
+        raise ApiProblem(404, "not_found")
+    return stopped

@@ -60,7 +60,7 @@ const meta = {
       'The boards keep the business and owner names they were drawn with, before the demo owner was renamed, as history; the story has the fixture’s, Turner Plumbing and Mike Turner, so on a phone the head’s line breaks at another word.',
       'The conversation is the Turner fixture’s: Dana asks for Mike, the kernel’s handoff card with its receipt, then the take-over’s events (Mike joins, and his words under his name), with its end kept above the composer as the page keeps it: on a phone, where the chat scrolls, its last row ends 24 px over the composer area.',
       'The board opens with an earlier exchange about the water heater, which isn’t in the fixture, so the story starts at Dana asking for Mike; Mike’s words are the fixture’s, without the board’s greeting.',
-      'The about column shows the charter’s cards, and the header the kernel’s open status; on a phone the about column opens the chat’s scroll region, above the conversation, where the phone board has none.',
+      'The About column sits to the left of the chat with the kernel’s open status above the charter’s cards; on a phone the status stays in the header and About opens the chat’s scroll region, above the conversation, where the phone board has none.',
       'The author’s name in the footer is a text link, signed after the boards (#697), where they draw it as plain text.',
       'Where the chat scrolls under its head, the page fades it out over 24 px (#670); the story doesn’t draw that fade and cuts the chat at the head’s edge.',
     ].join(' '),
@@ -126,8 +126,15 @@ export const Laptop: Story = {
   parameters: { canvas: 'N-R2-TakeOver-A-1512-EN' },
   play: async ({ canvasElement, userEvent }) => {
     await expectMariaInTheChat(canvasElement, userEvent, [1512, 982]);
-    // The about column at the right of the chat, as ever.
-    await expect(within(canvasElement).getByRole('complementary', { name: 'About Turner Plumbing' })).toBeVisible();
+    // The About column sits on the left, beside the chat from the header down.
+    const canvas = within(canvasElement);
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
+    await expect(about).toBeVisible();
+    const column = about.getBoundingClientRect();
+    const chat = canvas.getByRole('main').getBoundingClientRect();
+    await expect(column.right).toBeLessThanOrEqual(chat.left + 1);
+    await expect(Math.round(column.top)).toBe(Math.round(chat.top));
+    await expect(Math.round(column.bottom)).toBe(Math.round(chat.bottom));
   },
 };
 

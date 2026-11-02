@@ -125,9 +125,42 @@
   transform: rotate(180deg);
 }
 
+/* A question that takes several answers: each row's number, then its 18 px box, then its words, 10 px
+   apart. The box is an edge until picked, then filled with its check. */
+.cd-setup-q3__list--several .cd-setup-q3__row {
+  gap: var(--space-10);
+}
+
+.cd-setup-q3__box {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--space-18);
+  height: var(--space-18);
+  border: 1.5px solid var(--line-field);
+  border-radius: var(--space-4);
+}
+
+.cd-setup-q3__box.is-checked {
+  border: 0;
+  background: var(--text-primary);
+  color: var(--bg-app);
+}
+
+/* Send sits at the hint's right end, on whichever line the hint wraps to. */
+.cd-setup-q3__hint-gap {
+  flex: 1;
+}
+
 @media (max-width: 639px), (pointer: coarse) {
   .cd-setup-q3__hint {
     display: none;
+  }
+  /* A question that takes several keeps its hint on a phone, since it holds Send; it wraps. */
+  .cd-setup-q3__hint.cd-setup-q3__hint--several {
+    display: flex;
   }
 }
 

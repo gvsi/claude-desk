@@ -89,6 +89,10 @@ describe('mock payloads', () => {
       "ProofCheck/ must have required property 'counterexample_raw'",
     ]);
     expect(validateContract('EvWriting', { type: 'writing', text: 'hi' })).not.toEqual([]);
+    // A field the contracts mark as left out while it holds its default may be absent, and keeps its type when sent.
+    expect(validateContract('EvTurnEnd', { type: 'turn_end' })).toEqual([]);
+    expect(validateContract('EvTurnEnd', { type: 'turn_end', generation: 2 })).toEqual([]);
+    expect(validateContract('EvTurnEnd', { type: 'turn_end', generation: 'two' })).not.toEqual([]);
     expect(validateContract('Decision', { ...mockStore.world.decisions.values().next().value?.decision, expires_at: 'soon' })).not.toEqual([]);
     expect(validateContract('NoSuchModel', {})).not.toEqual([]);
     expect(Object.keys(SAMPLES).sort()).toEqual(SCRIPT.map((rule) => rule.name).sort());
@@ -112,7 +116,12 @@ describe('mock payloads', () => {
     checks.push(['PaymentLinkView', await body('paymentLink', { params: { token: paid } })]);
     checks.push(['PaymentLinkStateResult', await body('cancelPayment', { params: { token: dropped } })]);
 
-    // The visitor cancels one of their holds; its resolved receipt joins the stream.
+    // Booking samples closed the earlier discounts. Fresh requests exercise visitor cancellation
+    // and owner answers after that booking; the cancellation's resolved receipt joins the stream.
+    for (const text of SAMPLES.discount) {
+      await body('sendMessage', { params: { slug }, body: { text } });
+      await vi.advanceTimersByTimeAsync(EVENT_GAP_MS * 6);
+    }
     const held = (await body('needsYou', { params: { desk_id: RIVERA.deskId } })) as NeedsYouItem[];
     const own = held.find((item) => item.decision?.session_id === opened.state.session_id)?.decision;
     if (!own) throw new Error("the discount samples hold this browser's requests");

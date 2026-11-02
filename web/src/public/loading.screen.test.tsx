@@ -11,6 +11,7 @@ import { holdReads } from '../test/holdReads.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectScreenBasics } from '../test/screen.ts';
 import { expectSkeletonLoad, expectSkeletonStill, type SkeletonAnchor } from '../test/skeleton.ts';
+import { DEMO_TASKS, DEMO_TASK_ROWS } from './agents/copy.ts';
 
 beforeAll(loadWebFonts);
 
@@ -23,6 +24,11 @@ const AGENTS_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'page-title', page: '.cd-agents-page__head h1' },
   { name: 'disclosure', page: '.cd-agents-page__head .cd-disclosure-line' },
   { name: 'send-card', page: '.cd-agents-page__cards > section:first-child', size: true },
+  ...DEMO_TASK_ROWS.flatMap((row, rowIndex) => row.map((task, chipIndex) => ({
+    name: `task-chip-${DEMO_TASKS.indexOf(task)}`,
+    page: `.cd-agents-card__tasks > :nth-child(${rowIndex + 1}) > :nth-child(${chipIndex + 1})`,
+    size: true,
+  }))),
 ];
 const CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'brand-header', page: '.cd-public-brand', size: true },
@@ -47,13 +53,23 @@ const DESKTOP_CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'concept-footer', page: '.cd-concept-footer', size: true },
 ];
 
-it('public_chat_opens_in_place_desktop', async () => {
+it.each([[900, 768], [1024, 768], [1512, 982], [1800, 1000]])('public_chat_opens_in_place_desktop_%s_%s', async (width, height) => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: [...FIRST_VIEW_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
+    anchors: [
+      ...FIRST_VIEW_ANCHORS,
+      { name: 'about-title', page: '.cd-public-shell__about > h2' },
+      { name: 'about-column', page: '.cd-public-shell__about', size: true },
+      { name: 'about-status', page: '.cd-public-shell__about > .cd-public-shell__open-status', size: true },
+      ...(width >= 1512 ? Array.from({ length: 5 }, (_, index) => ({
+        name: `about-card-${index}`,
+        page: `.cd-public-shell__about .cd-public-shell__blocks > .cd-reply-card:nth-child(${index + 1})`,
+        size: true,
+      })) : []),
+    ],
     open: async () => {
-      await renderRoute(CHAT, { pollScale: 100 });
+      await renderRoute(CHAT, { viewport: { width, height }, pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
     },
     release: read.release,
@@ -313,7 +329,6 @@ it.each(['phone', 'desktop'] as const)('agents_page_opens_in_spanish_%s', async 
       { name: 'key-card', page: '.cd-agents-page__cards > section:nth-child(5)', size: true },
       { name: 'key-action', page: '.cd-agents-page__cards > section:nth-child(5) .cd-button', size: true },
       { name: 'agents-footer', page: '.cd-agents-page__main > .cd-concept-footer', size: true },
-      ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > :nth-child(${i + 1})`, size: true })),
     ],
     open: async () => { await renderRoute(AGENTS, { viewport, language: 'es-MX', pollScale: 100 }); },
     release: read.release,

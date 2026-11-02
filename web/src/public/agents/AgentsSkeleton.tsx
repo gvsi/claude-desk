@@ -2,14 +2,39 @@ import { useMemo, useRef, useState, type RefObject } from 'react';
 
 import { ConceptFooter, PublicBrandHeaderSkeleton, Skeleton, SkeletonCard, type CopyLanguage } from '../../ds/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
-import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASKS } from './copy.ts';
+import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASKS, DEMO_TASK_ROWS, type DemoTask } from './copy.ts';
 
 import './AgentCardPage.css';
 
-/** The fresh Desk's capabilities, measured only, until the kernel's Agent Card is read. */
-const CAN_DO: Record<CopyLanguage, readonly string[]> = {
-  en: ['Get a quote from the price list', 'Find open times and book a visit', 'Pay the service call deposit within a signed limit', 'Ask Mike for a callback'],
-  es: ['Pedir un presupuesto con la lista de precios', 'Ver horarios libres y reservar una visita', 'Pagar el depósito de la visita dentro de un límite firmado', 'Pedir que Mike devuelva la llamada'],
+/**
+ * The fresh copy's "What agents can do here": one row for each ability the Turner seed offers an
+ * agent, in the order the kernel's Agent Card lists them, measured only until the card is read.
+ */
+const CAN_DO: Readonly<Record<CopyLanguage, readonly string[]>> = {
+  en: [
+    'Get a quote from the price list',
+    'Find open times',
+    'Book a visit',
+    'Get a payment link for a quote',
+    'Pay for a quote within the limit of a signed mandate',
+    'Leave contact details',
+    'Ask for a callback',
+    'Verify a customer with a code sent to their contact on record',
+    "Receive a verified customer's own documents",
+    "List a verified customer's own charges",
+  ],
+  es: [
+    'Pedir una cotización de la lista de precios',
+    'Buscar horarios libres',
+    'Reservar una visita',
+    'Pedir un enlace de pago para una cotización',
+    'Pagar una cotización dentro del límite de un mandato firmado',
+    'Dejar datos de contacto',
+    'Pedir que te devuelvan la llamada',
+    'Verificar a un cliente con un código enviado a su contacto registrado',
+    'Recibir los documentos propios de un cliente verificado',
+    'Ver los cargos propios de un cliente verificado',
+  ],
 };
 
 /** A reference row's known words in the real type, at this row's width and in this browser's fonts. */
@@ -48,19 +73,28 @@ function TaskChip({ row, label, anchor }: { row: RefObject<HTMLDivElement | null
   return <Skeleton shape="block" measure={{ label, className }} height={height ?? 'var(--space-28)'} radius="full" anchor={anchor} />;
 }
 
-/**
- * The fresh copy's task chips as shapes, in their row: the page's skeleton draws them, and the send
- * panel holds their place with them until the Desk's set is read (`loading`). The row is kept as
- * state, so the chips measure once it is in the page: their own effects run before its ref is set.
- */
-export function TaskChipShapes({ language, loading = false }: { language: CopyLanguage; loading?: boolean }) {
+/** One row of task chips as shapes; the row is kept as state, so its chips measure once it is in the page. */
+function TaskChipRow({ language, tasks, loading }: { language: CopyLanguage; tasks: readonly DemoTask[]; loading: boolean }) {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const row = useMemo(() => ({ current: element }), [element]);
   return (
     <div ref={setElement} className="cd-suggestion-chips" aria-hidden={loading || undefined} data-loading={loading ? 'task-chips' : undefined}>
-      {DEMO_TASKS.map((task, i) => (
-        <TaskChip key={task} row={row} label={DEMO_TASK_COPY[language].rivera[task]} anchor={loading ? undefined : `task-chip-${i}`} />
+      {tasks.map((task) => (
+        <TaskChip key={task} row={row} label={DEMO_TASK_COPY[language].rivera[task]} anchor={loading ? undefined : `task-chip-${DEMO_TASKS.indexOf(task)}`} />
       ))}
+    </div>
+  );
+}
+
+/**
+ * The fresh copy's task chips as shapes, in board 03's rows (tasks without money, then payments):
+ * the page's skeleton draws them, and the send panel holds their place with them until the Desk's
+ * set is read (`loading`).
+ */
+export function TaskChipShapes({ language, loading = false }: { language: CopyLanguage; loading?: boolean }) {
+  return (
+    <div className="cd-agents-card__tasks">
+      {DEMO_TASK_ROWS.map((tasks) => <TaskChipRow key={tasks[0]} language={language} tasks={tasks} loading={loading} />)}
     </div>
   );
 }

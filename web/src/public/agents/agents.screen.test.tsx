@@ -13,7 +13,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { cdp, page, userEvent } from 'vitest/browser';
 import { cleanup, render, type RenderResult } from 'vitest-browser-react';
 
-import type { EvReceipt, PublicDesk } from '../../api/contracts.ts';
+import type { CardBlock, EvReceipt, PublicDesk } from '../../api/contracts.ts';
 import type { DemoAgentRun } from '../../api/views.ts';
 import { App } from '../../app/App.tsx';
 import { setPollScale } from '../../app/poll.ts';
@@ -50,11 +50,42 @@ const agentRuns = () => [...mockStore.world.sessions.values()].filter((s) => s.s
 /** The routes the page called, in order. */
 const calls = () => mockStore.requests.map((r) => r.key);
 
-/** The panel's three tasks. */
-const TASKS = ['Book the earliest visit', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
+/** The panel's four tasks. */
+const TASKS = ['Book the earliest visit', 'Ask about heater flushes', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
 
 /** The panel's lead before a run, as boards 03 to 05 write it. */
 const LEAD = 'A built-in agent visits Turner Plumbing for Alex Kim. It’s simulated.';
+
+/**
+ * What the kernel's Agent Card lists for Turner Plumbing's seed, as its contract test pins it
+ * (`test_public_desk_carries_the_agent_card`): one block per ability, by its plain label.
+ */
+const TURNER_ABILITIES = {
+  en: [
+    'Get a quote from the price list',
+    'Find open times',
+    'Book a visit',
+    'Get a payment link for a quote',
+    'Pay for a quote within the limit of a signed mandate',
+    'Leave contact details',
+    'Ask for a callback',
+    'Verify a customer with a code sent to their contact on record',
+    "Receive a verified customer's own documents",
+    "List a verified customer's own charges",
+  ],
+  es: [
+    'Pedir una cotización de la lista de precios',
+    'Buscar horarios libres',
+    'Reservar una visita',
+    'Pedir un enlace de pago para una cotización',
+    'Pagar una cotización dentro del límite de un mandato firmado',
+    'Dejar datos de contacto',
+    'Pedir que te devuelvan la llamada',
+    'Verificar a un cliente con un código enviado a su contacto registrado',
+    'Recibir los documentos propios de un cliente verificado',
+    'Ver los cargos propios de un cliente verificado',
+  ],
+};
 
 /** The signed limit panel's values and source, as the agents boards write them. */
 const LIMIT_VALUES = ['$20', '$100', 'One hour'];
@@ -71,8 +102,8 @@ function limitIn(screen: RenderResult, panelName = 'Send an agent', regionName =
 const follows = (earlier: Element | null | undefined, later: Element | null | undefined): boolean =>
   earlier != null && later != null && (earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
-/** The panel's group of task chips. */
-const chipGroup = (screen: RenderResult) => screen.getByRole('region', { name: 'Send an agent' }).getByRole('group', { name: 'Tasks for the agent' }).element();
+/** The panel's first row of task chips. */
+const chipGroup = (screen: RenderResult) => screen.getByRole('region', { name: 'Send an agent' }).getByRole('group', { name: 'Tasks for the agent' }).elements()[0];
 
 /** The task chips the panel offers now, by name. */
 const chipsIn = (screen: RenderResult) =>
@@ -221,16 +252,52 @@ async function plantDesk(patch: Partial<PublicDesk>): Promise<void> {
 }
 
 describe('agents page', () => {
+  it.each([
+    ['desktop', true], ['phone', true], ['desktop', false], ['phone', false],
+  ] as const)('task_rows_by_kind_%s_payments_%s', async (viewport, payments) => {
+    if (!payments) {
+      for (const tool of mockStore.world.desks[0]!.tools) {
+        if (tool.tool === 'native.payment_link' || tool.tool === 'native.charge_mandate') tool.status = 'disabled';
+      }
+    }
+    const { screen } = await renderRoute(PAGE, { viewport });
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    await expect.element(panel.getByRole('button', { name: TASKS[0] })).toBeVisible();
+    expect([innerWidth, innerHeight]).toEqual([VIEWPORTS[viewport].width, VIEWPORTS[viewport].height]);
+    const rows = panel.getByRole('group', { name: 'Tasks for the agent' }).elements();
+    expect(rows.map((row) => [...row.querySelectorAll('button')].map((chip) => chip.textContent)))
+      .toEqual(payments ? [TASKS.slice(0, 2), TASKS.slice(2)] : [TASKS.slice(0, 2)]);
+    for (const row of rows) {
+      expectComputed(row, { display: 'flex', flexWrap: 'wrap', gap: '8px' });
+      const chips = [...row.querySelectorAll('button')].map((chip) => chip.getBoundingClientRect());
+      expect(chips.every((chip) => chip.left >= row.getBoundingClientRect().left && chip.right <= row.getBoundingClientRect().right)).toBe(true);
+      if (viewport === 'desktop') expect(chips[0]!.top).toBe(chips[1]!.top);
+    }
+    const first = rows[0]!.getBoundingClientRect();
+    if (payments) {
+      expect(rows[1]!.getBoundingClientRect().top - first.bottom).toBe(8);
+    } else {
+      // No empty payment row or trailing row gap inside the task stack.
+      const stack = rows[0]!.parentElement!.getBoundingClientRect();
+      expect(stack.top).toBe(first.top);
+      expect(stack.bottom).toBe(first.bottom);
+    }
+    expectNoHorizontalScroll();
+  });
+
   it('agent_card_lists_skills_and_endpoint', async () => {
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
     onTestFinished(() => writeText.mockRestore());
     const card = agentCardOut(RIVERA.slug);
     const { screen } = await renderRoute(PAGE);
 
-    // What agents can do here: the kernel's blocks, each as written.
+    // What agents can do here: the kernel's blocks, each as written, one list item per ability and
+    // nothing about the protocol, which the API's card below carries.
     const canDo = screen.getByRole('region', { name: 'What agents can do here' });
     await expect.element(canDo).toBeVisible();
     for (const block of AGENT_CARD_BLOCKS.en) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
+    expect([...canDo.element().querySelectorAll('li')].map((li) => li.textContent)).toEqual(TURNER_ABILITIES.en);
+    for (const protocol of ['POST /api/a2a', 'X-Agent-Sig']) expect(canDo.element().textContent).not.toContain(protocol);
 
     // Connecting your own: the API's address, its signing rules in plain lines and its example request.
     const connect = screen.getByRole('region', { name: 'Connect your own agent' });
@@ -259,13 +326,13 @@ describe('agents page', () => {
   });
 
   it('a_desk_setup_made_offers_its_own_tasks', async () => {
-    // A dentist's Desk, which setup made as an office without enabled payment tools: only its consult,
+    // A dentist's Desk, which setup made as an office without enabled payment tools: its consult and question,
     // in English and Spanish, never Turner's visit or service call deposit; the run's first request
     // is titled with the chip picked. The Desk's set is read once, with the visitor's chat. (The CPA
     // starter is an office too, but the mock's setup runs it as its consultant interview, which this
     // helper doesn't answer; the mock's unit test types every starter.)
     const slug = await liveSetupDesk("I'm Dana Park. Park Dental is a family dentist in Fremont, and new patients start with a checkup.");
-    const office = ['Book the earliest consult'];
+    const office = ['Book the earliest consult', 'Ask what to bring'];
     const { screen } = await renderRoute(`/d/${slug}/agents`);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
     await expect.element(panel.getByRole('button', { name: office[0] })).toBeVisible();
@@ -288,14 +355,14 @@ describe('agents page', () => {
     const es = await renderRoute(`/d/${slug}/agents`, { language: 'es-MX' });
     const enviar = es.screen.getByRole('region', { name: 'Enviar un agente' });
     await expect.element(enviar.getByRole('button', { name: 'Reservar la primera consulta libre' })).toBeVisible();
-    expect(enviar.getByRole('button').elements().map((el) => el.textContent)).not.toContain('Pagar por adelantado, dentro de su límite');
+    expect(enviar.getByRole('button').elements().map((el) => el.textContent)).toEqual(['Reservar la primera consulta libre', 'Preguntar qué llevar']);
   });
 
-  it('offers_the_listed_tasks_in_page_order_and_all_three_for_older_or_unreadable_reads', async () => {
-    const all = ['Book the earliest consult', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+  it('offers_the_listed_tasks_in_page_order_and_all_four_for_older_or_unreadable_reads', async () => {
+    const all = ['Book the earliest consult', 'Ask what to bring', 'Pay up front, within its limit', 'Try to pay more than its limit'];
     const bodies = [
       { task_set: 'office', tasks: ['book_visit'] },
-      { task_set: 'office', tasks: ['push_the_limit', 'book_visit', 'quote_and_deposit'] },
+      { task_set: 'office', tasks: ['push_the_limit', 'ask_question', 'book_visit', 'quote_and_deposit'] },
       { task_set: 'office' },
       { task_set: 'office', tasks: null },
       { task_set: 'office', tasks: ['book_visit', 'unknown'] },
@@ -320,14 +387,14 @@ describe('agents page', () => {
     mockStore.inject({ route: 'agentTasks', status: 200, body: { task_set: 'rivera' }, delayMs: 1_000 });
     const slow = await renderRoute(PAGE);
     const waiting = slow.screen.getByRole('region', { name: 'Send an agent' });
-    await expect.poll(() => waiting.element().querySelectorAll('[data-loading="task-chips"] .cd-skeleton').length).toBe(3);
+    await expect.poll(() => waiting.element().querySelectorAll('[data-loading="task-chips"] .cd-skeleton').length).toBe(4);
     expect(chipsIn(slow.screen)).toEqual([]);
     await expect.element(waiting.getByRole('button', { name: TASKS[0] })).toBeVisible();
     expect(waiting.element().querySelector('[data-loading="task-chips"]')).toBeNull();
 
     // A read that fails, or a session that won't open for it, never holds the page up: the tasks come
     // in plain words for any business, and the agent still goes out on the one picked.
-    const plain = ['Book the earliest appointment', 'Pay up front, within its limit', 'Try to pay more than its limit'];
+    const plain = ['Book the earliest appointment', 'Ask what to know first', 'Pay up front, within its limit', 'Try to pay more than its limit'];
     const failures = [
       { route: 'agentTasks', status: 200, body: null },
       { route: 'agentTasks', status: 200, body: { task_set: 'unknown', tasks: ['book_visit'] } },
@@ -343,7 +410,7 @@ describe('agents page', () => {
       await expect.element(panel.getByRole('button', { name: plain[0] })).toBeVisible();
       for (const name of plain) await expect.element(panel.getByRole('button', { name })).toBeVisible();
       await expect.element(screen.getByRole('region', { name: 'What agents can do here' })).toBeVisible();
-      await panel.getByRole('button', { name: plain[2] }).click();
+      await panel.getByRole('button', { name: 'Try to pay more than its limit' }).click();
       await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
       expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'push_the_limit' });
     }
@@ -380,6 +447,7 @@ describe('agents page', () => {
     await expect.element(es.screen.getByText('Turner Plumbing responde con Claude, una IA.', { exact: true })).toBeVisible();
     const canDo = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
     for (const block of AGENT_CARD_BLOCKS.es) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
+    expect([...canDo.element().querySelectorAll('li')].map((li) => li.textContent)).toEqual(TURNER_ABILITIES.es);
     await expectScreenBasics(es.screen.container, { owner: false });
     // The signed limit and a run in Spanish: the panel's words and the signed request's pill.
     expect(limitIn(es.screen, 'Enviar un agente', 'Límite firmado')).toEqual({
@@ -503,6 +571,30 @@ describe('agents page', () => {
     await last.screen.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(last.screen.getByText(CHAT_ENDED_COPY.en, { exact: true })).toBeVisible();
     expect(chipsIn(last.screen)).toEqual([]);
+  });
+
+  it.each([true, false])('question_task_finishes_with_payments_%s', async (payments) => {
+    const desk = mockStore.world.desks[0]!;
+    if (!payments) {
+      for (const tool of desk.tools) {
+        if (tool.tool === 'native.payment_link' || tool.tool === 'native.charge_mandate') tool.status = 'disabled';
+      }
+    }
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const task = panel.getByRole('button', { name: 'Ask about heater flushes' });
+    await expect.element(task).toBeVisible();
+    expect(chipsIn(screen)).toEqual(payments ? TASKS : TASKS.slice(0, 2));
+
+    await task.click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'ask_question' });
+    const run = panel.getByRole('log', { name: 'Alex Kim’s assistant’s visit' });
+    await expect.element(run.getByText('Yes, we do water heater flushes.', { exact: true })).toBeVisible();
+    expect(run.element().querySelectorAll('.cd-agent-message')).toHaveLength(1);
+    expect(run.element().querySelectorAll('.cd-claude-message')).toHaveLength(1);
+    expect(run.element().querySelector('.cd-agent-message__title')?.textContent).toBe('Ask about heater flushes');
+    expect(chipsIn(screen)).toEqual(payments ? TASKS : TASKS.slice(0, 2));
   });
 
   it('send_agent_shows_signed_requests_and_replies', async () => {
@@ -1829,6 +1921,22 @@ describe('agents page', () => {
     expectNoHorizontalScroll();
   });
 
+  it('agent_card_with_no_abilities_shows_the_page_empty_line', async () => {
+    // A Desk with no tool an agent may be given yet: the kernel sends no blocks, and the card says so
+    // in the page's own words, in either language, with no empty list.
+    await plantDesk({ agent_card: [] });
+    const { screen } = await renderRoute(PAGE);
+    const canDo = screen.getByRole('region', { name: 'What agents can do here' });
+    await expect.element(canDo.getByText('Nothing is listed here yet. An agent can still ask what this Desk can help with.', { exact: true })).toBeVisible();
+    expect(canDo.element().querySelector('ul')).toBeNull();
+    await cleanup();
+    await plantDesk({ agent_card: [] });
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    const vacio = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
+    await expect.element(vacio.getByText('Todavía no hay nada en esta lista. Un agente puede preguntar en qué ayuda este Desk.', { exact: true })).toBeVisible();
+    expect(vacio.element().querySelector('ul')).toBeNull();
+  });
+
   it('business_name_is_marked_as_its_own_words', async () => {
     // The business's name is its own words wherever the page writes it, the panel's lead included,
     // so the copy check never reads it as the page's (all capitals and an exclamation mark here).
@@ -1851,5 +1959,32 @@ describe('agents page', () => {
     await until(() => expect(esLead()?.textContent).toBe('Un agente integrado visita ACME! en nombre de Alex Kim. Es simulado.'));
     expect(esLead()?.querySelector('[data-copy="user"]')?.textContent).toBe('ACME!');
     await expectScreenBasics(es.screen.container, { owner: false });
+  });
+});
+
+describe('an owner who gave no name', () => {
+  it('their_words_in_a_run_go_by_the_business', async () => {
+    // A run in which the owner wrote: their card is "Turner Plumbing said", never setup's
+    // fallback name, "Owner" (owner, 2026-11-02).
+    // Turner's Desk, whose agents page offers the booking run, read as setup leaves a nameless owner.
+    const slug = RIVERA.slug;
+    const desk = await mockStore.dispatch('publicDesk', { params: { slug }, query: { lang: 'en' } });
+    if ('network' in desk || desk.status !== 200) throw new Error('the mock reads the Desk');
+    mockStore.inject({ route: 'publicDesk', status: 200, times: 100, body: { ...(desk.body as PublicDesk), owner_display_name: 'Owner' } });
+    const said: CardBlock = { kind: 'card', template: 'owner_said', text: 'Yes, we can come on Tuesday.', fact_id: 'owner:said-1', title: 'Yes, we can come on Tuesday.' };
+    const run: DemoAgentRun = {
+      run_id: 'run-said', launcher_session_id: 'ses-any', slug, task: 'book_visit', state: 'done',
+      turns: [
+        { author: 'agent', n: 1, blocks: [], receipts: [], text: 'Can someone come on Tuesday?' },
+        { author: 'desk', n: 2, blocks: [said], receipts: [], text: null },
+      ],
+    };
+    mockStore.inject({ route: 'agentRun', status: 200, times: 100, body: run });
+    const { screen } = await renderRoute(`/d/${slug}/agents`);
+    await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
+    const log = screen.getByRole('region', { name: 'Send an agent' }).getByRole('log');
+    await expect.element(log.getByText('Yes, we can come on Tuesday.', { exact: true })).toBeVisible();
+    await expect.element(log.getByText('Turner Plumbing said', { exact: true })).toBeVisible();
+    expect(log.element().textContent).not.toMatch(/\bOwner\b/);
   });
 });
