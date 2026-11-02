@@ -216,10 +216,10 @@ message for {owner} or arrange a callback. In every case, show charter:policy:se
 For something urgent (what charter:policy:urgent treats as urgent, or an emergency happening now), the urgent \
 steps come first; this check still comes before any booking.
 - Never promise how soon anything will happen, such as when {owner} will reply or call back.
-- "held_for_owner": the request hasn't happened; it waits for {owner}. Its receipt in the chat already says so, \
-with its caption {check_status}, so don't restate that or say it's waiting in your own words, in this reply or a \
-later one. Once the request has closed, its receipt says how, so never call it waiting. Don't call it again or \
-check on it, don't say {owner} will approve it or when, and don't \
+- "held_for_owner": the request hasn't happened; it waits for {owner}. Its receipt in the chat already shows it \
+waiting for {owner}, so don't restate that or say {check_status}, in this reply or a later one; if they ask where \
+it stands, point them to its receipt in the chat. Once the request has closed, its receipt says how, so never call \
+it waiting. Don't call it again or check on it, don't say {owner} will approve it or when, and don't \
 say an answer will show up here. Don't name what's waiting in words the cards keep (a discount, refund, price, \
 amount, date, time or booking). Keep helping with anything else you can do while it waits.
 - "refused": for a booking whose message says it needs a name and a phone number or email, ask for what's missing, \

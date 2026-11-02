@@ -329,9 +329,9 @@ def test_a_held_request_is_left_to_its_receipt_and_never_called_waiting_once_clo
     text = conversation_system(RIVERA)[0]["text"]
     held = next(line for line in text.splitlines() if line.startswith('- "held_for_owner":'))
     assert "so you can say" not in held
-    assert ("Its receipt in the chat already says so, with its caption " in held
-            and "so don't restate that or say it's waiting in your own words, in this reply or a later one. Once the "
-                "request has closed, its receipt says how, so never call it waiting." in held)
+    assert "Its receipt in the chat already shows it waiting for Mike Turner, so don't restate that or say " in held
+    assert (", in this reply or a later one; if they ask where it stands, point them to its receipt in the chat. Once "
+            "the request has closed, its receipt says how, so never call it waiting." in held)
 
 
 def test_a_booking_refused_for_missing_details_is_asked_for_them_and_tried_once_more():
