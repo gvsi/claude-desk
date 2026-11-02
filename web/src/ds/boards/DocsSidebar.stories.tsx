@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { SIDEBAR_ABOUT } from '../../owner/sidebarAbout.ts';
 import { Sidebar } from '../components/Sidebar/Sidebar.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
@@ -9,11 +10,8 @@ import { SPEC, expectTabOrder, one } from './spec.ts';
 
 /** The documents behind the prototype, the owner reading the first. */
 const ABOUT = {
-  title: 'About this prototype',
-  links: [
-    { id: 'prediction', label: 'Capability prediction', href: '#docs/capability-prediction', current: true },
-    { id: 'proposal', label: 'Product proposal', href: '#docs/product-proposal' },
-  ],
+  ...SIDEBAR_ABOUT,
+  links: SIDEBAR_ABOUT.links.map((link) => ({ ...link, current: link.id === 'prediction' })),
 };
 
 /** The sidebar alone, in the column the AppShell gives it, with the "About this prototype" group. */
@@ -49,7 +47,7 @@ const meta = {
     canvas: 'N-Docs-Sidebar',
     canvasNote: [
       'The sidebar with the “About this prototype” group just above the Claude acts for you block, behind its hairline: “Capability prediction” and “Product proposal”, nav rows with the document icon.',
-      'The nav’s eight pages, Connectors after Rules, sit where the board draws them, as do the group and the foot.',
+      'The nav includes Knowledge after Customers and Connectors after Rules; the group and pinned foot keep their layout.',
       'The board marks no row current; here the owner is reading the capability prediction, so its row is the current page, on the selected fill, and the main nav marks none.',
       'The board draws the mark 1 px and every row’s icon 2 px higher than the other signed boards do; the sidebar keeps their placement, so all its icons, the group’s included, sit as on Today and the recorded-history boards.',
     ].join(' '),
@@ -78,7 +76,7 @@ export const Board: Story = {
 
     // Its rows: nav rows like the main ones, the document icon, the open document current.
     const links = within(about).getAllByRole('link');
-    await expect(links.map((link) => link.textContent)).toEqual(['Capability prediction', 'Product proposal']);
+    await expect(links.map((link) => link.textContent)).toEqual(['Capability prediction', 'Product proposal', 'Vision', 'GitHub']);
     const { height, borderTopLeftRadius, fontSize, lineHeight, fontWeight } = SPEC.activeNavRow;
     const row = { height, borderTopLeftRadius, fontSize, lineHeight, fontWeight };
     for (const link of links) {
@@ -91,20 +89,22 @@ export const Board: Story = {
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(within(nav).queryAllByRole('link', { current: 'page' })).toEqual([]);
 
-    // The board's eight pages, Connectors fifth, its row 270 px down the column as the board draws it.
+    // Knowledge follows Customers; Connectors is sixth, one row lower than its original board.
     const pages = within(nav).getAllByRole('link');
     await expect(pages.map((page) => page.querySelector('.cd-sidebar__label')?.textContent)).toEqual([
       'Today',
       'Conversations',
       'Customers',
+      'Knowledge',
       'Rules',
       'Connectors',
       'Safety',
+      'Profile',
       'Share',
       'Settings',
     ]);
-    const connectors = pages[4] as HTMLElement;
-    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(270);
+    const connectors = pages[5] as HTMLElement;
+    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(308);
 
     // focus_order_is_logical: the business, the main nav, the about links, then Claude acts for you.
     await expectTabOrder(userEvent, [

@@ -91,18 +91,22 @@
   cursor: pointer;
 }
 
-.cd-header-colour__swatch[aria-checked='true'] {
-  box-shadow: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--text-primary);
-}
-
-.cd-header-colour__swatch:focus-visible {
-  outline: 2px solid var(--ring-focus);
-  outline-offset: var(--space-6);
-}
-
 .cd-header-colour__swatch--none {
   --swatch-border: 1px;
   border: 1px solid var(--line-card);
+}
+
+/* Keyboard focus draws the swatch's own 1 px edge in line-focus, over its colour and inside its box,
+   so it grows no bigger; the touch area's reach counts that edge. Before the selected ring, which
+   stays as it is. */
+.cd-header-colour__swatch:focus-visible {
+  --swatch-border: 1px;
+  border: 1px solid var(--line-focus);
+  box-shadow: none;
+}
+
+.cd-header-colour__swatch[aria-checked='true'] {
+  box-shadow: 0 0 0 2px var(--bg-app), 0 0 0 4px var(--text-primary);
 }
 
 /* Clip only the diagonal, leaving the button's invisible touch area free to extend. */

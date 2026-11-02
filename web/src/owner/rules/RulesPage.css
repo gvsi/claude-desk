@@ -24,7 +24,6 @@
   display: inline-flex;
   align-items: center;
   min-height: var(--size-control-main);
-  border-radius: var(--radius-control);
 }
 
 /* The title and subtitle ask for a third of a reading measure beside the actions, so

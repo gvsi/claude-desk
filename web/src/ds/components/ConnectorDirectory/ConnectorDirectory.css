@@ -38,12 +38,8 @@
   text-decoration: none;
 }
 
-/* A row fills the card to its edges, so its focus ring sits just inside it, and the first and last
-   rows keep the card's corners. */
-.cd-connector-directory__link:focus-visible {
-  outline-offset: -2px;
-}
-
+/* A row fills the card to its edges, so its focus edge sits just inside the card's border, and the
+   first and last rows keep the card's corners. */
 .cd-connector-directory__row:first-child > .cd-connector-directory__item {
   border-top-left-radius: calc(var(--radius-card) - 1px);
   border-top-right-radius: calc(var(--radius-card) - 1px);

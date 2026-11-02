@@ -572,7 +572,7 @@ const WIDE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'sidebar-mark', page: '.cd-sidebar__brand .cd-mark' },
   { name: 'business-row', page: '.cd-sidebar__business' },
   { name: 'page-row-0', page: '.cd-sidebar__nav > a:first-child' },
-  { name: 'page-row-6', page: '.cd-sidebar__nav > a:last-child' },
+  ...Array.from({ length: 8 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
   { name: 'owner-avatar', page: '.cd-sidebar__avatar' },
 ];
 const PHONE_ANCHORS: readonly SkeletonAnchor[] = [
@@ -1242,6 +1242,7 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'conversations-caption', page: '.cd-conversations__caption' },
   { name: 'conversations-day-0', page: '.cd-conversations__day' },
   { name: 'conversation-row-0', page: '.cd-conversations__items > li:first-child > .cd-conversation-item', size: true },
+  { name: 'conversation-row-1', page: '.cd-conversations__items > li:nth-child(2) > .cd-conversation-item', size: true },
   { name: 'conversation-row-2', page: '.cd-conversations__items > li:nth-child(3) > .cd-conversation-item', size: true },
 ];
 

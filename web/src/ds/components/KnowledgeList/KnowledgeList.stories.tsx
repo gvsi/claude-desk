@@ -41,13 +41,13 @@ function rowWords(row: HTMLElement): string[] {
 }
 
 export const WhatIKnowNow: Story = {
-  name: 'What I know now',
+  name: 'What Claude knows',
   parameters: { canvasNote: 'The list at the Knowledge column’s 720 px: two items customers can see, then a note only the owner can see.' },
   play: async ({ canvas, canvasElement }) => {
     // knowledge_list_is_a_named_section: its heading names the section and the list.
-    const heading = canvas.getByRole('heading', { level: 2, name: 'What I know now' });
-    const section = canvas.getByRole('region', { name: 'What I know now' });
-    const list = within(section).getByRole('list', { name: 'What I know now' });
+    const heading = canvas.getByRole('heading', { level: 2, name: 'What Claude knows' });
+    const section = canvas.getByRole('region', { name: 'What Claude knows' });
+    const list = within(section).getByRole('list', { name: 'What Claude knows' });
     expectListsKeepTheirRole(canvasElement);
     const rows = within(list).getAllByRole('listitem');
     await expect(rows.map(rowWords)).toEqual([
@@ -103,7 +103,7 @@ export const KeptPrivateByTheOwner: Story = {
   args: { items: [{ id: 'note-2d4f', title: 'Gate code for the back lot', detail: 'Added Oct 28', readers: ['owner'] }] },
   parameters: { canvas: 'none', canvasNote: 'N-Run2-Settings-Knowledge’s rows with an item the owner kept private: its own title, and “Only you”.' },
   play: async ({ canvas }) => {
-    const [row] = within(canvas.getByRole('list', { name: 'What I know now' })).getAllByRole('listitem');
+    const [row] = within(canvas.getByRole('list', { name: 'What Claude knows' })).getAllByRole('listitem');
     await expect(rowWords(row as HTMLElement)).toEqual(['Gate code for the back lot', 'Added Oct 28', 'Only you']);
     await expect((row as HTMLElement).querySelector('.cd-knowledge-list__title')).toHaveAttribute('data-copy', 'user');
   },
@@ -118,7 +118,7 @@ export const WithheldIsOwnerOnly: Story = {
   args: { items: [{ id: 'note-0b7a', title: null, detail: 'Added Oct 28', readers: ['public'] }] },
   parameters: { canvas: 'none', canvasNote: 'A guard for N-Run2-Settings-Knowledge’s third row: a withheld item with a public label still reads “Only you”.' },
   play: async ({ canvas }) => {
-    const [row] = within(canvas.getByRole('list', { name: 'What I know now' })).getAllByRole('listitem');
+    const [row] = within(canvas.getByRole('list', { name: 'What Claude knows' })).getAllByRole('listitem');
     await expect(rowWords(row as HTMLElement)).toEqual(['A note only you can see', 'Added Oct 28', 'Only you']);
   },
 };
@@ -141,7 +141,7 @@ export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   parameters: { canvas: 'none', canvasNote: 'No phone board for Knowledge yet; the rows of N-Run2-Settings-Knowledge in the phone column, 358 px between the gutters.' },
   play: async ({ canvas }) => {
-    const rows = within(canvas.getByRole('list', { name: 'What I know now' })).getAllByRole('listitem');
+    const rows = within(canvas.getByRole('list', { name: 'What Claude knows' })).getAllByRole('listitem');
     for (const row of rows) {
       // The pill keeps its line at the right; the words wrap beside it, and nothing scrolls sideways.
       const pill = row.querySelector('.cd-pill') as HTMLElement;
@@ -161,7 +161,7 @@ export const NoDate: Story = {
   globals: { viewport: { value: 'desktop', isRotated: false } },
   parameters: { canvas: 'none', canvasNote: 'A row without a recorded date beside a dated row.' },
   play: async ({ canvas }) => {
-    const [noDate, dated] = within(canvas.getByRole('list', { name: 'What I know now' })).getAllByRole('listitem') as [HTMLElement, HTMLElement];
+    const [noDate, dated] = within(canvas.getByRole('list', { name: 'What Claude knows' })).getAllByRole('listitem') as [HTMLElement, HTMLElement];
     await expect(noDate.querySelector('.cd-knowledge-list__detail')).toBeNull();
     const words = noDate.querySelector('.cd-knowledge-list__words') as HTMLElement;
     const title = noDate.querySelector('.cd-knowledge-list__title') as HTMLElement;

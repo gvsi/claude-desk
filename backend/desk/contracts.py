@@ -293,7 +293,7 @@ class Decision(BaseModel):
     card_ids: list[str]
     review: Review | None = None
     reason_plain: str                     # owner-facing kernel template from the action and deciding cards; the call's free text quoted, labelled "Claude's note"
-    owner_plain: str | None = None        # owner-facing kernel template: why an approved or allowed action didn't run (`refused_at_execution`); None otherwise.
+    owner_plain: str | None = None        # owner-facing kernel template: why an approved or allowed action didn't run (`refused_at_execution`), or a held request a booking closed (`cancelled`); None otherwise.
                                           # Owner-authenticated reads only (GET /decisions/{id}, the approval answer); None on every answer to a session or
                                           # agent. Fixed templates in the owner's language, never free text; like reason_plain, the signature doesn't cover it
     visitor_plain: str                    # visitor-facing kernel template (en/es); no amounts, dates or limits

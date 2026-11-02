@@ -33,12 +33,20 @@
   color: var(--text-primary);
   text-align: left;
   cursor: pointer;
-  transition: border-color var(--motion-instant) var(--motion-ease);
+  transition: background-color var(--motion-instant) var(--motion-ease);
 }
 
+/* Hover, and an open menu, are the fill alone: the border stays at rest, so only keyboard focus
+   changes it. */
 .cd-outcome-menu__button:hover,
 .cd-outcome-menu__button[aria-expanded='true'] {
-  border-color: var(--line-control-hover);
+  background: var(--fill-hover);
+}
+
+/* Keyboard focus turns the button's own border line-focus; no ring and no edge inside. */
+.cd-outcome-menu__button:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: none;
 }
 
 .cd-outcome-menu__button:disabled {
@@ -95,11 +103,6 @@
 .cd-outcome-menu__item:hover,
 .cd-outcome-menu__item:focus-visible {
   background: var(--fill-hover);
-}
-
-/* The ring sits just inside the item, so it clears the menu's edge and the next item. */
-.cd-outcome-menu__item:focus-visible {
-  outline-offset: -2px;
 }
 
 /* The current outcome's check, in a fixed column so the words line up. */

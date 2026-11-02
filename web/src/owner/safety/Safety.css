@@ -83,15 +83,16 @@
   min-width: 0;
 }
 
-/* The open attempt takes focus when the owner picks a row: its outline follows the card, and it
-   scrolls into view with a little room above it. */
+/* The open attempt takes focus when the owner picks a row and scrolls into view with a little room
+   above it. The region draws nothing of its own; the trace inside it has its own border. */
 .cd-safety__opened {
   border-radius: var(--radius-card);
   scroll-margin-top: var(--space-16);
 }
 
-.cd-safety__opened:focus:not(:focus-visible) {
+.cd-safety__opened:focus {
   outline: none;
+  box-shadow: none;
 }
 
 .cd-safety__hint {

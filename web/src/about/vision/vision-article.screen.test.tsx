@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { userEvent } from 'vitest/browser';
 
+import { factsInProse } from '../../ds/boards/factInProse.ts';
 import { contrastRatio } from '../../ds/contrast.ts';
 import { FONT_SHEET_URL, loadWebFonts } from '../../ds/test/fonts.ts';
 import { writeLocal } from '../../lib/storage.ts';
@@ -17,7 +18,7 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.
 const PATH = '/about/vision';
 const HEADLINE = 'A front desk that never closes';
 const DEK =
-  'Today a Desk answers for one plumber in Oakland. The same idea fits a city permit office, a team in the field, a customer who’s already signed in and an owner who’s never at a desk. Here’s what that could look like, and the rules that wouldn’t change.';
+  'Today a Desk answers for one plumber in Oakland. The same idea fits a city permit office, a Desk for every person at work, a customer who’s already signed in and an owner who’s never at a desk. Here’s what that could look like, and the rules that wouldn’t change.';
 const NOTE = 'Vision, not the prototype. Nothing on this page is live.';
 const END_NOTE = 'Vision, not in the prototype. Nothing on this page is live; the businesses and people are fictional.';
 const FIRST_WORDS = /^Most of the questions a business gets are the same questions/;
@@ -36,9 +37,9 @@ const FIGURES = [
     ai: 'You’re chatting with Claude, an AI answering for the Permit Center.',
   },
   {
-    label: 'A plumber’s phone: the team Desk shows his job card with the gate code and declines to share a colleague’s pay.',
-    lead: 'Luis, between jobs.',
-    ai: 'Claude, an AI, answers the team under Mike’s rules.',
+    label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the hiring plan.',
+    lead: 'Jordan, looking for Sam.',
+    ai: 'Claude, an AI, answers colleagues under Sam’s rules.',
   },
   {
     label: 'A returning customer’s phone: she confirms it’s her with her Claude account, for this visit only, and her invoice opens.',
@@ -57,10 +58,35 @@ const CARDS_HEADING = 'See each one up close';
 const CARDS_LEAD = 'Each idea has its own page, drawn as it would work.';
 const CARDS = [
   { name: 'A city office that answers after hours', line: 'Meridian Bay Permits, after five', href: '/vision/city-office' },
-  { name: 'A Desk for the team', line: 'Turner Plumbing’s plumbers, from the van', href: '/vision/team-desk' },
+  { name: 'A Desk for everyone at work', line: 'Lumen Labs colleagues, asking Sam’s Desk', href: '/vision/team-desk' },
   { name: 'Recognized, with your permission', line: 'Dana, signed in with her Claude account', href: '/vision/claude-account' },
   { name: 'In your pocket', line: 'Mike’s requests on his phone', href: '/vision/phone' },
 ] as const;
+
+/**
+ * The section on a Desk for everyone at work, word for word as the signed board writes it: its heading, its two
+ * paragraphs, its caption, the screen's header (initial, name, line, and the line saying Claude, an AI, answers)
+ * and the chat, each part with its kind, its tone and its words. Claude's first reply leaves out the board's "this
+ * week", which the kernel's reply check reads as a date; the slot's day and time are on the calendar card.
+ */
+const WORK = {
+  heading: 'A Desk for everyone at work',
+  passages: [
+    'At Lumen Labs every employee has a Desk of their own, and colleagues chat with it before they interrupt the person: is Sam free this week, where’s the checklist, who owns this. Each Desk answers from its owner’s calendar, docs and notes, under rules its owner set.',
+    'Jordan gets half an hour on Thursday because Sam lets colleagues hold time. The hiring plan is Sam’s to share, so his Desk asks him and shares nothing until he says yes.',
+  ],
+  caption: 'Jordan, looking for Sam. Time on Sam’s calendar is open to colleagues. The hiring plan waits for Sam.',
+  head: ['S', 'Sam Patel’s Desk', 'Lumen Labs · Jordan Lee is asking', 'Claude, an AI, answers colleagues under Sam’s rules.'],
+  parts: [
+    ['visitor', '', 'Can I grab 30 minutes with Sam this week?'],
+    ['claude', '', 'Sam has a slot open. I’ve held it for you.'],
+    ['card', '', 'Calendar hold / Thursday, November 5, 2:00 pm / 30 minutes with Sam Patel: launch review'],
+    ['receipt', 'done', 'Open to colleagues: Sam lets them hold 30 minutes.'],
+    ['visitor', '', 'Can you send me the Q4 hiring plan?'],
+    ['claude', '', 'That one is Sam’s to share. I’ve asked him for you.'],
+    ['receipt', 'held', 'Held for Sam. Nothing was shared.'],
+  ],
+} as const;
 
 /**
  * The words a reader reads in `root`: its text, but what is hidden from everyone (`aria-hidden`) and the
@@ -189,7 +215,8 @@ describe('The Vision article', () => {
       }
       for (const words of picture?.querySelectorAll('[data-part="claude"]') ?? []) expect(flat(words)).not.toMatch(FACT);
     }
-    expect(facts, 'the cards hold the facts the test looks for').toBeGreaterThanOrEqual(6);
+    // The permit's fee and number, Sam's calendar hold, Dana's invoice date and the held discount: five in all.
+    expect(facts, 'the cards hold the facts the test looks for').toBeGreaterThanOrEqual(5);
 
     // Statuses too: the permit's status is the card's to state, and Claude's words in the city screen only point to it.
     const city = pictures[0];
@@ -204,12 +231,61 @@ describe('The Vision article', () => {
     const heldOrDeclined = outcomes.filter((receipt) => ['held', 'declined'].includes(receipt.getAttribute('data-tone') ?? ''));
     expect(heldOrDeclined.map(flat)).toEqual([
       'Held for a person: waivers are decided by staff.',
-      'Declined by team access. No pay was shared.',
+      'Held for Sam. Nothing was shared.',
     ]);
     for (const receipt of heldOrDeclined) {
       const message = receipt.previousElementSibling;
       expect(message?.getAttribute('data-part'), flat(receipt)).toBe('claude');
       expect(receipt.getBoundingClientRect().top).toBeGreaterThanOrEqual(message?.getBoundingClientRect().bottom ?? Infinity);
+    }
+  });
+
+  it('a_desk_at_work_holds_time_in_a_card_and_holds_the_hiring_plan_for_sam', async () => {
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      // The section as the signed board writes it: its heading, its two paragraphs, then Sam's Desk and its caption.
+      await expect.element(screen.getByRole('heading', { level: 2, name: WORK.heading, exact: true }), { message: viewport }).toBeVisible();
+      for (const passage of WORK.passages) await expect.element(screen.getByText(passage, { exact: true }), { message: viewport }).toBeVisible();
+      const figure = screen.getByRole('figure', { name: WORK.caption, exact: true });
+      await expect.element(figure, { message: viewport }).toBeVisible();
+      const picture = figure.getByRole('img', { name: FIGURES[1].label, exact: true }).element();
+
+      // Sam Patel's own Desk, with Jordan Lee asking, under the line that says Claude, an AI, answers.
+      const head = picture.querySelector('[data-screen-head]');
+      expect([...(head?.querySelectorAll('.ph-mono, .ph-name, .ph-sub, .ph-ai') ?? [])].map(flat), viewport).toEqual(WORK.head);
+      expect(flat(picture.querySelector('.ph-compose')), viewport).toBe('Ask Sam’s Desk');
+      const parts = [...picture.querySelectorAll('[data-part]')].map((part) => [
+        part.getAttribute('data-part'),
+        part.getAttribute('data-tone') ?? '',
+        part.getAttribute('data-part') === 'card' ? [...part.children].map(flat).reduce((all, line) => `${all} / ${line}`) : flat(part),
+      ]);
+      expect(parts, viewport).toEqual(WORK.parts);
+
+      // The slot's day and time are on the calendar card alone, and the hold reads in full on the page.
+      const card = picture.querySelector('[data-part="card"]');
+      const when = card?.querySelector('.ph-card__head');
+      expect(flat(when), viewport).toBe('Thursday, November 5, 2:00 pm');
+      expect(flat(when)).toContain('Thursday, November 5');
+      expect(flat(when)).toContain('2:00 pm');
+      await expect.element(figure.getByText('Thursday, November 5, 2:00 pm', { exact: true }), { message: viewport }).toBeVisible();
+      // Claude's words state no day, time or other fact the kernel's reply check would block, "this week" included.
+      for (const words of picture.querySelectorAll('[data-part="claude"]')) expect(factsInProse(flat(words)), flat(words)).toEqual([]);
+
+      // The hiring plan is held for Sam: a held receipt right under Claude's message, as the app draws it.
+      const held = [...picture.querySelectorAll('[data-part="receipt"][data-tone="held"]')];
+      expect(held.map(flat), viewport).toEqual(['Held for Sam. Nothing was shared.']);
+      const asked = held[0]?.previousElementSibling;
+      expect(flat(asked), viewport).toBe('That one is Sam’s to share. I’ve asked him for you.');
+      expect(held[0]?.querySelector('.ph-dot--held'), viewport).not.toBeNull();
+      expect(held[0]?.getBoundingClientRect().top ?? -Infinity, viewport).toBeGreaterThanOrEqual(asked?.getBoundingClientRect().bottom ?? Infinity);
+      await expect.element(figure.getByText('Held for Sam. Nothing was shared.', { exact: true }), { message: viewport }).toBeVisible();
+
+      // The cover band and the picture card draw this same screen, from the same words.
+      const cover = document.querySelectorAll('[data-cover] .va-phone');
+      expect(flat(cover[1]), viewport).toBe(flat(picture));
+      const cardTop = screen.getByRole('link', { name: `${CARDS[1].name} ${CARDS[1].line}`, exact: true }).element().querySelector('.va-phone');
+      expect(flat(cardTop), viewport).toBe(flat(picture));
+      expect(flat(document.querySelector('.vision-article')), viewport).not.toMatch(/Turner Plumbing team|Luis/);
     }
   });
 
@@ -270,30 +346,95 @@ describe('The Vision article', () => {
     await expect.element(screen.getByRole('note', { name: 'Vision' })).toBeVisible();
   });
 
-  it('keyboard_focus_rings_in_the_papers_secondary_ink', async () => {
-    // No blue focus ring on the paper either: keyboard focus on a link in the bar, a picture card and the way to the
-    // next page shows the 2 px ring in the paper's secondary ink, 3:1 and more against the paper.
+  it('read_next_ends_with_an_arrow_that_inks_on_hover', async () => {
+    // As on the other About pages, the "Read next" card ends with the arrow at its trailing edge, centred on the
+    // card and decoration only. Nothing on the article moves: pointing at the card turns it the paper's ink.
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(PATH, { viewport });
+      await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+      const card = document.querySelector<HTMLElement>('.va-next');
+      const arrow = card?.querySelector<SVGSVGElement>('svg.va-next__arrow');
+      if (!card || !arrow) throw new Error(`${viewport}: Read next draws no arrow`);
+      expect(arrow.getAttribute('aria-hidden'), viewport).toBe('true');
+      const box = card.getBoundingClientRect();
+      const at = arrow.getBoundingClientRect();
+      expect([at.width, at.height], viewport).toEqual([20, 20]);
+      expect(Math.abs(box.right - 20 - at.right), viewport).toBeLessThanOrEqual(1);
+      expect(Math.abs((at.top + at.bottom) / 2 - (box.top + box.bottom) / 2), viewport).toBeLessThanOrEqual(1);
+      const words = card.querySelector('.va-next__summary')?.getBoundingClientRect();
+      expect(words && words.right <= at.left, viewport).toBe(true);
+      expect(getComputedStyle(arrow).color, viewport).toBe('rgb(92, 88, 80)');
+      card.scrollIntoView({ block: 'center' });
+      // A click on the arrow itself lands on the card's link.
+      const spot = arrow.getBoundingClientRect();
+      expect(document.elementFromPoint((spot.left + spot.right) / 2, (spot.top + spot.bottom) / 2)?.closest('a'), viewport).toBe(card.querySelector('a'));
+      await userEvent.hover(card.querySelector('a') as HTMLElement);
+      await expect.poll(() => getComputedStyle(arrow).color, { message: viewport }).toBe('rgb(28, 27, 25)');
+      expect(getComputedStyle(arrow).transform, viewport).toBe('none');
+      await userEvent.unhover(card.querySelector('a') as HTMLElement);
+    }
+  });
+
+  it('keyboard_focus_edges_in_the_papers_secondary_ink', async () => {
+    // No ring and no blue on the paper either: keyboard focus on the link in the bar draws a 1 px edge inside it,
+    // and on a picture card and the way to the next page turns the card's own border, all in the paper's
+    // secondary ink, 3:1 and more against the paper.
     const { screen } = await renderRoute(PATH);
     await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
     const article = screen.getByRole('article').element();
     const paper = getComputedStyle(article.closest('.vision-article') as Element).backgroundColor;
     expect(paper).toBe('rgb(244, 242, 236)');
+    const ink2 = 'rgb(92, 88, 80)';
+    expect(contrastRatio(ink2, paper)).toBeGreaterThanOrEqual(3);
     const inBar = document.querySelector<HTMLElement>('.cd-about-top a');
     const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
     const next = document.querySelector<HTMLElement>('.va-next__link');
-    for (const [name, link, ring] of [
-      ['a link in the bar', inBar, (el: Element) => getComputedStyle(el)],
-      ['a picture card', card, (el: Element) => getComputedStyle(el)],
-      ['the next page', next, (el: Element) => getComputedStyle(el, '::after')],
-    ] as const) {
+    const keyboardFocus = async (name: string, link: HTMLElement | null) => {
       if (link === null) throw new Error(`no ${name}`);
       await userEvent.keyboard('{Shift}');
       link.focus();
       expect(link.matches(':focus-visible'), name).toBe(true);
-      const style = ring(link);
-      expect([style.outlineStyle, style.outlineWidth, style.outlineColor], name).toEqual(['solid', '2px', 'rgb(92, 88, 80)']);
-      expect(contrastRatio(style.outlineColor, paper), name).toBeGreaterThanOrEqual(3);
-    }
+      return link;
+    };
+    const drawn = (el: Element) => [getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow];
+    const border = (el: Element) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).borderBottomColor];
+
+    const bar = await keyboardFocus('a link in the bar', inBar);
+    expect(drawn(bar), 'a link in the bar').toEqual(['none', `${ink2} 0px 0px 0px 1px inset`]);
+
+    const picture = await keyboardFocus('a picture card', card);
+    expect([...drawn(picture), ...border(picture)], 'a picture card').toEqual(['none', 'none', ink2, ink2]);
+
+    const nextLink = await keyboardFocus('the next page', next);
+    const nextCard = nextLink.closest('.va-next') as HTMLElement;
+    expect([...drawn(nextLink), ...drawn(nextCard), ...border(nextCard)], 'the next page').toEqual(['none', 'none', 'none', 'none', ink2, ink2]);
+    expect(getComputedStyle(nextLink, '::after').boxShadow, 'the next page').toBe('none');
+  });
+
+  it('picture_cards_fill_on_hover_and_read_next_darkens_its_border', async () => {
+    // A picture card's hover is a fill only, in the paper's own hover ink, and its border stays as it rests. Read
+    // next is the About pages' one exception (owner, 2026-11-01): its border darkens on hover, and its fill stays.
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
+    const hoverInk = 'rgba(28, 27, 25, 0.06)';
+    card.scrollIntoView({ block: 'center' });
+    const cardRest = { fill: getComputedStyle(card).backgroundColor, border: getComputedStyle(card).borderTopColor };
+    expect(cardRest.fill).not.toBe(hoverInk);
+    await userEvent.hover(card);
+    await expect.poll(() => getComputedStyle(card).backgroundColor).toBe(hoverInk);
+    expect(getComputedStyle(card).borderTopColor).toBe(cardRest.border);
+    await userEvent.unhover(card);
+
+    const next = document.querySelector<HTMLElement>('.va-next');
+    if (next === null) throw new Error('no Read next');
+    next.scrollIntoView({ block: 'center' });
+    const nextRest = { fill: getComputedStyle(next).backgroundColor, border: getComputedStyle(next).borderTopColor };
+    await userEvent.hover(next);
+    expect(next.matches(':hover')).toBe(true);
+    await expect.poll(() => getComputedStyle(next).borderTopColor).not.toBe(nextRest.border);
+    expect(getComputedStyle(next).backgroundColor).toBe(nextRest.fill);
+    await userEvent.unhover(next);
   });
 
   it('the_picture_cards_draw_their_phones_with_an_even_bezel_and_a_clean_crop', async () => {

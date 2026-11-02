@@ -1,5 +1,5 @@
 /* Sidebar: the owner app's column contents, top to bottom: the lockup, the business
-   row and the Desk picker, pinned at the top; the eight nav rows and the optional "About this
+   row and the Desk picker, pinned at the top; the ten nav rows and the optional "About this
    prototype" group, which scroll between them when the window is short; and the Answering switch
    and the owner, pinned at the foot.
    The AppShell gives it the column (size-sidebar on bg-panel, with the seam); rows are
@@ -68,7 +68,8 @@
   gap: var(--space-8);
   width: 100%;
   height: var(--size-nav-row);
-  padding: 0 var(--space-8);
+  padding: 0 calc(var(--space-8) - 1px);
+  border: 1px solid var(--line-control);
 }
 
 /* Two classes, so the weight wins over .cd-type-control whatever order the stylesheets load in. */
@@ -89,6 +90,13 @@
   height: var(--size-control);
   padding: 0 var(--space-8) 0 var(--space-10);
   border: 1px solid var(--line-card);
+}
+
+/* The Desk picker is the sidebar's one bordered control: keyboard focus turns its border line-focus.
+   Every other row takes the base edge, 1 px of line-focus just inside it. */
+.cd-sidebar__desk-toggle:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: none;
 }
 
 .cd-sidebar__desk-list {
@@ -116,8 +124,8 @@
 
 /* The middle, the nav and the about group, takes the room between the top and the foot, and
    scrolls inside the column when the window is too short for it, so the foot always shows. It
-   reaches 4 px past the rows at the sides and into the gap under it, so a focused row's ring is
-   never clipped by the scroll, and every row sits where it would without it. */
+   reaches 4 px past the rows at the sides and into the gap under it, so nothing a row draws at its
+   edge is clipped by the scroll, and every row sits where it would without it. */
 .cd-sidebar__middle {
   display: flex;
   flex: 1 1 auto;

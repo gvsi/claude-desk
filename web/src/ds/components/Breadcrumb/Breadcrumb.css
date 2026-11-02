@@ -38,6 +38,15 @@
   text-decoration-color: currentColor;
 }
 
+/* Keyboard focus shows in the words, as a TextLink's: they and a 2 px underline turn the primary ink. */
+.cd-breadcrumb__link:focus-visible {
+  box-shadow: none;
+  color: var(--text-primary);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--text-primary);
+}
+
 .cd-breadcrumb__page {
   color: var(--text-primary);
   overflow-wrap: anywhere;

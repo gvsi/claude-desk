@@ -361,7 +361,10 @@ function BylineLine({ document }: { document: AboutDocument }) {
   );
 }
 
-/** "Read next": the next page in the About set, its title and summary, the whole card one link. */
+/**
+ * "Read next": the next page in the About set, its title and summary, the whole card one link, with an arrow
+ * at its trailing edge that nudges toward the next page when the card is pointed at or focused.
+ */
 function ReadNext({ next, compact }: { next: AboutPage; compact: boolean }) {
   return (
     <div className="cd-about-next">
@@ -376,6 +379,7 @@ function ReadNext({ next, compact }: { next: AboutPage; compact: boolean }) {
           {next.title}
         </Link>
         <p className="cd-about-next__summary cd-type-body">{next.summary}</p>
+        <Icon name="arrow-right" className="cd-about-next__arrow" />
       </Card>
     </div>
   );

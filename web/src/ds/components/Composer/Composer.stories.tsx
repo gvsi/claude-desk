@@ -82,11 +82,11 @@ export const Owner: Story = {
     expectComputed(box, { outlineStyle: 'none' });
     expectComputed(input, { outlineStyle: 'none' });
 
-    // A control inside the composer shows its own ring on keyboard focus, and the box still none.
+    // A control inside the composer shows its own focus edge on keyboard focus, and the box still no ring.
     await userEvent.tab();
     const attach = canvas.getByRole('button', { name: 'Add a photo or file' });
     await expect(attach).toHaveFocus();
-    expectComputed(attach, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', outlineOffset: '2px' });
+    expectComputed(attach, { outlineStyle: 'none', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
     expectComputed(box, { outlineStyle: 'none' });
     await userEvent.tab({ shift: true });
     await expect(input).toHaveFocus();
@@ -346,7 +346,7 @@ export const FailedLong: Story = {
     await expect(retry.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
     await userEvent.tab();
     await expect(kept).toHaveFocus();
-    expectComputed(kept, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', outlineOffset: '2px' });
+    expectComputed(kept, { outlineStyle: 'none', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
     await userEvent.tab();
     await expect(retry).toHaveFocus();
     await userEvent.keyboard('{Enter}');

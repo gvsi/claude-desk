@@ -1,6 +1,6 @@
 /**
- * Settings › Knowledge (N-Run2-Settings-Knowledge): what Claude answers from, which never changes
- * the owner's rules. "What I know now" lists what the owner may see, each item with when it was
+ * Knowledge (N-Run2-Settings-Knowledge): what Claude answers from, which never changes
+ * the owner's rules. "What Claude knows" lists what the owner may see, each item with when it was
  * added and who can see it; one the kernel forces owner-only comes with its title and text withheld
  * and reads "A note only you can see". Under it, a note or a text file is added for the owner only,
  * then the "Added" card's "Customers can see this" switch posts it again for customers or for the
@@ -13,12 +13,21 @@ import { useRef, useState } from 'react';
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
 import type { KnowledgeRow } from '../../api/views.ts';
-import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, Notice, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
+import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
+import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { startingDeskFor } from '../arrival/keptCopy.ts';
+import { VisionNote } from '../settings/VisionNote.tsx';
+import { KnowledgeListSkeleton } from './KnowledgeSkeleton.tsx';
+import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS } from './previewSources.ts';
 import { useReadFailure } from '../useReadFailure.ts';
+import { useDesks } from '../useDesks.ts';
 
-const LEAD = 'Knowledge is what I answer from. It never changes your rules.';
+import '../settings/Settings.css';
+import './Knowledge.css';
+
+export const KNOWLEDGE_SUMMARY = 'What Claude answers from. It never changes your rules.';
 
 /** The largest file "Add a file" takes: 100 KB. */
 export const MAX_FILE_BYTES = 100 * 1024;
@@ -58,6 +67,19 @@ const knowledgeKey = (deskId: string) => ['knowledge', deskId] as const;
 const knowledgeQuery = (deskId: string) =>
   queryOptions({ queryKey: knowledgeKey(deskId), queryFn: () => request('knowledge', { params: { desk_id: deskId } }) });
 
+/** The setup read has no URL field: only its recognized title supplies a host. */
+function setupHost(item: KnowledgeRow): string | null {
+  if (item.source !== 'website' || item.title === null) return null;
+  const host = /^Your website, ([^,\s/]+), read during setup$/.exec(item.title)?.[1];
+  if (host === undefined) return null;
+  try {
+    const url = new URL(`https://${host}`);
+    return url.hostname === host && host.includes('.') ? host : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The list's rows in API order, each with when it was added on the business's clock. An item whose
  * title or text the kernel withheld is drawn as the design system draws one it keeps to the owner:
@@ -66,19 +88,32 @@ const knowledgeQuery = (deskId: string) =>
 function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowView[] {
   return items.map((item) => {
     const date = item.created_at === null ? '' : formatDate(item.created_at, timeZone);
+    const kind = item.source === 'website' || item.source === 'web_search' ? 'globe' : item.source === 'upload' ? 'document' : item.item_id === 'kn-price-list' ? 'list' : 'note';
+    const host = setupHost(item);
+    const setupPrices = item.source === 'setup' && item.item_id === 'kn-price-list' && item.title === 'Price list, from your answers in setup';
+    const label = kind === 'globe' ? 'Website' : kind === 'document' ? 'File' : kind === 'list' ? 'Price list' : 'Note';
+    const fileTag = kind === 'document' && /\.pdf$/i.test(item.title ?? '') ? 'PDF' : kind === 'document' && /\.docx$/i.test(item.title ?? '') ? 'DOCX' : undefined;
     return {
       id: item.item_id,
-      title: item.title === null || item.text === null ? null : item.title,
-      detail: date === '' ? null : `Added ${date}`,
+      ...(host !== null || setupPrices ? { singleLineTitle: true } : {}),
+      kind,
+      ...(fileTag === undefined ? {} : { fileTag }),
+      title: item.title === null || item.text === null ? null : host ?? (setupPrices ? 'Price list' : item.title),
+      detail: [...(setupPrices ? ['From your answers in setup'] : [label, ...(item.source === 'website' ? ['Read during setup'] : [])]), ...(date === '' ? [] : [`Added ${date}`])].join(' · '),
       readers: item.readers,
     };
   });
 }
 
-/** "What I know now": the list once read, the loading line while it is, and a failed read with Try again over it. */
+/** "What Claude knows": the list once read, matching source-list shapes while it is, and a failed read with Try again over it. */
 function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
   const list = useQuery(knowledgeQuery(deskId));
   const failure = useReadFailure(list);
+  const desks = useDesks(deskId, { passive: true });
+  const queryClient = useQueryClient();
+  const samples = desks.data !== undefined && startingDeskFor(queryClient, desks.data) === deskId ? MOCK_SOURCES : [];
+  const rows = [...rowsOf(list.data ?? [], timeZone), ...samples];
+  const publicCount = rows.filter((item) => item.title !== null && item.readers.includes('public')).length;
   return (
     <>
       {failure === null ? null : (
@@ -95,12 +130,12 @@ function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
       )}
       {list.data === undefined ? (
         failure === null ? (
-          <LoadingLine>Loading what I know</LoadingLine>
+          <div role="status" aria-label="Loading what I know"><span className="cd-sr-only">Loading what I know</span><KnowledgeListSkeleton /></div>
         ) : null
       ) : (
         // With nothing known yet, no list: the board never draws it empty. A failed read says so
         // over the list read before.
-        <KnowledgeList items={rowsOf(list.data, timeZone)} />
+        <KnowledgeList items={rows} caption={`${rows.length} ${rows.length === 1 ? 'source' : 'sources'}. Customers can see ${publicCount}.`} />
       )}
     </>
   );
@@ -136,6 +171,7 @@ function sameItem(a: KnowledgeItem, b: Omit<KnowledgeItem, 'item_id'>): boolean 
 }
 
 export function KnowledgePage() {
+  useDocumentTitle(inApp(NAV_LABELS.knowledge));
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const queryClient = useQueryClient();
@@ -309,25 +345,38 @@ export function KnowledgePage() {
 
   return (
     <>
-      <p className="cd-type-summary">{LEAD}</p>
-      <WhatIKnow deskId={deskId} timeZone={business.timezone} />
-      <KnowledgeAdd
-        note={note}
-        onNoteChange={setNote}
-        onAddNote={addNote}
-        onAddFile={addFile}
-        {...(busy === undefined ? {} : { busy })}
-        {...(error === undefined ? {} : { error })}
-        {...(added === null
-          ? {}
-          : {
-              added: {
-                readers: added.label.readers ?? [],
-                onPublicChange: changeReaders,
-                ...(switchLine === undefined ? {} : { note: switchLine }),
-              },
-            })}
-      />
+      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} />
+      <div className="cd-knowledge">
+        <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} /></div>
+        <div className="cd-knowledge__add">
+        <KnowledgeAdd
+          note={note}
+          onNoteChange={setNote}
+          onAddNote={addNote}
+          onAddFile={addFile}
+          {...(busy === undefined ? {} : { busy })}
+          {...(error === undefined ? {} : { error })}
+          {...(added === null
+            ? {}
+            : {
+                added: {
+                  readers: added.label.readers ?? [],
+                  onPublicChange: changeReaders,
+                  ...(switchLine === undefined ? {} : { note: switchLine }),
+                },
+              })}
+        />
+        </div>
+        <KnowledgePreviews />
+      </div>
     </>
   );
+}
+
+/** Static examples share the real source list’s card and row markup. */
+export function KnowledgePreviews() {
+  return <div className="cd-knowledge__previews">
+    <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} />
+    <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
+  </div>;
 }

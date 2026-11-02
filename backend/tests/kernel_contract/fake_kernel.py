@@ -40,7 +40,7 @@ contract test, before the task that first uses them.
   mark of done on a closed one is 409. A booking, native or typed, closes the session's open handoffs of kind `card`
   as the owner's mark of done does, each ledgered `desk_data` naming it with `closed_by: "booking"`; a call-back
   stays open. A booking also makes the session's earlier held quotes with a discount stale: the next read of one
-  cancels it, as lazy expiry does.
+  cancels it, as lazy expiry does, and the owner's reads of it carry the owner's line for a request a booking closed.
   `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
@@ -503,6 +503,9 @@ OWNER_REFUSAL_TEXT = {
     "rules_changed": "Your rules changed before this ran, so it wasn't done.",
     "fallback": "This couldn't run, so it wasn't done.",
 }
+# The owner-only line for a held request the visitor's own booking closed (the kernel's
+# `render.en.OWNER_STATUS["cancelled_by_booking"]`); a visitor's own cancel has none.
+OWNER_BOOKING_CLOSED_TEXT = "The visitor booked before you answered, so this request closed."
 # What a visitor's or an agent's executed action did, by tool (the kernel's `render.en.EXECUTED` and
 # `render.es.EXECUTED`, Plans 01b and 01c), in place of the generic executed line.
 EXECUTED_TEXT = {
@@ -2890,7 +2893,8 @@ class FakeKernelState:
             "ledger_seq": decision.ledger_seq, "created_at": record.created_at, "policy_ids": decision.policy_ids})
 
     def _transition(self, record: DecisionRecord, state: str, kind: str = "decide", **summary) -> Decision:
-        """Move a decision to `state`: ledgered, re-signed, mirrored."""
+        """Move a decision to `state`: ledgered, re-signed, mirrored. The owner's line (`owner_plain`, unsigned) is set
+        for a refusal at execution and for a held request a booking closed, and cleared in every other state."""
         desk = self.desks[record.desk_id]
         decision = record.decision
         session = self.sessions[decision.session_id]
@@ -2904,6 +2908,8 @@ class FakeKernelState:
             owner_plain = OWNER_REFUSAL_TEXT[
                 "rules_changed" if summary.get("reason") == "rules_changed"
                 and summary.get("check") in {"tool", "profile", "pin", "policy"} else "fallback"]
+        elif state == "cancelled" and summary.get("cancelled_by") == "booking":
+            owner_plain = OWNER_BOOKING_CLOSED_TEXT
         record.decision = self._signed(decision.model_copy(update={
             "state": state, "visitor_plain": line, "owner_plain": owner_plain,
             "ledger_seq": entry.seq, "answers": decision.answers if state == "held" else []}))
