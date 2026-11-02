@@ -1030,3 +1030,22 @@ async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(
     monkeypatch.delitem(render.RECEIPT_SUBJECTS, "native.book")             # a tool the table doesn't name
     assert (await checked(client, visitor, CLEAN)).ok
     assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]
+
+
+async def test_a_denied_hold_backs_the_reply_after_it_until_a_reply_passes(app, client, reviewer):
+    """The order a live conversation takes: a reply passes on the held quote's receipt, the owner says no,
+    the next reply is shown exactly the denial's receipt (no longer the held one), and once a reply has
+    passed with it, the next is shown none."""
+    from .test_approvals import answered
+
+    copy, visitor = await visitor_of(app, client)
+    held = await held_quote(client, visitor)
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]
+
+    await answered(client, copy.owner, held.decision_id, "deny_once")
+    assert (await checked(client, visitor, "Mike Turner decided not to go ahead with that request.")).ok
+    assert reviewer.soft_inputs[-1].cards == ["Request receipt card: Quote request: Mike Turner decided not to go ahead"]
+
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == []
