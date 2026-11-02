@@ -1,5 +1,5 @@
 /**
- * The chat each payment link came from, so the paid checkout can link back to it. The API can't
+ * The chat each payment link came from, so the paid or cancelled checkout can link back to it. The API can't
  * say which Desk a link's token belongs to, so the public chat notes it in this browser as it shows
  * a payment link card: a digest of the link's token and the chat's own path, `/d/<slug>`, and
  * nothing else (no query, so an owner's `?preview=` stays out). The token pays or cancels its link,
