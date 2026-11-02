@@ -15,8 +15,8 @@ export type MarkProps = {
   | {
       /**
        * The ground under the bell, which has no tile: `dark` (the default, every ground in the app)
-       * draws its ink light; `light` keeps the drawing's dark ink, as on the intro illustration's
-       * light card.
+       * draws its ink light in the dark theme, and dark in the light theme, whose grounds are paper;
+       * `light` keeps the drawing's dark ink, as on the intro illustration's light card.
        */
       ground?: 'dark' | 'light';
       tile?: false;
