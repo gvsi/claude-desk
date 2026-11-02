@@ -1,8 +1,11 @@
 import { expect, it } from 'vitest';
 
 import { RIVERA } from '../../mocks/seed.ts';
+import { mockStore } from '../../mocks/store.ts';
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
+
+import { MOCK_SOURCES } from './previewSources.ts';
 
 const QUESTIONS = 'Questions Claude couldn’t answer';
 const QUESTION_NOTE = 'Sample questions, to show what this will do. It doesn’t work in this prototype yet.';
@@ -33,4 +36,25 @@ it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_st
   expect(more.getByRole('listitem').elements().map((row) => row.querySelector('.cd-knowledge-list__title')?.textContent)).toEqual([
     'Google Drive', 'Notion', 'Your website, kept fresh',
   ]);
+});
+
+it('deleting_the_starting_desk_and_reloading_keeps_samples_off_other_businesses', async () => {
+  const salon = await liveSetupDeskIds('A hair salon in Oakland');
+  const starting = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { pollScale: 100 });
+  await expect.element(starting.screen.getByText('Maintenance plan.pdf', { exact: true })).toBeVisible();
+  await starting.router.navigate(`/app/${RIVERA.deskId}/settings/general`);
+  await starting.screen.getByRole('button', { name: 'Delete this Desk', exact: true }).click();
+  await starting.screen.getByRole('dialog').getByRole('button', { name: 'Delete Desk', exact: true }).click();
+  await expect.poll(() => starting.router.state.location.pathname).toBe(`/app/${salon.deskId}/today`);
+  expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
+
+  const { screen } = await renderRoute(`/app/${salon.deskId}/knowledge`, { pollScale: 100 });
+  const website = screen.getByRole('textbox', { name: 'A website', exact: true });
+  await expect.element(website).toBeVisible();
+  await expect.element(screen.getByRole('status', { name: 'Loading what I know', exact: true })).not.toBeInTheDocument();
+  expect.soft(screen.getByRole('region', { name: QUESTIONS, exact: true }).query()).toBeNull();
+  expect.soft(screen.getByText(QUESTION_NOTE, { exact: true }).query()).toBeNull();
+  for (const sample of MOCK_SOURCES) expect.soft(screen.getByText(sample.title!, { exact: true }).query()).toBeNull();
+  expect.soft(website.element().hasAttribute('placeholder')).toBe(false);
+  await expect.element(screen.getByRole('region', { name: 'More sources', exact: true })).toBeVisible();
 });

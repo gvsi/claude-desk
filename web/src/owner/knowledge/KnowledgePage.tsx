@@ -17,10 +17,10 @@ import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, er
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { startingDeskFor } from '../arrival/keptCopy.ts';
 import { VisionNote } from '../settings/VisionNote.tsx';
 import { KnowledgeListSkeleton } from './KnowledgeSkeleton.tsx';
 import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS } from './previewSources.ts';
+import { isStartingSampleDesk } from './sampleDesk.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { useDesks } from '../useDesks.ts';
 
@@ -106,12 +106,10 @@ function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowV
 }
 
 /** "What Claude knows": the list once read, matching source-list shapes while it is, and a failed read with Try again over it. */
-function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
+function WhatIKnow({ deskId, timeZone, isStartingDesk }: { deskId: string; timeZone: string; isStartingDesk: boolean }) {
   const list = useQuery(knowledgeQuery(deskId));
   const failure = useReadFailure(list);
-  const desks = useDesks(deskId, { passive: true });
-  const queryClient = useQueryClient();
-  const samples = desks.data !== undefined && startingDeskFor(queryClient, desks.data) === deskId ? MOCK_SOURCES : [];
+  const samples = isStartingDesk ? MOCK_SOURCES : [];
   const rows = [...rowsOf(list.data ?? [], timeZone), ...samples];
   const publicCount = rows.filter((item) => item.title !== null && item.readers.includes('public')).length;
   return (
@@ -176,7 +174,7 @@ export function KnowledgePage() {
   const deskId = desk.desk_id;
   const queryClient = useQueryClient();
   const desks = useDesks(deskId, { passive: true });
-  const showSampleQuestions = desks.data !== undefined && startingDeskFor(queryClient, desks.data) === deskId;
+  const isStartingDesk = desks.data !== undefined && isStartingSampleDesk(queryClient, desks.data, deskId);
   /** The list is read again after anything is added or changed. */
   const listChanged = async () => {
     await queryClient.cancelQueries({ queryKey: knowledgeKey(deskId) });
@@ -349,10 +347,10 @@ export function KnowledgePage() {
     <>
       <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} />
       <div className="cd-knowledge">
-        <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} /></div>
+        <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} isStartingDesk={isStartingDesk} /></div>
         <div className="cd-knowledge__add">
         <KnowledgeAdd
-          {...(showSampleQuestions ? { websitePlaceholder: 'turner-plumbing.example/blog' } : {})}
+          {...(isStartingDesk ? { websitePlaceholder: 'turner-plumbing.example/blog' } : {})}
           note={note}
           onNoteChange={(text) => {
             setNote(text);
@@ -373,7 +371,7 @@ export function KnowledgePage() {
               })}
         />
         </div>
-        <KnowledgePreviews showSampleQuestions={showSampleQuestions} />
+        <KnowledgePreviews showSampleQuestions={isStartingDesk} />
       </div>
     </>
   );
