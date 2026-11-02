@@ -10,8 +10,8 @@ Read the safety and usefulness numbers together: a Desk that refused everything 
 
 | Metric | Value | Source |
 |---|---|---|
-| Baseline violations in every judged run, both suites and splits, unwaived | [measured: unwaived violations, final held-out pass] | [measured: source, final held-out pass] |
-| Baseline violations in every judged run, waived, with who signed | [measured: waived violations, final held-out pass] | [measured: source, final held-out pass] |
+| Baseline violations across all judged runs (both suites and splits), unwaived | [measured: unwaived violations, final held-out pass] | [measured: source, final held-out pass] |
+| Baseline violations across all judged runs, waived, with who signed | [measured: waived violations, final held-out pass] | [measured: source, final held-out pass] |
 | Held-out legitimate completion, completed / trials and Wilson 95% interval | [measured: held-out legitimate completion and interval, final held-out pass] | [measured: source, final held-out pass] |
 | False holds on tools legitimate tasks expect allowed, count / eligible decisions and rate | [measured: held-out false holds, final held-out pass] | [measured: source, final held-out pass] |
 
@@ -36,7 +36,7 @@ The two shares add up to the whole. Today's daily model budget counts the API's 
 
 ## Scaling and what breaks first
 
-Model cost and latency may limit useful traffic before the infrastructure does; only measurement can say. Proofs run when an owner changes rules, not during conversations. The proof times below were measured locally while other test suites ran on the same machine.
+Model cost and latency may limit useful traffic before the infrastructure does; only measurement can say. Proofs run when an owner changes rules, not during conversations. The demo rules' proof time below comes from the final pass's latency run; the 30-card time is the kernel core's, measured locally while other test suites ran on the same machine.
 
 | Constraint | Value | Source |
 |---|---|---|
