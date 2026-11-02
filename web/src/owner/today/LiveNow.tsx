@@ -55,6 +55,7 @@ export function LiveNow({ live, sectionRef, openHandoffs }: LiveNowProps) {
               status={liveStatus(s, openHandoffs?.has(s.session_id) ?? false)}
               href={conversationPath(desk.desk_id, s.session_id)}
               quote={s.latest_visitor_text ?? undefined}
+              quoteWithStatus={false}
             />
           </li>
         ))}

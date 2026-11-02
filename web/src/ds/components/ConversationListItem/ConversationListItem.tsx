@@ -21,21 +21,21 @@ export interface ConversationListItemProps {
   recorded?: boolean;
   /**
    * What the person last wrote, in their own words (untrusted, shown as text): quoted on the second
-   * line when the row has no status line. A status or the Recorded tag keeps that line, and the
-   * quote doesn't show.
+   * line, above any status line or Recorded tag.
    */
   quote?: string;
+  /** Live now keeps its two-line layout: a status or Recorded tag takes the quote's place. */
+  quoteWithStatus?: boolean;
 }
 
 /**
  * One conversation in a list: who it is with and when on the first line, its status as a dot and
- * words on the second, with the Recorded tag at its end when the conversation was replayed. With
- * no status and no tag, the second line quotes what the person last wrote, when the consumer gives
- * it, or there is none. The whole row is one link to the conversation. Put each in a list item.
+ * words below its optional visitor preview, with the Recorded tag at the status line's end when
+ * the conversation was replayed. The whole row is one link to the conversation. Put each in a list item.
  */
-export function ConversationListItem({ name, time, status, href, current = false, recorded = false, quote }: ConversationListItemProps) {
+export function ConversationListItem({ name, time, status, href, current = false, recorded = false, quote, quoteWithStatus = true }: ConversationListItemProps) {
   const statusLine = status !== undefined || recorded;
-  const quoted = !statusLine && quote !== undefined && quote.trim() !== '';
+  const quoted = (quoteWithStatus || !statusLine) && quote !== undefined && quote.trim() !== '';
   return (
     <a href={href} className="cd-conversation-item" aria-current={current || undefined}>
       <span className="cd-conversation-item__top">
@@ -44,6 +44,11 @@ export function ConversationListItem({ name, time, status, href, current = false
         </span>
         <span className="cd-conversation-item__time cd-type-caption">{time}</span>
       </span>
+      {quoted ? (
+        <span className="cd-conversation-item__quote cd-type-meta" data-copy="user">
+          {`“${quote}”`}
+        </span>
+      ) : null}
       {statusLine ? (
         <span className="cd-conversation-item__status cd-type-caption">
           {status !== undefined ? (
@@ -53,11 +58,6 @@ export function ConversationListItem({ name, time, status, href, current = false
             </>
           ) : null}
           {recorded ? <RecordedTag className="cd-conversation-item__recorded" /> : null}
-        </span>
-      ) : null}
-      {quoted ? (
-        <span className="cd-conversation-item__quote cd-type-meta" data-copy="user">
-          {`“${quote}”`}
         </span>
       ) : null}
     </a>
