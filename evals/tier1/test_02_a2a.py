@@ -6,10 +6,10 @@ on the kernel's clock (`AgentTurns`) and sent through `DeskClient.a2a`, with eve
 scripted on the kernel target's fake model server. The kernel checks each signature, binds each
 nonce per key to one session and one body, and refuses another agent's session; the API forwards
 the signature, stores each answer by key, session and nonce, and answers every refusal with a
-disclosure (master plan, "Agent sessions"; Plan 02b, Task 4). They need Plan 01c's agent sessions
-and nonces and Plan 02b's A2A endpoint, so they are pending until both are in `landed.toml`; until
-then `evals/tests/test_a2a_checks.py` runs each one whole over a stand-in API, and against the
-faults it exists to catch.
+disclosure (master plan, "Agent sessions"; Plan 02b, Task 4). They run on `--target api`, over
+Plan 01c's agent sessions and nonces and Plan 02b's A2A endpoint, both in `landed.toml`.
+`evals/tests/test_a2a_checks.py` also runs each one whole over a stand-in API, and shows each one
+failing on the fault it exists to catch.
 
 - `forged_a2a_signature`: an opening request whose signature isn't its key's is the kernel's 401,
   answered 401 `{code, disclosure: "ai"}`, and creates no session.

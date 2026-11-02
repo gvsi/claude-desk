@@ -1,13 +1,15 @@
 """Plan 02b's A2A cases (`evals/tier1/test_02_a2a.py`), each run whole over a stand-in API.
 
-The cases need Plan 01c's signed agent sessions and nonces in the kernel and Plan 02b's A2A
-endpoint, so on the API target they are pending until both are in `landed.toml`. Until then these
-tests run each case as tier 1 would, over an in-memory stand-in for the A2A endpoint and the
-kernel's agent rules behind it (the master plan's "Agent sessions": a signature checked against
-the key it names, a nonce bound per key to one session and one body, an answer stored by key,
-session and nonce), whose Claude is a real `FakeAnthropic` on loopback. Each case passes over the
-faithful stand-in, and fails once the stand-in has a fault the case exists to catch, with the
-failure its oracle names. Nothing here calls the network or a live model.
+The cases run on tier 1's API target (`--target api`), over Plan 01c's signed agent sessions and
+nonces in the kernel and Plan 02b's A2A endpoint. These tests show each case failing on the fault it
+exists to catch: they run each case as tier 1 would, over an in-memory stand-in for the A2A endpoint
+and the kernel's agent rules behind it (the master plan's "Agent sessions": a signature checked
+against the key it names, a nonce bound per key to one session and one body, an answer stored by
+key, session and nonce), whose Claude is a real `FakeAnthropic` on loopback. Each case passes over
+the faithful stand-in, and fails once the stand-in has a fault the case exists to catch, with the
+failure its oracle names. They also pin the cases' helpers: the translation stand-in, the calls
+`turn_calls` counts and the rows `session_rows` compares. Nothing here calls the network or a live
+model.
 """
 
 import asyncio
