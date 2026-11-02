@@ -1693,6 +1693,37 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('whisper_helper_says_an_agent_with_no_name_is_away', async () => {
+    const chat = session('ses-alex-agent');
+    chat.displayName = null;
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const line = "The agent isn't in the chat now. Claude will use your whisper when it next writes.";
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toHaveAccessibleDescription(line);
+    await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_names_an_agent_as_the_header_does', async () => {
+    const name = "Alex Kim's assistant";
+    const chat = named('ses-alex-agent', name);
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const line = `${name} isn't in the chat now. Claude will use your whisper when it next writes.`;
+    await expect.element(screen.getByRole('heading', { level: 2, name, exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toHaveAccessibleDescription(line);
+    await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_keeps_the_owner_preview_as_the_visitor', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    chat.ownerPreview = true;
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Your preview', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toHaveAccessibleDescription(AWAY('The visitor'));
+    await expect.element(screen.getByText(AWAY('The visitor'), { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it('whisper_helper_says_when_the_visitor_is_here', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
