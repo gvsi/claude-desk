@@ -580,6 +580,38 @@ async def test_agent_gets_a_pending_decisions_final_state_on_its_next_request(ap
     assert read and {call.headers["x-agent-key-id"] for call in read} == {agent.issued.agent_key_id}
 
 
+async def test_a_booking_reads_what_the_session_waits_on_before_its_reply_spends_the_request(app, browser, fake,
+                                                                                              kernel_http, model,
+                                                                                              engine):
+    """An agent's discount quote waits for the owner, then one response books a time and replies. The turn reads the
+    held quote with the request's own signature before the reply's check spends it: the kernel closes the quote, and
+    its `decision_due` row waits for the agent's next request. Read after the reply, the kernel would refuse it as a
+    replay."""
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
+    assert (await agent.send("Can I get a discount on a drain clearing?")).status_code == 200
+    (quote,) = [record.decision for record in fake.decisions.values()
+                if record.decision.session_id == agent.session_id]
+    assert quote.state == "held"
+    desk_id = fake.sessions[agent.session_id].desk_id
+    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id)}), reply("You're booked.")))
+    fake.calls.clear()
+
+    booked = await agent.send("Never mind, book me the earliest weekday visit at list price.")
+
+    assert booked.status_code == 200, booked.text
+    read = [call for call in fake.called("GET /decisions/{id}") if call.path.endswith(quote.decision_id)]
+    assert read and {call.headers["x-agent-key-id"] for call in read} == {agent.issued.agent_key_id}
+    assert fake.decisions[quote.decision_id].decision.state == "cancelled"
+    async with engine.connect() as conn:
+        due = (await conn.execute(text(
+            "SELECT payload->>'decision_id', handled_at IS NULL FROM app.run_events WHERE session_id = :s"
+            " AND kind = 'control' AND type = 'decision_due'"), {"s": agent.session_id})).all()
+    assert [tuple(row) for row in due] == [(quote.decision_id, True)]
+    assert [entry.event.summary for entry in fake.desks[desk_id].ledger
+            if entry.event.kind == "agent_auth" and entry.event.summary.get("reason") == "replayed"] == []
+
+
 # Requests sent again ------------------------------------------------------------------------------------------
 
 
