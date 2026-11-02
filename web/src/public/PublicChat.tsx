@@ -126,7 +126,8 @@ interface RowProps {
   /** `owner_display_name` as served, for the owner's own messages and a card's "{owner} said". */
   ownerName: string;
   language: CopyLanguage;
-  onResend: (id: string) => void;
+  onResend: (id: string) => Promise<void>;
+  composer: RefObject<HTMLDivElement | null>;
   /** A reply is on its way: "Try again" waits, as Send does. */
   resendHeld?: boolean;
   /** What goes under the row's receipts: "Cancel this request" for each open hold it holds. */
@@ -134,7 +135,18 @@ interface RowProps {
 }
 
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
-function ChatRowView({ row, ownerPreview, ownerName, language, onResend, resendHeld = false, paymentBlock, after = [] }: RowProps) {
+function ChatRowView({ row, ownerPreview, ownerName, language, onResend, composer, resendHeld = false, paymentBlock, after = [] }: RowProps) {
+  const retryButton = useRef<HTMLButtonElement>(null);
+  const [restoreRetryFocus, setRestoreRetryFocus] = useState(false);
+  // A retry removes its focused action. Restore the place after its result has drawn, unless
+  // the visitor moved to another control while the send was pending.
+  useLayoutEffect(() => {
+    if (!restoreRetryFocus) return;
+    setRestoreRetryFocus(false);
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    const target = retryButton.current ?? composer.current?.querySelector('textarea');
+    target?.focus({ preventScroll: true });
+  }, [restoreRetryFocus, composer]);
   const { item } = row;
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
@@ -156,7 +168,10 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, resendH
     const failed = item.status === 'failed' && item.failure !== 'session';
     const retry =
       item.failure === 'too_long' ? undefined : (
-        <Button variant="ghost" waiting={resendHeld} onClick={() => onResend(item.id)}>
+        <Button variant="ghost" buttonRef={retryButton} waiting={resendHeld} onClick={(event) => {
+          const focused = document.activeElement === event.currentTarget;
+          void onResend(item.id).then(() => { if (focused) setRestoreRetryFocus(true); });
+        }}>
           {copy.tryAgain}
         </Button>
       );
@@ -1004,11 +1019,11 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   };
   // Sent again, a message waits for a reply on its way and holds Send until its own starts, as a
   // new one does.
-  const resend = (id: string) => {
+  const resend = async (id: string) => {
     if (sendHeld) return;
     newest.follow();
     if (!chat.ownerInChat) setPending({ marks: state.turnMarks, id });
-    chat.resend(id);
+    await chat.resend(id);
   };
 
   // Above the composer, a line for each held request whose receipt is out of view, oldest first,
@@ -1099,6 +1114,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               ownerName={desk.owner_display_name}
               language={language}
               onResend={resend}
+              composer={composerRef}
               resendHeld={sendHeld}
               after={[...cancelsUnder(shownReceipts(row, ownerPreview)), ...verifyUnder(row)]}
             />
