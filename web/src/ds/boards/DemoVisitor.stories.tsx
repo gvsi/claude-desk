@@ -370,15 +370,6 @@ export const ThingsToTry: Story = {
   },
 };
 
-export const ThingsToTryPhone: Story = {
-  globals: { viewport: { value: 'phone', isRotated: false } },
-  play: async ({ canvasElement }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 844]);
-    await expectOwnerFooter(canvasElement, true);
-    await expectNoSidewaysScroll();
-  },
-};
-
 export const StartError: Story = {
   render: () => <TodayBoard failed />,
   parameters: {

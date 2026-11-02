@@ -39,10 +39,22 @@ it('conversations_desktop_places_one_concept_footer_in_the_sidebar', async () =>
 it('phone_today_and_conversations_keep_one_footer_at_the_bottom_and_none_in_the_drawer', async () => {
   for (const route of ['today', 'conversations']) {
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/${route}`, { viewport: 'phone' });
-    const footer = screen.getByRole('main').getByText(CONCEPT_FOOTER_TEXT, { exact: true });
+    expect([window.innerWidth, window.innerHeight]).toEqual([390, 844]);
+    if (route === 'today') {
+      // The reference board has one laptop story; check Things to try's phone footer in the app.
+      const things = screen.getByRole('region', { name: 'Things to try', exact: true });
+      await expect.element(things.getByRole('heading', { level: 3, name: 'Watch a demo visitor', exact: true })).toBeVisible();
+    }
+    const main = screen.getByRole('main');
+    const footer = main.getByText(CONCEPT_FOOTER_TEXT, { exact: true });
     await expect.element(footer).toBeVisible();
     await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
     expect(screen.container.querySelectorAll('[data-ds="concept-footer"]')).toHaveLength(1);
+    expect(footer.element().closest('[aria-hidden="true"], [inert]')).toBeNull();
+    expect(footer.element().contains(main.getByRole('link', { name: 'Giovanni Alcantara', exact: true }).element())).toBe(true);
+    const pageFooter = footer.element().closest('footer');
+    if (!pageFooter) throw new Error('the phone concept line sits in the page footer');
+    expect(pageFooter.parentElement?.lastElementChild).toBe(pageFooter);
     await screen.getByRole('button', { name: 'Menu', exact: true }).click();
     const drawer = screen.getByRole('dialog', { name: 'Menu', exact: true });
     await expect.element(drawer).toBeVisible();
@@ -50,6 +62,8 @@ it('phone_today_and_conversations_keep_one_footer_at_the_bottom_and_none_in_the_
     expect(screen.container.querySelectorAll('[data-ds="concept-footer"]')).toHaveLength(1);
     await userEvent.keyboard('{Escape}');
     await expect.element(screen.getByRole('link', { name: 'Giovanni Alcantara', exact: true })).toBeVisible();
+    footer.element().scrollIntoView({ block: 'end' });
+    await expect.element(footer).toBeInViewport({ ratio: 1 });
     expectNoHorizontalScroll();
   }
 });
