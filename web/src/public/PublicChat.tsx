@@ -1058,6 +1058,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         openStatus={openStatus}
         onAskForOwner={askForOwner}
         askWaits={sendHeld}
+        askDisabled={!ready}
         // While the owner has taken the chat over, the head says so in the disclosure's place, still
         // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
         // session mode, as it is: nothing on the page decides it.
