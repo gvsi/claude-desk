@@ -18,7 +18,7 @@ Bots get talked around: [Meta's AI support assistant](https://www.helpnetsecurit
 
 ## Why Anthropic
 
-A Desk speaks as Claude, for an owner, to people the owner doesn't know. The [capability prediction](capability-prediction.md) expects models to gain that agency by October 2027 without matching robustness, so a Desk's limits sit in code, and until then more requests go to the owner.
+A Desk speaks as Claude, for an owner, to people the owner doesn't know. The [capability prediction](capability-prediction.md) expects models to gain that agency by Q4 2027 without matching robustness, so a Desk's limits sit in code, and until then more requests go to the owner.
 
 [Claude's constitution](https://www.anthropic.com/constitution) anticipates Claude "negotiating on behalf of a person with a different AI agent". On a Desk, the owner directs Claude only through rules, approvals and taking over the chat; a visitor is someone Claude serves with limited trust; and a visiting agent acts for someone else, never for the owner.
 
