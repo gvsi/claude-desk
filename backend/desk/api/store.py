@@ -2,8 +2,9 @@
 
 Rows are never edited or deleted. The only later writes are a pending row's place in the model's history
 (`model_context`, `model_seq`, set once), a pending row's `wake` cleared when a paused session hands off
-(`clear_wake`), and an owner translation (`set_owner_translation`, once). Every function runs in the caller's
-transaction and never commits.
+(`clear_wake`), a waiting hand-back note's `wake` cleared when the owner takes the chat over again
+(`clear_hand_back_wake`), and an owner translation (`set_owner_translation`, once). Every function runs in the
+caller's transaction and never commits.
 
 Recorded history (Plan 01d): a row replayed into a new copy is written with `Replayed` (its recording's `replay_id`
 and the moment it was shown, which becomes its `created_at`). It is data for the owner's reads, not a turn: it has no
@@ -839,6 +840,16 @@ async def clear_wake(conn: AsyncConnection, session_id: str) -> int:
     for the model and reach it at its next call. Returns how many rows it cleared."""
     cleared = await conn.execute(update(MESSAGES).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake).values(wake=False))
+    return cleared.rowcount
+
+
+async def clear_hand_back_wake(conn: AsyncConnection, session_id: str) -> int:
+    """On a take-over, stop the wake of a hand-back note no model call has placed yet: it woke Claude for a message
+    that waited, which the owner now has the chat to answer, and the next hand-back looks for one again
+    (`has_unanswered_visitor`). The note still reaches the model at its next call. Returns how many rows it cleared."""
+    cleared = await conn.execute(update(MESSAGES).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "note", MESSAGES.c.text == NOTES["handed_back"],
+        MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake).values(wake=False))
     return cleared.rowcount
 
 

@@ -55,7 +55,7 @@ from desk.api.schemas import (
     operation_ids,
 )
 from desk.api.sse import RUN_EVENTS, append_control, emit
-from desk.api.store import (MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending,
+from desk.api.store import (MESSAGES, Ids, Replayed, append_message, blocks_text, clear_hand_back_wake, has_pending,
                             has_unanswered_visitor, transcript)
 from desk.contracts import (CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState,
                             effective_brand)
@@ -700,11 +700,13 @@ async def _change_mode(ctx: OwnerCtx, session_id: str, mode: Literal["ai", "owne
 
 async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionState, name: str) -> None:
     """The visitor's event (`name` is the owner's, as the kernel has it) and Claude's note for a mode change; after
-    one back to Claude, a `run_resumable` row when work is waiting for it. A take-over or a hand-back also stays in
-    the transcript (`_transcribed`); a resume after a breaker pause has no event and leaves no item."""
+    one back to Claude, a `run_resumable` row when work is waiting for it. A take-over stops the wake of a hand-back
+    note no turn has read (`clear_hand_back_wake`). A take-over or a hand-back also stays in the transcript
+    (`_transcribed`); a resume after a breaker pause has no event and leaves no item."""
     if now.mode == "owner":
         await _transcribed(conn, ids, EvOwnerJoined(type="owner_joined", name=name))
         await append_message(conn, ids, "note", text=NOTES["taken_over"], wake=False)
+        await clear_hand_back_wake(conn, ids.session_id)   # the owner answers what an earlier hand-back woke for
         return
     if before == "owner":
         await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))

@@ -523,6 +523,34 @@ async def test_an_agents_line_sent_as_the_owner_hands_back_gets_claudes_answer(a
         ("Hello", True), ("Do you fix leaks?", True)]
 
 
+async def test_a_take_over_drops_the_wake_of_a_hand_back_no_turn_has_read(app, browser, fake, kernel_http, model,
+                                                                          engine):
+    """The owner hands back with no stream open, so the waiting line's turn waits for the visitor's next request, then
+    takes the chat over again and answers the line: the next hand-back finds nothing waiting, and Claude never
+    answers it a second time under the owner's answer."""
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                    json={"text": "Do you fix leaks?"})).status_code == 202
+    await app.state.runtime.runner.drain()
+    assert (await mode_change(chat, "handback", 1)).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert (await mode_change(chat, "takeover", 2)).status_code == 200
+    assert (await message(chat, "Yes, we fix leaks. I can come by today.")).status_code == 200
+    assert (await mode_change(chat, "handback", 3)).status_code == 200
+    await app.state.runtime.runner.drain()
+
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]      # the first hand-back's alone
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        await stream.until(lambda events: types(events).count("owner_left") == 2)
+        await app.state.runtime.runner.drain()
+    await app.state.runtime.runner.drain()
+
+    assert model.requests == []
+    assert await conversation_notes(engine, chat.session_id, "text", "wake") == [
+        (NOTES["taken_over"], False), (NOTES["handed_back"], False)] * 2
+
+
 async def test_hand_back_resumes_claude_with_the_visitor_credential(app, browser, fake, kernel_http, model, engine):
     held = await held_request(app, browser, fake, kernel_http, model)
     path = f"/api/owner/conversations/{held.session_id}"
