@@ -871,6 +871,7 @@ export interface ToolRow {
   pending_sha256: string | null;
   cards: CoveringCard[];
   business?: BusinessToolDef | null;
+  review_reason?: ("new" | "changed" | "delisted") | null;
 }
 /**
  * `POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,

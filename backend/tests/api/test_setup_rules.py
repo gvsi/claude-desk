@@ -321,6 +321,7 @@ async def test_accepted_jobs_become_business_tools_needing_review(app, browser, 
     tools = [row for row in reply.json()["tools"] if row["source"] == "business"]
     assert {row["tool"] for row in tools} == {"desk.take-repair-requests", "desk.flag-urgent-help"}
     assert all(row["status"] == "needs_review" and row["definition_sha256"] for row in tools)
+    assert all(row["review_reason"] == "new" for row in tools)
     assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
 
 

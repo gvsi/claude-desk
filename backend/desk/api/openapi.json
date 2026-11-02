@@ -14806,6 +14806,22 @@
                 "type": "null"
               }
             ]
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "changed",
+                  "delisted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
           }
         },
         "type": "object",

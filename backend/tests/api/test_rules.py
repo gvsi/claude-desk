@@ -851,6 +851,29 @@ async def test_a_money_cap_lowering_that_fails_sends_nothing(app, browser, fake,
 
 
 @pytest.mark.parametrize("preset", ["ask_first", "auto"])
+@pytest.mark.parametrize("status,review_reason,kept", [
+    ("needs_review", "new", False), ("needs_review", "changed", True)])
+async def test_preset_with_job_awaiting_review(app, browser, fake, kernel_http, preset, status, review_reason, kept):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    job = "desk.emergency-callback"
+    urgent = next(each for each in owner_cards(fake, owner.desk_id) if each.applies_to == job)
+    fake._put_tool(desk, desk.tools[job].model_copy(update={
+        "status": status, "review_reason": review_reason}))
+    fake.flush()
+
+    reply = await owner.browser.get(rules_url(owner))
+    assert reply.status_code == 200, reply.text
+    row = next(each for each in reply.json()["tools"] if each["tool"] == job)
+    assert row["review_reason"] == review_reason
+    draft = await drafted(owner, rules_path(owner, "preset"), {"preset": preset})
+    assert (urgent in draft.cards) == kept
+    assert (urgent in draft.diff.removed) == (not kept)
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
+    assert (await owner.browser.get(rules_url(owner))).json()["preset"] == preset
+
+
+@pytest.mark.parametrize("preset", ["ask_first", "auto"])
 async def test_preset_keeps_the_desks_job_cards(app, browser, fake, kernel_http, preset):
     owner = await new_owner(app, browser, fake, kernel_http)
     before = owner_cards(fake, owner.desk_id)
