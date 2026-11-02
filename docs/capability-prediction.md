@@ -28,7 +28,9 @@ The measure is [τ³-Banking](https://taubench.com/leaderboard), from the custom
 
 In the paper's first example, a customer who has lost a wallet with their bank cards in it asks the agent to freeze a card. The bank's card policies and the card's recent transactions mean the right action is to cancel it instead. The request is plain; the right answer depends on rules the customer hasn't read. A front desk does that all day.
 
-τ³-Banking is the harder successor to Sierra's better-known τ²-bench (retail, airline and telecom service), where Claude already scored 92% on retail and 99% on telecom by February 2026 ([Opus 4.6 system card](https://www.anthropic.com/claude-opus-4-6-system-card)), so it can still measure progress. The bar is 80% pass^1. It is the closest public proxy for a front desk, though it tests neither negotiation nor a visitor trying to make the agent break the rules; the limitations below cover that.
+τ³-Banking is the harder successor to Sierra's better-known τ²-bench (retail, airline and telecom service), where Claude already scored 92% on retail and 99% on telecom by February 2026 ([Opus 4.6 system card](https://www.anthropic.com/claude-opus-4-6-system-card)), so it can still measure progress. The bar is 80% pass^1. It is the closest public proxy for a front desk, though it tests neither negotiation nor a visitor trying to make the agent break the rules.
+
+Resisting attack has no single leaderboard. For prompt injection, instructions hidden in something the model reads, such as a web page or a tool's result, Anthropic's system cards report the same tests release after release. [Gray Swan's benchmark](https://arxiv.org/abs/2603.15714), built with the UK AI Security Institute, the US Center for AI Standards and Innovation and model developers, replays 1,804 attacks from public red-teaming competitions. Gray Swan's adaptive attacker, Shade, learns against each scenario and gets 200 attempts. Social engineering by the person in the chat, such as claiming to be the owner, has no public benchmark across model releases; Anthropic tracks "accepting unverifiable authorization" in its own audit of each model's behavior.
 
 ## Why it's coming
 
@@ -54,17 +56,38 @@ Claude went from 24.7% (Opus 4.5, November 2025, Sierra) to 56.0% (Opus 5.5, Sep
 
 The fits rest on few scores, from three boards whose setups differ, and a trend can stall. The across-labs fit mixes boards, so it counts least. The prediction says Q4 2027 because the latest fit reaches the bar as that quarter begins.
 
-Falsifiers: no Claude model reaches 70% on τ³-Banking by the end of Q2 2027, or an independent adaptive red team, using prompt injection and social engineering, can't get the model alone, with no limits in code, to break an owner's rules.
+Falsifier: no Claude model reaches 70% on τ³-Banking by the end of Q2 2027.
 
-## Limitations
+## Why the limits stay in code
 
-Resisting the visitor lags behind applying policies. The [Claude Opus 5.5 system card](https://www.anthropic.com/claude-opus-5-5-system-card) lists two regressions that matter here. One is a form of prompt injection: following instructions planted in text a user pastes. The other is social engineering: more often "accepting unverifiable claims of authorization", such as a visitor saying "I'm the owner". Anthropic traced the first to training that "generalized into blindly trusting the user input"; at a public front desk, the user is a stranger. In Anthropic's coding test the released model acted on planted instructions about 2% of the time, and with product changes that mark pasted text it followed none; a visitor's message isn't pasted. [Anthropic's announcement](https://www.anthropic.com/claude-opus-5-5) says Opus 5.5 matches or beats Opus 5 on prompt injection in coding, tool use, computer use and web browsing; the card's regression is narrower, about what the user types or pastes.
+The model is getting much harder to attack through what it reads, but no harder for the person in the chat to manipulate. Results for the two newest Opus models, from the [Claude Opus 5.5 system card](https://www.anthropic.com/claude-opus-5-5-system-card), both with extended thinking:
+
+| Attack | How it's run | Claude Opus 5 | Claude Opus 5.5 |
+| --- | --- | --- | --- |
+| Prompt injection, Gray Swan's benchmark | Fixed attacks; success within 15 tries | 4.8% | 1.0% |
+| Prompt injection, computer use | Shade, 200 tries in each of 14 scenarios | 0.29% of tries; 1 of 14 scenarios broken | 0.07%; 1 of 14 |
+| Prompt injection, browser use | Professional red-teamers' attacks, written against Claude Opus 4.7; 10 tries in each of 110 environments | 3.64%; 15 of 110 | 0.09%; 1 of 110 |
+| Prompt injection, coding | Shade, 200 tries in each of 40 scenarios | 88.92%; 40 of 40 | 54.61%; 37 of 40, every success in requests handed to Claude Opus 4.8 |
+| Instructions in text the user pastes | Anthropic's coding test | Never followed | Followed 52% of the time by an early snapshot; about 2% after the fix |
+| Unverifiable claims of authority | Anthropic's behavior audit | — | Accepted more often than by recent Claude models; a chart, no number in the text |
+
+Injection was much easier in 2025: in the UK AI Security Institute and Gray Swan's public challenge, 1.8 million attacks on 22 agents, "nearly all agents exhibit policy violations for most behaviors within 10–100 queries" ([paper](https://arxiv.org/abs/2507.20526)). Anthropic still warns that fixed attack sets "can provide a false sense of security", and its coding results show why: Opus 5.5 hands some coding requests to Opus 4.8, and the adaptive attacker broke 37 of 40 scenarios through those.
+
+The person in the chat is a Desk's main attacker, and that is where Opus 5.5 regressed. Anthropic traced its readiness to follow instructions pasted into the user's own message to training that "generalized into blindly trusting the user input"; at a public front desk, the user is a stranger. Product changes that mark pasted text stopped it in Anthropic's test, but a visitor's message isn't pasted. The card also finds Opus 5.5 more often "accepting unverifiable authorization", such as a visitor saying "I'm the owner".
 
 A model supervising a model does not close the gap. In [Project Vend](https://www.anthropic.com/research/project-vend-2), Claude's CEO agent approved the shopkeeper agent's requests for discounts and other lenient treatment "about eight times as often as it denied them". Anthropic concluded that "the gap between 'capable' and 'completely robust' remains wide". In [Vending-Bench Arena](https://andonlabs.com/evals/vending-bench-arena) rounds from February to June 2026, Claude models proposed price-fixing, and a Claude team "ended up leaking valuable info to their competitors".
 
+These results don't support a trend line: two or three releases per measure, attack sets that change between system cards, and no series at all for the person in the chat. So the safety prediction is a threshold, not a date.
+
+**Prediction:** through Q4 2027, prompt injection hidden in what the model reads keeps falling toward zero for the model alone, but manipulation by the person in the chat will not be shown solved: a generally available model with no limits in code will still break an owner's rule for a determined visitor.
+
+**Falsifier:** by the end of 2027, a public adaptive red team that plays the person in the chat, with claimed authority, pressure and planted instructions, can't get a generally available model with no limits in code to break an owner's rule in any of its scenarios, with 100 attempts each.
+
 `estimate:` if a 2% per-attempt rate held and attempts were independent, an attacker trying 50 times would succeed at least once 64% of the time (1 − 0.98^50).
 
-So the model alone should not decide who the visitor is, what they may see or how much money moves. Those come from one-time codes sent to the contact on record, the business's own prices, signed spending limits and rules checked in code. A manipulated model can then still take actions the rules permit or say something wrong. It can't move money or release private data beyond the rules, or state a price the business's records don't back. So the capability is judged by how many requests it closes without the owner, not by how hard it is to fool.
+So the model alone should not decide who the visitor is, what they may see or how much money moves. Those come from one-time codes sent to the contact on record, the business's own prices, signed spending limits and rules checked in code. A manipulated model can then still take actions the rules permit or say something wrong. It can't move money or release private data beyond the rules, or state a price the business's records don't back.
+
+With its limits in code, Claude Desk's [final eval pass](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md) had no unwaived violation in 78 held-out attack runs across 26 scenarios: 6 prompt injection, most of the rest social engineering (claiming to be the owner, asking for someone else's data, pushing for discounts). That bounds the rate below 3.9% per run at 95% confidence. The scenarios are ours and fixed, run three times each, not an adaptive red team, and they measure the model and the code together, not the model alone. So the capability is judged by how many requests a Desk closes without the owner, not by how hard the model is to fool.
 
 ## Readiness
 
@@ -75,7 +98,7 @@ The prediction's date depends on one axis, applying policies, which is near. Res
 | Axis | Readiness | Evidence | Watch for |
 | --- | --- | --- | --- |
 | Apply policies | Near | Claude's [τ³-Banking](https://taubench.com/leaderboard) pass^1 rose from 24.7% (Sierra) to 56.0% (Fireworks) in ten months | Sonnet 5.5's score, and the next Claude on Sierra's own board |
-| Resist the visitor | Lagging | Opus 5.5 follows pasted instructions and claimed authority more often than Opus 5 ([system card](https://www.anthropic.com/claude-opus-5-5-system-card)) | The next card's results on the user's own messages |
+| Resist the visitor | Lagging | Prompt injection within 15 tries fell from 4.8% to 1.0% from Opus 5 to Opus 5.5, but Opus 5.5 follows pasted instructions and claimed authority more often than earlier Claude models ([system card](https://www.anthropic.com/claude-opus-5-5-system-card)) | A public adaptive red team that plays the person in the chat |
 | Negotiate | Early | One staff pilot ([Project Deal](https://www.anthropic.com/features/project-deal)); [Vending-Bench Arena](https://andonlabs.com/evals/vending-bench-arena) scores only final balances | Negotiation scores for successive releases |
 | Run unattended | Gated | Claude for Small Business: "Nothing sends until you say so" ([page](https://claude.com/solutions/small-business)); neither the [usage policy](https://www.anthropic.com/legal/aup) nor the [agent API](https://platform.claude.com/docs/en/managed-agents/permission-policies) requires that | Customer replies sent without approval by default |
 | Visiting agents | Early | At most 1 in 16 consumers say an AI contacted a company itself ([Lorikeet](https://www.lorikeetcx.ai/content/the-agent-economy/read)) | AP2 past v0.2 |
