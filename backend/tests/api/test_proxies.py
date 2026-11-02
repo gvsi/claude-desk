@@ -589,7 +589,7 @@ async def test_document_paths_never_reach_the_logs(app, fake, kernel_http, caplo
         raise RuntimeError(f"the route broke at {request.url}")
 
     # Every way a document link is answered: opened, refused, looked at, prefetched, the wrong method, the kernel
-    # down or failing, and a failure of the API's own, which the server logs with its traceback.
+    # down or failing, and a failure of the API's own.
     answers = []
     async with served(app) as url, httpx.AsyncClient(base_url=url, headers={"accept": BROWSER_ACCEPT}) as client:
         answers += [await client.get(f"/api/d/{opened}"), await client.get(f"/api/d/{opened}"),
@@ -613,8 +613,13 @@ async def test_document_paths_never_reach_the_logs(app, fake, kernel_http, caplo
         "GET /api/d/<redacted> HTTP/1.1"]
     # The kernel client keeps its own requests out of httpx's logs, so no line names the kernel's link route at all.
     assert [record.name for record in caplog.records if "/document_links/" in shown(record)] == []
-    (crash,) = [record for record in caplog.records if "the route broke" in shown(record)]
-    assert crash.name == "uvicorn.error" and "/api/d/<redacted>" in shown(crash)
+    # The API's own failure is logged by its type and route only (its message names the link), and the server's
+    # line about it drops the exception.
+    assert [record.name for record in caplog.records if "the route broke" in shown(record)] == []
+    (crash,) = [record for record in caplog.records if record.name == "desk.api.unexpected_errors"]
+    assert crash.getMessage() == "unexpected RuntimeError on GET /api/d/<redacted>"
+    assert any(record.name == "uvicorn.error" and record.getMessage().startswith("Exception in ASGI application")
+               for record in caplog.records)
     assert any(record.name == "uvicorn.asgi" and "scope=" in record.getMessage() for record in caplog.records)
     leaked = [(record.name, token) for record in caplog.records for token in tokens if token in shown(record)]
     assert leaked == [] and not [token for token in tokens if token in caplog.text]

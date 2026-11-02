@@ -42,7 +42,7 @@
 }
 
 .cd-copy-link__result:empty {
-  display: none;
+  margin-top: calc(-1 * var(--space-8));
 }
 
 @container cd-copy-link (max-width: 479.98px) {

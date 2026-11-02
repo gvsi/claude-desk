@@ -176,6 +176,39 @@ async def test_demo_copy_stores_the_replayed_night(db, fake, api_settings, clock
         assert fake.sessions[live_due[0]].closed_at is None      # only the live seeded hold can become due
 
 
+@pytest.mark.parametrize("desk_authored", [False, True], ids=["default-claude", "desk-confirmation"])
+async def test_replayed_reply_preserves_authorship(db, fake, api_settings, clock, browser, monkeypatch, desk_authored):
+    from desk.api.deliver import Reply
+    from desk.api.routes import owner
+
+    fake.record_night(booked_visit(LAST_NIGHT))
+    original_store, original_deliver = owner.store_replayed_night, owner.deliver
+    delivered = []
+
+    async def store(conn, created, **kwargs):
+        if desk_authored:
+            created = changed(created, "reply", author="desk")
+        return await original_store(conn, created, **kwargs)
+
+    async def deliver(conn, ids, item, **kwargs):
+        if isinstance(item, Reply):
+            delivered.append((item.author, item.via))
+        return await original_deliver(conn, ids, item, **kwargs)
+
+    monkeypatch.setattr(owner, "store_replayed_night", store)
+    monkeypatch.setattr(owner, "deliver", deliver)
+    async with running(api_settings, fake, clock) as app:
+        response = await browser(app).post("/api/owner/copies", json={"passcode": PASSCODE})
+        assert response.status_code == 201
+        copy_id = response.json()["copy_id"]
+    author, via = ("desk", "kernel") if desk_authored else ("claude", "api")
+    assert delivered == [(author, via)]
+    assert db.execute("SELECT author FROM app.messages WHERE copy_id = %s AND kind = 'delivered'"
+                      " AND replay_id IS NOT NULL", (copy_id,)).fetchall() == [(author,)]
+    assert db.execute("SELECT payload->>'author' FROM app.run_events WHERE copy_id = %s AND type = 'message'"
+                      " AND replay_id IS NOT NULL", (copy_id,)).fetchall() == [(author,)]
+
+
 async def test_replayed_rows_never_reach_a_model_context(db, api_conn, ids):
     """The store's own queries keep recorded history from the model, not only the replayed session being closed: a
     replayed row in a session the model talks in, even one carrying a frozen block, stays out of the session's model

@@ -17,13 +17,14 @@
 
 - One card (`fill-card`, a `line-card` border at `radius-card`), ruled in `line-hairline` between its rows.
 - Each row padded 14 px by 16 px: the block's name in `control` type at weight 520, its words 4 px under it in `meta`, `text-secondary`, and a secondary "Copy" button at the top right, 16 px from the edge.
+- Only the latest copy shows its line. A newer press anywhere clears the older result, whether it succeeded or failed; there is no timed clear.
 - After a press, a line under the words: "Copied.", or, when the copy fails, the block's words are selected and "Copy didn’t work. The text is selected, so copy it yourself." It takes no room until it has words. The words, the line and the hook that runs the copy are `CopyField`'s (`COPY_RESULT_COPY`, `copyResultLine`, `useCopyText`).
 
 ## Accessibility
 
 - A list (`role="list"`, kept since its markers are removed) named by `label`, one item per block.
 - Each button reads "Copy" and is named for its block: "Copy Google profile".
-- The line after a press is a `status`, there from the start, so it is read out when its words come.
+- `CopyResult` keeps the line after a press as a `status`, there from the start, so it is read out when its words come. Each press gets a fresh `announcement` key so repeated results are announced again.
 
 ## Props
 

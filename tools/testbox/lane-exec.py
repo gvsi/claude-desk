@@ -71,7 +71,10 @@ try:
         resolv = Path("/etc/netns") / ns
         resolv.mkdir(parents=True, exist_ok=True)
         (resolv / "resolv.conf").write_text("nameserver 169.254.169.253\n")
-    # Loopback proxy keeps tier 1's loopback-only network guard intact.
+    # Workers from older branches dial Postgres at 127.0.0.1:5432, so this forwarder relays the lane's loopback to
+    # the bridge. Current workers connect to the bridge (10.200.0.1:5432) directly (#490). Tier 1's loopback-only
+    # network guard patches Python sockets and never saw database connections, which go through libpq. Retire the
+    # forwarder once no older branches remain.
     db_unit = "desk-testbox-db-" + lane
     if subprocess.run(["systemctl", "is-active", "--quiet", db_unit]).returncode:
         subprocess.run(["systemd-run", "--unit", db_unit, "--property=Restart=on-failure", "ip", "netns", "exec", ns,

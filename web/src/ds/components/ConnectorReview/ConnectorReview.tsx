@@ -1,3 +1,5 @@
+import type { Ref } from 'react';
+
 import { BUSINESS_WORDS, type BusinessSetupRow } from '../../../owner/connectors/businessWords.ts';
 import type { IconName } from '../../icons/index.tsx';
 import { Button } from '../Button/Button.tsx';
@@ -32,9 +34,16 @@ export interface ReviewToolView {
   mode: RuleMode;
   /** The rules that already cover it, most specific first. */
   coveredBy: readonly ReviewCoverage[];
+  /**
+   * The screen's own line for a tool no rule covers, in place of "No rule of yours covers this
+   * yet…": why it starts where it does. A rule that covers the tool still shows instead.
+   */
+  uncoveredLine?: string;
 }
 
 interface ReviewControls {
+  /** The heading, for focus when the screen replaces the tools list. */
+  titleRef?: Ref<HTMLHeadingElement>;
   tools: readonly ReviewToolView[];
   /** Makes each tool's outcome a menu; the pick goes to the screen with the tool's key. */
   onChangeOutcome?: (key: string, mode: RuleMode) => void;
@@ -65,9 +74,10 @@ export type ConnectorReviewProps = ReviewControls & (
   | { job: ReviewJobView; connector?: never; intro?: never; connection?: never; onConnect?: never }
 );
 
-/** A line for each rule that covers a tool, or the line that none does. */
+/** A line for each rule that covers a tool, or the line that none does: the screen's own, else ours. */
 function coverageLines(tool: ReviewToolView): string[] {
   if (tool.coveredBy.length === 0) {
+    if (tool.uncoveredLine?.trim()) return [tool.uncoveredLine];
     return [tool.mode === 'ask' ? 'No rule of yours covers this yet, so it starts at Ask me first.' : 'No rule of yours covers this yet.'];
   }
   return tool.coveredBy.map((rule) => {
@@ -83,7 +93,7 @@ function coverageLines(tool: ReviewToolView): string[] {
  * outcome it starts at. "Turn it on" asks the screen to draft the change, which shows in
  * `ChangeReview` before anything runs.
  */
-export function ConnectorReview({ connector, job, intro, connection, onConnect, tools, onChangeOutcome, onTurnOn, onCancel, pending = false, error }: ConnectorReviewProps) {
+export function ConnectorReview({ connector, job, intro, connection, onConnect, tools, onChangeOutcome, onTurnOn, onCancel, pending = false, error, titleRef }: ConnectorReviewProps) {
   const { waiting, send } = useSendOnce<'turn_on' | 'connect'>(pending, error);
   const failed = error !== undefined && error.trim() !== '';
   const builtIn = connector?.source.kind === 'built_in';
@@ -101,7 +111,7 @@ export function ConnectorReview({ connector, job, intro, connection, onConnect, 
       <header className="cd-connector-review__header">
         {job ? <ConnectorIcon icon="quotes" glyph={job.glyph} size="page" /> : <ConnectorIcon icon={connector.icon} size="page" />}
         <div className="cd-connector-review__heading">
-          <h1 className="cd-connector-review__title cd-type-page-title">
+          <h1 ref={titleRef} tabIndex={titleRef === undefined ? undefined : -1} className="cd-connector-review__title cd-type-page-title">
             {job ? job.title : <>Review what Claude could do with <ConnectorName connector={connector} size="inline" /></>}
           </h1>
           <p className="cd-connector-review__lead cd-type-body">{lead}</p>

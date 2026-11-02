@@ -93,6 +93,15 @@ export interface ConversationSummary {
    * without it draws the row as before.
    */
   latest_visitor_text?: string | null;
+  /**
+   * The facts behind an agent's newest outcome, read from the kernel's rows, never anyone's words:
+   * the booking's start for `visit_booked`, the amount paid for `deposit_paid`, and the refusal's
+   * cause for `turned_down`. Null when the outcome isn't that one or the fact can't be read, and
+   * for a visitor's chat or the owner's preview; absent is null.
+   */
+  latest_outcome_starts_at?: string | null;
+  latest_outcome_cents?: number | null;
+  latest_outcome_cause?: RefusalCause | null;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
@@ -564,6 +573,11 @@ export interface SetupMessage {
   text: string;
   choices: Choice[];
   card: ProposalCard | null;
+  /**
+   * A card the owner decided themselves, by a click or a typed answer; false for one setup settled
+   * for them, as "Use your suggestions" does. Older responses omit it (false).
+   */
+  owner_decided?: boolean;
 }
 
 export interface SetupState {
@@ -881,6 +895,16 @@ export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?
 
 /** Sent as an empty JSON object. */
 export type SetupSuggestionsBody = Record<string, never>;
+
+/**
+ * "Change something": the owner's message to Claude from a step after the questions, which takes
+ * setup back to its chat (`setupReopen`). One key per send (1 to 128 characters, no control
+ * characters), sent again as it is by a retry: a repeat answers the interview as the first left it.
+ */
+export interface SetupReopenBody {
+  text: string;
+  idempotency_key: string;
+}
 
 export interface ConsentBody {
   allow: boolean;

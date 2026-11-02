@@ -16,7 +16,7 @@ import {
   type RuleRowProps,
   type ToolSummaryView,
 } from '../../ds/index.ts';
-import { aboveMoneyCapCopy, formatCents, listWords } from '../../lib/format.ts';
+import { aboveMoneyCapCopy, formatCents } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorOn, isCatalogTool, toolDisplayName, toolNoun, toolState, type BusinessTools, type ConnectorKey } from '../connectors/catalog.ts';
 import { heldOldestFirst } from '../useDesks.ts';
 import { coveredTools, reviewedTools } from './changeRows.ts';
@@ -102,17 +102,17 @@ function sharedTools(tools: readonly NamedToolRow[], business: BusinessTools): N
 }
 
 /**
- * A shared rule's line under each tool it governs: its group and the tools it covers on this Desk
- * (`coveredTools`, among the Desk's connector and business tools), "Applies to every tool that charges
- * money: Payment link and Charge within a signed limit.", or its group alone when it covers none
- * of them.
+ * A shared rule's line under each tool it governs (`RuleRow`'s `shared`): the app's words for its
+ * group, "Applies to every tool that charges money", and the titles of the tools it covers on this
+ * Desk (`coveredTools`, among the Desk's connector and business tools), "Payment link" and "Charge
+ * within a signed limit", which the row shows as user text after a colon; none when it covers none.
  */
-function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly NamedToolRow[]): string {
+function sharedWords(card: RuleCard, cards: readonly RuleCard[], tools: readonly NamedToolRow[]): NonNullable<RuleRowProps['shared']> {
   const business = businessTools(tools);
   const group = targetWords(card.applies_to, business);
   const lower = `${group.charAt(0).toLowerCase()}${group.slice(1)}`;
-  const names = coveredTools(card, cards, sharedTools(tools, business)).map((tool) => targetWords(tool, business));
-  return names.length === 0 ? `Applies to ${lower}.` : `Applies to ${lower}: ${listWords(names)}.`;
+  const titles = coveredTools(card, cards, sharedTools(tools, business)).map((tool) => targetWords(tool, business));
+  return { lead: `Applies to ${lower}`, titles };
 }
 
 /**
@@ -134,7 +134,7 @@ export function toolRuleRows(
       rule: card,
       words: ruleWords(card, people),
       ...(limit === undefined ? {} : { limit }),
-      ...(isShared(card) ? { shared: { appliesTo: sharedWords(card, active.cards, tools) } } : {}),
+      ...(isShared(card) ? { shared: sharedWords(card, active.cards, tools) } : {}),
     };
   });
 }

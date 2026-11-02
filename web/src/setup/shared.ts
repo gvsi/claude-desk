@@ -17,7 +17,7 @@ import { SETUP_COPY } from './copy.ts';
  * setup step, so each one, as it settles, has them read again (the app's providers), even once
  * setup has closed: one still out when the owner left lands later.
  */
-export const MOVES_SETUP: ReadonlySet<RouteKey> = new Set<RouteKey>(['setupAnswer', 'setupProposal', 'setupSuggestions', 'setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive']);
+export const MOVES_SETUP: ReadonlySet<RouteKey> = new Set<RouteKey>(['setupAnswer', 'setupProposal', 'setupSuggestions', 'setupReopen', 'setupRules', 'setupSituations', 'setupSafetyCheck', 'setupConfirm', 'goLive']);
 
 /** The step each request that moves an interview on has it at in the API once it succeeds. */
 export const SETUP_REACHES: Readonly<Partial<Record<RouteKey, SetupStep>>> = {

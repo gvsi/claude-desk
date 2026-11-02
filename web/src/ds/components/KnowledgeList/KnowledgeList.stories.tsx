@@ -186,3 +186,21 @@ export const NoDatePhone: Story = {
   ...NoDate,
   globals: { viewport: { value: 'phone', isRotated: false } },
 };
+
+
+/** Tiled source rows put their pill below the text in the phone column. */
+export const TiledPhone: Story = {
+  ...Phone,
+  args: { items: ITEMS.map((item, index) => ({ ...item, kind: index === 0 ? 'globe' : index === 1 ? 'list' : 'note' })) },
+  parameters: { canvas: 'none', canvasNote: 'Tiled Knowledge sources below 640 px, with pills under the text.' },
+  play: async ({ canvas }) => {
+    const rows = within(canvas.getByRole('list', { name: 'What Claude knows' })).getAllByRole('listitem');
+    for (const row of rows) {
+      const words = row.querySelector('.cd-knowledge-list__words')!.getBoundingClientRect();
+      const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
+      await expect(pill.left).toBe(words.left);
+      await expect(pill.top - words.bottom).toBe(8);
+    }
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};

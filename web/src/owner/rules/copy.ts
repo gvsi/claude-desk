@@ -1,8 +1,5 @@
 import type { RuleCard } from '../../api/contracts.ts';
 
-/** An API-format example for tests of a Desk with repeated owner approvals. */
-export const SUGGESTION_EXAMPLE = 'You approved 3 refund requests. Let me handle these?';
-
 /** The Rules header and its loading shapes use the same signed subtitle. */
 export const RULES_SUBTITLE = 'What Claude can do on this Desk, where each tool comes from, and your rules for it.';
 

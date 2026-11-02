@@ -30,15 +30,16 @@ offer no take-over on them.
 import asyncio
 import logging
 from collections import Counter, OrderedDict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import DateTime, cast, func, literal, select, type_coerce, union_all
+from sqlalchemy import DateTime, cast, func, literal, null, select, type_coerce, union_all
 from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 
+from desk.always_on import specificity
 from desk.api.deps import OwnerCtx
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.ro import decision_replayed, replayed, ro_view, set_copy
@@ -64,7 +65,7 @@ from desk.api.schemas import (
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
 from desk.api.store import AUDIENCE_KINDS, MESSAGES, WITH_EVENTS, newest_triage, triaged
-from desk.contracts import Decision, DecisionState, is_business_tool
+from desk.contracts import Decision, DecisionState, RuleCard, is_business_tool
 
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
@@ -234,18 +235,34 @@ async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state
     return decision.owner_plain
 
 
+def holding_card(cards: Mapping[str, RuleCard], card_ids: Iterable[str]) -> RuleCard | None:
+    """The rule card that held a request, the first its `reason_plain` quotes, picked as the kernel's
+    `decide.hold_decider` picks the cards that decided a hold. A held decision's `card_ids` are every card behind its
+    matching hold permits, sorted by ID, so the compiler's default ask for anyone can come first. Of those found in
+    `cards` (the version's, by ID): the most specific (`desk.always_on.specificity`, which ranks a default ask below
+    every card), the ask cards among them when there are any (an ask card wins a tie with an auto card's hold twin),
+    then the first by `card_id`. A hold only the default ask decided names the default ask. None when no card is
+    found."""
+    known = [cards[card_id] for card_id in card_ids if card_id in cards]
+    if not known:
+        return None
+    top = max(specificity(card) for card in known)
+    deciding = [card for card in known if specificity(card) == top]
+    return min([card for card in deciding if card.mode == "ask"] or deciding, key=lambda card: card.card_id)
+
+
 async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> dict[str, str | None]:
-    """The reason of the rule card that held each decision: its first `card_ids` entry, in the policy version it was
-    decided under (default cards included), by decision ID."""
+    """The reason of the rule card that held each decision (`holding_card`), in the policy version it was decided
+    under (default cards included), by decision ID."""
     versions = sorted({decision.policy_version for decision in decisions})
     if not versions:
         return {}
-    cards: dict[tuple[int, str], str] = {}
+    cards: dict[int, dict[str, RuleCard]] = {}
     for row in await ctx.ro.rows("policy_versions", desk_id=desk_id, version=versions):
-        for card in row["cards"] or []:
-            cards[(row["version"], card["card_id"])] = card["reason"]
-    return {decision.decision_id: cards.get((decision.policy_version, decision.card_ids[0]))
-            if decision.card_ids else None for decision in decisions}
+        cards[row["version"]] = {card["card_id"]: RuleCard.model_validate(card) for card in row["cards"] or []}
+    held = {decision.decision_id: holding_card(cards.get(decision.policy_version, {}), decision.card_ids)
+            for decision in decisions}
+    return {decision_id: card.reason if card is not None else None for decision_id, card in held.items()}
 
 
 async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
@@ -891,13 +908,56 @@ async def reports(ctx: OwnerCtx, desk_id: str, now: datetime, days: int) -> Repo
 # Conversations ------------------------------------------------------------------------------------------------
 
 
-async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decisions: list[dict]) -> dict[str, str | None]:
-    """Read only event metadata for this Desk's agents in one statement, never their transcripts.
+@dataclass(frozen=True)
+class Outcome:
+    """A conversation's newest outcome (`ConversationSummary.latest_outcome`) and, for an agent's, the kernel's facts
+    behind it: a booking's start, the amount paid, a refusal's cause. A fact that can't be read stays None."""
+
+    outcome: str | None = None
+    starts_at: datetime | None = None
+    cents: int | None = None
+    cause: RefusalCause | None = None
+
+
+async def outcome_facts(ctx: OwnerCtx, desk_id: str, actions: Iterable[str], links: Iterable[str]) -> dict[tuple, dict]:
+    """The kernel's rows behind agents' outcomes, in one statement: these actions, and these payment links once
+    `paid`, each with its session, tool (an action's), amount and start (an action's), keyed by ("action" or "link",
+    its ID). No text, card contents or tokens."""
+    actions, links = sorted(set(actions)), sorted(set(links))
+    if not actions and not links:
+        return {}
+    action, link = ro_view(ctx.ro.schema, "actions"), ro_view(ctx.ro.schema, "payment_links")
+    statement = union_all(
+        select(literal("action").label("kind"), action.c.action_id.label("ref"), action.c.session_id, action.c.tool,
+               action.c.amount_cents, action.c.starts_at).where(
+            action.c.copy_id == ctx.copy_id, action.c.desk_id == desk_id, action.c.action_id.in_(actions)),
+        select(literal("link"), link.c.link_id, link.c.session_id, null(), link.c.amount_cents, null()).where(
+            link.c.copy_id == ctx.copy_id, link.c.desk_id == desk_id, link.c.link_id.in_(links),
+            link.c.state == "paid"))
+    try:
+        await set_copy(ctx.ro.conn, ctx.copy_id)
+        return {(row.kind, row.ref): dict(row._mapping) for row in await ctx.ro.conn.execute(statement)}
+    finally:
+        await ctx.ro.done()
+
+
+async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: dict[str, dict],
+                         decisions: list[dict]) -> dict[str, Outcome]:
+    """Read only event metadata for this Desk's agents (`sessions`, their session rows by ID) in one statement, never
+    their transcripts.
 
     A shown done card needs its matching tool's executed receipt in the same turn. Kernel-authored
     payment confirmations stand on their own. Current decisions and handoff creation entries provide
     barriers even before their status/message is delivered. Use the decision's current ledger time,
     not its creation time: execution can refuse an older decision after a newer success.
+
+    The newest outcome carries its facts (`Outcome`), read for it alone in one more statement (`outcome_facts`): a
+    booking's start and a mandate charge's amount from its decision's action, which the decision's kernel-built
+    `decide` entry names (`action_id`); a Desk-authored payment confirmation's amount from its payment link, the
+    session's newest link moved to `paid` (as `paid_moves` reads a move) before the confirmation's own ledger entry,
+    since the kernel ledgers the move and the confirmation in one transaction under the ledger's head lock; and a
+    refusal's cause from its `decide` entry (`refusal_cause`). An action or link of another session, or an action of
+    another tool, gives no fact.
     """
     if not sessions:
         return {}
@@ -925,21 +985,25 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
                                                   cast('$.blocks[*] ? (@.kind == "card").template', JSONPATH))).label("payload")
     ).select_from(WITH_EVENTS).where(
         MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id,
-        MESSAGES.c.session_id.in_(sessions), MESSAGES.c.kind.in_(AUDIENCE_KINDS["owner"]) | starts_turn,
+        MESSAGES.c.session_id.in_(list(sessions)), MESSAGES.c.kind.in_(AUDIENCE_KINDS["owner"]) | starts_turn,
         MESSAGES.c.kind != "stopped_draft")
-    # Handoff creation has a kind; closing/replacing one has no kind and cannot restore a success.
+    # Handoff creation has a kind; closing/replacing one has no kind and cannot restore a success. Each decision's
+    # `decide` entry names its action, and each link's move to `paid` can price a payment confirmation.
     entries = select(
         event["session_id"].astext, cast(ledger.c.created_at, DateTime(timezone=True)),
         ledger.c.seq, literal("ledger"), event
     ).where(ledger.c.copy_id == ctx.copy_id, ledger.c.desk_id == desk_id,
-            event["session_id"].astext.in_(sessions),
+            event["session_id"].astext.in_(list(sessions)),
             ledger.c.seq.in_(list(by_seq)) | (
                 (event["kind"].astext == "desk_data")
                 & (event["summary"]["part"].astext == "handoffs")
-                & event["summary"]["kind"].astext.in_(("card", "callback"))))
+                & event["summary"]["kind"].astext.in_(("card", "callback")))
+            | ((event["kind"].astext == "decide") & event["ref_id"].astext.in_(list(by_id)))
+            | ((event["kind"].astext == "payment") & (event["summary"]["state"].astext == "paid")))
     rows = (await ctx.ro.conn.execute(union_all(messages, entries))).all()
     decision_times = {row.n: utc(row.created_at) for row in rows if row.kind == "ledger" and row.n in by_seq}
-    # Ledger sequence orders equal timestamps; a shown card follows its own execution.
+    # Ledger sequence orders equal timestamps; a shown card follows its own execution. Each event ends with the
+    # decision its facts come from, if any.
     events: dict[str, list[tuple]] = {session: [] for session in sessions}
     for decision in by_id.values():
         state, tool = decision["state"], decision["tool"]
@@ -948,7 +1012,7 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
             outcome = "turned_down" if state in {"refused", "refused_at_execution"} else None
             events[decision["session_id"]].append((
                 decision_times.get(decision["ledger_seq"], utc(decision["created_at"])),
-                decision["ledger_seq"], 0, 0, outcome))
+                decision["ledger_seq"], 0, 0, outcome, decision))
     pending: dict[str, list[dict]] = {}
     turn_ends: dict[str, int | None] = {}
     tools = {"booking_confirmed": ("native.book", "visit_booked"),
@@ -957,7 +1021,7 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
         session, payload = row.session_id, row.payload or {}
         if row.kind == "ledger":
             if (payload.get("kind") == "desk_data" and (payload.get("summary") or {}).get("part") == "handoffs"):
-                events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None))
+                events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None, None))
             continue
         if payload.get("starts_turn"):
             pending.pop(session, None)
@@ -976,11 +1040,12 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
         receipts = pending.pop(session, [])
         cards = payload.get("cards") or []
         if payload.get("handoff") or "handoff" in cards:
-            events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None))
+            events[session].append((utc(row.created_at), payload.get("ledger_seq", row.n), 2, row.n, None, None))
             continue
         for card in reversed(cards):
             if card == "payment_confirmed" and payload.get("author") == "desk":
-                events[session].append((utc(row.created_at), payload.get("ledger_seq", 0), 1, row.n, "deposit_paid"))
+                events[session].append((utc(row.created_at), payload.get("ledger_seq", 0), 1, row.n, "deposit_paid",
+                                        None))
                 break
             if card not in tools:
                 continue
@@ -989,9 +1054,55 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
             if matched:
                 decision = max(matched, key=lambda d: d["ledger_seq"])
                 events[session].append((decision_times.get(decision["ledger_seq"], utc(decision["created_at"])),
-                                        decision["ledger_seq"], 1, row.n, outcome))
+                                        decision["ledger_seq"], 1, row.n, outcome, decision))
             break
-    return {session: max(found)[-1] if found else None for session, found in events.items()}
+    newest = {session: max(found, key=lambda event: event[:4]) for session, found in events.items() if found}
+    # What the kernel ledgered about these decisions and links: each decision's action, each link's moves to `paid`.
+    ledgered = {row.n: {"seq": row.n, "event": row.payload} for row in rows if row.kind == "ledger"}
+    actions: dict[str, str] = {}
+    moves: dict[str, list[tuple[int, str]]] = {}
+    for seq, entry in ledgered.items():
+        logged = entry["event"] if isinstance(entry["event"], dict) else {}
+        summary = logged.get("summary") if isinstance(logged.get("summary"), dict) else {}
+        decision = by_id.get(logged.get("ref_id"))
+        if (logged.get("kind") == "decide" and decision is not None
+                and logged.get("session_id") == decision["session_id"]
+                and summary.get("decision_id") == decision["decision_id"]
+                and isinstance(summary.get("action_id"), str)):
+            actions[decision["decision_id"]] = summary["action_id"]
+        elif (logged.get("kind") == "payment" and summary.get("state") == "paid" and not summary.get("refused")
+              and isinstance(summary.get("link_id"), str) and logged.get("session_id") in sessions):
+            moves.setdefault(logged["session_id"], []).append((seq, summary["link_id"]))
+    wanted: dict[str, tuple[str, str]] = {}
+    for session, (_, seq, _, _, outcome, decision) in newest.items():
+        if outcome in ("visit_booked", "deposit_paid") and decision is not None:
+            if decision["decision_id"] in actions:
+                wanted[session] = ("action", actions[decision["decision_id"]])
+        elif outcome == "deposit_paid":
+            confirmed = [move for move in moves.get(session, []) if move[0] < seq]
+            if confirmed:
+                wanted[session] = ("link", max(confirmed)[1])
+    facts = await outcome_facts(ctx, desk_id, [ref for kind, ref in wanted.values() if kind == "action"],
+                                [ref for kind, ref in wanted.values() if kind == "link"])
+    found_outcomes: dict[str, Outcome] = {}
+    for session in sessions:
+        if session not in newest:
+            found_outcomes[session] = Outcome()
+            continue
+        _, _, _, _, outcome, decision = newest[session]
+        fact = facts.get(wanted[session]) if session in wanted else None
+        if fact is not None and (fact["session_id"] != session
+                                 or (fact["kind"] == "action" and fact["tool"] != decision["tool"])):
+            fact = None
+        cause = (refusal_cause(decision, ledgered.get(decision["ledger_seq"]),
+                               verified=bool(sessions[session]["verified"]))
+                 if outcome == "turned_down" and decision is not None else None)
+        found_outcomes[session] = Outcome(
+            outcome=outcome,
+            starts_at=fact["starts_at"] if fact is not None and outcome == "visit_booked" else None,
+            cents=fact["amount_cents"] if fact is not None and outcome == "deposit_paid" else None,
+            cause=cause)
+    return found_outcomes
 
 
 VISITOR_DONE = {"native.quote": "quoted", "native.release_document": "document_sent"}
@@ -1107,7 +1218,8 @@ async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
 async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
     activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
-    visitor typed (`visitor_line`); an agent's carries none."""
+    visitor typed (`visitor_line`); an agent's carries none, and instead its newest outcome's facts
+    (`agent_outcomes`)."""
     who = who or await people(ctx, desk_id)
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
@@ -1123,20 +1235,23 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
     visitors = [session_id for session_id, row in who.sessions.items()
                 if session_id in latest and row["kind"] == "visitor" and not row["preview"]]
     said = await last_texts(ctx, desk_id, visitors, kinds=("visitor_text",))
-    outcomes = await agent_outcomes(ctx, desk_id, [session_id for session_id, row in who.sessions.items()
-                                                   if row["kind"] == "agent" and session_id in latest], decisions)
-    outcomes |= await visitor_outcomes(ctx, desk_id, visitors, decisions)
+    outcomes = await agent_outcomes(ctx, desk_id, {session_id: row for session_id, row in who.sessions.items()
+                                                   if row["kind"] == "agent" and session_id in latest}, decisions)
+    outcomes |= {session_id: Outcome(outcome)
+                 for session_id, outcome in (await visitor_outcomes(ctx, desk_id, visitors, decisions)).items()}
     recorded, _ = await history_sessions(ctx, desk_id)
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
             continue
+        outcome = outcomes.get(session_id, Outcome())
         found.append(ConversationSummary(
             session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
             mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
-            latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcomes.get(session_id),
-            replayed=session_id in recorded))
+            latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcome.outcome,
+            latest_outcome_starts_at=outcome.starts_at, latest_outcome_cents=outcome.cents,
+            latest_outcome_cause=outcome.cause, replayed=session_id in recorded))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

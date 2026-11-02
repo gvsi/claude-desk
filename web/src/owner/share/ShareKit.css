@@ -118,6 +118,12 @@
     overflow: hidden;
   }
 
+  /* The kit is a size container on screen, and a container is a containing block for a fixed
+     descendant. On paper it stops being one, so the card is placed against the page. */
+  :root[data-print-only='share-card'] .cd-share-kit {
+    container-type: normal;
+  }
+
   :root[data-print-only='share-card'] .cd-share-kit__card figure,
   :root[data-print-only='share-card'] .cd-share-kit__card figure * {
     visibility: visible;

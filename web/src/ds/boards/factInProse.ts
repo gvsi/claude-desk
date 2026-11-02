@@ -4,19 +4,29 @@
  * Claude's words. The kernel scans only a reply's prose: a real receipt is the kernel's own fixed
  * line (`render.status`), never scanned. A vision page's receipts are free text written for the
  * page, so the vision stories hold them to the same check themselves (`expectNoFactsInProse`).
- * It holds:
- * - the always-on scans: any Unicode numeral, any currency sign, and the percent signs;
+ * It reads text as the kernel shows it (`shown`): NFKC, without the characters no font draws, and
+ * with each Hangul filler as a blank. It holds:
+ * - the always-on scans: any Unicode numeral or character drawn as a digit, with the letters shaped
+ *   like 0 or 1 next to one or in a word of their own, any currency sign, and the percent signs;
+ * - words mixing Latin letters with another script (`mixed_script`);
  * - both lexicons, `lexicon/en.txt` and `lexicon/es.txt`, entry for entry with their categories
  *   (`LEXICON`; `factInProse.test.ts` fails if either side has an entry the other lacks), matched
- *   as the kernel matches them: case-insensitively, as whole words, on text folded as it folds it;
+ *   as the kernel matches them: case-insensitively, as whole words, on every reading it takes of the
+ *   text (`readings`), each folded as it folds it: letters drawn like Latin ones read as those
+ *   (`lookalikes.ts`, its `lexicon/lookalikes.txt`, which the test keeps in step too), a bare stroke
+ *   as l and as I, an ASCII capital I as l too, and a spaced acute as an apostrophe;
  * - booking and callback claims: a claim passes with a condition straight before it
  *   (`BOOKING_CONDITION`), inside such a claim of its category, or beside its own receipt category.
- * What it doesn't read, which the kernel does (issue #142 tracks closing these): letters and digits
- * drawn like Latin ones (`lexicon/lookalikes.txt`) and bare strokes read as l or I; the acute accent
- * NFKC writes as a space, read as an apostrophe; the ignorable code points and Hangul fillers
- * `shown()` drops or blanks beyond format and control characters; words mixing scripts
- * (`mixed_script`); and canaries.
+ * `factInProse.kernel.ts` holds the kernel's own verdicts on sentences, and the test fails where
+ * this check disagrees with one. What it doesn't read, which the kernel does: canaries, since no
+ * board quotes a private document; the Desk's own names, which `mixed_script` spares, and a business
+ * tool's approved free names, since the boards name neither; and the reading of a reply as Markdown
+ * renders it, since the vision pages show Claude's words as written. And it reads with Node's
+ * Unicode, newer than the kernel's Python (15.1), so NFKC and the categories can differ on a
+ * character added since: U+1CCDE, a stroke the kernel reads as l, is an ASCII I after Node's NFKC.
  */
+
+import { LOOKALIKES } from './lookalikes.ts';
 
 /** A lexicon line's category, as the kernel names them. */
 export type LexiconCategory = 'number' | 'money' | 'percent' | 'date' | 'promise' | 'booking' | 'callback';
@@ -141,6 +151,18 @@ const MINUS_SIGN = '−';
 const DASH = /^\p{Pd}$/u;
 const MARK = /^[\p{Mn}\p{Me}]$/u;
 const SPACE = /^\s$/u;
+/** NFKC writes an acute accent (´) as a space and a combining acute (`SPACED_ACUTE`). */
+const SPACED_ACUTE = /\s\u0301/u;
+const COMBINING_ACUTE = '\u0301';
+
+/** Each letter of the lookalike table read as the ASCII letter it looks like (`LOOKALIKES`). */
+const LETTER_LOOKALIKES: ReadonlyMap<string, string> = new Map(
+  LOOKALIKES.filter(([, looksLike]) => /^[A-Za-z]$/.test(looksLike)).map(([code, looksLike]) => [String.fromCodePoint(code), looksLike]),
+);
+/** The table's letters drawn as a bare stroke, l or I (`STROKES`: those it reads as l). */
+const STROKES: ReadonlySet<string> = new Set([...LETTER_LOOKALIKES].filter(([, letter]) => letter === 'l').map(([ch]) => ch));
+/** The strokes with the ASCII capital I, read as l ("tweIve", `STROKES_AND_I`). */
+const STROKES_AND_I: ReadonlySet<string> = new Set([...STROKES, 'I']);
 
 /** A dash or hyphen of any kind and the minus sign as "-", an apostrophe of any kind as "’" (`_plain`). */
 function plain(ch: string): string {
@@ -149,16 +171,37 @@ function plain(ch: string): string {
 }
 
 /**
- * `text` as the lexicons read it (`_fold`): accents and other combining marks dropped, each dash
- * "-", each apostrophe "’" and each run of whitespace one space; and for each folded character, the
- * index in `text` it came from.
+ * One way of reading text for the lexicons (`_fold`'s arguments): what each of `strokes` is read
+ * as, and with `acute`, a spaced acute read as "’".
  */
-export function fold(text: string): { reading: string; origin: number[] } {
+interface FoldOptions {
+  stroke?: string;
+  strokes?: ReadonlySet<string>;
+  acute?: boolean;
+}
+
+/** A reading of text, and for each of its characters, the index in the text it came from. */
+interface Reading {
+  reading: string;
+  origin: number[];
+}
+
+/**
+ * `text` as the lexicons read it (`_fold`): accents and other combining marks dropped, each letter
+ * that looks like an ASCII one read as it ("Tuеsday" with a Cyrillic е is Tuesday), each of
+ * `strokes` (by default the bare strokes) read as `stroke`, each dash "-", each apostrophe "’" and
+ * each run of whitespace one space, but with `acute`, a whitespace character before a combining
+ * acute as "’"; and for each folded character, the index in `text` it came from.
+ */
+export function fold(text: string, { stroke = 'l', strokes = STROKES, acute = false }: FoldOptions = {}): Reading {
   let reading = '';
   const origin: number[] = [];
   let index = 0;
   for (const ch of text) {
-    if (SPACE.test(ch)) {
+    if (acute && SPACE.test(ch) && text.startsWith(COMBINING_ACUTE, index + ch.length)) {
+      reading += '’';
+      origin.push(index);
+    } else if (SPACE.test(ch)) {
       if (reading === '' || !reading.endsWith(' ')) {
         reading += ' ';
         origin.push(index);
@@ -167,8 +210,9 @@ export function fold(text: string): { reading: string; origin: number[] } {
       for (const part of plain(ch).normalize('NFKD')) {
         if (MARK.test(part)) continue;
         const shownPart = plain(part);
-        reading += shownPart;
-        for (let unit = 0; unit < shownPart.length; unit += 1) origin.push(index);
+        const read = strokes.has(shownPart) ? stroke : (LETTER_LOOKALIKES.get(shownPart) ?? shownPart);
+        reading += read;
+        for (let unit = 0; unit < read.length; unit += 1) origin.push(index);
       }
     }
     index += ch.length;
@@ -176,15 +220,73 @@ export function fold(text: string): { reading: string; origin: number[] } {
   return { reading, origin };
 }
 
+/**
+ * The readings of `text` the lexicons take (`_readings`): a bare stroke as l, as I, and an ASCII
+ * capital I as l too ("doIIars"); where NFKC wrote an acute accent as a space and a combining acute,
+ * each also with that pair read as "’" ("o´clock") besides the space it is drawn on ("no´charge").
+ * Two ways that read the same are one reading, as the kernel keys them by their text.
+ */
+function readings(text: string): Reading[] {
+  const variants: FoldOptions[] = [{}, { stroke: 'i' }, { strokes: STROKES_AND_I }];
+  if (SPACED_ACUTE.test(text)) variants.push(...variants.map((variant) => ({ ...variant, acute: true })));
+  return [...new Map(variants.map((variant) => {
+    const folded = fold(text, variant);
+    return [folded.reading, folded] as const;
+  })).values()];
+}
+
+/**
+ * Where in `text` a match ends whose last character came from `text[last]`: after the whole
+ * character, which outside the Basic Multilingual Plane is two UTF-16 units (the kernel's
+ * `origin[end - 1] + 1`, which counts code points).
+ */
+function endAfter(text: string, last: number): number {
+  return last + ((text.codePointAt(last) ?? 0) > 0xffff ? 2 : 1);
+}
+
 /** Whether `text` writes a combining mark anywhere (`_marked`): "sí", not "si". */
 function marked(text: string): boolean {
   return [...text.normalize('NFKD')].some((part) => MARK.test(part));
 }
 
-/** Text as the scan reads it and a visitor sees it (`shown`): NFKC, with the characters no font draws removed. */
+/**
+ * Default-ignorable code points beyond category Cf (`IGNORABLE`): the combining grapheme joiner,
+ * Khmer inherent vowels, Mongolian variation selectors, variation selectors and the code points
+ * reserved as ignorable.
+ */
+const IGNORABLE: readonly (readonly [number, number])[] = [
+  [0x034f, 0x034f],
+  [0x17b4, 0x17b5],
+  [0x180b, 0x180f],
+  [0x2065, 0x2065],
+  [0xfe00, 0xfe0f],
+  [0xfff0, 0xfff8],
+  [0xe0000, 0xe0fff],
+];
+/** Default-ignorable, but drawn as a blank (`HANGUL_FILLERS`). */
+const HANGUL_FILLERS = new Set(['\u115f', '\u1160', '\u3164', '\uffa0']);
+const LINE_CONTROLS = new Set(['\t', '\n', '\r']);
+const FORMAT_OR_SURROGATE = /^[\p{Cf}\p{Cs}]$/u;
+const CONTROL = /^\p{Cc}$/u;
+
+/**
+ * A character no font draws (`_unseen`): a format character, another default-ignorable code point,
+ * a control character other than a tab or a line break, or a lone surrogate.
+ */
+function unseen(ch: string): boolean {
+  const code = ch.codePointAt(0) as number;
+  return FORMAT_OR_SURROGATE.test(ch) || (CONTROL.test(ch) && !LINE_CONTROLS.has(ch)) || IGNORABLE.some(([low, high]) => low <= code && code <= high);
+}
+
+/** `text` without what no font draws, and each Hangul filler as the blank a font draws for it (`_drawn`). */
+function drawn(text: string): string {
+  let out = '';
+  for (const ch of text) if (!unseen(ch)) out += HANGUL_FILLERS.has(ch) ? ' ' : ch;
+  return out;
+}
+
+/** Text as the scan reads it and a visitor sees it (`shown`): NFKC, drawn before and after. */
 function shown(text: string): string {
-  // Format characters, lone surrogates, and control characters other than a tab or a line break.
-  const drawn = (value: string) => value.replace(/[\p{Cf}\p{Cs}]|(?![\t\n\r])\p{Cc}/gu, '');
   return drawn(drawn(text).normalize('NFKC'));
 }
 
@@ -247,10 +349,31 @@ const NUMERAL = /^\p{N}$/u;
 const CURRENCY = /^\p{Sc}$/u;
 /** Inside one number, between two numerals (`NUMBER_SEPARATORS`): "1.234,56", "10:30". */
 const NUMBER_SEPARATORS = new Set(['.', ',', ':', "'", '’', ' ']);
-/** The ASCII letters shaped like 0 or 1 (`ZERO_OR_ONE`), read with the number next to them. */
-const ZERO_OR_ONE = new Set(['O', 'l', 'I']);
+/** Each character of the lookalike table drawn as a digit (`DIGIT_LOOKALIKES`): a Cyrillic З for 3. */
+const DIGIT_LOOKALIKES: ReadonlySet<string> = new Set(
+  LOOKALIKES.filter(([, looksLike]) => /^[0-9]$/.test(looksLike)).map(([code]) => String.fromCodePoint(code)),
+);
+/**
+ * The letters shaped like 0 or 1 (`ZERO_OR_ONE`): O, l and I, and the table's letters it reads as O
+ * or l. They are read as digits next to a digit ("ЗОО"), or in a word made only of them that isn't
+ * plain ASCII ("ІОО"; "I" and "OK" stay words).
+ */
+const ZERO_OR_ONE: ReadonlySet<string> = new Set([
+  'O',
+  'l',
+  'I',
+  ...[...LETTER_LOOKALIKES].filter(([, letter]) => letter === 'O' || letter === 'l').map(([ch]) => ch),
+]);
+const LETTER_OR_MARK = /^[\p{L}\p{M}]$/u;
+const ASCII = /^[\x00-\x7f]*$/;
 
-const numeral = (ch: string | undefined) => ch !== undefined && NUMERAL.test(ch);
+/** A Unicode numeral, or a character drawn as a digit (`_numeral`). */
+const numeral = (ch: string | undefined) => ch !== undefined && (NUMERAL.test(ch) || DIGIT_LOOKALIKES.has(ch));
+
+/** Whether `chars[start:end]` is a word of its own (`_alone`): no letter or mark right before or after it. */
+function alone(chars: readonly string[], start: number, end: number): boolean {
+  return [chars[start - 1], chars[end]].every((ch) => ch === undefined || !LETTER_OR_MARK.test(ch));
+}
 
 /** Where the number starting at `start` ends (`_number_end`): numerals, and a separator between two of them. */
 function numberEnd(chars: readonly string[], start: number): number {
@@ -264,6 +387,41 @@ function numberEnd(chars: readonly string[], start: number): number {
     end += 1;
   }
   return end;
+}
+
+// ---- Words mixing scripts ------------------------------------------------------------------------
+
+/** The letters that belong to a script (`SCRIPT_LETTERS`): modifier letters (Lm), such as ʼ, belong to none. */
+const SCRIPT_LETTER = /^[\p{Lu}\p{Ll}\p{Lt}\p{Lo}]$/u;
+/**
+ * A Latin letter. The kernel asks whether its Unicode name starts with "LATIN ", which JavaScript
+ * can't read; on text after NFKC, the Latin script property stands in for it. Across the letters
+ * NFKC keeps, the two disagree on three, Latin by script but not by name, which are left out
+ * (`NAMED_OTHERWISE`): turned capital F, turned small f and the reversed Roman numeral one hundred.
+ */
+const LATIN = /^\p{Script=Latin}$/u;
+const NAMED_OTHERWISE = new Set(['\u2132', '\u214e', '\u2183']);
+const latin = (ch: string) => LATIN.test(ch) && !NAMED_OTHERWISE.has(ch);
+
+/** Each run of letters and combining marks in `chars` (`_words`), and where it starts. */
+function words(chars: readonly string[]): { start: number; word: string }[] {
+  const found: { start: number; word: string }[] = [];
+  let start: number | null = null;
+  for (let i = 0; i <= chars.length; i += 1) {
+    const ch = chars[i];
+    if (ch !== undefined && LETTER_OR_MARK.test(ch)) start ??= i;
+    else if (start !== null) {
+      found.push({ start, word: chars.slice(start, i).join('') });
+      start = null;
+    }
+  }
+  return found;
+}
+
+/** Whether `word` has Latin letters and letters of another script (`_mixes_scripts`): "Tuеsday" with a Cyrillic е. */
+function mixesScripts(word: string): boolean {
+  const letters = [...word].filter((ch) => SCRIPT_LETTER.test(ch)).map(latin);
+  return letters.some(Boolean) && !letters.every(Boolean);
 }
 
 // ---- Booking claims ------------------------------------------------------------------------------
@@ -291,24 +449,28 @@ function conditioned(text: string, reading: string, origin: readonly number[], s
 }
 
 /**
- * The booking and callback claims `_booking_claims` reports: conditions and containment apply
- * within each category, so neither category can suppress a claim requiring the other receipt.
+ * The booking and callback claims `_booking_claims` reports, from every reading of `text`: a
+ * condition reaches only within its own reading, the claims found are shared across them, and
+ * containment applies within each category, so neither category can suppress a claim requiring
+ * the other receipt.
  */
-function bookingClaims(text: string, reading: string, origin: readonly number[]): FactHit[] {
-  const matches = COMPILED.filter((entry) => entry.category === 'booking' || entry.category === 'callback')
-    .flatMap((entry) => [...reading.matchAll(entry.regex)].flatMap((match) => {
-      // Context-only alternatives have no claim span. The group, when present, owns the span.
-      const span = entry.regex.source.includes('(?<claim>') ? match.indices?.groups?.claim : match.indices?.[0];
-      return span === undefined || span[1] <= span[0] ? [] : [{ start: span[0], end: span[1], rule: entry.rule, category: entry.category }];
-    }))
-    .sort((a, b) => a.start - b.start || a.end - b.end || a.rule.localeCompare(b.rule));
+function bookingClaims(text: string, read: readonly Reading[]): FactHit[] {
   const found = new Map<string, { start: number; end: number; rule: string; category: LexiconCategory }>();
-  const reaches = new Map<LexiconCategory, number>();
-  for (const match of matches) {
-    if (conditioned(text, reading, origin, match.start)) reaches.set(match.category, Math.max(reaches.get(match.category) ?? -1, match.end));
-    if ((reaches.get(match.category) ?? -1) < match.end) {
-      const claim = { start: origin[match.start] as number, end: (origin[match.end - 1] as number) + 1, rule: match.rule, category: match.category };
-      found.set(`${claim.start} ${claim.end} ${claim.rule}`, claim);
+  for (const { reading, origin } of read) {
+    const matches = COMPILED.filter((entry) => entry.category === 'booking' || entry.category === 'callback')
+      .flatMap((entry) => [...reading.matchAll(entry.regex)].flatMap((match) => {
+        // Context-only alternatives have no claim span. The group, when present, owns the span.
+        const span = entry.regex.source.includes('(?<claim>') ? match.indices?.groups?.claim : match.indices?.[0];
+        return span === undefined || span[1] <= span[0] ? [] : [{ start: span[0], end: span[1], rule: entry.rule, category: entry.category }];
+      }))
+      .sort((a, b) => a.start - b.start || a.end - b.end || a.rule.localeCompare(b.rule));
+    const reaches = new Map<LexiconCategory, number>();
+    for (const match of matches) {
+      if (conditioned(text, reading, origin, match.start)) reaches.set(match.category, Math.max(reaches.get(match.category) ?? -1, match.end));
+      if ((reaches.get(match.category) ?? -1) < match.end) {
+        const claim = { start: origin[match.start] as number, end: endAfter(text, origin[match.end - 1] as number), rule: match.rule, category: match.category };
+        found.set(`${claim.start} ${claim.end} ${claim.rule}`, claim);
+      }
     }
   }
   const hits: FactHit[] = [];
@@ -327,8 +489,9 @@ function bookingClaims(text: string, reading: string, origin: readonly number[])
 
 /**
  * Everything in `text` the kernel's prose check would block: numerals, currency and percent signs,
- * and each lexicon match, with claims as `bookingClaims` reports them. `bookingCard` and
- * `callbackCard` exempt only their own category, after containment is resolved.
+ * words mixing scripts, and each lexicon match in any reading, with claims as `bookingClaims`
+ * reports them. `bookingCard` and `callbackCard` exempt only their own category, after containment
+ * is resolved.
  */
 export function factsInProse(text: string, { bookingCard = false, callbackCard = false }: { bookingCard?: boolean; callbackCard?: boolean } = {}): FactHit[] {
   const seen = shown(text);
@@ -341,28 +504,35 @@ export function factsInProse(text: string, { bookingCard = false, callbackCard =
     else if (ch === KEYCAP_TEN) hits.push({ rule: 'digit', span: ch });
     if (numeral(ch) || ZERO_OR_ONE.has(ch)) {
       const end = numberEnd(chars, i);
-      if (chars.slice(i, end).some((part) => numeral(part))) hits.push({ rule: 'digit', span: chars.slice(i, end).join('') });
+      const run = chars.slice(i, end).join('');
+      // A run with a numeral in it, or a word of its own made of 0/1 letters that isn't plain ASCII.
+      if ([...run].some((part) => numeral(part)) || (alone(chars, i, end) && !ASCII.test(run))) hits.push({ rule: 'digit', span: run });
       i = end;
       continue;
     }
     if (CURRENCY.test(ch)) hits.push({ rule: 'currency', span: ch });
     i += 1;
   }
-  const { reading, origin } = fold(seen);
-  hits.push(...bookingClaims(seen, reading, origin).filter((hit) =>
+  // A word mixing Latin letters with another script. The boards have no Desk names to exempt.
+  hits.push(...words(chars).filter(({ word }) => mixesScripts(word)).map(({ word }) => ({ rule: 'mixed_script', span: word })));
+  const read = readings(seen);
+  hits.push(...bookingClaims(seen, read).filter((hit) =>
     !(bookingCard && hit.rule.endsWith('.booking') || callbackCard && hit.rule.endsWith('.callback'))));
-  // Two entries matching the same words are one hit, as the kernel counts them.
+  // Every reading's matches count; two entries or two readings matching the same words are one hit,
+  // as the kernel counts them.
   const counted = new Set<string>();
   for (const entry of COMPILED) {
     if (entry.category === 'booking' || entry.category === 'callback') continue;
-    for (const match of reading.matchAll(entry.regex)) {
-      if (match[0] === '') continue;
-      const start = origin[match.index] as number;
-      const end = (origin[match.index + match[0].length - 1] as number) + 1;
-      const key = `${entry.rule} ${start} ${end}`;
-      if (counted.has(key)) continue;
-      counted.add(key);
-      hits.push({ rule: entry.rule, span: seen.slice(start, end) });
+    for (const { reading, origin } of read) {
+      for (const match of reading.matchAll(entry.regex)) {
+        if (match[0] === '') continue;
+        const start = origin[match.index] as number;
+        const end = endAfter(seen, origin[match.index + match[0].length - 1] as number);
+        const key = `${entry.rule} ${start} ${end}`;
+        if (counted.has(key)) continue;
+        counted.add(key);
+        hits.push({ rule: entry.rule, span: seen.slice(start, end) });
+      }
     }
   }
   return hits;

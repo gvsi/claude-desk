@@ -334,7 +334,7 @@ export function RulesPage() {
   const pickChip = (words: string) => {
     if (answering) return;
     if (!asking) openedBy.current = words;
-    ask(words);
+    ask(words, { fromSuggestion: true });
   };
   useEffect(() => {
     if (asking) return undefined;

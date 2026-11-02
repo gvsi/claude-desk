@@ -4444,7 +4444,8 @@ class FakeKernelState:
                                              "pending_sha256": sha256_hex(listed)})
         self._put_tool(desk, changed)
         self.append(desk, "tool_pin", {"tool": profile.tool, "event": "simulated"})
-        self.append(desk, "tool_pin", {"tool": profile.tool, "event": "drift",
+        self.append(desk, "tool_pin", {"tool": profile.tool, "event": "drift", "status": changed.status,
+                                       "definition_sha256": changed.definition_sha256,
                                        "pending_sha256": changed.pending_sha256})
         if not disabled:
             self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")

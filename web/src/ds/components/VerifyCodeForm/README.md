@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Under the latest message that carries a `verify_prompt` card, while the visitor hasn't confirmed yet. Once the code works, the screen takes the form away and shows `VerifiedLine` in its place.
+- Under the latest message that carries a `verify_prompt` card, while the visitor hasn't confirmed yet. Once the code works, the screen takes the form away and shows `VerifiedLine` in its place. If focus was in the form, the screen moves it to the line (`lineRef`, with `tabindex="-1"`, so it draws no edge and raises no phone keyboard) rather than letting it fall to the page.
 - Not for the demo passcode or any other text. `TextField` and the first-visit dialog have their own fields.
 
 ## What it does
@@ -62,3 +62,4 @@
 | `text` | `string` | Required. The screen's words: "Verified with a code sent to •••• 0142". |
 | `assurance` | `Assurance` | Required. Anything but `owner_session` adds the label, after a full stop. |
 | `language` | `'en' \| 'es'` | Required. The label's language and the line's `lang`. |
+| `lineRef` | `Ref<HTMLDivElement>` | The line's own element, for a screen that moves focus to it once the form it replaces goes. |
