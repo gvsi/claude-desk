@@ -405,6 +405,28 @@ describe('the open conversation bar', () => {
     expectNoWindowScroll();
   });
 
+  it('shows_the_owners_controls_after_a_bar_click_without_button_focus_at_390x844', async () => {
+    lengthen(named(DANA_LIVE, DANA));
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width: 390, height: 844 } });
+    const bar = await opened(screen, DANA);
+    const pane = landed('.cd-conversations__open');
+    expect(scrollerOf(screen.getByRole('log').element())).toBe(pane);
+    pane.scrollTop = 0;
+    await nextFrames();
+    const button = screen.getByRole('button', { name: 'Take over' }).element() as HTMLElement;
+    button.blur();
+    expect(document.activeElement).not.toBe(button);
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    await expect.poll(() => landed('.cd-take-over__first').textContent).toBe("You're in this chat");
+    const first = landed('.cd-take-over__first');
+    await expect.poll(() => landed('.cd-take-over').getAttribute('aria-busy')).toBeNull();
+    await expect.poll(() => rect(first).bottom).toBeLessThanOrEqual(844);
+    expect(rect(first).top).toBeGreaterThanOrEqual(rect(bar).bottom);
+    expect(document.activeElement).not.toBe(first);
+    expectNoWindowScroll();
+  });
+
   it('a_take_over_from_elsewhere_moves_no_focus', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));

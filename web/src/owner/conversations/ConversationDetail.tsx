@@ -200,13 +200,6 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   // Take over sits in the bar. While the change it sent is out it spins, and only then: a change sent
   // from the owner's controls at the foot leaves it waiting, as TakeOverBar's own buttons do.
   const [takeOverSent, setTakeOverSent] = useState(false);
-  useLayoutEffect(() => {
-    if (!takeOverSent || controls.changing) return;
-    setTakeOverSent(false);
-    // In a short pane the existing error is below the chat. Reveal it without moving focus from
-    // Take over; nearest leaves an error already on screen where it is.
-    if (controls.modeError !== null) controlsRef.current?.querySelector('.cd-take-over [role="alert"]')?.scrollIntoView({ block: 'nearest' });
-  }, [takeOverSent, controls.changing, controls.modeError]);
   const takeOver = () => {
     setTakeOverSent(true);
     controls.takeOver();
@@ -227,6 +220,17 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
     const active = document.activeElement;
     if (active === null || active === document.body) controlsRef.current?.querySelector<HTMLElement>('.cd-take-over__first')?.focus();
   });
+  useLayoutEffect(() => {
+    if (!takeOverSent || controls.changing) return;
+    setTakeOverSent(false);
+    const foot = controlsRef.current;
+    // Reveal the outcome of this bar's press. A click needn't focus Take over (Safari), so after
+    // the focus hand-off above, show the owner's first line if focus never reached the controls.
+    if (controls.modeError !== null) foot?.querySelector('.cd-take-over [role="alert"]')?.scrollIntoView({ block: 'nearest' });
+    else if (mode === 'owner' && !foot?.contains(document.activeElement)) {
+      foot?.querySelector('.cd-take-over__first')?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    }
+  }, [takeOverSent, controls.changing, controls.modeError, mode]);
 
   // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
   // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
