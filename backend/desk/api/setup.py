@@ -2300,6 +2300,11 @@ class _TurnReplies:
                     # Keep coverage and hidden plan metadata; empty messages are omitted from the view.
                     reply.text = ""
 
+    def answered(self, interview: Interview) -> bool:
+        """Whether a reply of this answer already in the transcript says something; one `before` blanked doesn't."""
+        return any(reply.text.strip() and any(entry is reply for entry in interview.transcript)
+                   for reply, _ in self.entries)
+
 
 async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview, *,
                              since: int, replies: _TurnReplies, key: QuestionKey | None = None,
@@ -2346,7 +2351,7 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
         replies.before(asked.question)
         interview.transcript.append(asked)
     else:
-        await close_setup(owner, engine, model, interview)
+        await close_setup(owner, engine, model, interview, answered=replies.answered(interview))
 
 
 async def _advance(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, interview: Interview,
@@ -2396,7 +2401,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             replies.track(entry)
             await _advance_ask(owner, engine, model, interview, following, entry, replies, closing_call=True)
             return
-        await close_setup(owner, engine, model, interview)
+        await close_setup(owner, engine, model, interview, answered=replies.answered(interview))
 
 
 def _show_card(interview: Interview, card: ProposalCard) -> None:
@@ -2628,9 +2633,13 @@ def settle_plan(interview: Interview) -> None:
                 card.connector.connected = True
 
 
-async def close_setup(owner, engine, model, interview: Interview) -> None:
+async def close_setup(owner, engine, model, interview: Interview, *, answered: bool = False) -> None:
     """Settle cards, end with the closing plan (or a fixed line without one), then finish, and offer to add the owner as
     a test client when they typed their own contact (`_offer_test_client`): setup then waits on that answer.
+
+    The closing call's own reply comes before the plan unless `answered`: a reply of this run already answered the
+    owner (`_TurnReplies.answered`), so it would say the same again. A run shows only its first call's text, so a
+    closing reply left out this way was never on the owner's display.
 
     While the offer waits, the plan is closed already: closing again ("Use your suggestions") moves on to the Tools
     step without another plan and writes nothing. The caller owns persistence and after_finish.
@@ -2646,7 +2655,7 @@ async def close_setup(owner, engine, model, interview: Interview) -> None:
             break
         plan = closing.plan.strip()
         if plan or attempt == 1:
-            if closing.reply.strip():
+            if closing.reply.strip() and not answered:
                 interview.transcript.append(Entry(role="claude", text=closing.reply.strip()))
             if plan:
                 interview.transcript.append(Entry(role="claude", text=plan))
