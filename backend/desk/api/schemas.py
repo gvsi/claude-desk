@@ -296,6 +296,28 @@ class DemoAgentRun(BaseModel):
     turns: list[AgentTurn]
 
 
+# How a demo visitor's run ended: its brief done (`finished`), the owner stopped it, the chat's session closed or its
+# stream ended (`chat_ended`), a cap (`limit`: ten messages, twelve model calls or fifteen minutes), the owner who took
+# the chat over stayed quiet (`owner_silent`), today's model budget (`budget`), or a model or HTTP failure (`failed`).
+DemoVisitorEnded = Literal["finished", "stopped_by_owner", "chat_ended", "limit", "owner_silent", "budget", "failed"]
+
+
+class DemoVisitorRun(BaseModel):
+    """A demo visitor's run: an AI that plays a customer in a visitor chat on the owner's own Desk
+    (`demo_visitors.py`), kept in the process's memory for an hour. `first_name` is its persona's, fixed text;
+    `session_id` is its visitor session, None until it is open; `messages_sent` counts the messages it sent the Desk;
+    `ended` says how a run that is no longer `running` ended (`done`: finished, limit or owner_silent; `stopped`:
+    stopped_by_owner or chat_ended; `failed`: budget or failed)."""
+
+    run_id: str
+    desk_id: str
+    first_name: str
+    session_id: str | None
+    state: Literal["running", "done", "stopped", "failed"]
+    messages_sent: int
+    ended: DemoVisitorEnded | None
+
+
 # The owner's answers (Task 8) ------------------------------------------------------------------------------------
 
 

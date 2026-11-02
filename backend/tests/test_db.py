@@ -814,6 +814,42 @@ def test_the_cap_edges_revision_runs_again_over_what_it_added(scratch):
                       " policy_version) VALUES ('act-again', 'copy-again', 'dec-again', 'intent', now(), 1)")
 
 
+DEMO_VISITOR_ROUTE_REVISION = "api_demo_visitor_route"
+
+
+def test_model_calls_take_the_demo_visitors_route(scratch):
+    """The demo visitor's model calls are recorded under a route of their own, and a route no code writes is still
+    refused. Its revision runs again over its own check, and a downgrade keeps the rows the route already holds (they
+    count toward the day's spend) while refusing new ones."""
+    admin = scratch.conn
+
+    def insert(route: str) -> None:
+        admin.execute("INSERT INTO app.model_calls (copy_id, route, model, input_tokens, cached_tokens,"
+                      " cache_write_tokens, output_tokens, latency_ms, stop_reason, created_at)"
+                      " VALUES ('copy-route', %s, 'claude-opus-5-5', 1200, 0, 0, 80, 2400, 'end_turn', now())", (route,))
+
+    def held() -> list[str]:
+        return [row[0] for row in admin.execute("SELECT route FROM app.model_calls WHERE copy_id = 'copy-route'")]
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DEMO_VISITOR_ROUTE_REVISION).down_revision
+    try:
+        insert("demo_visitor")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_agent")
+        scratch.migrate(command.stamp, before)
+        scratch.migrate(command.upgrade, DEMO_VISITOR_ROUTE_REVISION)     # again, over its own check
+        scratch.migrate(command.downgrade, before)
+        assert held() == ["demo_visitor"]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_visitor")
+        scratch.migrate(command.upgrade, "head")
+        insert("demo_visitor")
+        assert held() == ["demo_visitor", "demo_visitor"]
+    finally:
+        admin.execute("DELETE FROM app.model_calls WHERE copy_id = 'copy-route'")
+        scratch.migrate(command.upgrade, "head")
+
+
 DOCUMENT_LINKS_REVISION = "01b_6_document_links"
 
 
