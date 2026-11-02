@@ -165,6 +165,10 @@ export function SafetySkeleton({ withHeader }: { withHeader: boolean }) {
               <div className="cd-attempt-row__grid">
                 <Skeleton shape="line" text="meta" className="cd-attempt-row__time" width="80%" />
                 <div className="cd-attempt-row__what">
+                  {/* A fresh copy's first stopped attempt is a reply Claude has summarised: its label first. */}
+                  <span className="cd-attempt-row__why cd-type-meta">
+                    <Skeleton shape="line" text="meta" width="60%" />
+                  </span>
                   <Skeleton shape="line" text="control" className="cd-attempt-row__title" />
                   <div className="cd-attempt-row__from">
                     <Skeleton shape="line" text="caption" width="90%" />
