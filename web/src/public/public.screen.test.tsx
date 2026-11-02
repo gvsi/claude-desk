@@ -10,7 +10,7 @@ import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { EvMessage, OpenStatus, PublicDesk, SseEvent } from '../api/contracts.ts';
-import { request } from '../api/http.ts';
+import { observeRequests, request } from '../api/http.ts';
 import { typingPingMs } from '../app/poll.ts';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
@@ -25,10 +25,11 @@ import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
 import { expectRevealed, expectShownWhole, watchReveal, watchRevealing } from '../test/reveal.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
+import { mockDrain } from '../test/mockDrain.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
 import { OWNER_NAME_FALLBACK } from './brand.ts';
-import { CAUGHT_UP_AFTER_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
+import { CAUGHT_UP_AFTER_MS, REOPEN_DELAYS_MS, useVisitorChat, type VisitorChatView } from './PublicChatProvider.tsx';
 import { PublicPage } from './PublicPage.tsx';
 
 const PAGE = `/d/${RIVERA.slug}`;
@@ -934,9 +935,39 @@ describe('public chat page', () => {
     await expect.element(screen.getByText(UNREACHABLE_COPY.en, { exact: true })).not.toBeInTheDocument();
   });
 
-  it('deleted_desk_ends_the_chat', async () => {
+  it('ask_is_disabled_when_the_session_cannot_open_after_the_desk_loads', async () => {
+    mockStore.inject({ route: 'openSession', status: 503 });
+    const { screen } = await renderRoute(PAGE);
+    await expect.element(screen.getByRole('heading', { name: 'Turner Plumbing', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+    await expect.element(chatBox(screen)).toBeDisabled();
+    const ask = screen.getByRole('button', { name: 'Ask for Mike Turner', exact: true });
+    await expect.element(ask).toBeDisabled();
+    const before = mockStore.requests.length;
+    (ask.element() as HTMLButtonElement).click();
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).not.toBe(ask.element());
+    expect(mockStore.requests.slice(before).filter(({ key }) => key === 'sendMessage')).toHaveLength(0);
+  });
+
+  it('focus_leaves_ask_when_the_chat_ends_while_it_is_focused', async () => {
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
+    await ready(screen);
+    const ask = screen.getByRole('button', { name: 'Ask for Mike Turner', exact: true });
+    (ask.element() as HTMLElement).focus();
+    await expect.element(ask).toHaveFocus();
+    mockStore.emit(RIVERA.slug, { type: 'error', code: 'session' });
+    await expect.element(screen.getByRole('button', { name: NEW_CHAT_LABEL.en })).toBeVisible();
+    await expect.element(ask).toBeDisabled();
+    await expect.element(screen.getByRole('group', { name: 'Chat with Turner Plumbing', exact: true })).toHaveFocus();
+    const before = requests('sendMessage').length;
+    await userEvent.keyboard('{Enter}');
+    expect(requests('sendMessage')).toHaveLength(before);
+  });
+
+  it.each(['desktop', 'phone'] as const)('deleted_desk_ends_the_chat_on_%s', async (viewport) => {
     // The owner deletes the Desk the moment Claude starts writing a reply.
-    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera', viewport });
     await ready(screen);
     const deleted: Promise<unknown>[] = [];
     const stop = mockStore.listen(RIVERA.slug, chatEvents().length, (_seq, ev) => {
@@ -952,6 +983,17 @@ describe('public chat page', () => {
     await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).element()).toBeDisabled();
     expect(messagesOf(chatEvents())).toEqual([]);
+
+    const ask = screen.getByRole('button', { name: 'Ask for Mike Turner', exact: true });
+    const send = screen.getByRole('button', { name: 'Send', exact: true });
+    await expect.element(send).toBeDisabled();
+    await expect.element(ask).toBeDisabled();
+    expect(ask.element().hasAttribute('disabled')).toBe(true);
+    const before = requests('sendMessage').length;
+    (ask.element() as HTMLButtonElement).click();
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).not.toBe(ask.element());
+    expect(requests('sendMessage')).toHaveLength(before);
 
     // A new chat finds the Desk gone.
     await screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
@@ -2615,6 +2657,321 @@ describe('public chat page', () => {
     expect(chatHead()).toEqual(withClaude(HEAD.en));
   });
 
+  it.each(['network', 'stale'] as const)('an_unconfirmed_owner_read_retries_after_a_replayed_join (%s)', async (answer) => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    const older = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    mockStore.world.takeOver(chat);
+    const current = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    let releaseFirst = () => {};
+    const first = new Promise<void>((resolve) => (releaseFirst = resolve));
+    onTestFinished(() => releaseFirst());
+    let release = () => {};
+    mockStore.inject(answer === 'network' ? { route: 'visitorSession', status: 'network', until: first } : { route: 'visitorSession', status: 200, body: older, until: first });
+    mockStore.inject({ route: 'visitorSession', status: 200, body: current, until: new Promise<void>((resolve) => (release = resolve)) });
+    onTestFinished(() => release());
+    const reads = requests('visitorSession').length;
+    const disclosure = watchHeadDisclosure();
+    const texts = watchTexts();
+    const answers = sessionAnswers();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(systemLines()).toEqual(['Mike Turner joined the chat']));
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+    releaseFirst();
+    await answers.waitFor(1);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'no owner line before confirmation').toBe(false);
+    disclosure.assert();
+
+    // The stream stays open: the failed confirming read retries on its backoff, with the AI
+    // disclosure still present while the next read is pending.
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[0] + MARGIN_MS);
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 2));
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'no owner line while the retry is pending').toBe(false);
+    texts.stop();
+    release();
+    await until(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    disclosure.assert();
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
+    expect(requests('visitorSession'), 'confirmation stops further retries').toHaveLength(reads + 2);
+    disclosure.assert();
+  });
+
+  it.each(['owner_left', '401', 'navigate away'] as const)('pending_owner_confirmation_stops_after_%s', async (stop) => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    mockStore.world.takeOver(chat);
+    let releaseFirst = () => {};
+    mockStore.inject({ route: 'visitorSession', status: 'network', until: new Promise<void>((resolve) => (releaseFirst = resolve)) });
+    onTestFinished(() => releaseFirst());
+    const reads = requests('visitorSession').length;
+    const answers = sessionAnswers();
+    const texts = watchTexts();
+    const disclosure = watchHeadDisclosure();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(systemLines()).toEqual(['Mike Turner joined the chat']));
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+    await vi.advanceTimersByTimeAsync(CAUGHT_UP_AFTER_MS + MARGIN_MS);
+    releaseFirst();
+    await answers.waitFor(1);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+
+    // A failed read has armed the first retry. Each stop path must cancel the rest of the round.
+    if (stop === 'owner_left') {
+      mockStore.emit(RIVERA.slug, { type: 'owner_left' });
+      await until(() => expect(systemLines().at(-1)).toBe('Claude is helping again.'));
+    } else if (stop === '401') {
+      mockStore.inject({ route: 'visitorSession', status: 401 });
+      await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[0] + MARGIN_MS);
+      await answers.waitFor(2);
+      await until(() => expect(screen.getByText(CHAT_ENDED_COPY.en, { exact: true }).query()).not.toBeNull());
+      expect(chatBox(screen).element()).toBeDisabled();
+      expect(requests('visitorSession')).toHaveLength(reads + 2);
+    } else {
+      disclosure.assert();
+      await router.navigate('/d/nobody-here');
+      await until(() => expect(screen.getByText("This Desk isn't available", { exact: true }).query()).not.toBeNull());
+      await frames();
+    }
+    const stoppedReads = requests('visitorSession').length;
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
+    expect(requests('visitorSession'), 'no reads after the confirmation round stopped').toHaveLength(stoppedReads);
+    expect(stoppedReads).toBe(reads + (stop === '401' ? 2 : 1));
+    expect(texts.saw(OWNER_IN_CHAT_WORDS)).toBe(false);
+    if (stop !== 'navigate away') {
+      expect(chatHead().line).toBe(HEAD.en.disclosure);
+      disclosure.assert();
+    }
+  });
+
+  it('failed_owner_confirmations_stop_after_the_backoff_cap', async () => {
+    const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await router.navigate('/d/nobody-here');
+    await expect.element(screen.getByText("This Desk isn't available", { exact: true })).toBeVisible();
+    mockStore.world.takeOver(chat);
+    mockStore.inject({ route: 'visitorSession', status: 'network', times: 10 });
+    const reads = requests('visitorSession').length;
+    const answers = sessionAnswers();
+    const texts = watchTexts();
+    const disclosure = watchHeadDisclosure();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(systemLines()).toEqual(['Mike Turner joined the chat']));
+    await answers.waitFor(1);
+    for (const [i, delay] of REOPEN_DELAYS_MS.entries()) {
+      await vi.advanceTimersByTimeAsync(delay + MARGIN_MS);
+      await answers.waitFor(i + 2);
+      expect(requests('visitorSession')).toHaveLength(reads + i + 2);
+      expect(chatHead()).toEqual(withClaude(HEAD.en));
+      disclosure.assert();
+    }
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
+    expect(requests('visitorSession'), 'the last backoff ends the round').toHaveLength(reads + 4);
+    expect(texts.saw(OWNER_IN_CHAT_WORDS)).toBe(false);
+    disclosure.assert();
+  });
+
+  it('a_newer_replayed_join_starts_a_fresh_owner_confirmation_backoff_round', async () => {
+    let view: VisitorChatView | undefined;
+    function ObservedPage() {
+      view = useVisitorChat(RIVERA.slug);
+      return <PublicPage />;
+    }
+    const { screen, router } = await renderRoute(PAGE, {
+      seed: 'rivera',
+      routes: [{ path: '/d/:slug', Component: ObservedPage }, { path: '/away', element: <p>Away from chat</p> }],
+    });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await router.navigate('/away');
+    await expect.element(screen.getByText('Away from chat', { exact: true })).toBeVisible();
+    mockStore.world.takeOver(chat);
+    mockStore.inject({ route: 'visitorSession', status: 'network', times: 10 });
+    const reads = requests('visitorSession').length;
+    const answers = sessionAnswers();
+    const texts = watchTexts();
+    const disclosure = watchHeadDisclosure();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(systemLines()).toEqual(['Mike Turner joined the chat']));
+    await answers.waitFor(1);
+
+    // Replay keeps arriving before the quiet period ends. Exhaust this round without reopening
+    // the stream, since reopening would itself reset the confirmation retry budget.
+    const replayFor = async (ms: number) => {
+      for (let left = ms; left > 0;) {
+        const seq = mockStore.emit(RIVERA.slug, { type: 'turn_end' });
+        await until(() => expect(view?.state.lastSeq).toBe(seq));
+        expect(view?.state.catchingUp).toBe(true);
+        const step = Math.min(CAUGHT_UP_AFTER_MS / 2, left);
+        await vi.advanceTimersByTimeAsync(step);
+        left -= step;
+      }
+    };
+    for (const [i, delay] of REOPEN_DELAYS_MS.entries()) {
+      await replayFor(delay + MARGIN_MS);
+      await answers.waitFor(i + 2);
+      expect(requests('visitorSession')).toHaveLength(reads + i + 2);
+      expect(chatHead()).toEqual(withClaude(HEAD.en));
+      disclosure.assert();
+    }
+    await replayFor(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    await frames();
+    expect(requests('visitorSession'), 'the first round exhausted its cap').toHaveLength(reads + 4);
+    disclosure.assert();
+
+    // A later join arrives in the same catch-up. Its failed read gets a whole new backoff round.
+    expect(view?.state.catchingUp).toBe(true);
+    mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
+    await until(() => expect(systemLines()).toHaveLength(2));
+    await answers.waitFor(5);
+    expect(requests('visitorSession')).toHaveLength(reads + 5);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+    for (const [i, delay] of REOPEN_DELAYS_MS.entries()) {
+      await vi.advanceTimersByTimeAsync(delay + MARGIN_MS);
+      await answers.waitFor(i + 6);
+      expect(requests('visitorSession')).toHaveLength(reads + i + 6);
+      expect(chatHead()).toEqual(withClaude(HEAD.en));
+      disclosure.assert();
+    }
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
+    expect(requests('visitorSession'), 'the fresh round also stops at the cap').toHaveLength(reads + 8);
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'failed reads never confirm the owner').toBe(false);
+    disclosure.assert();
+  });
+
+  it('an_older_cursorless_verify_answer_reconfirms_the_owner', async () => {
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const disclosure = watchHeadDisclosure();
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    await say(screen, 'Can you send my invoice?');
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const verified = { ...chat.state, verified: true, assurance: 'demo_code' as const };
+    let releaseVerify = () => {};
+    mockStore.inject({ route: 'verifyCheck', status: 200, body: { state: verified }, until: new Promise<void>((resolve) => (releaseVerify = resolve)) });
+    onTestFinished(() => releaseVerify());
+    const checks = requests('verifyCheck').length;
+    await screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+    await screen.getByRole('button', { name: 'Confirm' }).click();
+    await vi.waitFor(() => expect(requests('verifyCheck')).toHaveLength(checks + 1));
+    disclosure.assert();
+
+    // The verification answer was taken in Claude's mode. Mike Turner joins before it lands.
+    chat.state = verified;
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    disclosure.assert();
+    const current = await request('visitorSession', { params: { slug: RIVERA.slug } });
+    let releaseRead = () => {};
+    mockStore.inject({ route: 'visitorSession', status: 200, body: current, until: new Promise<void>((resolve) => (releaseRead = resolve)) });
+    onTestFinished(() => releaseRead());
+    const reads = requests('visitorSession').length;
+    useTimers();
+    releaseVerify();
+    const texts = watchTexts({ ignoreExisting: true });
+    await until(() => expect(screen.getByText('Verified with a code. Simulated verification').element()).toBeVisible());
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+
+    // Only a fresh session read can restore the owner's line; it still discloses Claude as an AI.
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'no owner line after the verify downgrade').toBe(false);
+    texts.stop();
+    releaseRead();
+    await until(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    disclosure.assert();
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
+    expect(requests('visitorSession'), 'one read confirms the cursorless answer').toHaveLength(reads + 1);
+    disclosure.assert();
+  });
+
+  it('a_verify_downgrade_retries_failed_confirmations_within_the_backoff_cap', async () => {
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(screen);
+    const disclosure = watchHeadDisclosure();
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    await say(screen, 'Can you send my invoice?');
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const verified = { ...chat.state, verified: true, assurance: 'demo_code' as const };
+    let releaseVerify = () => {};
+    mockStore.inject({ route: 'verifyCheck', status: 200, body: { state: verified }, until: new Promise<void>((resolve) => (releaseVerify = resolve)) });
+    onTestFinished(() => releaseVerify());
+    const checks = requests('verifyCheck').length;
+    await screen.getByRole('textbox', { name: '6-digit code' }).fill(DEMO_CODE);
+    await screen.getByRole('button', { name: 'Confirm' }).click();
+    await vi.waitFor(() => expect(requests('verifyCheck')).toHaveLength(checks + 1));
+    disclosure.assert();
+
+    // The verification answer was taken in Claude's mode. Mike Turner joins before it lands.
+    chat.state = verified;
+    mockStore.world.takeOver(chat);
+    await vi.waitFor(() => expect(chatHead()).toEqual(withOwner(HEAD.en)));
+    disclosure.assert();
+    mockStore.inject({ route: 'visitorSession', status: 'network', times: 10 });
+    const reads = requests('visitorSession').length;
+    const answers = sessionAnswers();
+    useTimers();
+    releaseVerify();
+    const texts = watchTexts({ ignoreExisting: true });
+    await until(() => expect(screen.getByText('Verified with a code. Simulated verification').element()).toBeVisible());
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+    await until(() => expect(requests('visitorSession')).toHaveLength(reads + 1));
+
+    await answers.waitFor(1);
+    for (const [i, delay] of REOPEN_DELAYS_MS.entries()) {
+      await vi.advanceTimersByTimeAsync(delay + MARGIN_MS);
+      await answers.waitFor(i + 2);
+      expect(requests('visitorSession')).toHaveLength(reads + i + 2);
+      expect(chatHead()).toEqual(withClaude(HEAD.en));
+      expect(texts.saw(OWNER_IN_CHAT_WORDS), 'failed verification confirmation cannot restore the owner line').toBe(false);
+      disclosure.assert();
+    }
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    // nothing may happen now, so wait until the mock has gone quiet, not for a frame or two
+    await mockDrain.waitForIdle();
+    expect(requests('visitorSession'), 'verify confirmation stops after the final retry').toHaveLength(reads + 4);
+    expect(texts.saw(OWNER_IN_CHAT_WORDS)).toBe(false);
+    disclosure.assert();
+  });
+
   it('a_replayed_join_invalidates_an_earlier_reopen_confirmation', async () => {
     const { screen, router } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
@@ -4177,12 +4534,25 @@ const OWNER_IN_CHAT_WORDS = /is in this chat|is paused until/;
  * over, so a line drawn and replaced before anything reads the page still counts. Start it while the
  * page shows nothing it should never show.
  */
-function watchTexts(): { saw: (pattern: RegExp) => boolean; stop: () => void } {
-  const texts: string[] = [document.body.textContent ?? ''];
+function watchTexts({ ignoreExisting = false }: { ignoreExisting?: boolean } = {}): { saw: (pattern: RegExp) => boolean; stop: () => void } {
+  const texts: string[] = ignoreExisting ? [] : [document.body.textContent ?? ''];
+  // At a verify release the current owner line is legitimate. Ignore only pre-existing text
+  // being removed or overwritten, while recording every new line, including transient ones.
+  const existing = new WeakSet<Node>();
+  if (ignoreExisting) {
+    const nodes = document.createTreeWalker(document.body, NodeFilter.SHOW_ALL);
+    while (nodes.nextNode()) existing.add(nodes.currentNode);
+  }
   const watch = new MutationObserver((records) => {
     for (const record of records) {
-      if (record.type === 'characterData') texts.push(record.oldValue ?? '', record.target.textContent ?? '');
-      for (const node of [...record.addedNodes, ...record.removedNodes]) texts.push(node.textContent ?? '');
+      if (record.type === 'characterData') {
+        if (!existing.delete(record.target)) texts.push(record.oldValue ?? '');
+        texts.push(record.target.textContent ?? '');
+      }
+      for (const node of record.addedNodes) texts.push(node.textContent ?? '');
+      for (const node of record.removedNodes) {
+        if (!existing.has(node)) texts.push(node.textContent ?? '');
+      }
     }
   });
   watch.observe(document.body, { childList: true, subtree: true, characterData: true, characterDataOldValue: true });
@@ -4193,6 +4563,52 @@ function watchTexts(): { saw: (pattern: RegExp) => boolean; stop: () => void } {
 /** The head as it is with Claude answering, and while Mike is in the chat. */
 const withClaude = (head: (typeof HEAD)['en' | 'es']) => ({ line: head.disclosure, asks: [head.ask] });
 const withOwner = (head: (typeof HEAD)['en' | 'es']) => ({ line: head.ownerInChat, asks: [] });
+
+/** Waits for answers, then a browser frame so the provider has applied each settled request. */
+function sessionAnswers(): { waitFor: (count: number) => Promise<void> } {
+  let answered = 0;
+  const stop = observeRequests((outcome) => {
+    if (outcome.key === 'visitorSession') answered += 1;
+  });
+  onTestFinished(stop);
+  return {
+    waitFor: async (count) => {
+      await until(() => expect(answered).toBe(count));
+      await frames();
+    },
+  };
+}
+
+/** Records each observed chat-head state and painted frame, including pending and failed reads. */
+function watchHeadDisclosure(): { assert: () => void } {
+  const lines: string[] = [];
+  const record = () => {
+    if (document.querySelector('.cd-public-shell__chat-head')) lines.push(chatHead().line);
+  };
+  record();
+  const watch = new MutationObserver(record);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  let frame = 0;
+  const nextFrame = () => {
+    record();
+    frame = requestAnimationFrame(nextFrame);
+  };
+  frame = requestAnimationFrame(nextFrame);
+  onTestFinished(() => {
+    watch.disconnect();
+    cancelAnimationFrame(frame);
+  });
+  return {
+    assert: () => {
+      record();
+      expect(lines.length).toBeGreaterThan(0);
+      for (const line of lines) {
+        expect(line, 'every observed head names Claude as an AI').toContain('Claude, an AI');
+        expect([HEAD.en.disclosure, HEAD.en.ownerInChat]).toContain(line);
+      }
+    },
+  };
+}
 
 /** Whether `el` is wholly inside the window. */
 function inWindow(el: Element): boolean {

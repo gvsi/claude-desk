@@ -35,7 +35,7 @@ visitor's.
 import asyncio
 import logging
 from collections import Counter, OrderedDict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
@@ -44,6 +44,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import DateTime, cast, func, literal, null, select, type_coerce, union_all
 from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 
+from desk.always_on import specificity
 from desk.api.deps import OwnerCtx
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.ro import decision_replayed, replayed, ro_view, set_copy
@@ -69,7 +70,7 @@ from desk.api.schemas import (
 from desk.api.setup import INTERVIEWS
 from desk.api.sse import RUN_EVENTS
 from desk.api.store import AUDIENCE_KINDS, MESSAGES, WITH_EVENTS, newest_triage, triaged
-from desk.contracts import Decision, DecisionState, is_business_tool
+from desk.contracts import Decision, DecisionState, RuleCard, is_business_tool
 
 
 VISITOR_TEXT = ("visitor_text", "agent_text")      # what a visitor, or a visiting agent, wrote
@@ -252,18 +253,34 @@ async def refusal_reason(ctx: OwnerCtx, decision_id: str, session_id: str, state
     return decision.owner_plain
 
 
+def holding_card(cards: Mapping[str, RuleCard], card_ids: Iterable[str]) -> RuleCard | None:
+    """The rule card that held a request, the first its `reason_plain` quotes, picked as the kernel's
+    `decide.hold_decider` picks the cards that decided a hold. A held decision's `card_ids` are every card behind its
+    matching hold permits, sorted by ID, so the compiler's default ask for anyone can come first. Of those found in
+    `cards` (the version's, by ID): the most specific (`desk.always_on.specificity`, which ranks a default ask below
+    every card), the ask cards among them when there are any (an ask card wins a tie with an auto card's hold twin),
+    then the first by `card_id`. A hold only the default ask decided names the default ask. None when no card is
+    found."""
+    known = [cards[card_id] for card_id in card_ids if card_id in cards]
+    if not known:
+        return None
+    top = max(specificity(card) for card in known)
+    deciding = [card for card in known if specificity(card) == top]
+    return min([card for card in deciding if card.mode == "ask"] or deciding, key=lambda card: card.card_id)
+
+
 async def _held_by(ctx: OwnerCtx, desk_id: str, decisions: list[Decision]) -> dict[str, str | None]:
-    """The reason of the rule card that held each decision: its first `card_ids` entry, in the policy version it was
-    decided under (default cards included), by decision ID."""
+    """The reason of the rule card that held each decision (`holding_card`), in the policy version it was decided
+    under (default cards included), by decision ID."""
     versions = sorted({decision.policy_version for decision in decisions})
     if not versions:
         return {}
-    cards: dict[tuple[int, str], str] = {}
+    cards: dict[int, dict[str, RuleCard]] = {}
     for row in await ctx.ro.rows("policy_versions", desk_id=desk_id, version=versions):
-        for card in row["cards"] or []:
-            cards[(row["version"], card["card_id"])] = card["reason"]
-    return {decision.decision_id: cards.get((decision.policy_version, decision.card_ids[0]))
-            if decision.card_ids else None for decision in decisions}
+        cards[row["version"]] = {card["card_id"]: RuleCard.model_validate(card) for card in row["cards"] or []}
+    held = {decision.decision_id: holding_card(cards.get(decision.policy_version, {}), decision.card_ids)
+            for decision in decisions}
+    return {decision_id: card.reason if card is not None else None for decision_id, card in held.items()}
 
 
 async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:

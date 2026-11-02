@@ -1,12 +1,26 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import type { DeskSummary, UnfinishedSetupStep } from '../../api/views.ts';
 import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { DEMO_VISITOR_THING, THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
+import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
-import { handledCount, howItWorksSteps, outcomeWords, stepLabel, steppedInCount, TODAY_COPY, todayOutcomes } from './copy.ts';
+import { isLive } from '../useDesks.ts';
+import {
+  CONTINUE_SETUP_COPY,
+  continueSetupLine,
+  handledCount,
+  howItWorksSteps,
+  outcomeWords,
+  stepLabel,
+  steppedInCount,
+  TODAY_COPY,
+  todayOutcomes,
+  type TodayOutcomesLine,
+} from './copy.ts';
 import { sinceLastNightLine } from './sinceLastNightLine.ts';
 
 import './Today.css';
@@ -152,8 +166,95 @@ function Legend() {
  */
 const FRESH_OUTCOMES = todayOutcomes({ handled: 2, held: 1, turnedDown: 0 });
 
-/** How your Desk works: the three steps, in their real wrapping, then the Today line's rows. */
-function HowItWorksShape() {
+/** A Desk whose setup isn't finished has most likely been asked nothing yet today. */
+const QUIET_OUTCOMES = todayOutcomes({ handled: 0, held: 0, turnedDown: 0 });
+
+/** What the "Not live yet" card needs to be drawn as it will land: the Desk's own words and step. */
+export interface SkeletonSetup {
+  /** The step setup stopped at. */
+  step: UnfinishedSetupStep;
+  /** Whether the Desk answers the public, which decides the card's line. */
+  answering: boolean;
+  /** The business's name, in the card's title. */
+  business: string;
+}
+
+/**
+ * What Today's shapes draw the "Not live yet" card from: the Desk's unfinished setup, or nothing
+ * once it is live. Today's own skeleton and the loading page both take it from here, so they agree.
+ */
+export function skeletonSetupOf(desk: DeskSummary): SkeletonSetup | undefined {
+  if (isLive(desk) || !desk.setup) return undefined;
+  return { step: desk.setup.step, answering: desk.answering, business: desk.business_name };
+}
+
+/**
+ * The "Not live yet" card (`ContinueSetup`) in its own classes: the status, the title and the line
+ * at their real wrapping, "Continue setup" at its width, and the setup steps, or on a narrow card
+ * the one line that says where setup is.
+ */
+function ContinueSetupShape({ step, answering, business }: SkeletonSetup) {
+  const at = STEP_INDEX[step];
+  return (
+    <div className="cd-continue-setup">
+      <SkeletonCard padding={20} anchor="setup-card">
+        <div className="cd-continue-setup__body">
+          <div className="cd-continue-setup__head">
+            <div className="cd-continue-setup__words cd-today-skeleton__setup-words">
+              <div className="cd-continue-setup__status cd-type-meta">
+                <span className="cd-skeleton-line cd-skeleton-line--meta">
+                  <Skeleton
+                    shape="block"
+                    radius="full"
+                    height="var(--cd-skeleton-pill)"
+                    measure={{
+                      label: CONTINUE_SETUP_COPY.notLive,
+                      className: 'cd-status-label cd-type-meta',
+                      tagName: 'span',
+                      suffix: { className: 'cd-status-dot', width: 'var(--size-dot)' },
+                    }}
+                    anchor="setup-status"
+                  />
+                </span>
+              </div>
+              <TextLines words={[CONTINUE_SETUP_COPY.title, business]} text="section" className="cd-continue-setup__title" anchor="setup-title" />
+              <TextLines words={continueSetupLine(step, answering)} text="body" className="cd-continue-setup__line" />
+            </div>
+            <div className="cd-continue-setup__action">
+              <Skeleton
+                shape="block"
+                measure={{ label: CONTINUE_SETUP_COPY.action, className: 'cd-button cd-button--primary cd-button--inline cd-type-control', tagName: 'a' }}
+                height="var(--size-control)"
+                anchor="setup-action"
+              />
+            </div>
+          </div>
+          <div className="cd-steps-frame">
+            <div className="cd-steps cd-type-meta">
+              {STEP_NAMES.map((name, i) => (
+                <div key={name} className={`cd-steps__step cd-steps__step--${i < at ? 'done' : i === at ? 'current' : 'later'}`}>
+                  {i > 0 ? <span className="cd-steps__join" /> : null}
+                  <Skeleton shape="circle" size={22} />
+                  <TextLines words={name} className="cd-steps__name" intrinsic lineWidth="100%" lastWidth="100%" />
+                </div>
+              ))}
+            </div>
+            <div className="cd-steps__compact cd-type-meta">
+              <TextLines words={[`Step ${at + 1} of ${STEP_NAMES.length}: `, { text: STEP_NAMES[at]!, className: 'cd-steps__compact-name' }]} />
+            </div>
+          </div>
+        </div>
+      </SkeletonCard>
+    </div>
+  );
+}
+
+/**
+ * How your Desk works: the three steps, in their real wrapping, then the Today line's rows: the
+ * fresh copy's, or for a Desk whose setup isn't finished (`quiet`) the one line of a day nobody has
+ * asked it anything yet.
+ */
+function HowItWorksShape({ quiet }: { quiet: boolean }) {
   return (
     <div className="cd-today__section cd-how">
       <SectionTitle anchor="how-title" />
@@ -170,21 +271,30 @@ function HowItWorksShape() {
             </div>
           ))}
         </div>
-        <TodayLineRows />
+        <TodayLineRows outcomes={quiet ? QUIET_OUTCOMES : FRESH_OUTCOMES} />
       </SkeletonCard>
     </div>
   );
 }
 
-/** The Today line's real flex items, unseen, then one pill on each row they take. */
-function TodayLineRows() {
+/** The Today line: one quiet line in its real wrapping, or else its real flex items, unseen, then one pill on each row they take. */
+function TodayLineRows({ outcomes }: { outcomes: TodayOutcomesLine }) {
+  if (outcomes.quiet) {
+    return <div className="cd-how__today cd-today-skeleton__how-today">
+      <TextLines words={outcomes.line} />
+    </div>;
+  }
+  return <TodayLineItems outcomes={outcomes} />;
+}
+
+function TodayLineItems({ outcomes }: { outcomes: Extract<TodayOutcomesLine, { quiet: false }> }) {
   const box = useRef<HTMLDivElement>(null);
   const rows = useRows(box);
   return <div className="cd-how__today cd-today-skeleton__how-today">
     <div className="cd-today-skeleton__legend">
       <div ref={box} className="cd-today-skeleton__how-items cd-type-meta cd-today-skeleton__legend-room">
-        <span><WordRoom words={FRESH_OUTCOMES.quiet ? FRESH_OUTCOMES.line : FRESH_OUTCOMES.lead} /></span>
-        {FRESH_OUTCOMES.quiet ? null : FRESH_OUTCOMES.parts.map((part) => (
+        <span><WordRoom words={outcomes.lead} /></span>
+        {outcomes.parts.map((part) => (
           <span key={part.kind} className="cd-how__outcome"><span className="cd-status-dot" /><WordRoom words={outcomeWords(part)} /></span>
         ))}
       </div>
@@ -243,8 +353,12 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
   );
 }
 
-/** The first view of a fresh copy: the band (greeting, link, "Chat as a customer", how the Desk works and four things to try), one held request and the recorded night. */
-export function TodaySkeleton() {
+/**
+ * The first view of a fresh copy: the band (greeting, link, "Chat as a customer", how the Desk works
+ * and four things to try), one held request and the recorded night. Given a Desk whose setup isn't
+ * finished (`setup`), the band draws its "Not live yet" card first under the greeting, as Today will.
+ */
+export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
   return (
     <div className="cd-today cd-today--skeleton">
       <div className="cd-today__band">
@@ -269,7 +383,8 @@ export function TodaySkeleton() {
             </div>
           </div>
         </div>
-        <HowItWorksShape />
+        {setup === undefined ? null : <ContinueSetupShape {...setup} />}
+        <HowItWorksShape quiet={setup !== undefined} />
         <div className="cd-things">
           <div className="cd-things__head">
             <div className="cd-things__head-line">

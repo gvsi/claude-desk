@@ -1327,6 +1327,38 @@ describe('the scripted Desk', () => {
     expect(asked?.claude_summary).toBeNull();
   });
 
+  it('held_by_names_the_rule_the_decision_quotes', async () => {
+    // As the API reads it (`holding_card`): a hold's card_ids are every card behind its matching hold
+    // permits, sorted by ID, so the kernel's default ask for anyone can come first. "Held by your rule"
+    // names the card the decision's reason quotes: the most specific, an ask card at a tie, then the
+    // first by ID.
+    const refund = mockStore.world.addHeldRefund();
+    const record = mockStore.world.decisions.get(refund.decision_id);
+    const main = mockStore.world.desk(deskId);
+    if (!record || !main) throw new Error('Dana has a refund held on the main Desk');
+    const defaultAsk: RuleCard = {
+      card_id: 'default:payments.create_refund',
+      applies_to: 'payments.create_refund',
+      mode: 'ask',
+      who: 'anyone',
+      is_default: true,
+      reason: 'Not covered by a rule yet, so it asks you.',
+    };
+    main.policy.cards = [...main.policy.cards, defaultAsk];
+    const read = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+        (item) => item.decision?.decision_id === refund.decision_id,
+      );
+
+    // The refund card held it, and the default ask matched too, listed first.
+    record.decision.card_ids = [defaultAsk.card_id, 'rv-refund'];
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+
+    // Held by the default ask alone, it names the default ask.
+    record.decision.card_ids = [defaultAsk.card_id];
+    expect((await read())?.held_by).toBe(defaultAsk.reason);
+  });
+
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
     // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
     // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)

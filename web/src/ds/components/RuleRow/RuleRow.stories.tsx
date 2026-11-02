@@ -3,6 +3,7 @@ import { expect, fn } from 'storybook/test';
 
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectUserText } from '../../test/expectUserText.ts';
 import { RuleRow } from './RuleRow.tsx';
 
 const link = rivera.ruleCards['rv-link'];
@@ -54,7 +55,7 @@ export const Shared: Story = {
     rule: shared,
     words: rivera.ruleWords['rv-agent-charges'],
     limit: rivera.ruleLimits['rv-agent-charges'],
-    shared: { appliesTo: SHARED_APPLIES_TO },
+    shared: rivera.sharedChargeShared,
   },
   parameters: {
     canvasNote: "The shared rule is the demo agent's charges up to $20, automatic, read as \"Automatic up to $20; over $20, ask me first\"; the board's example is illustrative.",
@@ -65,8 +66,13 @@ export const Shared: Story = {
     await expect(button).toHaveTextContent('Automatic up to $20; over $20, ask me first');
     await expect(canvas.getByText("Alex Kim's assistant · Up to $20")).toBeVisible();
     // shared_rule_says_what_it_covers: the shared icon, hidden, and the words in caption type.
-    const line = canvas.getByText(`Shared rule. ${SHARED_APPLIES_TO}`);
+    const line = canvasElement.querySelector<HTMLElement>('.cd-rule-row__shared > span');
+    if (line === null) throw new Error('No shared line');
+    await expect(line).toHaveTextContent(`Shared rule. ${SHARED_APPLIES_TO}`);
+    await expect(line).toBeVisible();
     expectComputed(line, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    // Each tool's title is its own user-text item among the app's words.
+    for (const title of rivera.sharedChargeShared.titles) expectUserText(line, title);
     const icon = canvasElement.querySelector('.cd-rule-row__shared svg');
     await expect(icon).toHaveAttribute('aria-hidden', 'true');
   },
@@ -91,7 +97,7 @@ export const NarrowMaxLimit: Story = {
       { field: 'limits', text: 'Up to $10,000' },
     ],
     limit: '$10,000',
-    shared: { appliesTo: rivera.sharedChargeAppliesTo },
+    shared: rivera.sharedChargeShared,
   },
   globals: { viewport: { value: 'narrow', isRotated: false } },
   parameters: {

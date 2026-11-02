@@ -7,6 +7,7 @@ import { DEMO_VISITOR_PILL } from '../conversations/copy.ts';
 import { conversationPath } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { causeLabel } from '../safety/copy.ts';
+import { useTodayNow } from './todayClock.ts';
 
 /** Each kind's word and dot. A turned-down request is no alarm: its dot is the hollow, neutral one. */
 const KINDS = {
@@ -97,12 +98,13 @@ export interface BriefingRowProps {
  */
 export function BriefingRow({ item }: BriefingRowProps) {
   const { business, desk } = useOwnerDesk();
+  const now = useTodayNow();
   if (!isShown(item)) return null;
   const kind = KINDS[item.kind];
   const href = hrefFor(desk.desk_id, item);
   const content = (
     <>
-      <span className="cd-briefing-row__when cd-type-caption">{formatWhen(item.at, business.timezone, new Date())}</span>
+      <span className="cd-briefing-row__when cd-type-caption">{formatWhen(item.at, business.timezone, now)}</span>
       <span className="cd-briefing-row__kind cd-type-meta">
         <StatusLabel tone={kind.tone}>{kind.word}</StatusLabel>
       </span>

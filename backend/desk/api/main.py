@@ -13,8 +13,9 @@ the model client it built (never an injected one) last. Building the app sets th
 (`procrastinate` and its children) to WARNING and filters them (`JobRecords`): Procrastinate names
 each job with its arguments below WARNING and when a job fails, and the resume job's signed decision quotes the
 visitor. It also redacts link tokens from every log record the process makes (`log_redaction`), uvicorn's access log
-included. In production the app refuses to start without its secrets (the API key, the passcode hash and the public
-origin, which `Settings` requires), with a Bedrock setting or credential (refused by `Settings`) and with any test
+included, and logs an unexpected error in a route by its type and route only (`unexpected_errors`). In production
+the app refuses to start without its secrets (the API key, the passcode hash and the public origin, which `Settings`
+requires), with a Bedrock setting or credential (refused by `Settings`) and with any test
 hook: `ANTHROPIC_BASE_URL` (refused by `Settings`), an injected clock, model, kernel transport or job queue connector,
 or an A2A transport set on the runtime (refused when the lifespan starts). A passcode hash that isn't one refuses to
 start anywhere.
@@ -43,7 +44,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from desk.api import a2a, log_redaction
+from desk.api import a2a, log_redaction, unexpected_errors
 from desk.api.agents import DemoAgents, a2a_client
 from desk.api.cookies import clear_visitor_cookie
 from desk.api.demo_visitors import DemoVisitors, visitor_client
@@ -217,6 +218,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                                   "job queue connector": jobs_connector})
     _quiet_job_queue_logs()
     log_redaction.install()
+    unexpected_errors.quiet_server_errors()
     if settings.passcode_hash is not None:
         try:
             check_passcode_hash(settings.passcode_hash)
@@ -237,7 +239,8 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                 stack.push_async_callback(built.aclose)
             stack.push_async_callback(kernel.aclose)
             assert_production_safe(settings, kernel)
-            # Neither pool puts a statement's parameters in its errors: a route's failure is logged by the server.
+            # Neither pool puts a statement's parameters in its errors, and a route's failure is logged by its type
+            # and route only (`unexpected_errors`).
             engine = create_async_engine(settings.api_database_url, connect_args={"options": API_CONNECT_OPTIONS},
                                          pool_size=POOL_SIZE, max_overflow=MAX_OVERFLOW, pool_timeout=POOL_TIMEOUT_S,
                                          pool_pre_ping=True, hide_parameters=True)
@@ -285,6 +288,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                   redoc_url=None)
     app.state.runtime = state
     _install_error_handlers(app)
+    app.add_middleware(unexpected_errors.UnexpectedErrors)   # the only middleware: the outermost of the app's own
     app.include_router(system)
     app.include_router(owner.router)
     app.include_router(setup.router)
