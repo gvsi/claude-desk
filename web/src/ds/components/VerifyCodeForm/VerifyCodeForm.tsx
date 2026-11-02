@@ -160,6 +160,9 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = fals
             aria-invalid={failed || undefined}
             aria-describedby={failed ? failedId : undefined}
             onChange={change}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && event.repeat) event.preventDefault();
+            }}
           />
           {/* Busy keeps the words and the focus: the button stays focusable but inert. */}
           <Button variant="primary" size="main" type="submit" disabled={!whole && !checking} busy={checking}>

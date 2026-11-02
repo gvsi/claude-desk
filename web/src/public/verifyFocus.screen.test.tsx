@@ -5,7 +5,7 @@
  * and the next Tab reaches the document. A line draws no focus edge and raises no phone keyboard.
  */
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { userEvent } from 'vitest/browser';
+import { cdp, userEvent } from 'vitest/browser';
 
 import { coarsePointer } from '../ds/test/touch.ts';
 import { DEMO_CODE } from '../mocks/script.ts';
@@ -35,6 +35,24 @@ async function codeAsked(viewport: Viewport) {
 function verifiedLine(): HTMLElement | null {
   return document.querySelector<HTMLElement>('.cd-verified-line');
 }
+
+it('sends a wrong code only once while Enter is held through the failure', async () => {
+  const { field } = await codeAsked('desktop');
+  await field.fill('000000');
+  const submitted = vi.fn();
+  (field.element() as HTMLInputElement).form?.addEventListener('submit', submitted);
+  const enter = { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: '\r' };
+  try {
+    await cdp().send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter });
+    await expect.element(field).toHaveAttribute('aria-invalid', 'true');
+    await expect.element(field).toHaveFocus();
+    await cdp().send('Input.dispatchKeyEvent', { type: 'keyDown', ...enter, autoRepeat: true });
+    expect(submitted).toHaveBeenCalledTimes(1);
+    expect(mockStore.requests.filter((r) => r.key === 'verifyCheck')).toHaveLength(1);
+  } finally {
+    await cdp().send('Input.dispatchKeyEvent', { type: 'keyUp', ...enter });
+  }
+});
 
 describe.each(['desktop', 'phone'] as const)('focus once the code works at %s size', (viewport) => {
   it.each(['in the field', 'on Confirm'] as const)('moves keyboard focus to the verified line after Enter %s', async (where) => {
