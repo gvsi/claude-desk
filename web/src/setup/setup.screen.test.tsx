@@ -548,7 +548,8 @@ describe('setup', () => {
   it('the_lockup_leads_to_the_start_page_before_there_is_a_desk', async () => {
     // Before there is a Desk, the bar's lockup leads where "Save and exit" does: the app's start
     // page. It is a link named by the product's name and what it does, keeps the lockup's look with
-    // a pointer, and takes the warm focus ring from the keyboard, 4 px off so it clears the badge.
+    // a pointer, and from the keyboard takes the base focus edge: 1 px of line-focus just inside it, at
+    // the control radius, and no ring outside it.
     const firstVisit = holdFirstVisit();
     const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
     const bar = screen.getByRole('banner');
@@ -559,20 +560,12 @@ describe('setup', () => {
     expect(look.textDecorationLine).toBe('none');
     expect(look.color).toBe(getComputedStyle(bar.element()).color);
     expect(look.cursor).toBe('pointer');
-    expect(look.outlineStyle, 'no ring before the keyboard').toBe('none');
+    expect([look.outlineStyle, look.boxShadow], 'nothing drawn before the keyboard').toEqual(['none', 'none']);
     await userEvent.keyboard('{Tab}');
     (lockup.element() as HTMLElement).focus();
     expect(lockup.element().matches(':focus-visible')).toBe(true);
-    const probe = document.createElement('span');
-    probe.style.color = 'var(--ring-focus)';
-    document.body.append(probe);
-    try {
-      expect(getComputedStyle(lockup.element()).outlineColor).toBe(getComputedStyle(probe).color);
-      expect(getComputedStyle(lockup.element()).outlineOffset).toBe('4px');
-      expect(getComputedStyle(lockup.element()).outlineWidth).toBe('2px');
-    } finally {
-      probe.remove();
-    }
+    const edge = getComputedStyle(lockup.element());
+    expect([edge.outlineStyle, edge.boxShadow, edge.borderTopLeftRadius]).toEqual(['none', `${tokenColor('--line-focus')} 0px 0px 0px 1px inset`, '8px']);
     await lockup.click();
     await expect.poll(() => router.state.location.pathname).toBe('/');
     firstVisit.draw();

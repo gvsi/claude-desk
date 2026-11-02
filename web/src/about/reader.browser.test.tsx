@@ -1233,8 +1233,8 @@ describe('ReaderPage', () => {
 
   it('keyboard_focus_on_the_paper_draws_no_ring', async () => {
     // Keyboard focus changes a control's own edge, never a ring outside it (owner, 2026-11-01), in the paper's
-    // secondary ink: the link in the bar shows 1 px inside its pill, "Read next" 1 px over its card's own
-    // border, and a link in the text turns its words and a 2 px underline the paper's ink.
+    // secondary ink: the bar's pills and the contents list's items show 1 px inside them, "Read next" 1 px over
+    // its card's own border, and a link in the text turns its words and a 2 px underline the paper's ink.
     const screen = await renderReader('proposal', { size: DESKTOP });
     const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
     const edge = `${tokenColor('--line-focus', root)} 0px 0px 0px 1px inset`;
@@ -1246,8 +1246,12 @@ describe('ReaderPage', () => {
     };
 
     const tryIt = screen.container.querySelector('.cd-about-try') as HTMLElement;
-    await keyboardFocus(tryIt);
-    expect([getComputedStyle(tryIt).outlineStyle, getComputedStyle(tryIt).boxShadow]).toEqual(['none', edge]);
+    const pill = screen.container.querySelector('nav[aria-label="About this prototype"] a') as HTMLElement;
+    const item = screen.container.querySelector('.cd-about-contents__link') as HTMLElement;
+    for (const [name, el] of [['Try Desk prototype', tryIt], ['a page pill', pill], ['a contents item', item]] as const) {
+      await keyboardFocus(el);
+      expect.soft([getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow], name).toEqual(['none', edge]);
+    }
 
     const inText = screen.container.querySelector('article a.cd-text-link') as HTMLElement;
     await keyboardFocus(inText);
