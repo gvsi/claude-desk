@@ -15,6 +15,7 @@ tool review goes through the owner's policy route, drafting enables until explic
 
 import asyncio
 import contextlib
+import html
 import json
 import logging
 import re
@@ -1081,6 +1082,80 @@ async def test_a_request_typed_at_the_test_client_offer_reopens_the_plan_on_its_
         write.body["tools"])
 
 
+def request_text(request) -> str:
+    return request.messages[0]["content"][0]["text"]
+
+
+async def test_only_the_consultants_calls_at_the_test_client_offer_say_the_plan_is_closed(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    before = len(model.requests)
+    owner, state, _ = await reopened(app, browser, kernel_http, model, engine, monkeypatch)
+    # Both planning calls of the answer (the reply that adds the job, then the one that shows its card) are told what
+    # this turn is: the plan is closed and the owner answered the offer.
+    first, second = model.requests[-2:]
+    assert all(setup.SETUP_OFFER_ANSWER_LINE in request_text(request) and REQUEST in request_text(request)
+               for request in (first, second))
+    # The line tells the two calls apart by a planned job: none before the first (every card settled when the plan
+    # closed), and on the second only the job the first one added.
+    assert '"status": "planned"' not in request_text(first)
+    planned = [item for item in json.loads(html.unescape(request_text(second).split("<setup_plan>")[1]
+                                                           .split("</setup_plan>")[0]))["items"]
+               if item["status"] == "planned"]
+    assert [item["id"] for item in planned] == [REOPENED_ID]
+    # No other planning call carries it: not the ones before the offer, nor the decision and closing calls after it.
+    earlier = [request for request in model.requests[before:-2] if request.output_schema is setup.SetupNextStep]
+    assert earlier
+    model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    asked = len(model.requests)
+    reply = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/proposals/{REOPENED_ID}?cards=1",
+                                     json={"accept": True, "amount_cents": 25_000})
+    assert reply.status_code == 200, reply.text
+    later = model.requests[asked:]
+    assert len(later) == 2
+    assert not any(setup.SETUP_OFFER_ANSWER_LINE in request_text(request) for request in [*earlier, *later])
+
+
+async def test_a_job_turned_down_earlier_can_come_back_at_the_test_client_offer(
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
+    app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
+    owner, state = await offered(app, browser, kernel_http, model, cards=True)
+    interview_id = state["interview_id"]
+    # The plan already holds the retainer job, turned down by the owner before the plan closed.
+    earlier = ProposalCard(proposal_id="p-00000000000d", kind="job", state="declined", connector=None,
+                           job=JobProposal.model_validate({**RETAINER, "can_do_today": setup.CAPABILITIES["payment"],
+                                                           "config": {**RETAINER["config"], "amount_cents": None}}))
+    async with engine.begin() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id, lock=True)
+        offer = max(index for index, entry in enumerate(interview.transcript) if entry.question == setup.TEST_CLIENT)
+        interview.transcript[offer:offer] = [
+            setup.Entry(role="claude", text="", planned=[earlier.model_copy(deep=True)]),
+            setup.Entry(role="claude", text="", card=earlier.model_copy(deep=True), owner_decided=True)]
+        await setup._save(conn, interview)
+    reopened_id_first(monkeypatch)
+    model.add(consultant(REOPENED_LINE, add_jobs=[RETAINER]),
+              next_step("what_you_do", next={"kind": "job", "job": REOPENED_ID}, question=REOPENED_ASK))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/answer?cards=1",
+                                     json={"question": "test_client", "text": REQUEST})
+    assert reply.status_code == 200, reply.text
+    # Asked for again, it comes back as a new card with a new id; the earlier one stays declined.
+    shown = reply.json()
+    assert shown["pending_card"] == REOPENED_ID != earlier.proposal_id
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+    statuses = {item["id"]: item["status"] for item in setup._setup_plan(interview)["items"]}
+    assert (statuses[earlier.proposal_id], statuses[REOPENED_ID]) == ("declined", "shown")
+    # Accepted with its amount, it is one accepted job.
+    model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
+              next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/proposals/{REOPENED_ID}?cards=1",
+                                     json={"accept": True, "amount_cents": 25_000})
+    assert reply.status_code == 200, reply.text
+    async with engine.connect() as conn:
+        interview = await setup._load(conn, owner.copy_id, interview_id)
+    assert [job.title for job in setup.accepted_jobs(interview)].count(RETAINER["title"]) == 1
+
+
 async def test_an_app_named_at_the_test_client_offer_reopens_the_plan_on_its_card(
         app, browser, fake, kernel_http, model, monkeypatch):
     finished = watch_after_finish(monkeypatch)
@@ -1110,6 +1185,21 @@ async def test_an_app_named_at_the_test_client_offer_reopens_the_plan_on_its_car
     assert (closed["step"], closed["question"]) == ("questions", "test_client")
     assert closed["messages"][-3:] == [claude_line("I'll leave the calendar for now."), claude_line(SECOND_PLAN), OFFER]
     assert finished == [] and not model.script
+    # Named again once the plan lists it (declined): code makes no second card, so Claude's reply stays and the offer
+    # comes again.
+    asked = len(model.requests)
+    model.add(next_step("what_you_do", reply="You left the calendar out, so it stays that way.",
+                        next={"kind": "connector", "connector": "google_calendar"}, question="Connect Google Calendar?"))
+    reply = await owner.browser.post(f"{path}/answer?cards=1", json={"question": "test_client", "text": typed})
+    assert reply.status_code == 200, reply.text
+    again = reply.json()
+    assert len(model.requests) == asked + 1 and not model.script
+    assert (again["step"], again["question"], again["pending_card"]) == ("questions", "test_client", None)
+    assert again["messages"][-3:] == [owner_line(typed),
+                                      claude_line("You left the calendar out, so it stays that way."), OFFER]
+    assert [message["card"]["connector"]["app"] for message in again["messages"]
+            if message["card"] and message["card"]["connector"]] == ["google_calendar"]
+    assert finished == []
 
 
 async def test_using_the_suggestions_while_a_reopened_card_waits_closes_and_offers_again(

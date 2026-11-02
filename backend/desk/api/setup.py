@@ -204,6 +204,7 @@ from desk.api.prompts import (
     SETUP_CARD_ANSWER_SYSTEM,
     SETUP_CLIENT_CARDS,
     SETUP_CLOSING_LINE,
+    SETUP_OFFER_ANSWER_LINE,
     SETUP_PLAN_NOT_CONNECTED,
     SETUP_PLAN_NO_AMOUNT,
     SETUP_PLAN_TAG,
@@ -2337,7 +2338,8 @@ def _names_card(source, card: ProposalCard) -> bool:
 async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
                      interview: Interview, decision: str | None = None, *,
                      text: str | None = None, closing: bool = False) -> SetupNextStep | SetupCardAnswer | None:
-    """Plan after a limit or card decision without any field that can set a limit."""
+    """Plan after a limit answer, a card decision, or an answer to the test-client offer that is neither a yes nor a
+    no (`_consult_on_offer`), without any field that can set a limit."""
     parts = [
         SETUP_NEXT_HEAD.format(business_type=interview.business_type,
                                covered=", ".join(key for key in QUESTION_KEYS if closing or key in interview.covered),
@@ -2351,6 +2353,10 @@ async def _next_step(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     parts.append(SETUP_CLIENT_CARDS[interview.shows_cards])
     if closing:
         parts.append(SETUP_CLOSING_LINE)
+    elif interview.offering and text is None:
+        # The owner answered the test-client offer with neither a yes nor a no (`_consult_on_offer`): the plan is
+        # closed, and this call is neither a card decision nor a limit answer.
+        parts.append(SETUP_OFFER_ANSWER_LINE)
     if decision is not None:
         parts.append(wrap(OWNER_DECISION_TAG, decision))
     if text is not None:
