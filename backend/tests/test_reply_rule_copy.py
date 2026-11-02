@@ -33,22 +33,15 @@ def test_every_card_template_has_a_label_for_the_soft_checks():
 def test_a_request_receipt_reaches_the_soft_checks_with_a_label_no_card_has():
     """The session's request receipts aren't templates: held or resolved, they share one English label of
     their own, which no card's label shares, then what was asked for, in the reply's language, so a Spanish
-    reply about another request reads as one. While the request is held, a fixed note in that language
-    follows its status line: the card states only this request's status, nothing about another, nor whether
-    or when the owner will answer. A request the owner answered, or that closed or ran, has no such note,
-    since he has answered or it no longer waits for him."""
+    reply about another request reads as one, then the decision's status line as the visitor saw it, and
+    nothing after it."""
     assert render.RECEIPT_LABEL == "Request receipt"
     assert render.RECEIPT_LABEL not in render.CHECK_LABELS.values()
-    assert render.receipt_check_text("native.quote", "Waiting for Mike Turner to approve", "en", held=True) == (
-        "Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states only this quote"
-        " request's status; it says nothing about any other request, or whether or when the owner will answer)")
-    assert render.receipt_check_text("native.quote", "Esperando la aprobación de Mike Turner", "es", held=True) == (
-        "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta solo"
-        " indica el estado de esta solicitud de presupuesto; no dice nada de otras solicitudes, ni si el dueño"
-        " responderá ni cuándo)")
-    assert render.receipt_check_text("native.quote", "Mike Turner decided not to go ahead", "en", held=False) == (
-        "Request receipt card: Quote request: Mike Turner decided not to go ahead")
-    assert render.receipt_check_text("block:intake", "Cancelado", "es", held=False) == (
+    assert render.receipt_check_text("native.quote", "Waiting for Mike Turner to approve", "en") == (
+        "Request receipt card: Quote request: Waiting for Mike Turner to approve")
+    assert render.receipt_check_text("native.quote", "Esperando la aprobación de Mike Turner", "es") == (
+        "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner")
+    assert render.receipt_check_text("block:intake", "Cancelado", "es") == (
         "Request receipt card: Solicitud de datos: Cancelado")
 
 

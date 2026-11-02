@@ -1174,9 +1174,7 @@ async def test_a_held_business_tool_request_names_its_block_on_its_receipt(app, 
     assert (held.outcome, held.state) == ('hold', 'held')
     assert (await checked(client, visitor, 'I can help with that.')).ok
     assert reviewer.soft_inputs[-1].cards == [
-        "Request receipt card: Details request: Waiting for Mike Turner to approve (this card states only this"
-        " details request's status; it says nothing about any other request, or whether or when the owner will"
-        " answer)"]
+        "Request receipt card: Details request: Waiting for Mike Turner to approve"]
 
     replaced = intake(config={'block': 'typed_booking', 'appointment_type': 'Consult', 'minutes': 15})
     assert (await put(client, copy, [replaced])).status_code == 200

@@ -298,8 +298,7 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
             lines = [kernel_render.status(key, language, owner="Mike Turner") for key in reached]
             if asked in kernel_render.EXECUTED[language]:
                 lines.append(kernel_render.executed_status(asked, language, owner="Mike Turner"))
-            receipts.update({receipt_check_text(asked, line, language, held=line == lines[0]): language
-                             for line in lines})
+            receipts.update({receipt_check_text(asked, line, language): language for line in lines})
     for case_ in cases.values():
         assert [receipts[card] for card in case_.cards if card in receipts] == [case_.language], case_.id
         assert all(card in receipts or card.startswith(("Booking confirmed card: ", "Quote card: "))
@@ -307,28 +306,23 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
         assert not code_blocked(case_), case_.id
     # the held status line alone backs saying the request waits for approval, in each language
     held = {language: receipt_check_text("native.quote", kernel_render.status("held", language, owner="Mike Turner"),
-                                         language, held=True) for language in ("en", "es")}
-    assert held == {
-        "en": "Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states only this"
-              " quote request's status; it says nothing about any other request, or whether or when the owner will"
-              " answer)",
-        "es": "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta"
-              " solo indica el estado de esta solicitud de presupuesto; no dice nada de otras solicitudes, ni si el"
-              " dueño responderá ni cuándo)"}
+                                         language) for language in ("en", "es")}
+    assert held == {"en": "Request receipt card: Quote request: Waiting for Mike Turner to approve",
+                    "es": "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner"}
     assert {(c.language, c.prose, c.expected): c.cards for c in cases.values() if c.id.endswith("waiting-approval")} == {
         ("en", "This is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
         ("es", "Esto está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
     # each resolved receipt, in each language, backs one honest reply and stops at least one promise past it
     for key in ("cancelled", "denied", "expired"):
-        lines = {receipt_check_text("native.quote", kernel_render.status(key, language, owner="Mike Turner"), language,
-                                    held=False) for language in ("en", "es")}
+        lines = {receipt_check_text("native.quote", kernel_render.status(key, language, owner="Mike Turner"), language)
+                 for language in ("en", "es")}
         beside = [(c.language, c.expected) for c in cases.values() if c.cards[-1] in lines]
         assert {("en", "pass"), ("es", "pass"), ("en", "flag"), ("es", "flag")} <= set(beside), key
     # the cancelled request's honest reply stands beside the booking that closed it, and an approved one's
-    # beside the quote it ran, whose receipt is the kernel's executed line with no held note
+    # beside the quote it ran, whose receipt is the kernel's executed line
     assert all(len(c.cards) == 2 for c in cases.values() if c.id.endswith("closed-by-booking"))
     ran = {language: receipt_check_text("native.quote", kernel_render.executed_status(
-        "native.quote", language, owner="Mike Turner"), language, held=False) for language in ("en", "es")}
+        "native.quote", language, owner="Mike Turner"), language) for language in ("en", "es")}
     assert {(c.language, c.expected): (c.cards[0].split(chr(10))[0], c.cards[1])
             for c in cases.values() if c.id.endswith("approved-quote-below")} == {
         ("en", "pass"): ("Quote card: $153.00", ran["en"]), ("es", "pass"): ("Quote card: $153.00", ran["es"])}

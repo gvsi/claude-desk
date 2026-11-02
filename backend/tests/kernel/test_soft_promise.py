@@ -857,13 +857,7 @@ async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, st
 # ---- The session's request receipts back a later reply -----------------------------------------------
 
 # a held quote's receipt as the check reads it: its label, what was asked for, then the decision's status line
-def held_note(request: str) -> str:
-    """The note a held request's receipt ends with, naming that request (`render.RECEIPT_HELD_NOTE`)."""
-    return (f" (this card states only this {request}'s status; it says nothing about any other request, or whether"
-            " or when the owner will answer)")
-
-
-HELD_SEEN = f"Request receipt card: Quote request: Waiting for Mike Turner to approve{held_note('quote request')}"
+HELD_SEEN = "Request receipt card: Quote request: Waiting for Mike Turner to approve"
 
 
 async def test_the_soft_check_reads_a_held_requests_receipt(app, client, reviewer):
@@ -989,9 +983,7 @@ async def test_a_receipt_read_that_fails_adds_nothing(app, client, reviewer, mon
 @pytest.mark.parametrize(("prose", "language", "receipt"), [
     ("Your request is with Mike Turner now. Please check the request status in this chat.", "en", HELD_SEEN),
     ("Su solicitud está con Mike Turner. Consulte el estado de la solicitud en este chat.", "es",
-     "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta solo"
-     " indica el estado de esta solicitud de presupuesto; no dice nada de otras solicitudes, ni si el dueño"
-     " responderá ni cuándo)"),
+     "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner"),
 ])
 async def test_an_honest_acknowledgement_of_a_hold_passes_on_its_receipt(app, client, reviewer, prose, language,
                                                                          receipt):
@@ -1035,7 +1027,7 @@ async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(
     assert held_booking.state == "held"
     assert (await checked(client, visitor, CLEAN)).ok
     assert reviewer.soft_inputs[-1].cards == [
-        HELD_SEEN, f"Request receipt card: Booking request: Waiting for Mike Turner to approve{held_note('booking request')}"]
+        HELD_SEEN, "Request receipt card: Booking request: Waiting for Mike Turner to approve"]
 
     monkeypatch.delitem(render.RECEIPT_SUBJECTS["en"], "native.book")       # a tool the table doesn't name
     assert (await checked(client, visitor, CLEAN)).ok

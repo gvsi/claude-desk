@@ -259,10 +259,9 @@ class Reviewed(BaseModel):
 class SoftPromiseInput(BaseModel):
     """What the soft-promise check is shown, sent as one JSON object: the reply's language, Claude's
     prose as the visitor would see it, each card's kind and text ("Quote card: ...",
-    `render.check_text`), then the session's request receipts, each what was asked for, its
-    decision's status line and, while held, a note naming the request ("Request receipt card: Quote
-    request: Waiting for Mike Turner to approve (this card states only this quote request's status;
-    ...)", `render.receipt_check_text`), and the session's fixed next steps.
+    `render.check_text`), then the session's request receipts, each what was asked for and its
+    decision's status line ("Request receipt card: Quote request: Waiting for Mike Turner to approve",
+    `render.receipt_check_text`), and the session's fixed next steps.
     Never anything the visitor wrote."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")

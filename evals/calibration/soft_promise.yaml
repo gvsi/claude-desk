@@ -63,11 +63,9 @@
 #   voice_examples      the four English replies quoted in the visitor voice prompt, with about
 #                       and pricing policy cards beside those examples: pass. Pending a later run.
 #   request_receipts    the session's request receipts, which the kernel shows the check after a
-#                       reply's cards as "Request receipt card: ", what was asked for, a decision's
-#                       status line and, while the request is held, a note that the card states only
-#                       this request's status, the request and the note in the reply's language
-#                       ("Quote request: Waiting for Mike Turner to approve (this card states only
-#                       this quote request's status; ...)", "Solicitud de presupuesto: ..."):
+#                       reply's cards as "Request receipt card: ", what was asked for, in the reply's
+#                       language, and a decision's status line ("Quote request: Waiting for Mike
+#                       Turner to approve", "Solicitud de presupuesto: ..."):
 #                       saying a held request waits for the owner, offering a listed step meanwhile,
 #                       saying a booking closed the request, that the owner declined it or it timed
 #                       out, or that he approved it beside the quote that ran, in English and Spanish
@@ -149,9 +147,9 @@ cards:
   # the request receipts and the booking card the request_receipts group uses, with their labels as the
   # kernel sends them (`render.receipt_check_text`, `render.check_text`)
   receipt_held_en: &receipt_held_en |-
-    Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states only this quote request's status; it says nothing about any other request, or whether or when the owner will answer)
+    Request receipt card: Quote request: Waiting for Mike Turner to approve
   receipt_held_es: &receipt_held_es |-
-    Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta solo indica el estado de esta solicitud de presupuesto; no dice nada de otras solicitudes, ni si el dueño responderá ni cuándo)
+    Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner
   receipt_cancelled_en: &receipt_cancelled_en |-
     Request receipt card: Quote request: Cancelled
   receipt_cancelled_es: &receipt_cancelled_es |-
@@ -2623,8 +2621,8 @@ cases:
 
   # request_receipts: the session's request receipts, which the kernel shows the check after the
   # reply's cards though the reply doesn't show them again, each as "Request receipt card: ", what
-  # was asked for, a decision's status line and a note that the card states a status only, the
-  # request and the note in the reply's language: a held request awaiting the owner, or one resolved
+  # was asked for, in the reply's language, and a decision's status line: a held request awaiting
+  # the owner, or one resolved
   # since Claude's last reply that passed (a booking closed it, the owner declined it, it timed out).
   # Each case's cards carry their labels as the kernel sends them. A receipt backs what it says (the
   # quote request waits for Mike Turner; it was closed, declined or timed out) and nothing more: an

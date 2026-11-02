@@ -72,11 +72,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reply's own, though the reply doesn't show them again and cites no fact for them
    (`request_receipts`, never another session's), each as "Request receipt card: ", what was
    asked for in the reply's language, named from the request's tool (`render.RECEIPT_SUBJECTS`, a
-   business tool's by its block; a tool named in neither has no receipt), the decision's status
-   line, then, while it is held, a note in the reply's language that the card states only this
-   request's status, nothing about another, nor whether or when the owner will answer: each held
-   request awaiting the owner ("Quote request: Waiting for Mike Turner to approve (this card states
-   only this quote request's status; ...)"), and each request that has left `held` since
+   business tool's by its block; a tool named in neither has no receipt, nor has one the owner
+   has replaced since the request), then the decision's status line: each held request awaiting
+   the owner ("Quote request: Waiting for Mike Turner to approve"), and each request that has left
+   `held` since
    Claude's latest reply in the session that passed, in ledger order ("Quote request: Cancelled",
    when the visitor's booking closed a held discount). A receipt backs what it says and nothing
    more: never another request, a follow-up, an outcome, a time or an approval it doesn't state.
@@ -1560,10 +1559,9 @@ async def _last_passed_reply(ctx: KernelCtx, session_row: SessionRow, *, after: 
         event["summary"]["ok"].astext == "true").order_by(LedgerRow.seq.desc()).limit(1)))).scalar_one_or_none()
 
 
-async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str, bool]]:
+async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str]]:
     """The session's request receipts, oldest request first, each as what was asked for (its key in
-    `render.RECEIPT_SUBJECTS`), its decision's status line (`visitor_plain`) and whether it is still held,
-    read without a lock:
+    `render.RECEIPT_SUBJECTS`) and its decision's status line (`visitor_plain`), read without a lock:
     each held request awaiting the owner, as `_awaiting_holds` reads them (held and not expired), and
     each request that has left `held` (answered, cancelled, timed out, run or settled) after Claude's
     latest reply in the session that passed the check, by ledger order (its decision's `ledger_seq`,
@@ -1580,8 +1578,7 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     shown = [row for row in rows
              if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
     asked = await _receipt_asked(ctx, session_row, shown)
-    return [(key, row.visitor_plain, row.state == "held") for row, key in zip(shown, asked, strict=True)
-            if key is not None]
+    return [(key, row.visitor_plain) for row, key in zip(shown, asked, strict=True) if key is not None]
 
 
 async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, rows: Sequence) -> list[str | None]:
@@ -1610,7 +1607,7 @@ async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, rows: Sequence
 
 async def request_receipts(ctx: KernelCtx, session_row: SessionRow, language: render.Language) -> list[str]:
     """The session's request receipts as the soft checks read them (`render.receipt_check_text`), what was
-    asked for, and a held one's note, in the reply's `language`, never another session's: backing the
+    asked for in the reply's `language`, never another session's: backing the
     reply doesn't show again and cites no fact for, as an open handoff's card is. A read that fails adds
     none, in a savepoint of its own, so the transaction goes on: the receipts only widen what backs a
     reply, so not knowing fails toward the stricter check."""
@@ -1620,7 +1617,7 @@ async def request_receipts(ctx: KernelCtx, session_row: SessionRow, language: re
     except SQLAlchemyError as error:
         log_error(logger, error, "request_receipts_unread")
         return []
-    return [render.receipt_check_text(asked, line, language, held=held) for asked, line, held in found]
+    return [render.receipt_check_text(asked, line, language) for asked, line in found]
 
 
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:

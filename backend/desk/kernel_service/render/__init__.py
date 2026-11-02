@@ -29,8 +29,8 @@ fact statuses that count as current, and a renderer per language that returns th
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line; the soft checks read it after
 its kind's fixed label (`CHECK_LABELS`, `check_text`), and a session's request receipts after a label
-of their own (`RECEIPT_LABEL`, `receipt_check_text`), each carrying what was asked for, a decision's
-status line and, while the request is held, a note that the card states only its status. A
+of their own (`RECEIPT_LABEL`, `receipt_check_text`), each carrying what was asked for and a
+decision's status line. A
 template that names no fact kinds (handoff, verify_prompt) renders without one. `Template.current`
 says whether a fact may still be shown (a status the template renders, not expired), and a fact
 with nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an
@@ -326,22 +326,8 @@ RECEIPT_SUBJECTS: dict[str, dict[str, str]] = {
         "block:urgent": "Solicitud urgente",
     },
 }
-# After a held request's status line, in the reply's language, naming that request: the receipt states only its
-# status, so "Waiting for Mike Turner to approve" backs neither another request nor a follow-up or a time. A
-# request the owner answered, or that closed or ran, has no note: he has answered, or it no longer waits for him.
-RECEIPT_HELD_NOTE: dict[str, str] = {
-    "en": " (this card states only this {request}'s status; it says nothing about any other request, or whether or"
-          " when the owner will answer)",
-    "es": " (esta tarjeta solo indica el estado de esta {request}; no dice nada de otras solicitudes, ni si el dueño"
-          " responderá ni cuándo)",
-}
-
-
-def receipt_check_text(asked: str, visitor_plain: str, lang: Language, *, held: bool) -> str:
+def receipt_check_text(asked: str, visitor_plain: str, lang: Language) -> str:
     """A request receipt as the soft checks read it: its English label, what was asked for (`asked`, a tool
-    or `block:<name>`, `RECEIPT_SUBJECTS`) in `lang`, the decision's status line and, while the request is
-    `held`, the note naming it ("Request receipt card: Quote request: Waiting for Mike Turner to approve (this
-    card states only this quote request's status; ...)"). An `asked` with no subject raises KeyError."""
-    subject = RECEIPT_SUBJECTS[lang][asked]
-    note = RECEIPT_HELD_NOTE[lang].format(request=subject.lower()) if held else ""
-    return f"{RECEIPT_LABEL} card: {subject}: {visitor_plain}{note}"
+    or `block:<name>`, `RECEIPT_SUBJECTS`) in `lang`, then the decision's status line ("Request receipt card:
+    Quote request: Waiting for Mike Turner to approve"). An `asked` with no subject raises KeyError."""
+    return f"{RECEIPT_LABEL} card: {RECEIPT_SUBJECTS[lang][asked]}: {visitor_plain}"
