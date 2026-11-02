@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query';
 import { expect, it, onTestFinished, vi } from 'vitest';
 
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -113,4 +114,22 @@ it('marks the drawn cursor once, follows new rows while open, and leaves closed 
   await router.navigate(`${LIST}/ses-alex-agent`);
   await expect.poll(() => unreadRows().length).toBe(0);
   await expect.poll(conversationPill).toBeNull();
+});
+
+it('follows a later list read over a newer Desks count, even when the number is the same', async () => {
+  // The list said 2, then a fresh Desks read said 1 (the held chat read meanwhile), then the visitor wrote again and
+  // the list said 2 once more: the sidebar shows the list's newer 2, not the Desks read's 1.
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  await renderRoute(LIST, { pollScale: 100 });
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  await expect.poll(() => unreadRows().length).toBe(2);
+  await expect.poll(() => conversationPill()?.getAttribute('aria-label')).toBe('2 unread');
+  heldChat().readThrough = newest();
+  await client.refetchQueries({ queryKey: ['desks'] });
+  await expect.poll(() => conversationPill()?.getAttribute('aria-label')).toBe('1 unread');
+  mockStore.world.visitorText(heldChat(), 'One more question after that.');
+  await client.refetchQueries({ queryKey: ['conversations', RIVERA.deskId] });
+  await expect.poll(() => unreadRows().length).toBe(2);
+  await expect.poll(() => conversationPill()?.getAttribute('aria-label')).toBe('2 unread');
 });

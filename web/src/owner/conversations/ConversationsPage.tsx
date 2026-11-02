@@ -107,7 +107,7 @@ export function ConversationsPage() {
   // Each read of the list carries its unread count to the sidebar, which every page shows.
   useEffect(() => {
     if (list.data !== undefined) syncUnreadCount(queryClient, deskId);
-  }, [list.data, deskId, queryClient]);
+  }, [list.data, list.dataUpdatedAt, deskId, queryClient]);
   const needsYou = useNeedsYou(deskId);
   // The chats with an open handoff, from Needs you's last good read: a later read that fails leaves
   // them open, and with none yet, the rows keep their usual status.

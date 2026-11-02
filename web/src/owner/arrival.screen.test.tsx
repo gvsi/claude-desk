@@ -482,7 +482,8 @@ describe('Arrival', () => {
     let sawTheOldInbox = false;
     const look = new MutationObserver(() => {
       const rows = document.querySelectorAll<HTMLAnchorElement>('.cd-sidebar a');
-      if ([...rows].some((row) => /^Notifications\b/.test(row.textContent ?? '') && row.querySelector('[aria-label="2 unread"]') !== null)) {
+      if ([...rows].some((row) => row.querySelector('.cd-sidebar__label')?.textContent === 'Notifications'
+        && row.querySelector('[aria-label="2 unread"]') !== null)) {
         sawTheOldInbox = true;
       }
     });

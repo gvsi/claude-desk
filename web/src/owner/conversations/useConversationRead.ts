@@ -10,12 +10,19 @@ const listKey = (deskId: string) => ['conversations', deskId] as const;
  * keeps and checks for fresh reads of its own, so following the list never reads the Desks again or looks like it. */
 const unreadKey = (deskId: string) => ['unreadConversations', deskId] as const;
 
-/** Carry the cached conversation list's unread rows to the sidebar's count, with nothing read again. */
-export function syncUnreadCount(queryClient: QueryClient, deskId: string): void {
-  const rows = queryClient.getQueryData<ConversationSummary[]>(listKey(deskId));
-  if (rows === undefined) return;
-  const count = rows.filter((row) => row.unread).length;
-  if (queryClient.getQueryData<number>(unreadKey(deskId)) !== count) queryClient.setQueryData(unreadKey(deskId), count);
+/**
+ * Carry the cached conversation list's unread rows to the sidebar's count, with nothing read again, stamped with the
+ * time the list was read (`at`, or the list's own read time): a later Desks read then wins over it, and a later list
+ * read wins back, even when the number is the same.
+ */
+export function syncUnreadCount(queryClient: QueryClient, deskId: string, at?: number): void {
+  const list = queryClient.getQueryState<ConversationSummary[]>(listKey(deskId));
+  if (list?.data === undefined) return;
+  const count = list.data.filter((row) => row.unread).length;
+  const updatedAt = at ?? list.dataUpdatedAt;
+  const held = queryClient.getQueryState<number>(unreadKey(deskId));
+  if (held?.data === count && held.dataUpdatedAt >= updatedAt) return;
+  queryClient.setQueryData(unreadKey(deskId), count, { updatedAt });
 }
 
 /** The sidebar's unread count for the Desk: the conversation list's, when it was seen after the Desks read gave
@@ -45,7 +52,7 @@ export function useConversationRead(deskId: string, sessionId: string, through: 
         void request('markConversationRead', { params: { session_id: sessionId }, body: { through } }).then(() => {
           queryClient.setQueryData<ConversationSummary[]>(listKey(deskId), (rows) => rows?.map((row) => (
             row.session_id === sessionId && row.unread ? { ...row, unread: false } : row)));
-          syncUnreadCount(queryClient, deskId);
+          syncUnreadCount(queryClient, deskId, Date.now());
         }).catch(() => { /* Read markers never interrupt the conversation. */ });
       });
     };
