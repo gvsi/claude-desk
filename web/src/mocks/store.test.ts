@@ -1380,6 +1380,111 @@ describe('the scripted Desk', () => {
     expect((await read())?.held_by).toBe(defaultAsk.reason);
   });
 
+  it.each([
+    ['seed', 'changed'], ['seed', 'removed'], ['confirmed', 'changed'], ['confirmed', 'removed'],
+  ] as const)('held_by_keeps_the_%s_version_when_the_rule_is_%s', async (start, change) => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    const competing: RuleCard = {
+      card_id: 'a-refund-effect', applies_to: 'effect:pay_out', mode: 'ask', who: 'anyone',
+      reason: 'Payouts ask first.',
+    };
+    if (start === 'confirmed') {
+      const initial = world.draft(main, [competing]);
+      expect(world.confirmDraft(main, initial.version)).toMatchObject({ version: initial.version });
+    } else {
+      world.addActiveRules(main, [competing]);
+      expect(main.versions.size).toBe(0);
+    }
+    const heldVersion = main.policy.version;
+    const refundRule = main.policy.cards.find((card) => card.card_id === 'rv-refund')!;
+    const refund = world.addHeldRefund();
+    // All matching hold cards are stored; the tool card outranks the effect card.
+    refund.card_ids = [competing.card_id, refundRule.card_id];
+    expect(refund.policy_version).toBe(heldVersion);
+    const read = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+        (item) => item.decision?.decision_id === refund.decision_id,
+      );
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+
+    const next = world.draftCards(main, main.policy.cards.flatMap((card) =>
+      card.card_id !== refundRule.card_id ? [card] : change === 'removed' ? [] : [{ ...card, reason: 'New refund rule.' }],
+    ));
+    expect(world.confirmDraft(main, next.version)).toMatchObject({ version: heldVersion + 1 });
+
+    expect((await read())?.decision?.state).toBe('held');
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+    expect(main.versions.has(main.policy.version)).toBe(false);
+  });
+
+  it('keeps_no_archived_versions_after_100_confirms_without_held_decisions', () => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    world.decisions.clear();
+    for (let i = 0; i < 100; i += 1) {
+      const draft = world.draft(main, []);
+      expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+    }
+    expect(main.versions.size).toBe(0);
+  });
+
+  it('held_by_names_no_rule_when_the_deciding_version_is_missing', async () => {
+    const refund = mockStore.world.addHeldRefund();
+    refund.policy_version = 999;
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+      .find((item) => item.decision?.decision_id === refund.decision_id);
+    expect(held?.held_by).toBeNull();
+  });
+
+  it('held_by_reads_an_in_place_edit_of_the_active_cards', async () => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    const draft = world.draft(main, []);
+    expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+    const refund = world.addHeldRefund();
+    expect(refund.policy_version).toBe(main.policy.version);
+    const card = main.policy.cards.find((card) => card.card_id === 'rv-refund')!;
+    card.reason = 'The current refund rule asks for your answer.';
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+      .find((item) => item.decision?.decision_id === refund.decision_id);
+    expect(held?.held_by).toBe(card.reason);
+    expect(main.versions.has(main.policy.version)).toBe(false);
+  });
+
+  it.each(['allow', 'deny', 'cancel', 'refuse', 'closed_allow', 'closed_deny'] as const)(
+    'drops_archived_cards_after_the_last_hold_resolves_%s', (resolution) => {
+      const world = mockStore.world;
+      const main = world.desk(deskId)!;
+      world.decisions.clear();
+      const first = world.addHeldRefund();
+      const last = world.addHeldRefund();
+      const version = first.policy_version;
+      const draft = world.draft(main, []);
+      expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+      expect([...main.versions.keys()]).toEqual([version]);
+
+      world.cancel(world.decisions.get(first.decision_id)!);
+      expect([...main.versions.keys()]).toEqual([version]);
+      const record = world.decisions.get(last.decision_id)!;
+      let state: DecisionState;
+      if (resolution === 'cancel') state = world.cancel(record).state;
+      else if (resolution === 'closed_allow' || resolution === 'closed_deny') {
+        world.deleteDesk(main);
+        state = world.answerClosed(record, resolution === 'closed_allow' ? 'allow_once' : 'deny_once').state;
+      } else {
+        if (resolution === 'refuse') {
+          main.policy.cards = main.policy.cards.map((card) => card.card_id === 'rv-refund' ? { ...card, mode: 'never' } : card);
+        }
+        state = world.answer(record, resolution === 'deny' ? 'deny_once' : 'allow_once').state;
+      }
+      expect(state).toBe(resolution === 'cancel' ? 'cancelled'
+        : resolution === 'refuse' || resolution === 'closed_allow' ? 'refused_at_execution'
+        : resolution === 'deny' || resolution === 'closed_deny' ? 'denied' : 'executed');
+      expect(main.versions.size).toBe(0);
+    },
+  );
+
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
     // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
     // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)
@@ -1729,6 +1834,52 @@ describe('taking over', () => {
   /** What the ledger holds for `sessionId`, by kind, oldest first. */
   const kindsFor = (sessionId: string) =>
     (mockStore.world.desks[0]?.ledger ?? []).filter((e) => e.event.session_id === sessionId).map((e) => e.event.kind);
+
+  it('hand_back_answers_the_waiting_visitor_once', async () => {
+    const { session, events } = await openChat();
+    const params = { session_id: session.session_id };
+    expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
+    await send('Do you work in Alameda?');
+    await drain();
+    expect(typesOf(events)).toEqual(['owner_joined']);
+
+    expect((await call('handback', { params, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events)).toEqual(['owner_joined', 'owner_left', 'writing', 'message', 'turn_end']);
+    expect(events[3]?.[1]).toMatchObject({ type: 'message', author: 'claude', generation: session.generation + 2 });
+    await drain();
+    expect(typesOf(events).filter((kind) => kind === 'message')).toHaveLength(1);
+  });
+
+  it('hand_back_leaves_a_waiting_agent_line_for_its_next_request', async () => {
+    // As on the API, an agent's line waits too, but its turn runs only on the agent's own next request.
+    const world = mockStore.world;
+    const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+    const params = { session_id: agent.state.session_id };
+    expect((await call('takeover', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    world.agentText(agent, 'Can someone come on Thursday?');
+    expect((await call('handback', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    await drain();
+    expect(agent.events.map(({ ev }) => ev.type)).toEqual(['owner_joined', 'owner_left']);
+  });
+
+  it.each(['empty', 'owner_answered', 'owner', 'claude'] as const)('hand_back_starts_nothing_after_%s', async (latest) => {
+    const { session, events } = await openChat();
+    const params = { session_id: session.session_id };
+    if (latest === 'claude') {
+      await send('Do you work in Alameda?');
+      await drain();
+    }
+    expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
+    if (latest === 'owner_answered') await send('Do you work in Alameda?');
+    if (latest === 'owner_answered' || latest === 'owner') {
+      expect((await call('ownerMessage', { params, body: { kind: 'say', text: 'Yes, we do.' } })).status).toBe(200);
+    }
+    const before = events.length;
+    expect((await call('handback', { params, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events.slice(before))).toEqual(['owner_left']);
+  });
 
   it('takeover_fences_the_turn_in_flight', async () => {
     const { session, events } = await openChat();

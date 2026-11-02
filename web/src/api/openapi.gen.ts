@@ -928,13 +928,16 @@ export interface SetupConsentIn {
 /**
  * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
  * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
- * only to a card message, with role `claude` and empty text.
+ * only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+ * themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
+ * false. Read-only: it only says what happened.
  */
 export interface SetupMessage {
   role: "claude" | "owner" | "tool_label";
   text: string;
   choices?: Choice[];
   card?: ProposalCard | null;
+  owner_decided?: boolean;
 }
 /**
  * The owner's decision on a setup proposal, with optional changes when accepting it.
@@ -991,6 +994,15 @@ export interface SetupPublicLinesConfirmIn {
    */
   keys: [string, ...string[]];
   revision: string;
+}
+/**
+ * `POST /api/owner/setup/{id}/reopen`: "Change something", the owner's message to Claude from a step after the
+ * questions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),
+ * makes a repeat answer the interview as the first left it instead of sending the message twice.
+ */
+export interface SetupReopenIn {
+  text: string;
+  idempotency_key: string;
 }
 /**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
@@ -1291,6 +1303,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/proposals/{proposal_id}": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/reopen": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },

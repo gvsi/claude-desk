@@ -2,8 +2,9 @@
 
 Rows are never edited or deleted. The only later writes are a pending row's place in the model's history
 (`model_context`, `model_seq`, set once), a pending row's `wake` cleared when a paused session hands off
-(`clear_wake`), and an owner translation (`set_owner_translation`, once). Every function runs in the caller's
-transaction and never commits.
+(`clear_wake`), a waiting hand-back note's `wake` cleared when the owner takes the chat over again
+(`clear_hand_back_wake`), and an owner translation (`set_owner_translation`, once). Every function runs in the
+caller's transaction and never commits.
 
 Recorded history (Plan 01d): a row replayed into a new copy is written with `Replayed` (its recording's `replay_id`
 and the moment it was shown, which becomes its `created_at`). It is data for the owner's reads, not a turn: it has no
@@ -85,6 +86,7 @@ from desk.api.prompts import (
     wrap,
     wrap_action_update,
 )
+from desk.api.ro import KernelRO
 from desk.api.schemas import OwnerTranscriptItem, StoppedDraft, TranscriptItem
 from desk.contracts import RenderedBlock
 from desk.db.models import ActionUpdateMetadata, Message, RunEvent
@@ -771,6 +773,35 @@ async def has_pending(conn: AsyncConnection, session_id: str) -> bool:
     return await latest_pending(conn, session_id) is not None
 
 
+async def mode_for_message(ro: KernelRO, session_id: str, named: str) -> str:
+    """The session's mode as a visitor's or an agent's message is about to be stored, which decides whether it wakes
+    Claude: read from the session's kernel_ro row under its events lock, taken here and held until the transaction
+    ends, so call it in the transaction that appends the message. The kernel commits a hand-back's mode before the
+    hand-back takes that lock to look for a waiting message (`has_unanswered_message`), so either this read sees
+    Claude has the chat again, or the hand-back looks after the message has committed and finds it. `named` is the
+    mode the kernel named the request's session in, used when the row isn't there."""
+    if ro.own_transactions:
+        raise ValueError("the mode is read in the transaction that stores the message")
+    await lock_events(ro.conn, session_id)
+    session = await ro.session(session_id)
+    return named if session is None else session["mode"]
+
+
+async def has_unanswered_message(conn: AsyncConnection, session_id: str) -> bool:
+    """Whether the latest conversational message is the visitor's or visiting agent's, with no delivered reply after
+    it.
+
+    Mode markers, private whispers and bookkeeping aren't answers. Read under the events lock so a message
+    being stored has committed before deciding whether the hand-back should wake Claude.
+    """
+    await lock_events(conn, session_id)
+    kind = (await conn.execute(select(MESSAGES.c.kind).where(
+        MESSAGES.c.session_id == session_id, NOT_REPLAYED,
+        MESSAGES.c.kind.in_((*SAID_KINDS, "owner_say", "delivered")))
+        .order_by(MESSAGES.c.n.desc()).limit(1))).scalar_one_or_none()
+    return kind in SAID_KINDS
+
+
 async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
     """The `n` of the session's latest pending row (`has_pending`), or None when no work is waiting."""
     return (await conn.execute(select(func.max(MESSAGES.c.n)).where(
@@ -810,6 +841,16 @@ async def clear_wake(conn: AsyncConnection, session_id: str) -> int:
     for the model and reach it at its next call. Returns how many rows it cleared."""
     cleared = await conn.execute(update(MESSAGES).where(
         MESSAGES.c.session_id == session_id, MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake).values(wake=False))
+    return cleared.rowcount
+
+
+async def clear_hand_back_wake(conn: AsyncConnection, session_id: str) -> int:
+    """On a take-over, stop the wake of a hand-back note no model call has placed yet: it woke Claude for a message
+    that waited, which the owner now has the chat to answer, and the next hand-back looks for one again
+    (`has_unanswered_message`). The note still reaches the model at its next call. Returns how many rows it cleared."""
+    cleared = await conn.execute(update(MESSAGES).where(
+        MESSAGES.c.session_id == session_id, MESSAGES.c.kind == "note", MESSAGES.c.text == NOTES["handed_back"],
+        MESSAGES.c.model_seq.is_(None), MESSAGES.c.wake).values(wake=False))
     return cleared.rowcount
 
 

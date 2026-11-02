@@ -56,7 +56,7 @@ export function continueSetupLine(step: UnfinishedSetupStep, answering: boolean)
 export const TODAY_COPY = {
   chatDetail: 'Your public page opens in a new tab. Ask about a price or a time.',
   breakBeforeOwner: "Ask for a discount, another customer's address or ",
-  breakAfterOwner: "'s home number. Safety shows what was refused and why.",
+  breakAfterOwner: "'s home number. Safety shows what was stopped and why.",
   waiting: 'A request is waiting for your answer.',
   heldBy: 'Held by your rule: ',
   /** "Answer a held request" before anything is held. */
@@ -90,11 +90,11 @@ export function howItWorksSteps(business: string): readonly { title: string; lin
   ];
 }
 
-/** Today's counts under the steps, over the briefing's window (since last night). */
+/** Today's outcomes: handled and refused since last night, requests still held now. */
 export interface TodayCounts {
   /** What Claude did on its own: the answers and the bookings. */
   handled: number;
-  /** What waits for the owner now. */
+  /** Requests waiting for the owner's answer now, excluding callbacks. */
   held: number;
   /** The requests the kernel refused. */
   turnedDown: number;

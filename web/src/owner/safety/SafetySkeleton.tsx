@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 
-import { chainLine, PageHeaderSkeleton, Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
+import { chainLine, entriesLabel, PageHeaderSkeleton, Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
 import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, SAFETY_SUBTITLE, heldForYou, originCopy, turnedDownHeadline } from './copy.ts';
 
@@ -81,11 +81,11 @@ function Bar() {
           <Skeleton
             shape="block"
             height="1lh"
-            className="cd-type-count"
+            className="cd-chain-status__count cd-type-caption"
             radius="full"
             measure={{
-              label: '40',
-              className: 'cd-count-pill cd-type-count',
+              label: entriesLabel(40),
+              className: 'cd-type-caption',
               tagName: 'span',
             }}
           />

@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { Button, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
+import { Button, COPIED_FOR_MS, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { givenOwnerName } from '../../public/brand.ts';
@@ -52,8 +52,7 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   failed: "Copy didn't work. Select the link and copy it yourself.",
 };
 
-/** How long the link's pill says "Copied" after a copy that worked. */
-export const COPIED_FOR_MS = 1_600;
+export { COPIED_FOR_MS } from '../../ds/index.ts';
 
 /**
  * `/app/:deskId/today`: a band across the page with the greeting, who is here now, the Desk's public
@@ -217,7 +216,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   });
   if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
   const requested = !returningFromBriefing && visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
-  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused && readFailure === null;
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
@@ -302,6 +301,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               deskId={deskId}
               business={desk.business_name}
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
+              heldCount={readWorked ? listed.length : undefined}
+              callbackCount={callbacks.length}
               firstHeldId={firstHeld?.decision.decision_id ?? null}
             />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />

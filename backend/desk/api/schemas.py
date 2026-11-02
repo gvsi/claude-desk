@@ -722,6 +722,17 @@ class SetupProposalIn(BaseModel):
         return self
 
 
+class SetupReopenIn(BaseModel):
+    """`POST /api/owner/setup/{id}/reopen`: "Change something", the owner's message to Claude from a step after the
+    questions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),
+    makes a repeat answer the interview as the first left it instead of sending the message twice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    idempotency_key: IdempotencyKey
+
+
 class SetupSuggestionsIn(BaseModel):
     """Finish setup questions with the current suggestions; no additional answers are supplied."""
 
@@ -731,12 +742,15 @@ class SetupSuggestionsIn(BaseModel):
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
     owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
-    only to a card message, with role `claude` and empty text."""
+    only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+    themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
+    false. Read-only: it only says what happened."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
     choices: list[Choice] = []
     card: ProposalCard | None = None
+    owner_decided: bool = False
 
 
 class SetupPublicLine(BaseModel):
