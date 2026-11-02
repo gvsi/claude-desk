@@ -296,7 +296,7 @@ const IN_REVIEW = 'Built against the board in review; sign-off pending.';
  * The stories draw the boards as they are.
  */
 const SINCE_THE_BAR =
-  'The board predates the bar pinned to the top of the open conversation (REV-720 C). The web app draws "Demo visitor" in that bar, right after the level pill, and the note at the top of the transcript, 16 px under the bar and over its opening lines, so it scrolls away with them.';
+  'The board predates the bar pinned to the top of the open conversation (REV-720 C). The web app draws "Demo visitor" in that bar, right after the level pill, and the note at the top of the transcript, 16 px under the bar and over its opening lines, so it scrolls away with them. The web app\'s take-over and whisper composers now show example placeholders, with a helper line under the take-over one (#905), where the board draws the older placeholder words.';
 
 /** What the web app's Things to try draws differently from the REV-DEMO Today boards, by the owner's later choices. */
 const SINCE_THE_CHOICES =
