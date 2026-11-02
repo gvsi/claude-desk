@@ -17,7 +17,7 @@
 
 A mode this build doesn't know shows the `ai` bar, which offers only Take over. `agent` drops the line about what the visitor sees: agents never receive it.
 
-With `takeOverAbove`, the screen draws Take over itself, in the bar at the top of the owner's open conversation (board REV-720 C): while Claude answers, this bar keeps only its line about whispers, with no button and no line about what the visitor sees. The owner and paused bars are unchanged.
+With `takeOverAbove`, the screen draws Take over itself, in the bar at the top of the owner's open conversation (board REV-720 C): while Claude answers, this bar keeps only its line about whispers, with no button and no line about what the visitor sees. The screen spins its Take over only for its own press; other pending changes leave it waiting. When that button goes while focused, the screen moves focus to `.cd-take-over__first`. After its own press ends, the screen brings the alert into view on failure, or, when the mode is now `owner` and focus hasn't reached the controls, brings `.cd-take-over__first` into view instantly with `scrollIntoView({ block: 'nearest' })`. The owner and paused bars are unchanged.
 
 ## What the consumer provides
 
@@ -35,7 +35,7 @@ With `takeOverAbove`, the screen draws Take over itself, in the bar at the top o
 | `visitorName` | `string` | Required. |
 | `ownerName` | `string` | Required. `owner_display_name`. |
 | `agent` | `boolean` | An agent's session. |
-| `takeOverAbove` | `boolean` | Take over is drawn above, in the conversation's bar: the `ai` bar keeps only its line. |
+| `takeOverAbove` | `boolean` | The `ai` bar keeps only its line. The screen owns Take over above: spin only for its own press, move focus to `.cd-take-over__first` when the focused button goes, and reveal the alert or owner's first line after its press as described above. |
 | `onTakeOver` | `() => void` | Required. |
 | `onHandBack` | `() => void` | Required. |
 | `onResume` | `() => void` | Required. |
