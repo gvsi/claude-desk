@@ -258,11 +258,15 @@
 }
 
 /* When the pane cannot fit the head, a held request's card and the controls after Take over,
-   the transcript takes its own height and the whole column scrolls. Those parts need about
-   37 rem in the two-column layout and 40 rem in the single-column layout, where
-   "All conversations" sits above the head and the head and card wrap more. */
+   the transcript takes its own height and the whole column scrolls. Measured with the app fonts,
+   the two-column layout needs 83 px for the head, 214 for the controls, 261 for the held card at
+   its narrowest, and 24 for the gaps (two 16 px gaps less the transcript's 8 px margins): 582 px.
+   41.5 rem keeps the previous header's clearance. In a 390 px single column those parts take
+   117 + 214 + 306 + 24 px, plus 34 for "All conversations": 695 px. 44.5 rem leaves 17 px for
+   the transcript's 8 px focus padding and a little slack. Queries measure the pane's content box,
+   so its 44 px vertical padding is outside these totals. */
 @media (min-width: 1024px) {
-  @container cd-open-conversation (max-height: 37.5rem) {
+  @container cd-open-conversation (max-height: 41.5rem) {
     .cd-conversation__scroll {
       flex: none;
       overflow: visible;
@@ -271,7 +275,7 @@
 }
 
 @media (max-width: 1023.98px) {
-  @container cd-open-conversation (max-height: 40rem) {
+  @container cd-open-conversation (max-height: 44.5rem) {
     .cd-conversation__scroll {
       flex: none;
       overflow: visible;

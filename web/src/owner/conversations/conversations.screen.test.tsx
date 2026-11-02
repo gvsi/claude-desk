@@ -12,6 +12,7 @@ import type { Decision, StatusEvent } from '../../api/contracts.ts';
 import type { Attempt, ConversationSummary, NeedsYouItem, OwnerTranscript } from '../../api/views.ts';
 import { ROUTES } from '../../api/routes.ts';
 import { proseBlock, rivera } from '../../ds/fixtures/index.ts';
+import { loadWebFonts } from '../../ds/test/fonts.ts';
 import { typingPingMs } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { AFTER_VERIFY, DECISIONS, DEMO_CODE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, writing } from '../../mocks/script.ts';
@@ -434,15 +435,17 @@ describe('Conversations', () => {
     await row.click();
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    // The phone's shorter pane scrolls with the head; desktop keeps its transcript region.
+    const region = scrollerOf(card.element());
+    const transcript = screen.container.querySelector('.cd-conversation__scroll')!;
     await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
     expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
     expect(region.scrollHeight).toBeGreaterThan(region.clientHeight);
-    expect(region.scrollTop).toBe(0);
+    expect(transcript.scrollTop).toBe(0);
     await card.getByRole('button', { name: 'Mark done' }).click();
     await expect.element(card).not.toBeInTheDocument();
     await expect.poll(() => document.activeElement).toBe(screen.getByRole('heading', { level: 2, name: DANA }).element());
-    expect(region.scrollTop).toBe(0);
+    expect(transcript.scrollTop).toBe(0);
   });
 
   it('callback_stays_after_takeover_and_fits_390px', async () => {
@@ -1130,6 +1133,43 @@ describe('Conversations', () => {
       expectNoWindowScroll();
     });
   }
+
+  it.each([
+    [390, 800, true],
+    [390, 880, true],
+    [390, 900, true],
+    [390, 940, false],
+    [430, 858, true],
+    [1024, 718, true],
+    [1440, 650, true],
+    [1440, 740, true],
+    [1440, 900, false],
+  ] as const)('a_held_card_fits_after_take_over_at_%sx%s', async (width, height, wholeColumn) => {
+    await loadWebFonts();
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeInTheDocument();
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer')).toBeNull();
+    const region = card.element().closest<HTMLElement>('.cd-conversation__scroll')!;
+    const pane = region.closest<HTMLElement>('.cd-conversations__open')!;
+    // Exactly one region moves the conversation. If the transcript has its own box, a whole
+    // held card must fit in it, with the pane staying still around the head and controls.
+    const fits = getComputedStyle(region).overflowY === 'visible'
+      || region.clientHeight >= card.element().getBoundingClientRect().height + 8;
+    expect(fits, `held card ${card.element().getBoundingClientRect().height}px in transcript ${region.clientHeight}px`).toBe(true);
+    expect(getComputedStyle(region).overflowY === 'visible').toBe(wholeColumn);
+    card.element().scrollIntoView({ block: 'start' });
+    await expect.element(card).toBeInViewport({ ratio: 1 });
+    if (region.scrollHeight > region.clientHeight || pane.scrollHeight > pane.clientHeight) {
+      expect(scrollerOf(card.element()) === (wholeColumn ? pane : region)).toBe(true);
+    }
+    if (wholeColumn) expect(region.scrollHeight).toBeLessThanOrEqual(region.clientHeight);
+    else expect(pane.scrollHeight).toBeLessThanOrEqual(pane.clientHeight);
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
 
   it('a_window_made_short_keeps_the_latest_in_view', async () => {
     // A long chat read at 1440 by 900, in the transcript's own region under the head.
@@ -2266,19 +2306,23 @@ describe('Conversations', () => {
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
 
-    // Read to its end, the chat scrolls on its own there too: the way back and the chat's head stay
-    // in view above it, and the owner's controls under it.
+    // This phone's pane is short enough to scroll as one: the head and way back move with the
+    // transcript, and the owner's controls are at its end.
     const latest = log(screen).getByText(last, { exact: true });
     latest.element().scrollIntoView({ block: 'end' });
     await expect.element(latest).toBeInViewport({ ratio: 1 });
-    await expect.element(screen.getByRole('link', { name: 'All conversations' })).toBeInViewport({ ratio: 1 });
-    await expect.element(screen.getByRole('heading', { level: 2, name: DANA })).toBeInViewport({ ratio: 1 });
-    await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
+    expect(scrollerOf(latest.element()).contains(screen.getByRole('heading', { level: 2, name: DANA }).element())).toBe(true);
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    takeOver.element().scrollIntoView({ block: 'end' });
+    await expect.element(takeOver).toBeInViewport({ ratio: 1 });
     const main = screen.getByRole('main').element();
     expect(scrollerOf(latest.element())).not.toBe(main);
     expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
     expectNoWindowScroll();
-    await screen.getByRole('link', { name: 'All conversations' }).click();
+    const back = screen.getByRole('link', { name: 'All conversations' });
+    back.element().scrollIntoView({ block: 'start' });
+    await expect.element(back).toBeInViewport({ ratio: 1 });
+    await back.click();
     await expect.poll(() => router.state.location.pathname).toBe(LIST);
     await expect.element(list).toBeVisible();
   });
