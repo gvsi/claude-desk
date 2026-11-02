@@ -1397,12 +1397,12 @@ describe('public chat page', () => {
     }
     await frames();
 
-    // Mike joins, and his row rises into place, reaching a little below the end until it settles.
-    // The visitor, at the end, scrolls to the very bottom as it lands, so the browser takes the
-    // conversation back up a pixel at a time as the row settles, each scroll's event coming only
-    // with the next frame. Between one of those scrolls and its event, a pasted message grows the
-    // composer over the end. The browser's scroll isn't the visitor leaving the end, so the end
-    // comes back above the composer.
+    // Mike joins, and his row rises into place. The visitor, at the end, scrolls to the very bottom
+    // as it lands. The row rises within the room the conversation leaves under its end, so the
+    // browser doesn't take the conversation back up as it settles. Should the browser still move it
+    // up a pixel or two in the very moment a pasted message grows the composer over the end, that
+    // scroll's event coming only with the next frame, the scroll isn't the visitor leaving the end,
+    // so the end comes back above the composer.
     const region = chatScroller();
     const box = screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).element() as HTMLTextAreaElement;
     let tookBack = false;
@@ -1412,17 +1412,17 @@ describe('public chat page', () => {
         if (!document.body.textContent?.includes('Mike Turner joined the chat')) return;
         watcher.disconnect();
         region.scrollTo({ top: region.scrollHeight, behavior: 'instant' });
-        let was = region.scrollTop;
+        const bottom = region.scrollTop;
         const since = performance.now();
-        // Looked at between frames, so the paste comes right after the browser's scroll, before its event.
+        // Looked at between frames while the row is still rising, then the browser's own small
+        // scroll and the paste, together, before either's event.
         const look = (): void => {
-          const now = region.scrollTop;
-          if (now >= was && performance.now() - since < 1_000) {
-            was = now;
+          if (region.scrollTop < bottom) tookBack = true;
+          if (performance.now() - since < 60) {
             realSetTimeout(look, 0);
             return;
           }
-          tookBack = now < was;
+          region.scrollBy({ top: -2, behavior: 'instant' });
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, 'one\ntwo\nthree\nfour\nfive\nsix');
           box.dispatchEvent(new Event('input', { bubbles: true }));
           grownOver = endUnderTheComposer(screen);
@@ -1434,7 +1434,7 @@ describe('public chat page', () => {
       watcher.observe(document.body, { subtree: true, childList: true, characterData: true });
       mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
     });
-    expect(tookBack, 'the browser took the conversation back up as the row settled').toBe(true);
+    expect(tookBack, 'the browser left the conversation where it was as the row rose').toBe(false);
     expect(grownOver, 'the composer grew over the end').toBeGreaterThan(48);
     await frames();
     expect(box.value.split('\n'), 'the pasted lines are in the composer').toHaveLength(6);
@@ -3934,10 +3934,23 @@ describe('a waiting request stays findable', () => {
   }, 30_000);
 });
 
+/** The room a conversation scrolled to its end leaves between what it shows last and the composer area: 24 px. */
+const ROOM_UNDER_THE_END = 24;
+
 /**
- * The end of the conversation (its last row, receipt or notice) sits right above the composer that
- * stays at the bottom of the window: in view, and not hidden under it, nor under the chat's head
- * that stays at the top.
+ * Where what the conversation shows last ends: its last row, receipt or card, or what the page
+ * draws under them (a notice, the Demo inbox's button).
+ */
+function shownEnd(conversation: Element): number {
+  const shown = [...conversation.children].filter((part) => getComputedStyle(part).position !== 'absolute' && part.getBoundingClientRect().height > 0);
+  return Math.max(...shown.map((part) => part.getBoundingClientRect().bottom));
+}
+
+/**
+ * The end of the conversation (its last row, receipt or notice) sits above the composer that stays
+ * at the bottom of the window, with room under it: in view, and not hidden under the composer, nor
+ * under the chat's head that stays at the top. Once the conversation has scrolled to get there, the
+ * room is exactly ROOM_UNDER_THE_END; a conversation too short to scroll keeps at least that.
  */
 function expectEndAboveTheComposer(screen: RenderResult): void {
   const { composer, conversation } = conversationAndComposer(screen);
@@ -3945,6 +3958,12 @@ function expectEndAboveTheComposer(screen: RenderResult): void {
   const top = composer.getBoundingClientRect().top;
   expect(Math.abs(end - top), `the conversation ends at ${end}, the composer starts at ${top}`).toBeLessThanOrEqual(2);
   expect(top).toBeLessThanOrEqual(innerHeight);
+  const room = top - shownEnd(conversation);
+  if (chatScroller().scrollTop > 0) {
+    expect(Math.abs(room - ROOM_UNDER_THE_END), `${room} px between the conversation's last line and the composer`).toBeLessThanOrEqual(2);
+  } else {
+    expect(room, `${room} px between the conversation's last line and the composer`).toBeGreaterThanOrEqual(ROOM_UNDER_THE_END - 2);
+  }
   const rows = conversation.querySelectorAll('.cd-transcript-row');
   const last = rows[rows.length - 1]?.getBoundingClientRect();
   expect(last?.bottom ?? 0).toBeLessThanOrEqual(top);

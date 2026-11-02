@@ -160,8 +160,10 @@ function useRevealNewTurns(root: { current: HTMLElement | null }, turns: readonl
       if (end === undefined) return false;
       reveal(end);
       // The review's buttons are the one action that applies the change: when they and the owner's
-      // words don't both fit, the buttons win, wholly in view.
-      const short = end.getBoundingClientRect().bottom + scrollMargin(turn, 'bottom') - log.getBoundingClientRect().bottom;
+      // words don't both fit, the buttons win, wholly in view, with the room for their focus rings
+      // the conversation keeps at its top. The owner's words win over the room under the end.
+      const ring = Number.parseFloat(getComputedStyle(log).paddingTop) || 0;
+      const short = end.getBoundingClientRect().bottom + ring - log.getBoundingClientRect().bottom;
       if (short > 0) {
         log.scrollTop += short;
         follow.current.at = log.scrollTop;

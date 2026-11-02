@@ -265,11 +265,15 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     await expect.poll(() => (growing(panel)?.textContent ?? '').split(' ').length, LANDS_WITHIN).toBe(11);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const inView = (el: Element) => el.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1;
+    // Followed with room under it, as a chat leaves its end: 24 px above the conversation's foot.
+    const roomUnder = (el: Element) => log.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom;
     expect(inView(growing(panel)!)).toBe(true);
+    expect(Math.abs(roomUnder(growing(panel)!) - 24), `${roomUnder(growing(panel)!)} px under the answer being written`).toBeLessThanOrEqual(2);
     held.release();
     const final = await finalAnswer(panel, 'I can explain what a rule does, or draft a change to one.');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(inView(final)).toBe(true);
+    expect(Math.abs(roomUnder(final) - 24), `${roomUnder(final)} px under the final answer`).toBeLessThanOrEqual(2);
   });
 
   it('shows_a_drafted_change_with_both_its_buttons_in_view', async () => {
