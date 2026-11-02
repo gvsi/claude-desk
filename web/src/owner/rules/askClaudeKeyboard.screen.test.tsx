@@ -1,0 +1,93 @@
+/**
+ * Ask Claude opened from one of Turner's suggestions on Rules by keyboard, in a real browser against
+ * the mock API: Tab to the suggestion, Enter, and once Claude's review is in, closing the panel
+ * (Escape, or Tab to Close and Enter) gives focus back to the suggestion, as a click does; when the
+ * suggestion has gone, its change now in effect, to the composer above the suggestions. Beside the
+ * page at 1440 px, and as a sheet over it at 900 px (under 640 px Rules shows no suggestions).
+ */
+import { describe, expect, it } from 'vitest';
+import { userEvent, type Locator } from 'vitest/browser';
+
+import { RIVERA } from '../../mocks/seed.ts';
+import { renderRoute } from '../../test/renderRoute.tsx';
+
+const RULES = `/app/${RIVERA.deskId}/rules`;
+
+/** Where Ask Claude opens: beside the page, or as a sheet over it. */
+type Place = 'beside the page' | 'as a sheet';
+
+const WINDOWS: Record<Place, { width: number; height: number }> = {
+  'beside the page': { width: 1440, height: 900 },
+  'as a sheet': { width: 900, height: 900 },
+};
+
+/** How the owner closes Ask Claude by keyboard. */
+type Closing = 'Escape' | 'Close';
+
+const CASES: [Closing, Place][] = [
+  ['Escape', 'beside the page'],
+  ['Close', 'beside the page'],
+  ['Escape', 'as a sheet'],
+  ['Close', 'as a sheet'],
+];
+
+/** Presses Tab, or Shift+Tab when `back`, until `target` has focus. */
+async function tabTo(target: Element, { back = false } = {}): Promise<void> {
+  for (let presses = 0; presses < 40 && document.activeElement !== target; presses += 1) await userEvent.tab({ shift: back });
+  expect(document.activeElement, 'Tab reaches it').toBe(target);
+}
+
+/**
+ * Rules, with Ask Claude opened by Tab from the composer to Turner's suggestion `words` and Enter,
+ * and Claude's review of the change it drafted in.
+ */
+async function openFromSuggestionByKeyboard(place: Place, words: string) {
+  const { screen } = await renderRoute(RULES, { viewport: WINDOWS[place], seed: 'rivera_quiet' });
+  const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+  const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: words, exact: true });
+  await expect.element(chip).toBeVisible();
+  composer.element().focus();
+  await tabTo(chip.element());
+  await userEvent.keyboard('{Enter}');
+  const panel = screen.getByRole(place === 'as a sheet' ? 'dialog' : 'complementary', { name: 'Ask Claude' });
+  const log = panel.getByRole('log');
+  await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+  return { composer, chip, panel, log };
+}
+
+/**
+ * Closes Ask Claude by keyboard, with Escape or with Shift+Tab to Close and Enter, and waits until
+ * it has gone, beside the page once it has slid out, so nothing it does as it leaves is missed.
+ */
+async function closeByKeyboard(panel: Locator, closing: Closing): Promise<void> {
+  if (closing === 'Escape') {
+    await userEvent.keyboard('{Escape}');
+  } else {
+    await tabTo(panel.getByRole('button', { name: 'Close' }).element(), { back: true });
+    await userEvent.keyboard('{Enter}');
+  }
+  await expect.element(panel).not.toBeInTheDocument();
+  await expect.poll(() => document.querySelector('.cd-app-shell__panel')).toBeNull();
+}
+
+describe('ask claude opened from a suggestion by keyboard', () => {
+  it.each(CASES)('closing_with_%s_gives_focus_back_to_the_suggestion %s', async (closing, place) => {
+    const { chip, panel } = await openFromSuggestionByKeyboard(place, 'Quote water heater installs up to $600');
+    await closeByKeyboard(panel, closing);
+    expect(document.activeElement, 'the suggestion that opened it').toBe(chip.element());
+  });
+
+  it.each(CASES)('closing_with_%s_once_its_change_applies_gives_focus_to_the_composer %s', async (closing, place) => {
+    const { composer, chip, panel, log } = await openFromSuggestionByKeyboard(place, 'Stop quoting on weekends');
+    // Shift+Tab from Ask Claude's composer reaches "Keep my rules", then "Confirm change".
+    await tabTo(log.getByRole('button', { name: 'Confirm change' }).element(), { back: true });
+    await userEvent.keyboard('{Enter}');
+    await expect.element(log.getByText(/^Confirmed\. Version \d+ of your rules, checked against the always-on rules\.$/)).toBeVisible();
+    // Quotes no longer go out on their own at weekends, so the suggestion has gone.
+    await expect.element(chip).not.toBeInTheDocument();
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+
+    await closeByKeyboard(panel, closing);
+    await expect.element(composer).toHaveFocus();
+  });
+});
