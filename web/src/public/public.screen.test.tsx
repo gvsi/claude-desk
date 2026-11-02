@@ -2753,6 +2753,79 @@ describe('public chat page', () => {
     disclosure.assert();
   });
 
+  it('a_newer_replayed_join_starts_a_fresh_owner_confirmation_backoff_round', async () => {
+    let view: VisitorChatView | undefined;
+    function ObservedPage() {
+      view = useVisitorChat(RIVERA.slug);
+      return <PublicPage />;
+    }
+    const { screen, router } = await renderRoute(PAGE, {
+      seed: 'rivera',
+      routes: [{ path: '/d/:slug', Component: ObservedPage }, { path: '/away', element: <p>Away from chat</p> }],
+    });
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await router.navigate('/away');
+    await expect.element(screen.getByText('Away from chat', { exact: true })).toBeVisible();
+    mockStore.world.takeOver(chat);
+    mockStore.inject({ route: 'visitorSession', status: 'network', times: 10 });
+    const reads = requests('visitorSession').length;
+    const answers = sessionAnswers();
+    const texts = watchTexts();
+    const disclosure = watchHeadDisclosure();
+    useTimers();
+    await router.navigate(PAGE);
+    await readyNow(screen);
+    await until(() => expect(systemLines()).toEqual(['Mike Turner joined the chat']));
+    await answers.waitFor(1);
+
+    // Replay keeps arriving before the quiet period ends. Exhaust this round without reopening
+    // the stream, since reopening would itself reset the confirmation retry budget.
+    const replayFor = async (ms: number) => {
+      for (let left = ms; left > 0;) {
+        const seq = mockStore.emit(RIVERA.slug, { type: 'turn_end' });
+        await until(() => expect(view?.state.lastSeq).toBe(seq));
+        expect(view?.state.catchingUp).toBe(true);
+        const step = Math.min(CAUGHT_UP_AFTER_MS / 2, left);
+        await vi.advanceTimersByTimeAsync(step);
+        left -= step;
+      }
+    };
+    for (const [i, delay] of REOPEN_DELAYS_MS.entries()) {
+      await replayFor(delay + MARGIN_MS);
+      await answers.waitFor(i + 2);
+      expect(requests('visitorSession')).toHaveLength(reads + i + 2);
+      expect(chatHead()).toEqual(withClaude(HEAD.en));
+      disclosure.assert();
+    }
+    await replayFor(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    await frames();
+    expect(requests('visitorSession'), 'the first round exhausted its cap').toHaveLength(reads + 4);
+    disclosure.assert();
+
+    // A later join arrives in the same catch-up. Its failed read gets a whole new backoff round.
+    expect(view?.state.catchingUp).toBe(true);
+    mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
+    await until(() => expect(systemLines()).toHaveLength(2));
+    await answers.waitFor(5);
+    expect(requests('visitorSession')).toHaveLength(reads + 5);
+    expect(chatHead()).toEqual(withClaude(HEAD.en));
+    disclosure.assert();
+    for (const [i, delay] of REOPEN_DELAYS_MS.entries()) {
+      await vi.advanceTimersByTimeAsync(delay + MARGIN_MS);
+      await answers.waitFor(i + 6);
+      expect(requests('visitorSession')).toHaveLength(reads + i + 6);
+      expect(chatHead()).toEqual(withClaude(HEAD.en));
+      disclosure.assert();
+    }
+    await vi.advanceTimersByTimeAsync(REOPEN_DELAYS_MS[2] + MARGIN_MS);
+    await frames();
+    expect(requests('visitorSession'), 'the fresh round also stops at the cap').toHaveLength(reads + 8);
+    expect(texts.saw(OWNER_IN_CHAT_WORDS), 'failed reads never confirm the owner').toBe(false);
+    disclosure.assert();
+  });
+
   it('an_older_cursorless_verify_answer_reconfirms_the_owner', async () => {
     const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);

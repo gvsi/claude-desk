@@ -504,7 +504,10 @@ class VisitorChat {
     if (confirm) this.modeKnown = false;
     if (ev.type === 'owner_joined' && !state.catchingUp) this.modeKnown = true;
     this.set({ session: { ...session, mode } });
-    if (confirm) void this.confirmMode(this.epoch);
+    if (confirm) {
+      this.clearConfirmRetry();
+      void this.confirmMode(this.epoch);
+    }
   }
 
   private clearOwnerTypingTimer(): void {
