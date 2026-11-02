@@ -1321,6 +1321,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
   "POST /api/owner/desks/{desk_id}/demo_visitor": { 202: "DemoVisitorStarted" },
   "GET /api/owner/desks/{desk_id}/demo_visitor": { 200: "DemoVisitorRun" },
+  "GET /api/owner/desks/{desk_id}/demo_visitor/{run_id}": { 200: "DemoVisitorRun" },
   "POST /api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop": { 200: "DemoVisitorRun" },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },

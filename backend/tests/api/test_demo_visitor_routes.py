@@ -192,6 +192,45 @@ async def test_one_runs_at_a_time_in_a_copy_until_the_owner_stops_it(app, browse
     assert (await owner.post(stop)).json() == stopped.json()
 
 
+async def test_each_run_is_read_by_its_id_on_its_own_desk(app, browser, fake, kernel_http, clock, copy,
+                                                         visitor_model):
+    owner = owner_of(app, browser, copy)
+    desk_id = copy.desk_ids[0]
+    runs = []
+    for key in ("click-1", "click-2"):
+        visitor_model.add(step("", done=True))
+        started = await start(owner, desk_id, key=key)
+        assert started.status_code == 202, started.text
+        await app.state.runtime.demo_visitors.drain()
+        runs.append(started.json())
+    first = runs[0]
+    path = f"/api/owner/desks/{desk_id}/demo_visitor/{first['run_id']}"
+
+    # The older run, once a newer one has started on the Desk, still reads as it ended.
+    read = await owner.get(path)
+    assert read.status_code == 200, read.text
+    assert read.json() == {"run_id": first["run_id"], "desk_id": desk_id, "first_name": "Riley",
+                           "session_id": first["session_id"], "state": "done", "messages_sent": 0,
+                           "ended": "finished"}
+    newest = (await owner.get(f"/api/owner/desks/{desk_id}/demo_visitor")).json()
+    assert newest["run_id"] == runs[1]["run_id"]
+
+    # Only its own copy's owner, on the Desk it ran on, and only while it is kept.
+    stranger = await browser(app).get(path)
+    assert (stranger.status_code, stranger.json()) == (401, {"error": "no_owner_session"})
+    other_desk, _ = await owner_desk(kernel_http, fake, clock, copy.owner_token, "Turner Emergency")
+    other = await kernel_http.public().call("POST /copies", CreateCopyRequest())
+    for reader, where in ((owner, f"/api/owner/desks/{other_desk}/demo_visitor/{first['run_id']}"),
+                          (owner, f"/api/owner/desks/{desk_id}/demo_visitor/visitor-unknown"),
+                          (owner_of(app, browser, other),
+                           f"/api/owner/desks/{other.desk_ids[0]}/demo_visitor/{first['run_id']}")):
+        missing = await reader.get(where)
+        assert (missing.status_code, missing.json()) == (404, {"error": "not_found"}), where
+    clock.advance(3600)                                      # an hour on, the process no longer keeps it
+    gone = await owner.get(path)
+    assert (gone.status_code, gone.json()) == (404, {"error": "not_found"})
+
+
 async def test_a_copy_starts_three_an_hour(app, browser, fake, clock, copy, visitor_model):
     owner = owner_of(app, browser, copy)
     desk_id = copy.desk_ids[0]

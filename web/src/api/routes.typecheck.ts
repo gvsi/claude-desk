@@ -52,6 +52,7 @@ export const ROUTE_MODELS = {
   decision: 'Decision',
   startDemoVisitor: 'DemoVisitorStarted',
   demoVisitor: 'DemoVisitorRun',
+  demoVisitorRun: 'DemoVisitorRun',
   stopDemoVisitor: 'DemoVisitorRun',
 
   // Safety

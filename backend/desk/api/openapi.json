@@ -2623,7 +2623,7 @@
     "/api/owner/desks/{desk_id}/demo_visitor": {
       "post": {
         "summary": "Start Demo Visitor",
-        "description": "Start a demo visitor on one of the copy's Desks, answered once its visitor session is open: open that\nconversation to watch it. It plays the fixed persona of the Desk's set (`agents.demo_task_set`: its setup business\ntype, or Turner's for the copy's own Desk), read with the Desk's slug from the copy's own rows. A Desk of another\ncopy, or none, is 404 before anything starts.\n\nOne runs at a time in a copy: starting another meanwhile answers the running one, on whichever of the copy's Desks\nit runs, and starts nothing. Each start carries an `idempotency_key`, one per click (422 without one); a repeat in\nthe copy within the hour answers the run its key started, however it ended, and the same key on another Desk is\n409 `conflict`. Neither counts as a start. A copy starts at most three an hour: past that, 429 `rate_limited` with\nthe seconds until another fits (`retry_after`). In production, 503 `demo_budget` once today's model budget is\nspent. A run whose visitor session never opened is 503 `demo_visitor_unavailable`.",
+        "description": "Start a demo visitor on one of the copy's Desks, answered once its visitor session is open: open that\nconversation to watch it. It plays the fixed persona of the Desk's set (`agents.demo_task_set`: its setup business\ntype, or Turner's for the copy's own Desk), read with the Desk's slug from the copy's own rows. A Desk of another\ncopy, or none, is 404 before anything starts.\n\nOne runs at a time in a copy: starting another meanwhile answers the running one, on whichever of the copy's Desks\nit runs, and starts nothing. Each start carries an `idempotency_key`, one per click (422 without one); a repeat in\nthe copy within the hour answers the run its key started, however it ended, and the same key on another Desk is\n409 `conflict`. Neither counts as a start. A copy starts at most three an hour: past that, 429 `rate_limited` with\nthe seconds until another fits (`retry_after`). In production, 503 `demo_budget` once today's model budget is\nspent. A run whose visitor session never opened, or that failed before it said anything (its chat couldn't be\nmarked), is 503 `demo_visitor_unavailable`.",
         "operationId": "owner_start_demo_visitor",
         "parameters": [
           {
@@ -2733,6 +2733,87 @@
               "type": "string",
               "maxLength": 128,
               "title": "Desk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoVisitorRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/desks/{desk_id}/demo_visitor/{run_id}": {
+      "get": {
+        "summary": "Demo Visitor Run",
+        "description": "One of the copy's demo visitors on the Desk as it stands, by its ID, so a conversation reads its own run after a\nnewer one has started. A run of another copy or another Desk, or one this process no longer keeps (an hour), is\n404.",
+        "operationId": "owner_demo_visitor_run",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Run Id"
             }
           }
         ],

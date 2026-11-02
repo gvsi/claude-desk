@@ -127,6 +127,7 @@ export const ROUTES = {
   decision: { method: 'GET', path: '/api/owner/decisions/{decision_id}', owner: true },
   startDemoVisitor: { method: 'POST', path: '/api/owner/desks/{desk_id}/demo_visitor', owner: true },
   demoVisitor: { method: 'GET', path: '/api/owner/desks/{desk_id}/demo_visitor', owner: true },
+  demoVisitorRun: { method: 'GET', path: '/api/owner/desks/{desk_id}/demo_visitor/{run_id}', owner: true },
   stopDemoVisitor: { method: 'POST', path: '/api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop', owner: true },
 
   // Safety
@@ -226,6 +227,7 @@ interface RouteShapes {
   decision: { body: undefined; response: Decision };
   startDemoVisitor: { body: DemoVisitorIn; response: DemoVisitorStarted };
   demoVisitor: { body: undefined; response: DemoVisitorRun };
+  demoVisitorRun: { body: undefined; response: DemoVisitorRun };
   stopDemoVisitor: { body: undefined; response: DemoVisitorRun };
 
   safety: { body: undefined; response: Attempt[] };

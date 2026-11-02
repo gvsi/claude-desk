@@ -916,6 +916,19 @@ async def demo_visitor(desk_id: DeskId, request: Request,
     return run
 
 
+@router.get("/desks/{desk_id}/demo_visitor/{run_id}", response_model=DemoVisitorRun,
+            responses=error_responses(401, 404, 422, 503))
+async def demo_visitor_run(desk_id: DeskId, run_id: Annotated[str, Path(max_length=64)], request: Request,
+                           ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorRun:
+    """One of the copy's demo visitors on the Desk as it stands, by its ID, so a conversation reads its own run after a
+    newer one has started. A run of another copy or another Desk, or one this process no longer keeps (an hour), is
+    404."""
+    run = runtime(request).started().demo_visitors.run(run_id, ctx.copy_id)
+    if run is None or run.desk_id != ctx.desk(desk_id):
+        raise ApiProblem(404, "not_found")
+    return run
+
+
 @router.post("/desks/{desk_id}/demo_visitor/{run_id}/stop", response_model=DemoVisitorRun,
              responses=error_responses(401, 404, 422, 503))
 async def stop_demo_visitor(desk_id: DeskId, run_id: Annotated[str, Path(max_length=64)], request: Request,
