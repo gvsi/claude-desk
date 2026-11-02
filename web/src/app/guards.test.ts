@@ -232,9 +232,10 @@ const DOCUMENT_LINK = /\/api\/d\//i;
 
 // An API operation's name, "GET /api/d/{token}", in capitals as the API's document writes it, names
 // the route for a check, never a link. It is passed over only in the two files that list operations
-// for the route checks: the generated operation list and the compile-time checks.
+// for the route checks: the generated operation list and the routes' compile-time checks.
 const OPERATION_NAME = /\b(?:GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS) \/api\/d\//g;
-const listsOperations = (file: string) => file === 'api/openapi.gen.ts' || file.endsWith('.typecheck.ts');
+const OPERATION_LISTS: ReadonlySet<string> = new Set(['api/openapi.gen.ts', 'api/routes.typecheck.ts']);
+const listsOperations = (file: string) => OPERATION_LISTS.has(file);
 
 /** Every document link in `scanned`, but an operation's name in a file that lists operations. */
 function documentLinks(scanned: Source[]): string[] {
@@ -953,6 +954,8 @@ describe('app source guards', () => {
     expect(named('api/openapi.gen.ts', '"get /api/d/{token}": { 200: null },')).toHaveLength(1);
     expect(named('api/routes.typecheck.ts', "const link = `${origin}/api/d/${token}`;")).toHaveLength(1);
     expect(named('owner/share/ShareKit.tsx', "const route = 'GET /api/d/{token}';")).toHaveLength(1);
+    // Only those two files: any other compile-time check is scanned as code is.
+    expect(named('api/contracts.typecheck.ts', "export const NEVER_CALLED = ['GET /api/d/{token}'];")).toHaveLength(1);
 
     // The app's code and its page: no hint that fetches a link ahead, and no document link written out.
     expect(INDEX_HTML.text).toContain('<div id="root"></div>');
