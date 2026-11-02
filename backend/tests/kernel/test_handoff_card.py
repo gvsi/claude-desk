@@ -911,7 +911,8 @@ async def test_two_call_back_requests_at_once_leave_one_open_handoff(app, client
 
 
 async def legacy_call_back(app: FastAPI, copy: Rivera, visitor: Visitor, handoff_id: str, action_id: str) -> None:
-    """An open call-back's handoff as an earlier kernel wrote it (no `created_at`), beside any other."""
+    """An open call-back's handoff as an earlier kernel wrote it (no `created_at`). The table
+    admits one open handoff per session (kernel_one_open_handoff), so it is the session's only one."""
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         ctx.db.add(Handoff(handoff_id=handoff_id, copy_id=copy.copy_id, desk_id=copy.desk_id,
@@ -919,25 +920,23 @@ async def legacy_call_back(app: FastAPI, copy: Rivera, visitor: Visitor, handoff
                            action_id=action_id))
 
 
-async def test_a_session_holding_several_open_handoffs_has_them_closed_by_the_next_call_back(app, client):
-    """A session may hold several open call-backs from before one open handoff per session was
-    kept, or from the previous release during a deploy. A card shown there opens none; the next
-    call-back request closes them all, each ledgered as the owner's mark is, and opens its own."""
+async def test_an_open_call_back_from_before_is_closed_by_the_next_call_back(app, client):
+    """An open call-back an earlier kernel wrote, with no `created_at`, is the session's open
+    handoff like any other: a card shown there opens none, and the next call-back request closes
+    it, ledgered as replaced, and opens its own. Sessions that rows from before left holding
+    several open were consolidated when the table took its one-open rule."""
     copy, visitor = await visitor_of(app, client)
-    for handoff_id, call_id in (("handoff-zzzz", "call-1"), ("handoff-aaaa", "call-2")):
-        earlier = await decided(client, visitor, "native.request_callback", CALLBACK, call_id=call_id)
-        await legacy_call_back(app, copy, visitor, handoff_id, earlier.action.action_id)
+    earlier = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-1")
+    await legacy_call_back(app, copy, visitor, "handoff-earlier", earlier.action.action_id)
     await hand_over(client, visitor)
-    assert await handoff_alerts(app, copy) == []                                      # no card's handoff beside them
+    assert await handoff_alerts(app, copy) == []                                      # no card's handoff beside it
 
-    latest = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-3")
+    latest = await decided(client, visitor, "native.request_callback", CALLBACK, call_id="call-2")
     result = await executed(client, visitor, latest)
     rows = {row.handoff_id: (row.kind, row.status) for row in await handoffs_of(app, copy)}
-    assert rows == {"handoff-zzzz": ("callback", "done"), "handoff-aaaa": ("callback", "done"),
-                    result.model_view["handoff_id"]: ("callback", "open")}
     replacing = result.model_view["handoff_id"]
-    assert sorted(replaced_entries(await ledger_rows(app, copy))) == [(["handoff-aaaa"], replacing),
-                                                                     (["handoff-zzzz"], replacing)]
+    assert rows == {"handoff-earlier": ("callback", "done"), replacing: ("callback", "open")}
+    assert replaced_entries(await ledger_rows(app, copy)) == [(["handoff-earlier"], replacing)]
 
 
 # ---- A held request awaiting the owner (the owner's decision of 2026-10-31) ---------------------------

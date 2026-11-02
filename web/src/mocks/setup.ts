@@ -40,6 +40,7 @@ import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { formatHours } from '../lib/format.ts';
 import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
+import { pickedAnswer } from '../setup/pickedAnswer.ts';
 import { replaceBusinessTools } from './businessTools.ts';
 import { playReply, type PlayedRead } from './ownerStreams.ts';
 import type { Language } from './script.ts';
@@ -80,6 +81,15 @@ export const SETUP_QUESTIONS: readonly { key: QuestionKey; text: string }[] = [
  */
 export const FOLLOW_UP_TRIGGER = /\bnot sure\b/i;
 export const FOLLOW_UP = "That's fine. Give me your best guess, and you can change it later.";
+
+/**
+ * The salon's first question, in place of the scripted one: its choices can be picked together
+ * (`SetupMessage.several`), as a live turn can ask a topic question.
+ */
+export const SALON_TIME = {
+  text: 'What eats up most of your time that isn’t doing hair?',
+  choices: ['Booking and rescheduling', 'Answering price questions', 'Chasing color deposits', 'Late cancellations and no-shows'],
+} as const;
 
 /** What Claude says once the last question is answered. */
 export const QUESTIONS_DONE = "Thanks, that's everything I need. Next, choose what Claude can use.";
@@ -485,6 +495,20 @@ interface SituationWords {
   searches: readonly [string, string];
 }
 
+/** The salon starter's words; a salon is also asked `SALON_TIME`. */
+const SALON_WORDS: SituationWords = {
+  // Open Tuesday to Saturday, as its description says.
+  bookingDays: ['tue', 'wed', 'thu', 'fri', 'sat'],
+  bookings: 'Books appointments Tuesday to Saturday in your hours.',
+  weekday: 'A visitor wants a cut on Tuesday afternoon',
+  discount: 'A visitor asks for 10% off a cut and color',
+  agentPays: 'the color appointment deposit',
+  document: 'A client asks for their last receipt',
+  saturday: 'A visitor wants balayage on Saturday morning',
+  someoneElses: "Someone asks for another client's phone number",
+  searches: ['hair salon color appointment deposits', 'salon new client consultation form'],
+};
+
 /** Turner Plumbing's words: the situations as the mock always told them. */
 const PLUMBER_WORDS: SituationWords = {
   bookingDays: WEEKDAYS,
@@ -538,22 +562,8 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
     },
   ],
   [[/\b(?:plumb|plomer)/i], PLUMBER_WORDS],
-  [
-    // Whole words only: "hairline cracks" is no salon.
-    [/\b(?:salons?|hair|haircuts?|hairdress(?:er|ers|ing)|hairstylists?)\b/i, /\bpeluquer/i],
-    {
-      // Open Tuesday to Saturday, as its description says.
-      bookingDays: ['tue', 'wed', 'thu', 'fri', 'sat'],
-      bookings: 'Books appointments Tuesday to Saturday in your hours.',
-      weekday: 'A visitor wants a cut on Tuesday afternoon',
-      discount: 'A visitor asks for 10% off a cut and color',
-      agentPays: 'the color appointment deposit',
-      document: 'A client asks for their last receipt',
-      saturday: 'A visitor wants balayage on Saturday morning',
-      someoneElses: "Someone asks for another client's phone number",
-      searches: ['hair salon color appointment deposits', 'salon new client consultation form'],
-    },
-  ],
+  // Whole words only: "hairline cracks" is no salon.
+  [[/\b(?:salons?|hair|haircuts?|hairdress(?:er|ers|ing)|hairstylists?)\b/i, /\bpeluquer/i], SALON_WORDS],
   [
     [/\b(?:apartments?|tenants?|landlords?|departamentos?|inquilinos?)\b/i],
     {
@@ -773,8 +783,8 @@ function moveTo(interview: Interview, step: SetupState['step']): void {
   if (!atLeast(interview.state.step, step)) interview.state.step = step;
 }
 
-function say(interview: Interview, role: SetupMessage['role'], text: string, choices: Choice[] = []): void {
-  interview.state.messages.push({ role, text, choices, card: null });
+function say(interview: Interview, role: SetupMessage['role'], text: string, choices: Choice[] = [], several = false): void {
+  interview.state.messages.push({ role, text, choices, ...(several ? { several: true } : {}), card: null });
 }
 
 /**
@@ -1122,7 +1132,8 @@ function completeConsent(interview: Interview): void {
     const first = SETUP_QUESTIONS[0];
     if (first) {
       interview.state.question = first.key;
-      say(interview, 'claude', first.text);
+      if (interview.words === SALON_WORDS) say(interview, 'claude', SALON_TIME.text, choicesOf(SALON_TIME.choices), true);
+      else say(interview, 'claude', first.text);
     }
   }
   interview.state.busy = false;
@@ -1480,7 +1491,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
   const desk: DeskRecord = {
     summary: {
       desk_id: deskId, slug: slugFor(world, business), name: 'Main line', business_name: business, hours: [], answering: false,
-      business_type: businessTypeOf(text),
+      business_type: businessTypeOf(text), unread_conversations: 0,
     },
     policy: firstVersion(deskId),
     versions: new Map(),
@@ -1665,14 +1676,24 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (isFailure(found)) return found;
     if (busyOf(found.interview)) return { status: 202, body: stateOf(found.interview, req.query) };
     const body = isRecord(req.body) ? req.body : {};
-    const { text, question, card } = body;
-    if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX) return INVALID;
+    const { text: typed = '', question, card, picks = [] } = body;
+    // Typed words, picks from the question's choices, or both, as the API takes them; never neither.
+    if (req.malformed || typeof typed !== 'string' || typed.length > ANSWER_MAX) return INVALID;
+    if (!Array.isArray(picks) || picks.length > 4 || picks.some((pick) => typeof pick !== 'string' || pick === '' || pick.length > 80)) return INVALID;
+    const picked = picks as string[];
+    if ((typed.trim() === '' && picked.length === 0) || new Set(picked).size !== picked.length) return INVALID;
     const cardAnswer = question === null && typeof card === 'string' && card !== '';
     if (!cardAnswer && (card !== undefined || typeof question !== 'string' || !(question === 'test_client' || SETUP_QUESTIONS.some((q) => q.key === question)))) return INVALID;
+    if (cardAnswer && picked.length > 0) return INVALID;
     const { interview } = found;
     // An answer to a question the interview has moved past is refused, never applied to the next one.
     if (interview.state.step !== 'questions') return CONFLICT;
     if (cardAnswer ? card !== interview.state.pending_card : interview.state.question === null || question !== interview.state.question || !!interview.state.pending_card) return CONFLICT;
+    // Picks are the waiting question's own choices, more than one only where it takes several; the
+    // owner's message is written from them (`pickedAnswer`).
+    const asked = interview.state.messages.findLast((message) => message.role === 'claude' && message.card == null);
+    if (picked.length > 0 && (!asked || picked.some((pick) => !asked.choices.some((choice) => choice.text === pick)) || (picked.length > 1 && asked.several !== true))) return INVALID;
+    const text = picked.length > 0 ? pickedAnswer(asked!.choices, picked, typed) : typed;
     // One turn at a time, as the API runs them: another answer while one is running is refused.
     if (interview.running !== null) return CONFLICT;
     if (interview.holdNext) {

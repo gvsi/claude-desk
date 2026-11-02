@@ -64,3 +64,19 @@ it('inert_suggestion_line_shows_in_view', async () => {
   const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
   expect(hit !== null && line.contains(hit)).toBe(true);
 });
+
+it('city_office_status_shows_once_in_about_or_the_narrow_header', async () => {
+  for (const width of [1512, 900, 899, 390]) {
+    act(() => root.render(null));
+    await page.viewport(width, 982);
+    act(() => root.render(<CityOfficeChat />));
+    await vi.waitFor(() => {
+      const statuses = container.querySelectorAll('.cd-public-shell__open-status');
+      expect(statuses).toHaveLength(1);
+      const status = statuses[0]!;
+      expect(status.textContent).toBe('Open now, until 4:30 pm');
+      expect(status.closest(width >= 900 ? '.cd-public-shell__about' : '.cd-public-shell__brand')).not.toBeNull();
+    });
+    await expect.element(one('.cd-public-shell__open-status')).toBeVisible();
+  }
+});

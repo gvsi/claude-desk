@@ -158,6 +158,8 @@ export const NEVER_CALLED = [
   // Task 14 (Connectors) adds `connectTools` and `toolDecisions`.
   'POST /api/owner/desks/{desk_id}/tools/connect',
   'GET /api/owner/desks/{desk_id}/tools/{tool}/decisions',
+  // Marking a conversation read waits for its design; the unread fields already come with the reads.
+  'POST /api/owner/conversations/{session_id}/read',
 ] as const satisfies readonly string[];
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
