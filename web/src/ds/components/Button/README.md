@@ -1,15 +1,15 @@
 # Button
 
-`Button` starts an action, in one of three weights and two heights, with two red variants for answers that refuse, and says exactly what happens.
+`Button` starts an action, in one of three weights and two heights, with red variants for refusals and deletes that cannot be undone, and says exactly what happens.
 
 ## When to use
 
 - `primary` for the one action a view is about ("Send counter-offer", "Join the chat"): an inverted neutral, at most one per view.
 - `secondary` for the other actions beside it, such as "Allow this time" on an approval card.
 - `ghost` for quiet actions that shouldn't compete ("Start over").
-- `danger` for an answer that refuses, once: "Deny this time", a soft `button-danger-fill` behind `button-danger-text`.
+- `danger` for refusals ("Deny this time") and deletes that cannot be undone ("Delete this Desk", "Delete Desk"), a soft `button-danger-fill` behind `button-danger-text`. The owner decision of 2026-11-02 replaces the earlier neutral-delete rule.
 - `danger-ghost` for a quieter refusal beside it: `button-danger-text` with no fill.
-- The red variants are only for refusing. They are never a status, a warning or decoration, and their words still say exactly what happens.
+- The red variants cover refusals and deletes that cannot be undone. They are never a status, a warning or decoration, and their words still say exactly what happens.
 - `size="main"` for a screen's main actions (`size-control-main`, 40 px); `inline` (`size-control`, 32 px) everywhere else.
 - With `href`, the same look as a link: the button a payment or document card ends with ("Open payment page").
 - With `href` and `external`, a link that opens in a new tab, as `TextLink`'s `external` does: `target="_blank"` with `rel="noopener noreferrer"`, and no change to its look. Today's "Open your public page" and "Chat as a customer" use it, so Today stays open.
@@ -19,7 +19,7 @@
 
 - The label, in words that say what happens. Never "OK" or "Continue" when a verb can say more, and never an arrow.
 - `busy` while the click's request is in flight. A small spinner takes the label's place, at the same width: the label, and a menu button's chevron, keep their places unseen, so nothing around the button moves. The button steps down to its busy colors (the table below), and the spinner takes its label's busy color: a `size-spinner` (16 px) ring at 30% with a quarter arc on it, both 2 px wide, turning once every `motion-spin` (0.8 s) at an even speed, and a still arc under reduced motion. The button keeps focus, is still named by its label, announces `aria-busy` and `aria-disabled`, and ignores further clicks. If the wait needs words, a status line says them, as a held request's "Sending your answer" does: read out from the card's status region and visually hidden, since the spinner carries the wait on screen. Dots mean someone is typing (`WritingIndicator`), never a busy button.
-- Every busy color is a listed contrast pair (`contrast.ts`) on the grounds its pairs are listed for: a page (`bg-app`), a card on it (`fill-card` over `bg-app`) and a dialog (`bg-surface`), the sidebar (`bg-panel`) and the reviewer bar (`bg-muted`) too for a ghost button, and a page or a card for the red answers. There the busy label color reads 4.5:1 or more on the busy fill, so the spinner's arc, a graphic that needs 3:1, reads 5.3:1 or more; the faint ring behind it is decoration.
+- Every busy color is a listed contrast pair (`contrast.ts`) on the grounds its pairs are listed for: a page (`bg-app`), a card on it (`fill-card` over `bg-app`) and a dialog (`bg-surface`), the sidebar (`bg-panel`) and the reviewer bar (`bg-muted`) too for a ghost button, and a page, a card or a dialog for `danger` buttons. There the busy label color reads 4.5:1 or more on the busy fill, so the spinner's arc, a graphic that needs 3:1, reads 4.8:1 or more; the faint ring behind it is decoration.
 - A ground for it among those. No Button sits on `bg-selected`, the selected row's ground: a busy secondary label would read 4.45 there and a busy danger one 3.98, so the guard `no_button_on_the_selected_ground` keeps Buttons off it until its pairs are listed, with colors that clear 4.5.
 - `waiting` on the buttons beside a busy one whose request they wait for, such as the other answer on a held request: they step to the same busy colors without the spinner and ignore clicks.
 - `disabled` only when the action can't be taken at all. A disabled button is dimmed and leaves the tab order.
