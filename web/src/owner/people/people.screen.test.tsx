@@ -287,7 +287,6 @@ describe('customers', () => {
     expect(again.screen.getByRole('link', { name: 'Includes recorded history' }).query()).toBeNull();
   });
 
-  // Tab stops in the page: each person's row, then the recorded-history link, and no lead.
   it('leads_newest_first', async () => {
     // The list comes oldest first, as the mock keeps them; the page puts the newest first.
     addLead({ name: 'Ana Reyes', note: JORDAN.note, minutesAgo: 60 * 24 * 4 });
@@ -856,6 +855,10 @@ describe('share', () => {
       const box = card.getBoundingClientRect();
       expect(Math.round(box.width)).toBe(300);
       expect(Math.round(box.left)).toBe(Math.round((document.documentElement.clientWidth - 300) / 2));
+      // At the top of the page, and nothing over it: the card is what its centre hits.
+      expect(Math.round(box.top)).toBe(0);
+      const centre = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      expect(centre !== null && card.contains(centre)).toBe(true);
       expect(getComputedStyle(card).visibility).toBe('visible');
       expect(getComputedStyle(card).backgroundColor).toBe('rgb(250, 249, 245)');
       expect(getComputedStyle(card).printColorAdjust).toBe('exact');
