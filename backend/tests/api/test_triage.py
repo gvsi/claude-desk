@@ -159,7 +159,7 @@ async def test_refusal_gets_an_ai_written_triage(app, browser, fake, kernel_http
     (blocked,) = [sent_text(request) for request in asked if '"reply_blocked"' in sent_text(request)]
     assert json.loads(unwrapped(refusal, "stopped_event")) == {
         "kind": "refused", "tool": "native.find_slots", "effects": list(refused.action.effects),
-        "reason": refused.reason_plain, "turned_down_because": "Your rule says no"}
+        "reason": refused.reason_plain, "turned_down_because": "your rule says no"}
     assert json.loads(unwrapped(blocked, "stopped_event")) == {"kind": "reply_blocked",
         "violations": [{"kind": "number_in_prose", "rule": "digit"}]}
     # an owner-only triage row for each, the model's never; the refusal's receipt and the reply's stopped draft (Claude
@@ -190,14 +190,15 @@ async def test_refusal_gets_an_ai_written_triage(app, browser, fake, kernel_http
 
 
 @pytest.mark.parametrize(("refusal", "cause", "because"), [
-    ("never", "owner_rule", "Your rule says no"),
-    ("no_such_slot", "no_such_slot", "That time isn't open"),
+    ("never", "owner_rule", "your rule says no"),
+    ("no_such_slot", "no_such_slot", "that time isn't open"),
     ("unknown_code", None, None),
 ])
 async def test_a_refusal_carries_its_safety_why_label(app, browser, fake, kernel_http, model, engine, ro_schema,
                                                       monkeypatch, refusal, cause, because):
-    """Haiku reads why a request was turned down in the words of the entry's label on Safety: the label of the cause
-    Safety derives for the same refusal, and none when Safety shows none (a code the API has no cause for)."""
+    """Haiku reads why a request was turned down in the words of the entry's label on Safety, its first letter
+    lowercased to follow "It was turned down:": the label of the cause Safety derives for the same refusal, and none
+    when Safety shows none (a code the API has no cause for)."""
     owner = await new_owner(app, browser, fake, kernel_http)
     visitor = await guest(kernel_http, fake, owner)
     if refusal == "no_such_slot":

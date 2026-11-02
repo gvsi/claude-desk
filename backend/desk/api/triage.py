@@ -138,12 +138,14 @@ async def _attempt(conn: AsyncConnection, ids: Ids, ref_id: str, ref_kind: RefKi
             return None
         attempt = {"kind": "refused", "tool": row["tool"], "effects": list(row["effects"] or []),
                    "reason": row["reason_plain"]}
-        # Why, in the words of the label Safety shows beside it, and none when Safety shows none. The cause reads the
-        # session's verification as Safety's attempts do; it never clears (`refusal_cause`).
+        # Why, in the words of the label Safety shows beside it, its first letter lowercased to follow "It was turned
+        # down:", and none when Safety shows none. The cause reads the session's verification as Safety's attempts
+        # do; it never clears (`refusal_cause`).
         session = await ro.session(ids.session_id)
         cause = None if session is None else refusal_cause(row, entry, verified=bool(session["verified"]))
         if cause in TURNED_DOWN_BECAUSE:
-            attempt["turned_down_because"] = TURNED_DOWN_BECAUSE[cause]
+            label = TURNED_DOWN_BECAUSE[cause]
+            attempt["turned_down_because"] = label[:1].lower() + label[1:]
         return attempt
     if ref_kind != "reply" or not (ref_id.isascii() and ref_id.isdigit()) or len(ref_id) > 18:
         return None

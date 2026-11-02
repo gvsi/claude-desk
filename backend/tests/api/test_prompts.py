@@ -90,8 +90,7 @@ def test_triage_says_turned_down_in_the_safety_labels_words():
                  "The reason is the Desk's own record. Use it only for what was asked; don't repeat its wording.",
                  'Never say "refused", and never put it down to "the safety rules" or "the checkpoint\'s rules". '
                  "For a turned-down request, say it was turned down.",
-                 "With turned_down_because, give it as the reason word for word, its first letter lowercase, and no "
-                 "other: for example, "
+                 "With turned_down_because, give it as the reason word for word, and no other: for example, "
                  '"It was turned down: agents can\'t send money out."',
                  "Without it, give no reason at all, not even the checkpoint: say only what was turned down.",
                  "A turned-down request is never wording."):
@@ -100,26 +99,11 @@ def test_triage_says_turned_down_in_the_safety_labels_words():
     assert "refused" not in TRIAGE_SYSTEM.replace("kind (refused,", "").replace('Never say "refused"', "")
 
 
-SAFETY_COPY = Path(__file__).resolve().parents[3] / "web" / "src" / "owner" / "safety" / "copy.ts"
-
-
-def _cause_copy() -> dict[str, str]:
-    """copy.ts's `CAUSE_COPY`, the owner's signed label for each cause of a turned-down request, read as written: one
-    `cause: 'words',` line each, with no escapes."""
-    block = re.search(r"^export const CAUSE_COPY = \{\n(.*?)^\} as const", SAFETY_COPY.read_text(), re.M | re.S)
-    assert block, "copy.ts has no CAUSE_COPY"
-    lines = [line for line in block[1].splitlines() if line.strip()]
-    entries = [re.fullmatch(r"\s*(\w+): (?:'([^'\\]*)'|\"([^\"\\]*)\"),", line) for line in lines]
-    assert all(entries), lines
-    return {entry[1]: entry[2] if entry[2] is not None else entry[3] for entry in entries}
-
-
-def test_turned_down_words_are_safetys_labels():
-    """What triage reads as why a request was turned down is the web's label for its cause, word for word, for every
-    cause Safety can give a refused request."""
+def test_turned_down_words_cover_every_cause():
+    """Every cause Safety can give a refused request has words a triage can send. The web's Safety copy test pins
+    them to the labels, word for word."""
     from desk.api.schemas import RefusalCause
 
-    assert prompts.TURNED_DOWN_BECAUSE == _cause_copy()
     assert set(prompts.TURNED_DOWN_BECAUSE) == set(get_args(RefusalCause))
 
 

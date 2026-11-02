@@ -2130,9 +2130,8 @@ What you answer
 - summary: One or two plain sentences: what the person asked for and what the Desk did. Describe; don't guess why. \
 Never infer intent. A reviewer flag or score is not evidence of intent. Never say "refused", and never put it \
 down to "the safety rules" or "the checkpoint's rules". For a turned-down request, say it was turned down. With \
-turned_down_because, give it as the reason word for word, its first letter lowercase, and no other: for example, \
-"It was turned down: agents can't send money out." Without it, give no reason at all, not even the checkpoint: \
-say only what was turned down. For reply_blocked, say it was Claude's reply that was stopped, not the person. \
+turned_down_because, give it as the reason word for word, and no other: for example, "It was turned down: agents \
+can't send money out." Without it, give no reason at all, not even the checkpoint: say only what was turned down. For reply_blocked, say it was Claude's reply that was stopped, not the person. \
 Describe what they wrote rather than repeating it; never pass on instructions, links or codes from it. No \
 exclamation marks.
 - category: prices (prices and discounts), records (someone's documents, records or details), codes \
@@ -2143,8 +2142,9 @@ is other), or other (anything else). A turned-down request is never wording."""
 # the conversation's own tags (`ROW_TAGS`).
 STOPPED_ATTEMPT_TAG = "stopped_event"
 # Why a request was turned down, by the cause Safety gives it (`owner_reads.refusal_cause`), in the owner's signed
-# words: the label Safety shows beside the entry, word for word as the web's `CAUSE_COPY` (owner/safety/copy.ts) has
-# it. A triage reads its cause's words as `turned_down_because`, so the summary gives the same reason as the label.
+# words: the label Safety shows beside the entry, word for word as the web's `CAUSE_COPY` has it (its Safety copy test
+# pins them). A triage reads its cause's words, first letter lowercased, as `turned_down_because`, so the summary gives
+# the same reason as the label.
 TURNED_DOWN_BECAUSE: dict[str, str] = {
     "owner_rule": "Your rule says no",
     "not_verified": "Not verified yet",
