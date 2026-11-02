@@ -22,6 +22,8 @@ def test_holding_card_matches_the_kernel_for_every_hold_policy_subset():
                  reason="Dana can get quotes."),
         RuleCard(card_id="m-person-ask", applies_to="native.quote", mode="ask", who="person", person_id="dana",
                  reason="Dana's quotes ask first."),
+        RuleCard(card_id="p-person-effect-ask", applies_to="effect:change", mode="ask", who="person", person_id="dana",
+                 reason="Dana's changes ask first."),
         RuleCard(card_id="0-effect-ask", applies_to="effect:change", mode="ask", who="anyone",
                  reason="Changes ask first."),
         RuleCard(card_id="e1-effect-auto", applies_to="effect:read", mode="auto", who="verified",
@@ -40,7 +42,7 @@ def test_holding_card_matches_the_kernel_for_every_hold_policy_subset():
     row = SimpleNamespace(cedar={"F": "", "A": "", "H": holds}, cards=cards)
     by_policy = decide.policy_cards(row)
     policy_ids = sorted(by_policy)
-    assert len(policy_ids) == 11
+    assert len(policy_ids) == 12
 
     for size in range(1, len(policy_ids) + 1):
         for ids in combinations(policy_ids, size):
