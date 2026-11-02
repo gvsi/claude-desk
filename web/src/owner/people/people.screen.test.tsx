@@ -534,6 +534,16 @@ const DANAS_CHATS = [
   { sessionId: 'ses-dana-quote', quote: 'How much is drain clearing?', status: 'Quoted' },
 ] as const;
 
+/** Dana's verified invoice chat with a handoff waiting for the owner. */
+async function danaWantsYou(): Promise<void> {
+  await cleanup();
+  mockStore.nextEpoch();
+  mockStore.reset('rivera_regulars');
+  const chat = mockStore.world.sessions.get(DANAS_CHATS[0].sessionId);
+  if (!chat) throw new Error('the seed has Dana’s invoice chat');
+  mockStore.world.reply(chat, [rivera.blocks.handoff.en], 'en');
+}
+
 describe("a person's conversations", () => {
   beforeEach(freezeClock);
 
@@ -600,6 +610,60 @@ describe("a person's conversations", () => {
     expect(section.getByRole('list').elements()).toEqual([]);
     await expectScreenBasics(screen.container, { owner: true });
     expectNoHorizontalScroll();
+  });
+
+  it.each(['desktop', 'phone'] as const)('person_page_needs_you_first_read_failure_retries_%s', async (viewport) => {
+    await danaWantsYou();
+    mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+    const { screen } = await renderRoute(`${PEOPLE}/${dana.personId}`, { viewport, pollScale: 100, retryScale: 0 });
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(section.getByRole('link').first()).toBeVisible();
+    expect(section.getByRole('link').elements()).toHaveLength(DANAS_CHATS.length);
+    expect(section.getByText('Wants you', { exact: true }).query()).toBeNull();
+    await expect.element(screen.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    const reads = mockStore.requests.filter((r) => r.key === 'needsYou').length;
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(section.getByText('Wants you', { exact: true })).toBeVisible();
+    expect(mockStore.requests.filter((r) => r.key === 'needsYou').length).toBeGreaterThan(reads);
+    expect(screen.getByText(UNAVAILABLE, { exact: true }).query()).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+  });
+
+  it.each(['desktop', 'phone'] as const)('person_page_needs_you_poll_failure_keeps_handoff_%s', async (viewport) => {
+    await danaWantsYou();
+    const { screen } = await renderRoute(`${PEOPLE}/${dana.personId}`, { viewport, retryScale: 0 });
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(section.getByText('Wants you', { exact: true })).toBeVisible();
+    const reads = mockStore.requests.filter((r) => r.key === 'needsYou').length;
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await expect.element(screen.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    expect(mockStore.requests.filter((r) => r.key === 'needsYou').length).toBeGreaterThan(reads);
+    await expect.element(section.getByText('Wants you', { exact: true })).toBeVisible();
+    expect(section.getByRole('link').elements()).toHaveLength(DANAS_CHATS.length);
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+  });
+
+  it.each(['desktop', 'phone'] as const)('person_page_both_reads_fail_shows_one_notice_%s', async (viewport) => {
+    await danaWantsYou();
+    mockStore.inject({ route: 'conversations', status: 503, times: 2 });
+    mockStore.inject({ route: 'needsYou', status: 503, times: 2 });
+    const { screen } = await renderRoute(`${PEOPLE}/${dana.personId}`, { viewport, pollScale: 100, retryScale: 0 });
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'needsYou').length).toBe(2);
+    await expect.element(screen.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    expect(screen.getByText(UNAVAILABLE, { exact: true }).elements()).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(1);
+    // The list's failure goes first. Once its retry works, only Needs you's notice remains.
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(section.getByRole('link').first()).toBeVisible();
+    await expect.element(screen.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    expect(screen.getByText(UNAVAILABLE, { exact: true }).elements()).toHaveLength(1);
+    expect(mockStore.requests.filter((r) => r.key === 'needsYou')).toHaveLength(2);
+    await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(section.getByText('Wants you', { exact: true })).toBeVisible();
+    expect(screen.getByText(UNAVAILABLE, { exact: true }).query()).toBeNull();
   });
 
   it('person_page_conversations_load_then_fail_with_a_retry', async () => {

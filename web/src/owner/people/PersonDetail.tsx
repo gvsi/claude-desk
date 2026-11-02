@@ -124,7 +124,7 @@ function TheirConversations({ deskId, personId }: { deskId: string; personId: st
   const groups = personConversations(list.data, personId, business.timezone, now);
   return (
     <>
-      <ReadFailed failure={failure} />
+      <ReadFailed failure={failure ?? needsFailure} />
       <section className="cd-person__conversations" aria-labelledby={titleId}>
         <SectionHeader id={titleId} title="Conversations" />
         {groups.length === 0 ? (
