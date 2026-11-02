@@ -295,7 +295,7 @@ async def test_a2a_resent_after_its_turn(k: KernelHarness, api: ApiTarget, fake:
             again = await client.a2a(desk.slug, body, headers)
             assert (again.status_code, json_of(again)) == (200, json_of(answer)), (
                 f"{what} sent again answered {again.status_code}, not its stored answer: {again.text[:300]}")
-    assert turn_calls(fake) == calls, "a request sent again made a model call"
     assert await decided(records, desk, session_id) == decisions, "a request sent again was decided"
+    assert turn_calls(fake) == calls, "a request sent again made a model call"
     assert await records.a2a_turns(session_id) == turns, "a request sent again stored a new turn"
     assert await agent_sessions(records, desk) == sessions, "a request sent again opened a session"

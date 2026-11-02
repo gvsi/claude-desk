@@ -58,6 +58,7 @@ FAULTS = (
     "refuses_late",               # a refused nonce or session is refused only after the message is stored and Claude ran
     "nonce_by_text",              # nonces and stored answers are keyed by the nonce's text alone, for every key
     "rerun_resent",               # a request sent again runs a new turn instead of getting its stored answer
+    "rerun_quietly",              # a request sent again gets its stored answer, but its turn runs again anyway
     "surplus_call",               # one turn calls Claude once more after its reply, and drops the answer
 )
 MAX_CALLS = 4   # Claude's calls in one stand-in turn before it gives up on a reply
@@ -127,6 +128,8 @@ class StandInDesk:
                 return await self.refuse(session_id, body.message)
             if self.fault != "rerun_resent":
                 stored = self.answers.get((holder, session_id, nonce))
+                if stored is not None and self.fault == "rerun_quietly":
+                    await self.quiet_turn(session_id, body.message)
                 return JSONResponse(stored) if stored is not None else refusal(409, "replayed")
         elif body.session_id is None:
             session_id = f"agent-session-{len(self.sessions) + 1}"
@@ -166,11 +169,15 @@ class StandInDesk:
         only after the message was stored in the session and Claude ran on it."""
         if self.fault == "refuses_late":
             self.messages.append({"session_id": session_id, "kind": "agent_text", "text": message})
-            try:
-                await self.turn(session_id, message)
-            except TurnFailed:
-                pass
+            await self.quiet_turn(session_id, message)
         return refusal(401, "auth")
+
+    async def quiet_turn(self, session_id: str, message: str) -> None:
+        """Claude's turn on `message`, for a fault: what it answers dropped, and a turn that fails ignored."""
+        try:
+            await self.turn(session_id, message)
+        except TurnFailed:
+            pass
 
     async def turn(self, session_id: str, message: str) -> list[RenderedBlock]:
         """Claude's turn on the fake model server: its replies until `send_reply`, each other tool call a decision."""
@@ -275,6 +282,7 @@ CAUGHT = [
     ("a2a_other_agents_session", "refuses_late", "the refused request wrote app.* rows naming the first agent's session"),
     ("a2a_nonce_reused_by_another_agent", "nonce_by_text", "the second agent's answer holds the first agent's"),
     ("a2a_resent_after_its_turn", "rerun_resent", "the opening request sent again answered 500, not its stored answer"),
+    ("a2a_resent_after_its_turn", "rerun_quietly", "a request sent again was decided"),
 ]
 
 # Each case whose Claude goes on answering once its script has run out (`any_further_turn_decides`), with its
