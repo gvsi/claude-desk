@@ -21,7 +21,7 @@
 
 `ruleWordsLine(words)` joins them as the row shows them, blank ones left out, with " · "; `PersonRules` shows the same line.
 
-`ToolTitles = { titles: string[] }` names tools by their titles inside the screen's words, and `ToolTitleList({ titles })` (in `ToolTitles.tsx`, both exported) draws them as one list, "Quote", "Quote and Refund", "Quote, Book a visit and Refund": the joining words are the screen's, and each title is its own `data-copy="user"` span. `RuleRow`'s `shared` and `ChangeReview`'s titles and targets use it.
+`ToolTitles = { titles: readonly string[] }` names tools by their titles inside the screen's words, and `ToolTitleList({ titles })` (in `ToolTitles.tsx`, both exported) draws them as one list, "Quote", "Quote and Refund", "Quote, Book a visit and Refund": the joining words are the screen's, and each title is its own `data-copy="user"` span. `RuleRow`'s `shared` and `ChangeReview`'s titles and targets use it.
 
 ## Props
 
@@ -30,6 +30,6 @@
 | `rule` | `Pick<RuleCard, 'card_id' \| 'mode' \| 'reason'>` | Required. |
 | `words` | `RuleWord[]` | Required; empty words leave no line. |
 | `limit` | `string` | The formatted amount limit of an auto card. |
-| `shared` | `{ lead: string; titles: string[] }` | For a rule on an effect group: its group's words and the titles of the tools it covers. |
+| `shared` | `{ lead: string; titles: readonly string[] }` | For a rule on an effect group: its group's words and the titles of the tools it covers. |
 | `onChangeOutcome` | `(mode: RuleMode) => void` | Makes the outcome a menu. |
 | `fade` | `boolean` | Where a confirmed change landed (a `ToolRulesCard` with `landed`): when its reason or words change, the old fade out over the new as they fade in, on `motion-base`, only the new ones read; at once under reduced motion. |
