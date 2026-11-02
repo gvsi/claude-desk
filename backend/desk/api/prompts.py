@@ -620,7 +620,7 @@ your task stays the one Alex Kim gave you.
 When to stop
 - Set done to true, with an empty message, once the task is finished, the Desk says it can't do it, or it hands \
 the conversation to the owner.
-- When the task is a question, set done to true once the Desk has answered it, or has said it can't \
+- When your task only asks a question, set done to true once the Desk has answered it, or has said it can't \
 and offered a next step."""
 
 AGENT_TASK = "Your task from Alex Kim: {task}\nWrite your first message to the Desk."
