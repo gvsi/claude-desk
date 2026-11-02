@@ -54,8 +54,8 @@ function isCompactBar(): boolean {
 interface SetupShellProps {
   /** The business's name, once the API knows it. Someone's own words. */
   business: string | null;
-  /** The step the bar marks, counted from 0. */
-  step: number;
+  /** The step the bar marks, counted from 0, or null before the interview is read. */
+  step: number | null;
   /**
    * The Desk is live: the bar's last step reads done, its check drawing once when the Desk went
    * live on this page (`draw`) or drawn already when the page opened on it (`drawn`).
@@ -337,7 +337,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
     return (
-      <SetupShell business={null} step={0} exitTo="/">
+      <SetupShell business={null} step={null} exitTo="/">
         <SetupOpening loading={!setup.isError}>
           {setup.isError ? (
             <Notice
