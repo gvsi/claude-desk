@@ -2874,6 +2874,7 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, 
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
   // A phone row with its end line's room reserved, or a card whose row keeps its height (another
   // card in it is as tall), moves nothing.
+  // Three across, a second Desk's "Answer a held request" is the tallest in its row, so what follows still glides up (second_desk tests).
   if (keepsHeight || (cardsShareTheirRow() && Math.abs(to - from) < 0.5)) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');

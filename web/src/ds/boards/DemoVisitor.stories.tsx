@@ -298,6 +298,10 @@ const IN_REVIEW = 'Built against the board in review; sign-off pending.';
 const SINCE_THE_BAR =
   'The board predates the bar pinned to the top of the open conversation (REV-720 C). The web app draws "Demo visitor" in that bar, right after the level pill, and the note at the top of the transcript, 16 px under the bar and over its opening lines, so it scrolls away with them.';
 
+/** What the web app's Things to try draws differently from the REV-DEMO Today boards, by the owner's later choices. */
+const SINCE_THE_CHOICES =
+  "The other cards keep the board's words, where the web app's have since moved on: a hold past an automatic rule's limit has no “Held by your rule” line, since its headline already quotes that rule (owner decision, 2026-11-02, #671); “Try to break it” points at each reply's receipt, a hold by a named rule reads “A request is waiting for your answer: {rule}.”, and every card fits in three lines (owner, 2026-11-02, #867).";
+
 const meta = {
   title: 'Boards/Demo visitor',
   render: () => <TodayBoard />,
@@ -309,6 +313,7 @@ const meta = {
       IN_REVIEW,
       'REV-DEMO entry A, Today › Things to try (#artboard-cdae4f209f2e): "Watch a demo visitor" second of five cards, three across from 1280 px.',
       'Only the band\'s Things to try is drawn; the greeting, How your Desk works, Needs you and the rest of Today are as the Today boards draw them.',
+      SINCE_THE_CHOICES,
     ].join(' '),
   },
 } satisfies Meta;
@@ -357,7 +362,7 @@ export const StartError: Story = {
   render: () => <TodayBoard failed />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-error-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO entry A, it couldn’t start (#artboard-d691001ca787): the card's line says so after a refused dot, as an alert, and the button stays.`,
+    canvasNote: `${IN_REVIEW} REV-DEMO entry A, it couldn’t start (#artboard-d691001ca787): the card's line says so after a refused dot, as an alert, and the button stays. ${SINCE_THE_CHOICES}`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
