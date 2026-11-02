@@ -165,14 +165,22 @@ const DANGER_LITERAL = /(['"`])danger\1/g;
 
 // Button itself and ApprovalCard’s Deny, plus the exact Dialog and Settings examples of deletion.
 const DANGER_VARIANT_FOLDERS = ['components/Button/', 'components/ApprovalCard/'] as const;
-const DANGER_VARIANT_FILES = ['components/Dialog/Dialog.stories.tsx', 'boards/parts.tsx', 'boards/SettingsDeleteDesk.stories.tsx'] as const;
+const DANGER_VARIANT_MATCHES: Readonly<Record<string, readonly string[]>> = {
+  'boards/parts.tsx': ['variant="danger"'],
+  'boards/SettingsDeleteDesk.stories.tsx': ['confirmVariant="danger"'],
+  'components/Dialog/Dialog.stories.tsx': [
+    'variant="danger"',
+    "confirmVariant: 'danger'",
+    'cd-button--danger',
+  ],
+};
 
 function mayUseDangerTokens(file: string): boolean {
   return DANGER_TOKEN_FILES.includes(file);
 }
 
 function mayUseDangerVariants(file: string): boolean {
-  return DANGER_VARIANT_FOLDERS.some((folder) => file.startsWith(folder)) || DANGER_VARIANT_FILES.some((allowed) => file === allowed);
+  return DANGER_VARIANT_FOLDERS.some((folder) => file.startsWith(folder));
 }
 
 /**
@@ -188,6 +196,12 @@ function dangerVariants(text: string): string[] {
     for (const m of text.matchAll(DANGER_LITERAL)) if (!counted(m.index)) hits.push(m[0]);
   }
   return hits;
+}
+
+function expectAllowedDangerVariants(sources: Source[]): void {
+  for (const { file, text } of sources) {
+    if (!mayUseDangerVariants(file)) expect(dangerVariants(text), file).toEqual(DANGER_VARIANT_MATCHES[file] ?? []);
+  }
 }
 
 // The lockup's Preview badge, the product's one all-caps label (owner, 2026-10-30): its type style,
@@ -581,6 +595,15 @@ describe('design system source guards', () => {
     expect(findAll(outsideTheMark, matches(MARK_COLOR))).toEqual([]);
   });
 
+  it('danger_variant_allowances_reject_an_extra_delete_button', () => {
+    const parts = '<Button variant="danger">Delete this Desk</Button>';
+    expect(() => expectAllowedDangerVariants([{ file: 'boards/parts.tsx', text: parts }])).not.toThrow();
+    expect(() => expectAllowedDangerVariants([{
+      file: 'boards/parts.tsx',
+      text: `${parts}<Button variant="danger">Save</Button>`,
+    }])).toThrow();
+  });
+
   it('danger_only_for_refusals_and_irreversible_deletes', () => {
     // The tokens by custom property or by name; Button's class and longer names that only contain the words aren't tokens.
     expect(matches(DANGER_TOKEN)('background: var(--button-danger-fill); color: var(--button-danger-text);')).toEqual([
@@ -605,9 +628,9 @@ describe('design system source guards', () => {
     expect(mayUseDangerVariants('components/ApprovalCard/ApprovalCard.stories.tsx')).toBe(true);
     expect(mayUseDangerVariants('components/ButtonGroup/ButtonGroup.tsx')).toBe(false);
     expect(mayUseDangerVariants('components/Dialog/Dialog.tsx')).toBe(false);
-    expect(mayUseDangerVariants('components/Dialog/Dialog.stories.tsx')).toBe(true);
-    expect(mayUseDangerVariants('boards/parts.tsx')).toBe(true);
-    expect(mayUseDangerVariants('boards/SettingsDeleteDesk.stories.tsx')).toBe(true);
+    expect(mayUseDangerVariants('components/Dialog/Dialog.stories.tsx')).toBe(false);
+    expect(mayUseDangerVariants('boards/parts.tsx')).toBe(false);
+    expect(mayUseDangerVariants('boards/SettingsDeleteDesk.stories.tsx')).toBe(false);
     expect(mayUseDangerVariants('boards/SettingsBilling.stories.tsx')).toBe(false);
     expect(mayUseDangerVariants('components/Dialog/Other.stories.tsx')).toBe(false);
     expect(mayUseDangerTokens('components/Button/Button.css')).toBe(true);
@@ -624,7 +647,17 @@ describe('design system source guards', () => {
     expect(findAll(code.filter(({ file }) => mayUseDangerTokens(file)), matches(DANGER_TOKEN)).length).toBeGreaterThan(0);
     expect(findAll(code.filter(({ file }) => mayUseDangerVariants(file)), dangerVariants).length).toBeGreaterThan(0);
     expect(findAll(code.filter(({ file }) => !mayUseDangerTokens(file)), matches(DANGER_TOKEN))).toEqual([]);
-    expect(findAll(code.filter(({ file }) => !mayUseDangerVariants(file)), dangerVariants)).toEqual([]);
+    expectAllowedDangerVariants(code);
+    // Each pinned example must exist, even if a file is removed or renamed.
+    for (const file of Object.keys(DANGER_VARIANT_MATCHES)) expect(code.map((source) => source.file)).toContain(file);
+    // Dialog forwards the caller's confirm variant; it never asks Button for danger itself.
+    const dialog = code.find(({ file }) => file === 'components/Dialog/Dialog.tsx')!;
+    const dialogCode = withoutComments(dialog.text);
+    expect(matches(/<Button\b[^>]*\bvariant=(?:"[^"]*"|\{[^}]*\})/g)(dialogCode)).toEqual([
+      '<Button variant="secondary"',
+      '<Button variant={confirmVariant}',
+    ]);
+    expect(dangerVariants(dialogCode)).toEqual([]);
   });
 
   it('no_button_on_the_selected_ground', () => {

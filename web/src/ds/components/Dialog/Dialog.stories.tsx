@@ -47,6 +47,7 @@ const meta = {
     title: TITLE,
     body: BODY,
     confirmLabel: 'Delete Desk',
+    confirmVariant: 'danger',
     cancelLabel: 'Keep it',
     onConfirm: fn(),
     onCancel: fn(),
@@ -56,7 +57,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Run2-Settings-DeleteDesk',
     canvasNote:
-      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too. The board draws red delete buttons, an unquoted title and a refused dot; deleting a Desk now uses confirmVariant="danger" with the default tone and a quoted Desk name, without a dot (owner decision, 2026-11-02, replacing the earlier neutral-delete rule). Default below demonstrates the primary confirm default; DeleteDesk shows the red confirm. The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
+      'N-Run2-Settings-DeleteDesk draws this dialog over Settings › General (Boards/Settings, delete this Desk); here a lone "Delete this Desk" button opens it. "Start over" in the reviewer bar on N-Today-Run1 opens one too. Redrawn on 2026-11-02, the delete board quotes the Desk name and shows both delete buttons in red with no refused dot (owner decision, replacing the earlier neutral-delete rule). Default and DeleteDesk below use that red confirm with the default tone. The board dims the page with rgba(20, 20, 19, 0.64); the dialog keeps the scrim token, rgba(0, 0, 0, 0.5), as every dialog does.',
   },
 } satisfies Meta<typeof Dialog>;
 
@@ -92,11 +93,11 @@ export const Default: Story = {
     await expect(Math.round(body.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12);
     for (const button of within(dialog).getAllByRole('button')) expectComputed(button, { height: '40px' });
 
-    // The default tone: no dot beside the title, and neutral buttons.
+    // The delete look: red confirm, secondary cancel, and no dot in the default tone.
     await expect(dialog.querySelector('.cd-status-dot')).toBeNull();
     const keep = within(dialog).getByRole('button', { name: 'Keep it' });
     const remove = within(dialog).getByRole('button', { name: 'Delete Desk' });
-    expectComputed(remove, { backgroundColor: 'rgb(239, 236, 228)' });
+    expectComputed(remove, { backgroundColor: 'rgba(220, 130, 144, 0.16)', color: 'rgb(235, 163, 174)' });
     expectComputed(keep, { backgroundColor: 'rgba(250, 249, 245, 0.1)' });
 
     // dialog_traps_focus_and_escapes: focus starts on the least destructive answer, and Tab and
@@ -153,7 +154,6 @@ export const Default: Story = {
 };
 
 export const DeleteDesk: Story = {
-  args: { confirmVariant: 'danger' },
   play: async ({ args, canvas, userEvent }) => {
     const dialog = canvas.getByRole('dialog', { name: TITLE });
     await expect(dialog.querySelector('.cd-status-dot')).toBeNull();
@@ -174,15 +174,15 @@ export const Danger: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'No signed screen uses the danger tone: deleting a Desk uses the default tone with a red confirm button (owner decision, 2026-11-02). Nearest is N-Run2-Settings-DeleteDesk, which drew the dot before that decision.',
+      'No signed screen uses the danger tone: deleting a Desk uses the default tone with a red confirm button (owner decision, 2026-11-02). Nearest is N-Run2-Settings-DeleteDesk, redrawn that day with a quoted Desk name, red delete buttons and no dot.',
   },
   play: async ({ canvas }) => {
-    // Danger adds a refused dot beside the title, hidden from screen readers; the buttons stay neutral.
+    // The danger tone adds only a refused dot, hidden from screen readers; the red confirm is independent.
     const dialog = canvas.getByRole('dialog', { name: TITLE });
     const dot = within(dialog).getByRole('heading', { name: TITLE }).querySelector('.cd-status-dot--refused');
     await expect(dot).not.toBeNull();
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(within(dialog).getByRole('button', { name: 'Delete Desk' }), { backgroundColor: 'rgb(239, 236, 228)' });
+    expectComputed(within(dialog).getByRole('button', { name: 'Delete Desk' }), { backgroundColor: 'rgba(220, 130, 144, 0.16)', color: 'rgb(235, 163, 174)' });
     expectComputed(within(dialog).getByRole('button', { name: 'Keep it' }), { backgroundColor: 'rgba(250, 249, 245, 0.1)' });
   },
 };

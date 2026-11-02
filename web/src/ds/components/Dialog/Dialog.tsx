@@ -16,7 +16,7 @@ export interface DialogProps {
   confirmVariant?: 'primary' | 'danger';
   /** The button that leaves things as they are: "Keep it", "Keep this copy". */
   cancelLabel: string;
-  /** `danger` adds a refused dot beside the title, for something that can't be undone; the button variants are independent. */
+  /** `danger` adds only a refused dot beside the title; no signed screen uses it. Use the danger value of `confirmVariant` for the delete look. */
   tone?: 'default' | 'danger';
   /** The confirmation is being sent: both buttons wait with `aria-busy`, and Escape does nothing. */
   pending?: boolean;
