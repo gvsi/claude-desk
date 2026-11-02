@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { RuleCard } from '../../api/contracts.ts';
-import type { ToolRow } from '../../api/views.ts';
+import type { PeopleOut, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { NO_BUSINESS_TOOLS } from '../connectors/catalog.ts';
 import {
@@ -14,6 +14,7 @@ import {
   discountHoldSentence,
   holdLine,
   holdMeta,
+  holdRows,
   holdSentence,
   moneyCapMeta,
   moneyCapSentence,
@@ -239,5 +240,68 @@ describe('cards that read as one rule', () => {
     expect(canJoin([captureLead, requestCallback, urgent])).toBe(true);
     expect(canJoin([cards['rv-docs'], cards['rv-charges']])).toBe(true);
     expect(canJoin([cards['rv-link']])).toBe(true);
+  });
+});
+
+describe('holds keep their audience', () => {
+  const people: PeopleOut = { people: [{ person_id: 'per-dana', display_name: 'Dana Whitfield', masked_contact: 'd•••@example.com' }], leads: [] };
+  const withPeople = { business: NO_BUSINESS_TOOLS, people };
+  const danaLink = card({ card_id: 'dana-link', applies_to: 'native.payment_link', mode: 'auto', who: 'person', person_id: 'per-dana', max_amount_cents: 5000 });
+
+  it('a_public_limit_and_a_persons_limit_are_two_holds', () => {
+    // The kernel's hold twin keeps its card's audience: another customer's $100 link runs under the
+    // public $300 rule, so Dana's $50 hold is hers alone, never "anyone over $50".
+    const rows = holdRows([cards['rv-link'], danaLink], withPeople);
+    expect(rows.map((row) => `${read(row.parts)} / ${line(row.meta)}`)).toEqual([
+      'Claude asks you before payment links over **$300** / Payment link · Anyone',
+      'Claude asks you before payment links over **$50** / Payment link · Dana Whitfield',
+    ]);
+    // The one-sentence forms never join them: they refuse holds for different people.
+    expect(() => holdSentence([cards['rv-link'], danaLink])).toThrow(/different people/);
+    expect(() => holdMeta([cards['rv-link'], danaLink], withPeople)).toThrow(/different people/);
+  });
+
+  it('limits_for_the_same_people_still_join', () => {
+    const rows = holdRows([cards['rv-quote'], cards['rv-link'], cards['rv-mandate']], words);
+    expect(rows.map((row) => `${read(row.parts)} / ${line(row.meta)}`)).toEqual([
+      'Claude asks you before payment links over **$300** or agent payments over **$20** / Payment link and Charge within a signed limit · Anyone',
+    ]);
+    expect(holdRows([cards['rv-quote']], words)).toEqual([]);
+  });
+});
+
+describe('an effect rule names only the tools it governs', () => {
+  const STRIPE_TOOLS: readonly Pick<ToolRow, 'tool' | 'effects'>[] = [
+    { tool: 'native.payment_link', effects: ['charge'] },
+    { tool: 'payments.list_charges', effects: ['private_data'] },
+    { tool: 'payments.create_refund', effects: ['pay_out', 'private_data'] },
+  ];
+  const payOut = card({ card_id: 'pay-out', applies_to: 'effect:pay_out', mode: 'auto', who: 'anyone' });
+  const privateData = card({ card_id: 'private', applies_to: 'effect:private_data', mode: 'auto', who: 'anyone' });
+
+  it('an_automatic_rule_alone_doesnt_cover_a_tool_with_another_effect', () => {
+    // Refund also touches private data, so an automatic pay-out rule alone governs nothing.
+    expect(ruleMeta(payOut, { business: NO_BUSINESS_TOOLS, tools: STRIPE_TOOLS, cards: [payOut] }).tools).toBe('Every tool that sends money out');
+    // Without the Desk's other cards, it is read alone, the same way.
+    expect(ruleMeta(payOut, { business: NO_BUSINESS_TOOLS, tools: STRIPE_TOOLS }).tools).toBe('Every tool that sends money out');
+  });
+
+  it('with_an_automatic_rule_for_every_effect_it_covers_the_tool', () => {
+    const both = { business: NO_BUSINESS_TOOLS, tools: STRIPE_TOOLS, cards: [payOut, privateData] };
+    expect(line(ruleMeta(payOut, both))).toBe('Refund · Anyone');
+    expect(line(ruleMeta(privateData, both))).toBe('See charges and Refund · Anyone');
+  });
+
+  it('an_ask_rule_covers_every_tool_with_its_effect', () => {
+    const ask = { ...payOut, mode: 'ask' as const };
+    expect(line(ruleMeta(ask, { business: NO_BUSINESS_TOOLS, tools: STRIPE_TOOLS, cards: [ask] }))).toBe('Refund · Anyone');
+  });
+});
+
+describe('never rows over several tools', () => {
+  it('each_action_reads_claude_never', () => {
+    const neverQuote = card({ card_id: 'nq', applies_to: 'native.quote', mode: 'never', who: 'anyone' });
+    const neverBook = card({ card_id: 'nb', applies_to: 'native.book', mode: 'never', who: 'anyone' });
+    expect(read(ruleSentence([neverQuote, neverBook], words))).toBe('Claude never sends quotes from your price list and books visits');
   });
 });
