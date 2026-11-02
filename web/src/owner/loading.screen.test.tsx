@@ -26,7 +26,6 @@ import { holdReads } from '../test/holdReads.ts';
 import { needsYouKey, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
-import { SUGGESTION_EXAMPLE } from './rules/copy.ts';
 import { settled } from '../ds/test/settled.ts';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 
@@ -1666,10 +1665,10 @@ it.each([620, 700])('customers_reload_draws_the_subtitles_own_lines at %i px', a
 
 const RULES = `/app/${RIVERA.deskId}/rules`;
 const RULES_READ = ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId);
-/** A Desk with enough owner approvals for the API to suggest a refund rule. */
+/** A Desk with enough owner approvals for the API to suggest a refund rule, in the API's own words. */
 const APPROVED_REFUND_SUGGESTION: Suggestion = {
   tool: 'payments.create_refund', count: 3,
-  text: SUGGESTION_EXAMPLE,
+  text: 'You approved 3 refund requests. Let me handle these?',
   card: { ...rivera.ruleCards['rv-refund'], card_id: 'card-dana-refunds', mode: 'auto', who: 'person', person_id: rivera.people.dana.personId, max_amount_cents: 5_000 },
 };
 
