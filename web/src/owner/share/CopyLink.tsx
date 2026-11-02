@@ -1,6 +1,6 @@
 import { useRef, type ReactNode } from 'react';
 
-import { Button, CopyField, copyResultLine, useCopyText } from '../../ds/index.ts';
+import { Button, CopyField, CopyResult, copyResultLine, useCopyText } from '../../ds/index.ts';
 import { displayLink } from './shareCopy.ts';
 
 import './CopyLink.css';
@@ -26,7 +26,7 @@ async function writeToClipboard(value: string): Promise<void> {
 /**
  * The Desk's public link with "Copy link", which copies the whole link through `useCopyText`, so a
  * copy that didn't work selects the link as shown and says so ("Copy didn't work. The link is
- * selected, so copy it yourself."). Used on the setup live step, Today and Share.
+ * selected, so copy it yourself."). Used on the setup live step and Share.
  */
 export function CopyLink({ url, actions, look = 'field' }: CopyLinkProps) {
   const field = useRef<HTMLDivElement>(null);
@@ -51,10 +51,7 @@ export function CopyLink({ url, actions, look = 'field' }: CopyLinkProps) {
         </Button>
         {actions}
       </div>
-      {/* Always there, so the line after a press is read out when it appears. */}
-      <p role="status" className="cd-copy-link__result cd-type-meta">
-        {result === '' ? null : <span key={announcement}>{result}</span>}
-      </p>
+      <CopyResult result={result} announcement={announcement} className="cd-copy-link__result cd-type-meta" />
     </div>
   );
 }

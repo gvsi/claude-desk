@@ -2,6 +2,7 @@ import { useRef, type ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
 import { copyResultLine, useCopyText } from '../CopyField/useCopyText.ts';
+import { CopyResult } from '../CopyResult/CopyResult.tsx';
 
 import './CopyList.css';
 
@@ -89,9 +90,7 @@ function CopyRow({ item, onCopy }: { item: CopyListItem; onCopy: CopyListProps['
         <p ref={words} className="cd-copy-list__words cd-type-meta">
           {item.text}
         </p>
-        <p role="status" className="cd-copy-list__result cd-type-meta">
-          {result === '' ? null : <span key={announcement}>{result}</span>}
-        </p>
+        <CopyResult result={result} announcement={announcement} className="cd-copy-list__result cd-type-meta" />
       </div>
       <span className="cd-copy-list__copy">
         <Button variant="secondary" onClick={() => void copy(plainWords(item.text, words.current), words.current)}>
