@@ -834,3 +834,74 @@ def test_the_api_can_import_the_always_on_check_without_kernel_code():
     assert {name for name in loaded if name.split(".")[0] == "desk"} == {
         "desk", "desk.always_on", "desk.contracts", "desk.presets"}
     assert not {name for name in loaded if name.split(".")[0] in ("desk_kernel", "sqlalchemy", "fastapi")}
+
+
+# ---- The outcome for anyone (the public Agent Card's outcomes) ----------------------------------
+
+def test_an_auto_card_for_anyone_allows_and_a_tool_no_card_covers_asks():
+    """`outcome_for_anyone` reads a tool's outcome from the cards for anyone alone, as the compiled
+    sets decide it for a caller with no standing of its own: an auto card for anyone, on the tool or
+    on its effect, allows it, and a tool no card for anyone covers falls to its default ask."""
+    cards = [card("quote", "native.quote"), card("reads", "effect:read")]
+    assert compiler.outcome_for_anyone("native.quote", cards, NATIVE) == "auto"
+    assert compiler.outcome_for_anyone("native.find_slots", cards, NATIVE) == "auto"
+    assert compiler.outcome_for_anyone("native.book", cards, NATIVE) == "ask"
+    for tool, outcome in (("native.quote", "allow"), ("native.find_slots", "allow"), ("native.book", "hold")):
+        assert decide_with(cards, NATIVE, req(tool, kind="Agent")) == outcome
+
+
+def test_a_never_card_for_anyone_on_the_tool_or_its_effect_refuses_it():
+    """A never card for anyone that covers the tool, by its name or one of its effects, refuses it
+    whatever other card covers it: a forbid in `F` always wins."""
+    on_the_tool = [card("book", "native.book"), card("no-book", "native.book", mode="never")]
+    assert compiler.outcome_for_anyone("native.book", on_the_tool, NATIVE) == "never"
+    assert compiler.outcome_for_anyone("native.quote", on_the_tool, NATIVE) == "ask"
+    on_its_effect = [card("book", "native.book"), card("quote", "native.quote"),
+                     card("no-changes", "effect:change", mode="never")]
+    for tool in ("native.book", "native.quote", "native.capture_lead"):
+        assert compiler.outcome_for_anyone(tool, on_its_effect, NATIVE) == "never"
+        assert decide_with(on_its_effect, NATIVE, req(tool, kind="Agent")) == "refuse"
+    assert compiler.outcome_for_anyone("native.find_slots", on_its_effect, NATIVE) == "ask"
+
+
+def test_an_ask_card_for_anyone_beats_an_auto_card_as_the_compiler_ranks_them():
+    """An ask card for anyone at an auto card's specificity or above decides instead of it (the
+    auto permit's `unless`), and one below it doesn't: a tool card's ask beats an effect card's
+    auto, and an effect card's ask leaves a tool card's auto deciding, as a signed-limit charge's
+    card does beside an ask before any payment."""
+    tool_ask = [card("changes", "effect:change"), card("ask-book", "native.book", mode="ask")]
+    assert compiler.outcome_for_anyone("native.book", tool_ask, NATIVE) == "ask"
+    assert compiler.outcome_for_anyone("native.quote", tool_ask, NATIVE) == "auto"
+    same_level = [card("book", "native.book"), card("ask-book", "native.book", mode="ask")]
+    assert compiler.outcome_for_anyone("native.book", same_level, NATIVE) == "ask"
+    charge = [card("mandate", "native.charge_mandate", max_amount_cents=2000),
+              card("charge-ask", "effect:charge", mode="ask")]
+    assert compiler.outcome_for_anyone("native.charge_mandate", charge, NATIVE) == "auto"
+    assert compiler.outcome_for_anyone("native.payment_link", charge, NATIVE) == "ask"
+    for cards, tool, outcome in ((tool_ask, "native.book", "hold"), (tool_ask, "native.quote", "allow"),
+                                 (same_level, "native.book", "hold")):
+        assert decide_with(cards, NATIVE, req(tool, kind="Agent")) == outcome
+    # (an agent with no mandate is refused any charge by the baseline, so a visitor asks for the link here)
+    assert decide_with(charge, NATIVE, req("native.payment_link", amount_cents=2000)) == "hold"
+
+
+def test_the_outcome_for_anyone_reads_no_card_for_another_standing():
+    """Cards for a person, an agent key, verified people or record owners, whatever their mode, never
+    change the outcome for anyone: the auto one doesn't allow, the never one doesn't refuse, and the
+    ask one doesn't beat an auto card for anyone."""
+    agent_key = {"agent_key_id": "agent-key-1"}
+    others = [card("dana-book", "native.book", who="person", **DANA),
+              card("key-quote", "native.quote", who="agent", **agent_key),
+              card("verified-leads", "native.capture_lead", who="verified"),
+              card("owner-docs", "native.release_document", who="record_owner"),
+              card("dana-no-slots", "native.find_slots", mode="never", who="person", **DANA),
+              card("key-no-callback", "native.request_callback", mode="never", who="agent", **agent_key),
+              card("dana-ask-link", "native.payment_link", mode="ask", who="person", **DANA)]
+    anyone = [card("slots", "native.find_slots"), card("callback", "native.request_callback"),
+              card("link", "native.payment_link", max_amount_cents=2000)]
+    for tool in NATIVE_TOOLS:
+        assert (compiler.outcome_for_anyone(tool, [*anyone, *others], NATIVE)
+                == compiler.outcome_for_anyone(tool, anyone, NATIVE)), tool
+    assert [compiler.outcome_for_anyone(tool, [*anyone, *others], NATIVE) for tool in (
+        "native.book", "native.quote", "native.capture_lead", "native.release_document", "native.find_slots",
+        "native.request_callback", "native.payment_link")] == ["ask", "ask", "ask", "ask", "auto", "auto", "auto"]
