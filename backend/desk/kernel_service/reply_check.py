@@ -460,10 +460,12 @@ def _free_name_reach(text: str, names: Iterable[str]) -> list[int] | None:
 
 
 def free_names_used(text: str, names: Iterable[str]) -> list[str]:
-    """The names of `names` (`scan_prose`'s `approved_free_names`) that lend a free word in `text`:
-    each holding a free word, not made of free words alone, and repeated in `text` at a word's
-    start as the scan finds it (`_free_name_repeats`); each once, in `names`' order. The
-    soft-promise check reads these alone, so a reply that repeats no such name shows it none."""
+    """The names of `names` (`scan_prose`'s `approved_free_names`) that `text` repeats with a free
+    word inside: each holding a free word, not made of free words alone, and repeated in `text` at
+    a word's start as the scan finds it (`_free_name_repeats`); each once, in `names`' order. That's
+    a superset of the names whose free word the scan let through, which also needs the word to be a
+    lexicon match ("feel free" isn't one). The soft-promise check reads these alone, so a reply
+    that repeats no such name shows it none."""
     names = list(names)
     lending = [name for name, key in _free_name_keys(names)
                if any(word in FREE_WORDS for word in re.findall(r"\w+", key))]

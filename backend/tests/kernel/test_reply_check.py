@@ -3026,7 +3026,7 @@ def test_a_repeat_of_a_business_tools_name_reads_apostrophes_dashes_and_spaces_a
     ("Ofrecemos una videoconsulta gratuita.", CONSULTA_GRATUITA, []),         # not at a word's start
     ("A Free consult, then another free consult.", FREE_CONSULT * 2, ["Free consult"]),   # each name once
 ])
-def test_the_soft_check_is_shown_only_the_free_names_the_scan_found(prose, names, used):
+def test_the_soft_check_is_shown_only_the_free_names_the_prose_repeats(prose, names, used):
     """The approved names the soft-promise check reads: those with a free word, not of free words
     alone, that the prose repeats at a word's start as the scan reads it (`free_names_used`)."""
     assert reply_check.free_names_used(prose, names) == used
