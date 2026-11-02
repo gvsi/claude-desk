@@ -79,7 +79,7 @@ A model supervising a model does not close the gap. In [Project Vend](https://ww
 
 These results don't support a trend line: two or three releases per measure, attack sets that change between system cards, and no series at all for the person in the chat. So the safety prediction is a threshold, not a date.
 
-**Prediction:** through Q4 2027, prompt injection hidden in what the model reads keeps falling toward zero for the model alone, but manipulation by the person in the chat will not be shown solved: a generally available model with no limits in code will still break an owner's rule for a determined visitor.
+**Prediction:** through Q4 2027, manipulation by the person in the chat will not be shown solved: a generally available model with no limits in code will still break an owner's rule for a determined visitor. Prompt injection hidden in what the model reads is expected to keep falling, but the prediction doesn't rest on it.
 
 **Falsifier:** by the end of 2027, a public adaptive red team that plays the person in the chat, with claimed authority, pressure and planted instructions, can't get a generally available model with no limits in code to break an owner's rule in any of its scenarios, with 100 attempts each.
 
