@@ -268,7 +268,7 @@ export function deskPath(deskId: string): string {
 }
 
 /**
- * A new copy is taking the old one's place (Start over, or a new passcode): drop the old copy's Demo
+ * A new copy is taking the old one's place (Reset demo, or a new passcode): drop the old copy's Demo
  * inbox before anything of the new copy is read, its Today read ahead included. The inbox's key
  * doesn't name a copy, so a read of the old copy's inbox still out would otherwise answer for the
  * new one and count as fresh: it is stopped, and its entries dropped, so the new copy's demo bar reads

@@ -268,7 +268,7 @@ describe('the dev server mock', () => {
     const firstValue = valueOf(firstLine);
     expect(firstValue).toMatch(/^[A-Za-z0-9]{32}$/);
 
-    // Start over makes a new copy and sets a new owner cookie for it, with the same attributes.
+    // Reset demo makes a new copy and sets a new owner cookie for it, with the same attributes.
     const restarted = await tab.send('POST', apiPath('startOver', {}));
     expect(restarted.status).toBe(200);
     const fresh = (await restarted.json()) as CopyOut;

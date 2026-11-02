@@ -3056,6 +3056,13 @@ describe('setup', () => {
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
 
+  /** The first path of the round bubble, the square bubble and the phone, Lucide's line icons. */
+  const CHANNEL_FIRST_PATHS = [
+    'M7.9 20A9 9 0 1 0 4 16.1L2 22Z',
+    'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+    'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+  ];
+
   it.each([1440, 390])('at %i px, live lists more channels, coming later, in a card after Share it', async (width) => {
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
@@ -3079,6 +3086,21 @@ describe('setup', () => {
     );
     const pads = rows.map((row) => [getComputedStyle(row).paddingTop, getComputedStyle(row).paddingBottom, getComputedStyle(row).borderTopWidth]);
     expect(pads).toEqual([['0px', '12px', '0px'], ['12px', '12px', '1px'], ['12px', '0px', '1px']]);
+    // Each with its line icon on the connector tile, as Share draws it (board REV-CHAN A): a round
+    // and a square speech bubble, and a phone, 12 px before the words and centred on them.
+    const embedRow = share.querySelector<HTMLElement>('.cd-setup-live__embed')!;
+    const tiled: [HTMLElement, string | undefined][] = [[embedRow, 'M2 8h20M6 4v4M10 4v4'], ...rows.map((row, index): [HTMLElement, string | undefined] => [row as HTMLElement, CHANNEL_FIRST_PATHS[index]])];
+    for (const [row, glyph] of tiled) {
+      const tile = row.firstElementChild as HTMLElement;
+      expect(tile.className).toBe('cd-connector-icon cd-connector-icon--section cd-connector-icon--built-in');
+      expect(tile.getAttribute('aria-hidden')).toBe('true');
+      const box = tile.getBoundingClientRect();
+      expect([box.width, box.height]).toEqual([36, 36]);
+      const text = row.querySelector('.cd-setup-live__embed-text')!.getBoundingClientRect();
+      expect(Math.round(text.left - box.right)).toBe(12);
+      expect(Math.abs((box.top + box.bottom) / 2 - (text.top + text.bottom) / 2)).toBeLessThanOrEqual(1);
+      expect(tile.querySelector('path')?.getAttribute('d')).toBe(glyph);
+    }
     expectNoHorizontalScroll();
   });
 
@@ -4323,7 +4345,7 @@ describe('consultant setup', () => {
     await expect.element(other).toBeVisible();
     const row = other.element().closest<HTMLElement>('.cd-setup-q3__row--other');
     if (!row) throw new Error('the "Something else" input sits in its row');
-    const edge = tokenColor('--line-field-focus');
+    const edge = tokenColor('--line-focus');
     expect(getComputedStyle(row).boxShadow).not.toContain(edge);
     await other.click();
     expect(getComputedStyle(row).boxShadow).toContain(edge);

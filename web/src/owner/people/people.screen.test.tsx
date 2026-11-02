@@ -26,7 +26,7 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { holdReads } from '../../test/holdReads.ts';
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../../test/screen.ts';
 import { SHARE_COPY, displayLink } from '../share/shareCopy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -679,6 +679,17 @@ describe('a person outside the list', () => {
   });
 });
 
+/**
+ * Each channel's line icon in More channels, by its first path: Lucide's app-window (a browser
+ * window), message-circle, message-square and phone.
+ */
+const CHANNEL_GLYPHS = [
+  'M2 8h20M6 4v4M10 4v4',
+  'M7.9 20A9 9 0 1 0 4 16.1L2 22Z',
+  'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+];
+
 describe('share', () => {
   it('more_channels_matches_the_signed_section_on_desktop_and_phone', async () => {
     const channels = [
@@ -716,6 +727,27 @@ describe('share', () => {
         const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
         const text = row.querySelector('.cd-share-kit__later-text')!.getBoundingClientRect();
         expect(pill.left).toBeGreaterThanOrEqual(text.right);
+        // Board REV-CHAN A: the channel's line icon on the built-in connector tile, at the row's
+        // left, 12 px before its words, centred on them. A neutral glyph, never a brand's mark.
+        const tile = row.firstElementChild as HTMLElement;
+        expect(tile.classList).toContain('cd-connector-icon');
+        expect(tile.classList).toContain('cd-connector-icon--section');
+        expect(tile.classList).toContain('cd-connector-icon--built-in');
+        expect(tile.getAttribute('aria-hidden')).toBe('true');
+        const tileBox = tile.getBoundingClientRect();
+        expect([tileBox.width, tileBox.height]).toEqual([36, 36]);
+        expect(getComputedStyle(tile).backgroundColor).toBe(tokenColor('--fill-secondary'));
+        expect(Math.round(tileBox.left - row.getBoundingClientRect().left)).toBe(16);
+        expect(Math.round(text.left - tileBox.right)).toBe(12);
+        expect(Math.round(pill.left - text.right)).toBeGreaterThanOrEqual(16);
+        expect(getComputedStyle(tile).borderTopLeftRadius).toBe('8px');
+        expect(Math.abs((tileBox.top + tileBox.bottom) / 2 - (text.top + text.bottom) / 2)).toBeLessThanOrEqual(1);
+        const glyph = tile.querySelector('svg')!;
+        expect(glyph.getAttribute('stroke')).toBe('currentColor');
+        expect(glyph.querySelector('[fill]:not([fill="none"])')).toBeNull();
+        const glyphBox = glyph.getBoundingClientRect();
+        expect([glyphBox.width, glyphBox.height]).toEqual([20, 20]);
+        expect([...glyph.querySelectorAll('path')].map((path) => path.getAttribute('d'))[0]).toBe(CHANNEL_GLYPHS[index]);
       }
       expectNoHorizontalScroll();
     }

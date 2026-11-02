@@ -19,7 +19,8 @@ import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { VisionNote } from '../settings/VisionNote.tsx';
 import { KnowledgeListSkeleton } from './KnowledgeSkeleton.tsx';
-import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS } from './previewSources.ts';
+import { businessWords } from '../businessWords.ts';
+import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS, sampleQuestions } from './previewSources.ts';
 import { isStartingSampleDesk } from './sampleDesk.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { useDesks } from '../useDesks.ts';
@@ -376,16 +377,16 @@ export function KnowledgePage() {
               })}
         />
         </div>
-        <KnowledgePreviews showSampleQuestions={isStartingDesk} />
+        <KnowledgePreviews questions={sampleQuestions(businessWords(desk))} />
       </div>
     </>
   );
 }
 
-/** Static examples share the real source list’s card and row markup. */
-export function KnowledgePreviews({ showSampleQuestions = true }: { showSampleQuestions?: boolean } = {}) {
+/** Static examples share the real source list’s card and row markup: the business’s sample questions (Turner’s by default) and more sources. */
+export function KnowledgePreviews({ questions = SAMPLE_QUESTIONS }: { questions?: readonly KnowledgeRowView[] } = {}) {
   return <div className="cd-knowledge__previews">
-    {showSampleQuestions ? <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} /> : null}
+    <KnowledgeList title="Questions Claude couldn’t answer" items={questions} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} />
     <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
   </div>;
 }
