@@ -40,11 +40,12 @@ export function GeneralPage() {
     document.getElementById(unconfirmed ? reloadId : removeButtonId)?.focus();
   }, [unconfirmed, reloadId, removeButtonId]);
 
-  /** The Desk is gone: the business's next Desk's Today, or setup for a new one; then the copy is read again. */
-  const leave = async (businesses: readonly BusinessOut[] = [business]) => {
+  /** The Desk is gone: another Desk's Today, preferring this business, or setup when none remain. */
+  const leave = async (businesses: readonly BusinessOut[] = queryClient.getQueryData<BusinessOut[]>(DESKS_KEY) ?? [business]) => {
     setConfirming(false);
-    const now = businesses.find((b) => b.business_id === business.business_id) ?? business;
-    const next = now.desks.find((d) => d.desk_id !== desk.desk_id);
+    const now = businesses.find((b) => b.business_id === business.business_id);
+    const next = now?.desks.find((d) => d.desk_id !== desk.desk_id)
+      ?? businesses.flatMap((b) => b.desks).find((d) => d.desk_id !== desk.desk_id);
     // Leave this Desk first: read again while it is still shown, the copy without it would say it's gone.
     await navigate(next ? todayPath(next.desk_id) : '/app/setup', { replace: true });
     await invalidateCopy(queryClient);
