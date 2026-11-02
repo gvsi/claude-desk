@@ -23,7 +23,7 @@
 
 Beside the line, the count in words, "{n} entries" ("1 entry"), in caption type and the secondary text color (`entriesLabel`); at the end, "Signed with a development key" when `devKey`.
 
-The words claim no more than the kernel's check shows. A pass means every entry still hashes and verifies as signed, in an unbroken run that ends at the head the kernel last wrote. A failure at an entry names the first check that failed, not a changed entry: an untouched record checked against another key fails at entry 1, a removed entry fails at the unchanged one after it, and entries cut off the end fail at the first missing one, past the last entry shown. So a failed check says where it failed, never that the record changed. The full trace (`FullTrace`) keeps the chain's own terms.
+The words claim no more than the kernel's check shows. A pass means every entry still hashes and verifies as signed, in an unbroken run that ends at the head the kernel last wrote. A failure at an entry names where a check first failed, which may not be a changed entry: an edited entry fails at itself, but an untouched record checked against another key fails at entry 1, a removed entry fails at the unchanged one after it, entries cut off the end fail at the first missing one past the last entry shown, and a head row left behind fails at the first entry past it. So a failed check says where it failed, never that the record changed. The full trace (`FullTrace`) keeps the chain's own terms.
 
 ## Props
 
