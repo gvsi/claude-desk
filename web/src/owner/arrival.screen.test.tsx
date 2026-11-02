@@ -1862,6 +1862,8 @@ describe('Things to try ticks off', () => {
   });
 
   it.each(['desktop', 'phone'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (viewport) => {
+    // On a phone the demo's rule fits the held line in two lines, as many as the done line's; a longer one makes the row shrink.
+    if (viewport === 'phone') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -2058,7 +2060,9 @@ describe('Things to try ticks off', () => {
     ['cancelled', 'desktop', 'The visitor cancelled before you answered. Nothing was done.', 'Cancelled before you answered. Nothing was done.'],
   ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, viewport, cardLine, rowLine) => {
     // The answer comes back 409: the request had already ended. That isn't an answer, so nothing
-    // ticks; the row stays in its slot and says how it ended.
+    // ticks; the row stays in its slot and says how it ended. On a phone the request is held under a
+    // longer rule, so its row is taller than the line it settles with.
+    if (viewport === 'phone') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -2747,20 +2751,29 @@ interface ListFrame {
   below: number;
 }
 
+/** A rule long enough that "Answer a held request" takes three lines on a phone, one more than the line it ends with. */
+const LONG_RULE = 'Quotes from your price list, at list price, with no discount unless you agree to it first.';
+
+/** Rewords the rule that holds the seeded request, as an owner who wrote a longer reason would have it. */
+function holdUnderALongRule(): void {
+  const desk = mockStore.world.desk(RIVERA.deskId);
+  if (!desk?.policy.cards.some((card) => card.card_id === 'rv-quote')) throw new Error('the seed holds the 15% quote under rv-quote');
+  desk.policy.cards = desk.policy.cards.map((card) => (card.card_id === 'rv-quote' ? { ...card, reason: LONG_RULE } : card));
+}
+
 /** A move this small (in px) can't show whether it eased: it fits in a frame or two whatever the curve. */
 const TOO_SMALL_TO_EASE = 4;
 
 /**
- * What follows the list held its place while the row's check drew, then, when the row ends shorter,
- * moved up one way only, by way of places between (when it moved more than a few px), to where the
- * row's own height puts it: the row keeps no least height at the end.
+ * What follows the list held its place while the row's check drew, then moved up one way only, by
+ * way of places between (when it moved more than a few px), to where the row's own height puts it:
+ * the row keeps no least height at the end.
  */
 function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): void {
   const from = frames[0]?.below ?? 0;
   const to = frames.at(-1)?.below ?? 0;
-  // A row that ends as tall as it was moves nothing: a card whose row keeps its height (its open
-  // ideas didn't make it the tallest), or a row whose done line takes as many lines as its detail.
-  if (Math.abs(to - from) < 0.5) {
+  // A card whose row keeps its height (its open ideas didn't make it the tallest) moves nothing.
+  if (cardsShareTheirRow() && Math.abs(to - from) < 0.5) {
     expect(frames.some((frame) => frame.checkDrawing), 'the check drew').toBe(true);
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
@@ -2786,8 +2799,8 @@ function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): v
 
 /**
  * A row that settled with a line and no check: it stayed in the list in its slot, what follows held
- * its place as the line came in, then, when the row ends shorter, moved up one way only, by way of
- * places between, to where the row's own height puts it.
+ * its place as the line came in, then moved up one way only, by way of places between, to where the
+ * row's own height puts it.
  */
 function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement): void {
   expect(frames.every((frame) => frame.drawn), 'the row stayed in the list').toBe(true);
@@ -2799,8 +2812,7 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement):
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
-  // Cards side by side keep their row's height; a row whose line takes as many lines as its detail keeps its own.
-  if (cardsShareTheirRow() || Math.abs(to - from) < 0.5) {
+  if (cardsShareTheirRow()) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
     return;
