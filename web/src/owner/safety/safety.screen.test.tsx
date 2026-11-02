@@ -495,10 +495,6 @@ describe('Safety', () => {
     await expect.poll(() => document.activeElement).toBe(trace.element());
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     expect(main.scrollTop).toBe(before);
-    // Its record opened, the trace is taller than the window, and still the page stays where it was.
-    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
-    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-    expect(main.scrollTop).toBe(before);
     const beside = trace.element().closest<HTMLElement>('.cd-safety__beside');
     if (!beside) throw new Error('the trace sits in the column beside the list');
     expect(beside.scrollHeight).toBeGreaterThan(beside.clientHeight);
@@ -521,30 +517,6 @@ describe('Safety', () => {
     expect(subtitle.element().compareDocumentPosition(headline.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
-  });
-
-  it('record_is_closed_for_each_entry_opened', async () => {
-    // The owner opens entry 2's record, then picks entry 3 in the same list: its trace opens with
-    // the record closed, as every trace does, rather than keeping the last one's open.
-    injectLedger(ledgerPage(threeEntries()));
-    const { screen } = await renderRoute(`${SAFETY}?view=entries`);
-    await recordRow(screen, 2).click();
-    const first = region(screen, 'Full trace of entry 2');
-    const recorded = first.getByRole('button', { name: 'What was recorded', exact: true });
-    await recorded.click();
-    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
-    await recordRow(screen, 3).click();
-    const next = region(screen, 'Full trace of entry 3');
-    await expect.element(next).toBeVisible();
-    await expect.element(next.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
-    expect(next.element().querySelector('pre')).toBeNull();
-
-    // Back to entry 2: its record is closed again, not left as it was.
-    await recordRow(screen, 2).click();
-    const again = region(screen, 'Full trace of entry 2');
-    await expect.element(again).toBeVisible();
-    await expect.element(again.getByRole('button', { name: 'What was recorded', exact: true })).toHaveAttribute('aria-expanded', 'false');
-    expect(again.element().querySelector('pre')).toBeNull();
   });
 
   it('dev_key_is_labelled', async () => {
@@ -664,9 +636,6 @@ describe('Safety', () => {
     await expect.element(full).toHaveAttribute('aria-expanded', 'true');
     const trace = region(screen, 'Full trace of entry 2');
     await expect.element(trace).toBeVisible();
-    expect(trace.element().textContent).not.toContain('payments.create_refund');
-    // What was recorded opens under its label.
-    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     const values = [...document.querySelectorAll('.cd-type-trace')].map((el) => el.textContent);
     expect(values).toContain('2');
     expect(values.join('\n')).toContain('payments.create_refund');
@@ -788,12 +757,7 @@ describe('Safety', () => {
     await expectScreenBasics(screen.container, { owner: true });
     await recordRow(screen, returned.seq).click();
     const trace = region(screen, `Full trace of entry ${returned.seq}`);
-    // The raw record waits, closed, under its label: the trace opens on its plain line and the chain.
-    const recorded = trace.getByRole('button', { name: 'What was recorded', exact: true });
-    await expect.element(recorded).toHaveAttribute('aria-expanded', 'false');
-    expect(trace.element().textContent).not.toContain('"from"');
-    await recorded.click();
-    await expect.element(recorded).toHaveAttribute('aria-expanded', 'true');
+    await expect.element(trace.getByText('What was recorded', { exact: true })).toBeVisible();
     expect(trace.element().textContent).toContain('"from": "owner"');
     expect(trace.element().textContent).toContain('"to": "ai"');
   });
@@ -1030,7 +994,6 @@ describe('Safety', () => {
     const values = () => [...trace.element().querySelectorAll('.cd-type-trace')].map((el) => el.textContent ?? '');
     await expect.element(trace.getByText('Recorded at', { exact: true })).toBeVisible();
     expect(values()).toContain(decide.created_at);
-    await trace.getByRole('button', { name: 'What was recorded', exact: true }).click();
     expect(values().join('\n')).toContain(replayedAt);
 
     // The attempt kept in that entry says the same, at the same time.
