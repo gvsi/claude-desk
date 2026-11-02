@@ -189,13 +189,14 @@ async def _read(response: httpx.Response, feed: _Feed, clock: Callable[[], datet
 
 
 @contextlib.asynccontextmanager
-async def _listening(http: httpx.AsyncClient, path: str, cookie: str,
+async def _listening(loopback: httpx.AsyncClient, path: str, cookie: str,
                      clock: Callable[[], datetime]) -> AsyncIterator[_Feed]:
     """The session's event stream, open (from its first event) while the block runs, read into a `_Feed` in a task of
-    its own; closed on the way out, however the block ends."""
+    its own; closed on the way out, however the block ends. `loopback` is the run's client of the API's own public
+    visitor endpoints, never a kernel view."""
     async with contextlib.AsyncExitStack() as stack:
         try:
-            response = await stack.enter_async_context(http.stream(
+            response = await stack.enter_async_context(loopback.stream(
                 "GET", f"{path}/events", headers={"Cookie": cookie, "Accept": "text/event-stream"}))
         except httpx.HTTPError as error:
             raise RunFailed(f"the event stream couldn't open ({type(error).__name__})") from None
@@ -380,8 +381,8 @@ class _Chat:
             terminal.cancel()
             await asyncio.gather(work, terminal, return_exceptions=True)
 
-    async def call(self, method: str, path: str, *, ok: int, json: dict | None = None) -> None:
-        """One request to the Desk with the run's cookie: `RunFailed` for any answer but `ok`, and the chat's end for a
+    async def request(self, method: str, path: str, *, ok: int, json: dict | None = None) -> None:
+        """One request to the Desk's public visitor endpoints with the run's cookie: `RunFailed` for any answer but `ok`, and the chat's end for a
         401 `no_session`."""
         self.check()
         try:
@@ -399,7 +400,7 @@ class _Chat:
         typing itself."""
         reading = min(READING_MAX_S, READING_MIN_S + READING_PER_CHAR_S * read)
         await self.sleep(reading)
-        await self.call("POST", "/typing", ok=204)
+        await self.request("POST", "/typing", ok=204)
         await self.sleep(min(TYPING_PER_CHAR_S * len(message), PAUSE_MAX_S - reading))
         return await self.send(message)
 
@@ -407,7 +408,7 @@ class _Chat:
         if self.run.messages_sent >= MAX_MESSAGES:
             raise _Ended("limit")
         mark = len(self.feed.events)
-        await self.call("POST", "/messages", ok=202, json={"text": message})
+        await self.request("POST", "/messages", ok=202, json={"text": message})
         self.run.messages_sent += 1
         return mark
 
@@ -432,7 +433,7 @@ class _Chat:
                 if not nudged and quiet >= NUDGE_AFTER_S:
                     nudged = True
                     if self.run.messages_sent < MAX_MESSAGES:
-                        await self.active(self.call("POST", "/typing", ok=204))
+                        await self.active(self.request("POST", "/typing", ok=204))
                         await self.active(self.send(DEMO_VISITOR_NUDGE))
                     continue
                 wait = min(wait, (OWNER_SILENT_S if nudged else NUDGE_AFTER_S) - quiet)
