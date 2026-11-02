@@ -75,12 +75,12 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
   turn, answered on the contact question behind a code ask the owner isn't shown. A change that belongs to another
   topic is asked there next, a limit on its own question with code's choices (`_next_ask`, on that turn alone), and
   so is a fact the turn gave that the contact question can't record off its topic (`_held_off_topic`). A drop of a
-  job or connector the owner accepted shows its card again for them to decide, and a new job of an accepted one's
-  kind replaces it (`_record_plan`). The turn drops the rules draft, so the rules, situations and safety check are
-  drafted again on the way forward; the confirm then waits for the safety check to run again, and proving work that
-  read the interview before a reopen never writes after it (`Interview.reopens`). The safety check, the confirm and
-  going live never run alongside a change in this process (`_transition`). Each send carries an idempotency key, kept
-  on the owner's message.
+  job or connector the owner accepted shows its card again for them to decide, unless the same call adds a job of
+  its kind, which replaces it (`_record_plan`). The turn drops the rules draft, so the rules, situations and safety
+  check are drafted again on the way forward; the confirm then waits for the safety check to run again, and proving
+  work that read the interview before a reopen never writes after it (`Interview.reopens`). The safety check, the
+  confirm and going live never run alongside a change in this process (`_transition`). Each send carries an
+  idempotency key, kept on the owner's message.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
@@ -2528,22 +2528,27 @@ def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCar
     """Record additions and valid drops even on a follow-up; return only items available before this turn.
 
     Once "Change something" reopened the questions, the plan can also change what the owner accepted, through the
-    cards that record it: a drop naming an accepted job or connector changes it to a fresh copy of its card, which
-    waits for the owner's decision and is available at once (a job the owner took isn't removed on Claude's word
-    alone); and a job added of an accepted job's kind replaces it (`changed`), never sitting beside it."""
+    cards that record it, and only by the plan's own `drop` (a job's kind is no identity: an owner can have several
+    jobs of one kind, and a job added without a drop sits beside them). A drop naming an accepted job that the same
+    call adds a job of its kind for is replaced by that job (`changed`), which waits for the owner's decision. A drop
+    naming any other accepted job or connector changes it to a fresh copy of its card, which waits for the owner's
+    decision and is available at once: a job the owner took isn't removed on Claude's word alone."""
     available = interview.unshown
     if source is not None:
         available_ids = {card.proposal_id for card in available}
         reply.dropped = list(dict.fromkeys(proposal_id for proposal_id in source.drop if proposal_id in available_ids))
         reply.planned = [card for draft in source.add_jobs if (card := _planned_job(interview, draft)) is not None]
         if interview.reopens:
-            for added in list(reply.planned):
-                for kept in _accepted_cards(interview):
-                    if kept.job is not None and kept.job.job == added.job.job:
-                        _supersede(interview, kept.proposal_id, added.proposal_id)
+            replacements = list(reply.planned)
             for proposal_id in dict.fromkeys(source.drop):
                 kept = next((card for card in _accepted_cards(interview) if card.proposal_id == proposal_id), None)
                 if kept is None:
+                    continue
+                added = next((card for card in replacements
+                              if kept.job is not None and card.job is not None and card.job.job == kept.job.job), None)
+                if added is not None:
+                    replacements.remove(added)
+                    _supersede(interview, kept.proposal_id, added.proposal_id)
                     continue
                 again = kept.model_copy(deep=True, update={"proposal_id": new_proposal_id(), "state": "proposed"})
                 if again.connector is not None:

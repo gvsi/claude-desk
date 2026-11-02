@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import proving, setup
-from desk.api.prompts import QUESTIONS, DraftedSituations, JobDraft, question_text
+from desk.api.prompts import QUESTIONS, DraftedSituations, JobDraft, JobProposal, question_text
 from tests.api.fakes import gated, unavailable
 from tests.api.test_setup_questions import Owner, answer, next_step, stored as stored_questions, structured, turn, until
 from tests.api.test_setup_rules import (  # noqa: F401  (the app and model fixtures)
@@ -524,10 +524,11 @@ TOOLS = "PUT /desks/{id}/business_tools"
 ASK_REFUNDS = GOOD_CARDS[-1]       # a card that fits a setup with no limits answered
 
 
-async def with_jobs(app, browser, kernel_http, model, engine):
-    """An owner on the web's client, which shows cards, whose setup closed with `business_jobs`' four jobs, each
-    decided by the owner on its card (the third declined): at the Tools step, with the accepted jobs' tools."""
-    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine)
+async def with_jobs(app, browser, kernel_http, model, engine, jobs: list[JobProposal] | None = None):
+    """An owner on the web's client, which shows cards, whose setup closed with `jobs` (by default `business_jobs`'
+    four, the third declined, else each one accepted), each decided by the owner on its card: at the Tools step, with
+    the accepted jobs' tools."""
+    owner, state, jobs = await business_jobs(app, browser, kernel_http, model, engine, jobs=jobs)
     async with engine.begin() as conn:
         interview = await setup._load(conn, owner.copy_id, state["interview_id"])
         for entry in interview.transcript:
@@ -619,16 +620,27 @@ async def test_dropping_every_job_asks_each_card_and_takes_every_tool_away(
     assert not any(job.title in drafted_jobs(model) for job in jobs)
 
 
-async def test_a_new_job_of_the_kind_of_one_the_owner_accepted_replaces_it(
+PHOTOS = JobDraft(job="intake", title="Repair requests with photos", who="", why="See the problem first",
+                  how="Ask what needs repair and for a photo of it.", autonomy="ask",
+                  config={"block": "intake", "questions": ["What needs repair?", "Can you send a photo?"]})
+
+
+def accepted_job(title: str, job: str = "intake") -> JobProposal:
+    config = ({"block": "intake", "questions": [f"{title}?"]} if job == "intake" else
+              {"block": "typed_booking", "appointment_type": title, "minutes": 60})
+    return JobProposal(job=job, title=title, why="Help customers", how=f"{title} for customers.", autonomy="ask",
+                       can_do_today=True, config=config)
+
+
+async def test_a_job_the_plan_drops_and_adds_again_is_replaced_by_the_new_one(
         app, browser, kernel_http, model, engine, fake):
-    # Claude changes the repair requests job by planning another of its kind: the one the owner accepted is changed
-    # to it, never kept beside it, and the new one is shown for the owner to decide.
+    # Claude changes the repair requests job by dropping it and planning another of its kind in one call: the one the
+    # owner accepted is changed to the new one, not shown again beside it, and the new one waits for their decision.
     owner, state, jobs = await with_jobs(app, browser, kernel_http, model, engine)
     writes = len(fake.called(TOOLS))
-    photos = JobDraft(job="intake", title="Repair requests with photos", who="", why="See the problem first",
-                      how="Ask what needs repair and for a photo of it.", autonomy="ask",
-                      config={"block": "intake", "questions": ["What needs repair?", "Can you send a photo?"]})
-    model.add(turn("I'll ask for a photo with each repair request.", add_jobs=[photos], next={"kind": "done"}))
+    photos = PHOTOS
+    model.add(turn("I'll ask for a photo with each repair request.", add_jobs=[photos], drop=[JOB_IDS[0]],
+                   next={"kind": "done"}))
     model.add(next_step("what_you_do", next={"kind": "done"}))
     changed = await reopen(owner, state, "Ask for a photo with repair requests.", cards=True)
     assert changed.status_code == 200, changed.text
@@ -647,3 +659,50 @@ async def test_a_new_job_of_the_kind_of_one_the_owner_accepted_replaces_it(
     assert [tool["title"] for tool in write.body["tools"]] == [jobs[1].title, photos.title]
     await drafted_rules(owner, model, state, ASK_REFUNDS)
     assert jobs[0].title not in drafted_jobs(model) and photos.title in drafted_jobs(model)
+
+
+async def test_a_new_job_beside_accepted_ones_of_its_kind_keeps_them_all(app, browser, kernel_http, model, engine, fake):
+    # "Also let people book overnight sitting": a job of a kind the owner has twice already. Nothing is dropped, so
+    # both bookings stay, and the new one is offered beside them.
+    walks, greets = accepted_job("Book walks", "schedule"), accepted_job("Book meet and greets", "schedule")
+    owner, state, _ = await with_jobs(app, browser, kernel_http, model, engine, jobs=[walks, greets])
+    writes = len(fake.called(TOOLS))
+    overnight = JobDraft(job="schedule", title="Book overnight sitting", who="", why="Fill the nights",
+                         how="Book an overnight stay in open dates.", autonomy="ask",
+                         config={"block": "typed_booking", "appointment_type": "Overnight sitting", "minutes": 60})
+    model.add(turn("I'll add overnight sitting.", add_jobs=[overnight], next={"kind": "done"}))
+    model.add(next_step("what_you_do", next={"kind": "done"}))
+    changed = await reopen(owner, state, "Also let people book overnight sitting.", cards=True)
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    card = body["messages"][-1]["card"]
+    assert (card["state"], card["job"]["title"]) == ("proposed", overnight.title)
+    assert not [message for message in body["messages"] if message["card"] and message["card"]["state"] == "changed"]
+
+    landed = await decide(owner, model, state, card["proposal_id"], True, closes=True)
+    assert landed["step"] == "tools"
+    current = await setup._read(engine, owner, state["interview_id"])
+    assert [job.title for job in setup.accepted_jobs(current)] == [walks.title, greets.title, overnight.title]
+    (write,) = fake.called(TOOLS)[writes:]
+    assert [tool["title"] for tool in write.body["tools"]] == [walks.title, greets.title, overnight.title]
+
+
+async def test_replacing_one_job_keeps_another_of_its_kind(app, browser, kernel_http, model, engine, fake):
+    # Repair requests are replaced through the plan's drop; the warranty claims intake, the same kind, stays.
+    repairs, warranty = accepted_job("Take repair requests"), accepted_job("Take warranty claims")
+    owner, state, _ = await with_jobs(app, browser, kernel_http, model, engine, jobs=[repairs, warranty])
+    model.add(turn("I'll change the repair requests.", add_jobs=[PHOTOS], drop=[JOB_IDS[0]], next={"kind": "done"}))
+    model.add(next_step("what_you_do", next={"kind": "done"}))
+    changed = await reopen(owner, state, "Ask for a photo with repair requests. Keep warranty claims as they are.",
+                           cards=True)
+    assert changed.status_code == 200, changed.text
+    body = changed.json()
+    card = body["messages"][-1]["card"]
+    assert (card["job"]["title"], body["pending_card"]) == (PHOTOS.title, card["proposal_id"])
+    assert all(each["superseded_by"] == card["proposal_id"] for each in cards_of(body, JOB_IDS[0]))
+    assert all(each["state"] == "accepted" for each in cards_of(body, JOB_IDS[1]))
+
+    landed = await decide(owner, model, state, card["proposal_id"], True, closes=True)
+    assert landed["step"] == "tools"
+    current = await setup._read(engine, owner, state["interview_id"])
+    assert [job.title for job in setup.accepted_jobs(current)] == [warranty.title, PHOTOS.title]
