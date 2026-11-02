@@ -505,6 +505,30 @@ describe('agents page', () => {
     expect(chipsIn(last.screen)).toEqual([]);
   });
 
+  it.each([true, false])('question_task_finishes_with_payments_%s', async (payments) => {
+    const desk = mockStore.world.desks[0];
+    if (!payments) {
+      for (const tool of desk.tools) {
+        if (tool.tool === 'native.payment_link' || tool.tool === 'native.charge_mandate') tool.status = 'disabled';
+      }
+    }
+    const { screen } = await renderRoute(PAGE);
+    const panel = screen.getByRole('region', { name: 'Send an agent' });
+    const task = panel.getByRole('button', { name: 'Ask about tankless heaters' });
+    await expect.element(task).toBeVisible();
+    expect(chipsIn(screen)).toEqual(payments ? TASKS : TASKS.slice(0, 2));
+
+    await task.click();
+    await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
+    expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'ask_question' });
+    const run = panel.getByRole('log', { name: 'Alex Kim’s assistant’s visit' });
+    await expect.element(run.getByText('We work on tankless water heaters.', { exact: true })).toBeVisible();
+    expect(run.element().querySelectorAll('.cd-agent-message')).toHaveLength(1);
+    expect(run.element().querySelectorAll('.cd-claude-message')).toHaveLength(1);
+    expect(run.element().querySelector('.cd-agent-message__title')?.textContent).toBe('Ask about tankless heaters');
+    expect(chipsIn(screen)).toEqual(payments ? TASKS : TASKS.slice(0, 2));
+  });
+
   it('send_agent_shows_signed_requests_and_replies', async () => {
     const { screen } = await renderRoute(PAGE);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
