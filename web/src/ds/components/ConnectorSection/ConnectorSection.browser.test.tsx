@@ -40,6 +40,32 @@ function withTool(section: ConnectorSectionProps, name: string, changes: Partial
 /** The selected fill, as the browser computes `--bg-selected`. */
 const SELECTED = 'rgb(60, 57, 47)';
 
+it.each([680, 688].flatMap((width) => [undefined, '/x'].map((href) => ({ width, href }))))('payment_link_keeps_a_readable_text_column_in_a_$width_px_section_with_href_$href', ({ width, href }) => {
+  const payments = rivera.connectors.sections.find((section) => section.connector.id === 'payments');
+  const paymentLink = payments?.tools.find((tool) => tool.key === 'native.payment_link');
+  if (!payments || !paymentLink) throw new Error('Payments has a payment link');
+  const draw = mount();
+  const el = draw({
+    ...payments,
+    tools: [{ ...paymentLink, href, summary: 'Anyone · Up to $300 · Checked by the reviewer' }],
+  });
+  el.style.width = `${width}px`;
+  const row = el.querySelector<HTMLElement>('.cd-connector-section__tool')!;
+  const head = row.querySelector<HTMLElement>('.cd-connector-section__tool-head')!;
+  const description = row.querySelector<HTMLElement>('.cd-connector-section__tool-description')!;
+  const summary = row.querySelector<HTMLElement>('.cd-connector-section__tool-summary')!;
+  const outcome = row.querySelector<HTMLElement>('.cd-connector-section__tool-outcome')!;
+  expect(head.getBoundingClientRect().width).toBeGreaterThanOrEqual(240);
+  expect(description.getBoundingClientRect().width).toBeGreaterThanOrEqual(240);
+  expect(description.getBoundingClientRect().height).toBeLessThanOrEqual(4 * parseFloat(getComputedStyle(description).lineHeight));
+  expect(summary.getBoundingClientRect().right).toBeLessThanOrEqual(outcome.getBoundingClientRect().left);
+  const style = getComputedStyle(row);
+  const contentRight = row.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth);
+  for (const part of row.children) {
+    expect(part.getBoundingClientRect().right).toBeLessThanOrEqual(contentRight);
+  }
+});
+
 it('a_landed_row_lights_up_holds_and_lets_go', async () => {
   await motion();
   const draw = mount();
