@@ -345,7 +345,9 @@ export interface ConnectorProposal {
  * entries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release
  * (`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the
  * owner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later
- * request still held, expired or cancelled, or a handoff card opening, clears it to null.
+ * request still held, expired or cancelled, or a handoff card opening, clears it to null. `demo_visitor` is true for
+ * a demo visitor's chat (an AI the owner started to play a customer, `owner_reads.demo_visitors`), listed as soon as
+ * it opens; with no verified or lead name, its `display_name` is its persona's first name.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -372,6 +374,7 @@ export interface ConversationSummary {
       )
     | null;
   replayed?: boolean;
+  demo_visitor?: boolean;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -404,6 +407,35 @@ export interface DemoAgentRun {
   task: "book_visit" | "quote_and_deposit" | "push_the_limit";
   state: "running" | "done" | "failed";
   turns: AgentTurn[];
+}
+export interface DemoVisitorIn {
+  idempotency_key: string;
+}
+/**
+ * A demo visitor's run: an AI that plays a customer in a visitor chat on the owner's own Desk
+ * (`demo_visitors.py`), kept in the process's memory for an hour. `first_name` is its persona's, fixed text;
+ * `session_id` is its visitor session, None until it is open; `messages_sent` counts the messages it sent the Desk;
+ * `ended` says how a run that is no longer `running` ended (`done`: finished, limit or owner_silent; `stopped`:
+ * stopped_by_owner or chat_ended; `failed`: budget or failed).
+ */
+export interface DemoVisitorRun {
+  run_id: string;
+  desk_id: string;
+  first_name: string;
+  session_id: string | null;
+  state: "running" | "done" | "stopped" | "failed";
+  messages_sent: number;
+  ended: ("finished" | "stopped_by_owner" | "chat_ended" | "limit" | "owner_silent" | "budget" | "failed") | null;
+}
+/**
+ * 202 from `POST /api/owner/desks/{desk_id}/demo_visitor`: the demo visitor's run and its open visitor session,
+ * on `desk_id`. While one runs in the copy, starting another answers that one, so `desk_id` can be another of the
+ * copy's Desks. Poll `GET /api/owner/desks/{desk_id}/demo_visitor` for how it stands.
+ */
+export interface DemoVisitorStarted {
+  run_id: string;
+  desk_id: string;
+  session_id: string;
 }
 /**
  * `POST /api/owner/desks/{desk_id}/documents`: a document for the Desk, the owner's alone or a customer's on
@@ -639,6 +671,7 @@ export interface OwnerTranscript {
   items: OwnerTranscriptItem[];
   typing_until: string | null;
   replayed?: boolean;
+  demo_visitor?: boolean;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
@@ -1250,6 +1283,9 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/resume": { 200: "SessionState" },
   "POST /api/owner/conversations/{session_id}/messages": { 200: "OwnerMessageResult" },
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
+  "POST /api/owner/desks/{desk_id}/demo_visitor": { 202: "DemoVisitorStarted" },
+  "GET /api/owner/desks/{desk_id}/demo_visitor": { 200: "DemoVisitorRun" },
+  "POST /api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop": { 200: "DemoVisitorRun" },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
   "GET /api/owner/setup/{id}/events": { 200: null },

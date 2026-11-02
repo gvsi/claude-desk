@@ -1,12 +1,14 @@
-"""The demo visitor's model calls: `app.model_calls.route` may also be `demo_visitor`.
+"""The demo visitor: `app.model_calls.route` may also be `demo_visitor`, and `app.messages.kind` may too.
 
 The demo visitor (`desk.api.demo_visitors`) is an AI that plays a customer in a visitor chat on the owner's own Desk.
 Each of its model calls is recorded like any other, under a route of its own, so its cost stays apart from the Desk's
-own and from the built-in visiting agent's. The route check is widened by dropping it and adding it again with the
-new route; the previous release never writes the new route, so it runs unchanged beside this one during a deploy.
+own and from the built-in visiting agent's. The chat it opens is marked by a `demo_visitor` row in that chat's
+transcript, written before it says anything, so the owner's reads label the chat as a demo visitor's after the
+process that ran it is gone (its runs live in memory only). Each check is widened by dropping it and adding it again
+with the new value; the previous release never writes either one, so it runs unchanged beside this one during a deploy.
 
-The downgrade puts the narrower check back as NOT VALID: rows the demo visitor already wrote stay (they are usage
-records, and deleting them would undercount the day's spend), while no new row may name the route.
+The downgrade puts the narrower checks back as NOT VALID: rows already written stay (the usage records count toward
+the day's spend, and the marks keep labelling the chats they mark), while no new row may name either one.
 
 Revision ID: api_demo_visitor_route
 Revises: 09_business_tools_view
@@ -19,9 +21,14 @@ down_revision = "09_business_tools_view"
 branch_labels = None
 depends_on = None
 
-# The routes before and after this revision, frozen here.
+# The routes and the transcript's kinds before and after this revision, frozen here (the kinds as `api_owner` left
+# them).
 BEFORE = ("conversation", "setup", "card_draft", "situations", "rules_chat", "visiting_agent", "triage", "translation")
 AFTER = (*BEFORE, "demo_visitor")
+KINDS_BEFORE = ("visitor_text", "agent_text", "delivered", "status", "owner_say", "whisper", "action_update",
+                "desk_context", "note", "context_start", "tool_change", "model_assistant", "model_tool_results",
+                "triage", "annotation", "owner_joined", "owner_left", "stopped_draft")
+KINDS_AFTER = (*KINDS_BEFORE, "demo_visitor")
 
 
 def _in(values: tuple[str, ...]) -> str:
@@ -33,11 +40,17 @@ def upgrade() -> None:
         ALTER TABLE app.model_calls
             DROP CONSTRAINT IF EXISTS model_calls_route,
             ADD CONSTRAINT model_calls_route CHECK (route IN {_in(AFTER)});
+        ALTER TABLE app.messages
+            DROP CONSTRAINT IF EXISTS messages_kind,
+            ADD CONSTRAINT messages_kind CHECK (kind IN {_in(KINDS_AFTER)});
     """)
 
 
 def downgrade() -> None:
     op.execute(f"""
+        ALTER TABLE app.messages
+            DROP CONSTRAINT IF EXISTS messages_kind,
+            ADD CONSTRAINT messages_kind CHECK (kind IN {_in(KINDS_BEFORE)}) NOT VALID;
         ALTER TABLE app.model_calls
             DROP CONSTRAINT IF EXISTS model_calls_route,
             ADD CONSTRAINT model_calls_route CHECK (route IN {_in(BEFORE)}) NOT VALID;

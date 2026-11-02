@@ -759,6 +759,13 @@ export interface DemoAgentRun {
   turns: AgentTurn[];
 }
 
+/**
+ * A demo visitor, an AI the owner starts to play a customer on one of the copy's Desks: the start's
+ * body (one key per click), its answer (the run and its open visitor session) and its run as it
+ * stands.
+ */
+export type { DemoVisitorIn, DemoVisitorRun, DemoVisitorStarted } from './openapi.gen.ts';
+
 // Tokens
 
 /** Why a payment link was cancelled: only a change to the business's rules gives a reason. */

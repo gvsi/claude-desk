@@ -1566,7 +1566,7 @@
     "/api/owner/conversations/{session_id}": {
       "get": {
         "summary": "Conversation",
-        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders.",
+        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true\nfor a demo visitor's chat (`owner_reads.demo_visitors`).",
         "operationId": "owner_conversation",
         "parameters": [
           {
@@ -2596,6 +2596,257 @@
               }
             },
             "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/desks/{desk_id}/demo_visitor": {
+      "post": {
+        "summary": "Start Demo Visitor",
+        "description": "Start a demo visitor on one of the copy's Desks, answered once its visitor session is open: open that\nconversation to watch it. It plays the fixed persona of the Desk's set (`agents.demo_task_set`: its setup business\ntype, or Turner's for the copy's own Desk), read with the Desk's slug from the copy's own rows. A Desk of another\ncopy, or none, is 404 before anything starts.\n\nOne runs at a time in a copy: starting another meanwhile answers the running one, on whichever of the copy's Desks\nit runs, and starts nothing. Each start carries an `idempotency_key`, one per click (422 without one); a repeat in\nthe copy within the hour answers the run its key started, however it ended, and the same key on another Desk is\n409 `conflict`. Neither counts as a start. A copy starts at most three an hour: past that, 429 `rate_limited` with\nthe seconds until another fits (`retry_after`). In production, 503 `demo_budget` once today's model budget is\nspent. A run whose visitor session never opened is 503 `demo_visitor_unavailable`.",
+        "operationId": "owner_start_demo_visitor",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemoVisitorIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoVisitorStarted"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      "get": {
+        "summary": "Demo Visitor",
+        "description": "The copy's newest demo visitor on the Desk as it stands (`state`, and how it `ended` once it has), while this\nprocess keeps it (an hour); 404 when there is none.",
+        "operationId": "owner_demo_visitor",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoVisitorRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
+    "/api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop": {
+      "post": {
+        "summary": "Stop Demo Visitor",
+        "description": "Stop the copy's demo visitor on the Desk: a running one ends `stopped` (`stopped_by_owner`) with no further\nmodel call and its event stream closed, and is answered once it has; one that has ended is answered as it is. A\nrun of another copy or another Desk, or one this process no longer keeps, is 404.",
+        "operationId": "owner_stop_demo_visitor",
+        "parameters": [
+          {
+            "name": "desk_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "title": "Desk Id"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoVisitorRun"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
           },
           "422": {
             "content": {
@@ -9146,6 +9397,11 @@
             "type": "boolean",
             "title": "Replayed",
             "default": false
+          },
+          "demo_visitor": {
+            "type": "boolean",
+            "title": "Demo Visitor",
+            "default": false
           }
         },
         "type": "object",
@@ -9162,7 +9418,7 @@
           "latest_outcome"
         ],
         "title": "ConversationSummary",
-        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose\nor positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never\nthe owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger\nentries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release\n(`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the\nowner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later\nrequest still held, expired or cancelled, or a handoff card opening, clears it to null."
+        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose\nor positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never\nthe owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger\nentries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release\n(`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the\nowner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later\nrequest still held, expired or cancelled, or a handoff card opening, clears it to null. `demo_visitor` is true for\na demo visitor's chat (an AI the owner started to play a customer, `owner_reads.demo_visitors`), listed as soon as\nit opens; with no verified or lead name, its `display_name` is its persona's first name."
       },
       "CopyOut": {
         "properties": {
@@ -9528,6 +9784,120 @@
           "created_at"
         ],
         "title": "DemoInboxEntry"
+      },
+      "DemoVisitorIn": {
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "DemoVisitorIn"
+      },
+      "DemoVisitorRun": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "desk_id": {
+            "type": "string",
+            "title": "Desk Id"
+          },
+          "first_name": {
+            "type": "string",
+            "title": "First Name"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "done",
+              "stopped",
+              "failed"
+            ],
+            "title": "State"
+          },
+          "messages_sent": {
+            "type": "integer",
+            "title": "Messages Sent"
+          },
+          "ended": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "finished",
+                  "stopped_by_owner",
+                  "chat_ended",
+                  "limit",
+                  "owner_silent",
+                  "budget",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "desk_id",
+          "first_name",
+          "session_id",
+          "state",
+          "messages_sent",
+          "ended"
+        ],
+        "title": "DemoVisitorRun",
+        "description": "A demo visitor's run: an AI that plays a customer in a visitor chat on the owner's own Desk\n(`demo_visitors.py`), kept in the process's memory for an hour. `first_name` is its persona's, fixed text;\n`session_id` is its visitor session, None until it is open; `messages_sent` counts the messages it sent the Desk;\n`ended` says how a run that is no longer `running` ended (`done`: finished, limit or owner_silent; `stopped`:\nstopped_by_owner or chat_ended; `failed`: budget or failed)."
+      },
+      "DemoVisitorStarted": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "desk_id": {
+            "type": "string",
+            "title": "Desk Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "desk_id",
+          "session_id"
+        ],
+        "title": "DemoVisitorStarted",
+        "description": "202 from `POST /api/owner/desks/{desk_id}/demo_visitor`: the demo visitor's run and its open visitor session,\non `desk_id`. While one runs in the copy, starting another answers that one, so `desk_id` can be another of the\ncopy's Desks. Poll `GET /api/owner/desks/{desk_id}/demo_visitor` for how it stands."
       },
       "DeskBusinessRequest": {
         "properties": {
@@ -11525,6 +11895,11 @@
           "replayed": {
             "type": "boolean",
             "title": "Replayed",
+            "default": false
+          },
+          "demo_visitor": {
+            "type": "boolean",
+            "title": "Demo Visitor",
             "default": false
           }
         },

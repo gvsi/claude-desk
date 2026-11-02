@@ -51,8 +51,11 @@ take-over or a hand-back in the transcript, holding the event the visitor's stre
 reads the change from its `note`. Nor is a `stopped_draft` (Plan 02b), a draft of Claude's the reply check stopped,
 shown in the owner's transcript alone (`text` its `StoppedDraftRow`: the `StoppedDraft` and the verdict's ledger entry
 when its triage shows on it; `ref_id` the verdict's `message_id`): Claude already has its own call and the blocked
-result, and no visitor read has the kind. The summary of the conversation so far labels its lines with prompts.py's
-labels (`SUMMARY_LABELS`, `SHOWN_LABELS`).
+result, and no visitor read has the kind. Nor is a `demo_visitor` row, which marks the chat of a demo visitor (an AI
+the owner started to play a customer, `demo_visitors.py`) for the owner's reads alone, its `text` the persona's first
+name: written once its session opens, before it says anything, so Claude and the visitor's reads treat that chat as
+any visitor's. The summary of the conversation so far labels its lines with prompts.py's labels (`SUMMARY_LABELS`,
+`SHOWN_LABELS`).
 """
 
 import hashlib
@@ -188,9 +191,10 @@ ROW_KINDS: dict[str, _Kind] = {
     "owner_joined": _Kind("api", "public", False),     # the owner's take-over, as its event (Plan 02b)
     "owner_left": _Kind("api", "public", False),       # the owner's hand-back, as its event (Plan 02b)
     "stopped_draft": _Kind("claude", "owner", False),  # a draft of Claude's the reply check stopped (Plan 02b)
+    "demo_visitor": _Kind("api", "owner", False),      # marks a demo visitor's chat; `text`, its persona's first name
 }
 TEXT_KINDS = frozenset({"visitor_text", "agent_text", "owner_say", "whisper", "desk_context", "note",
-                        "action_update", "triage", "stopped_draft"})
+                        "action_update", "triage", "stopped_draft", "demo_visitor"})
 DELIVERY_AUTHORS = frozenset({"claude", "owner", "desk"})
 COLUMNS = frozenset({"author", "text", "blocks", "language", "owner_translation", "wake", "ref_id", "call_id",
                      "event_seq"})

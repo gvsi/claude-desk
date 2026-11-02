@@ -1099,7 +1099,7 @@ def test_wrappers_and_labels_live_in_prompts():
 
 
 # The transcript's row kinds no model reads as a row: the owner's view and the visitor's events only.
-NEVER_READ_KINDS = {"status", "triage", "annotation", "owner_joined", "owner_left", "stopped_draft"}
+NEVER_READ_KINDS = {"status", "triage", "annotation", "owner_joined", "owner_left", "stopped_draft", "demo_visitor"}
 
 
 def test_each_row_kind_is_wrapped_or_never_read():

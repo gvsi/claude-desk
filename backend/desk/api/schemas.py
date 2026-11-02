@@ -318,6 +318,16 @@ class DemoVisitorRun(BaseModel):
     ended: DemoVisitorEnded | None
 
 
+class DemoVisitorStarted(BaseModel):
+    """202 from `POST /api/owner/desks/{desk_id}/demo_visitor`: the demo visitor's run and its open visitor session,
+    on `desk_id`. While one runs in the copy, starting another answers that one, so `desk_id` can be another of the
+    copy's Desks. Poll `GET /api/owner/desks/{desk_id}/demo_visitor` for how it stands."""
+
+    run_id: str
+    desk_id: str
+    session_id: str
+
+
 # The owner's answers (Task 8) ------------------------------------------------------------------------------------
 
 
@@ -447,7 +457,9 @@ class ConversationSummary(BaseModel):
     entries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release
     (`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the
     owner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later
-    request still held, expired or cancelled, or a handoff card opening, clears it to null."""
+    request still held, expired or cancelled, or a handoff card opening, clears it to null. `demo_visitor` is true for
+    a demo visitor's chat (an AI the owner started to play a customer, `owner_reads.demo_visitors`), listed as soon as
+    it opens; with no verified or lead name, its `display_name` is its persona's first name."""
 
     session_id: str
     kind: ActorKind
@@ -461,6 +473,7 @@ class ConversationSummary(BaseModel):
     latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down", "quoted", "lead_captured",
                             "owner_declined", "called_back", "document_sent"] | None
     replayed: bool = False                  # recorded history written into the copy (`owner_reads.history_sessions`)
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
 
 
 class OwnerTranscript(BaseModel):
@@ -473,6 +486,7 @@ class OwnerTranscript(BaseModel):
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
     replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
+    demo_visitor: bool = False              # a demo visitor's chat: an AI the owner started plays the customer
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------

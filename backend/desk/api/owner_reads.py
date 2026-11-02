@@ -25,6 +25,11 @@ record (a booking, a refusal; a decision whose entry can't be read counts as rep
 never count as needing the owner, so "needs you" is never flagged. A conversation, its transcript and a lead say
 whether they are recorded history too (`replayed`, from `history_sessions`), so the owner's screens label them and
 offer no take-over on them.
+
+Demo visitors: a conversation and its transcript say whether a demo visitor (an AI the owner started to play a
+customer, `demo_visitors.py`) is the one chatting (`demo_visitor`), from the `demo_visitor` row its chat was marked
+with when it opened, so they still say so once the process that ran it is gone. Its chat otherwise counts as any
+visitor's.
 """
 
 import asyncio
@@ -1093,6 +1098,15 @@ async def transcript_replayed(ctx: OwnerCtx, desk_id: str, session_id: str) -> b
     return session_id in recorded
 
 
+async def demo_visitors(ctx: OwnerCtx, desk_id: str, session_id: str | None = None) -> dict[str, str]:
+    """The Desk's demo visitors' chats (only `session_id`'s, when given), each with its persona's first name: the
+    sessions whose transcript holds a `demo_visitor` row (module docstring)."""
+    only = [] if session_id is None else [MESSAGES.c.session_id == session_id]
+    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+        MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "demo_visitor", *only))
+    return dict(rows.all())
+
+
 async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
     """The leads visitors left on the Desk, newest first, their names and notes as typed (untrusted text). A lead is
     recorded history unless the session it was left in is known live (`history_sessions`), failing closed as
@@ -1107,7 +1121,8 @@ async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
 async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
     activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
-    visitor typed (`visitor_line`); an agent's carries none."""
+    visitor typed (`visitor_line`); an agent's carries none. A demo visitor's is flagged (`demo_visitors`) and, with no
+    other name, named by its persona."""
     who = who or await people(ctx, desk_id)
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
@@ -1127,16 +1142,18 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
                                                    if row["kind"] == "agent" and session_id in latest], decisions)
     outcomes |= await visitor_outcomes(ctx, desk_id, visitors, decisions)
     recorded, _ = await history_sessions(ctx, desk_id)
+    demo = await demo_visitors(ctx, desk_id)
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
             continue
         found.append(ConversationSummary(
-            session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
-            mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
+            session_id=session_id, kind=row["kind"], display_name=who.name(session_id) or demo.get(session_id),
+            verified=row["verified"], mode=row["mode"],
+            last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
             latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcomes.get(session_id),
-            replayed=session_id in recorded))
+            replayed=session_id in recorded, demo_visitor=session_id in demo))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

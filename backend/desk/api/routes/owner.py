@@ -19,15 +19,19 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from desk.api.agents import demo_task_set
 from desk.api.cookies import set_owner_cookie, set_visitor_cookie
 from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown, visitor_safe
-from desk.api.deps import ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, runtime
+from desk.api.demo_visitors import KeyReused, TooManyStarts
+from desk.api.deps import (ApiProblem, OwnerCtx, Runtime, client_ip, owner_context, owner_ctx, require_model_budget,
+                           runtime)
+from desk.api.idempotency import IdempotencyKey
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api import owner_reads
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
 from desk.api.prompts import NOTES
-from desk.api.ratelimit import RateLimitLedger
+from desk.api.ratelimit import RateLimited, RateLimitLedger
 from desk.api.ro import KernelRO
 from desk.api.schemas import (
     AlreadyResolved,
@@ -40,6 +44,8 @@ from desk.api.schemas import (
     BusinessOut,
     ConversationSummary,
     CopyOut,
+    DemoVisitorRun,
+    DemoVisitorStarted,
     DeskSetup,
     DeskSummary,
     GenerationIn,
@@ -457,7 +463,8 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
     The cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the
     visitor's typing dots stop, while they are typing (presence in this process's memory, never stored).
     Status reasons are read concurrently with the owner's kernel credential, with bounded caching for final
-    execution refusals; an unreadable reason is null, so the stored transcript still renders."""
+    execution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true
+    for a demo visitor's chat (`owner_reads.demo_visitors`)."""
     session = await ctx.ro.session(session_id)
     if session is None or session["desk_id"] not in ctx.desk_ids:
         raise ApiProblem(404, "not_found")
@@ -473,7 +480,8 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
         item.owner_plain = reason
     return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()),
-                           replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id))
+                           replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id),
+                           demo_visitor=bool(await owner_reads.demo_visitors(ctx, session["desk_id"], session_id)))
 
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))
@@ -835,3 +843,81 @@ async def typing(session_id: SessionId, body: GenerationIn, request: Request,
     except BaseException:
         await conn.rollback()
         raise
+
+
+# Demo visitors -----------------------------------------------------------------------------------------------
+#
+# A demo visitor is an AI that plays a customer in a visitor chat on one of the copy's own Desks, so the owner can
+# watch a live chat and take it over, whisper to Claude or hand it back (`demo_visitors.py`). It talks to the Desk
+# only through the public visitor endpoints, as any visitor does; these routes start it, read it and stop it, in the
+# owner cookie's copy alone. Its runs live in this process's memory for an hour; the chat it opens is marked in the
+# API's own transcript, so the owner's reads still flag it once the run is gone (`owner_reads.demo_visitors`).
+
+
+class DemoVisitorIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    idempotency_key: IdempotencyKey                     # one per click, required (`idempotency`)
+
+
+@router.post("/desks/{desk_id}/demo_visitor", status_code=202, response_model=DemoVisitorStarted,
+             responses=error_responses(401, 404, 409, 422, 429, 503))
+async def start_demo_visitor(desk_id: DeskId, body: DemoVisitorIn, request: Request,
+                             ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorStarted:
+    """Start a demo visitor on one of the copy's Desks, answered once its visitor session is open: open that
+    conversation to watch it. It plays the fixed persona of the Desk's set (`agents.demo_task_set`: its setup business
+    type, or Turner's for the copy's own Desk), read with the Desk's slug from the copy's own rows. A Desk of another
+    copy, or none, is 404 before anything starts.
+
+    One runs at a time in a copy: starting another meanwhile answers the running one, on whichever of the copy's Desks
+    it runs, and starts nothing. Each start carries an `idempotency_key`, one per click (422 without one); a repeat in
+    the copy within the hour answers the run its key started, however it ended, and the same key on another Desk is
+    409 `conflict`. Neither counts as a start. A copy starts at most three an hour: past that, 429 `rate_limited` with
+    the seconds until another fits (`retry_after`). In production, 503 `demo_budget` once today's model budget is
+    spent. A run whose visitor session never opened is 503 `demo_visitor_unavailable`."""
+    state = runtime(request).started()
+    desk = await ctx.ro.one("desks", desk_id=ctx.desk(desk_id))
+    if desk is None:
+        raise ApiProblem(404, "not_found")
+    task_set = await demo_task_set(ctx.ro.conn, ctx.ro, desk_id)
+    await ctx.ro.conn.commit()
+    await require_model_budget(request)
+    try:
+        run = await state.demo_visitors.start(ctx.copy_id, ctx.owner_session_id, desk_id, desk["slug"], task_set,
+                                              key=body.idempotency_key)
+    except TooManyStarts as refused:
+        raise RateLimited(refused.retry_after) from None
+    except KeyReused:
+        raise ApiProblem(409, "conflict") from None
+    if run.session_id is None:
+        raise ApiProblem(503, "demo_visitor_unavailable")
+    return DemoVisitorStarted(run_id=run.run_id, desk_id=run.desk_id, session_id=run.session_id)
+
+
+@router.get("/desks/{desk_id}/demo_visitor", response_model=DemoVisitorRun,
+            responses=error_responses(401, 404, 422, 503))
+async def demo_visitor(desk_id: DeskId, request: Request,
+                       ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorRun:
+    """The copy's newest demo visitor on the Desk as it stands (`state`, and how it `ended` once it has), while this
+    process keeps it (an hour); 404 when there is none."""
+    run = runtime(request).started().demo_visitors.newest(ctx.copy_id, ctx.desk(desk_id))
+    if run is None:
+        raise ApiProblem(404, "not_found")
+    return run
+
+
+@router.post("/desks/{desk_id}/demo_visitor/{run_id}/stop", response_model=DemoVisitorRun,
+             responses=error_responses(401, 404, 422, 503))
+async def stop_demo_visitor(desk_id: DeskId, run_id: Annotated[str, Path(max_length=64)], request: Request,
+                            ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> DemoVisitorRun:
+    """Stop the copy's demo visitor on the Desk: a running one ends `stopped` (`stopped_by_owner`) with no further
+    model call and its event stream closed, and is answered once it has; one that has ended is answered as it is. A
+    run of another copy or another Desk, or one this process no longer keeps, is 404."""
+    visitors = runtime(request).started().demo_visitors
+    found = visitors.run(run_id, ctx.copy_id)
+    if found is None or found.desk_id != ctx.desk(desk_id):
+        raise ApiProblem(404, "not_found")
+    stopped = await visitors.stop(run_id, ctx.copy_id)
+    if stopped is None:
+        raise ApiProblem(404, "not_found")
+    return stopped

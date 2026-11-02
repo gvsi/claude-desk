@@ -36,6 +36,9 @@ const PLAN_02: Record<RouteKey, string> = {
   ownerMessage: 'POST /api/owner/conversations/{session_id}/messages',
   ownerTyping: 'POST /api/owner/conversations/{session_id}/typing',
   decision: 'GET /api/owner/decisions/{decision_id}',
+  startDemoVisitor: 'POST /api/owner/desks/{desk_id}/demo_visitor',
+  demoVisitor: 'GET /api/owner/desks/{desk_id}/demo_visitor',
+  stopDemoVisitor: 'POST /api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop',
   // Safety
   safety: 'GET /api/owner/desks/{desk_id}/safety',
   ledger: 'GET /api/owner/desks/{desk_id}/ledger',

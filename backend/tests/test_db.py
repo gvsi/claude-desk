@@ -850,6 +850,41 @@ def test_model_calls_take_the_demo_visitors_route(scratch):
         scratch.migrate(command.upgrade, "head")
 
 
+def test_messages_take_the_demo_visitors_mark(scratch):
+    """The chat a demo visitor opens is marked in the API's transcript by a row of a kind of its own, and a kind no
+    code writes is still refused. Its revision runs again over its own check, and a downgrade keeps the marks already
+    written (the owner's reads still label those chats) while refusing new ones."""
+    admin = scratch.conn
+    written = iter(range(100))
+
+    def insert(kind: str) -> None:
+        admin.execute("INSERT INTO app.messages (message_id, copy_id, desk_id, session_id, kind, author, text,"
+                      " visibility) VALUES (%s, 'copy-mark', 'desk-mark', 'session-mark', %s, 'api', 'Riley', 'owner')",
+                      (f"m-mark-{next(written)}", kind))
+
+    def held() -> list[str]:
+        return [row[0] for row in admin.execute("SELECT kind FROM app.messages WHERE copy_id = 'copy-mark'")]
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DEMO_VISITOR_ROUTE_REVISION).down_revision
+    try:
+        insert("demo_visitor")
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_agent")
+        scratch.migrate(command.stamp, before)
+        scratch.migrate(command.upgrade, DEMO_VISITOR_ROUTE_REVISION)     # again, over its own check
+        scratch.migrate(command.downgrade, before)
+        assert held() == ["demo_visitor"]
+        with pytest.raises(psycopg.errors.CheckViolation):
+            insert("demo_visitor")
+        insert("annotation")                                              # the kinds before it still pass
+        scratch.migrate(command.upgrade, "head")
+        insert("demo_visitor")
+        assert held() == ["demo_visitor", "annotation", "demo_visitor"]
+    finally:
+        admin.execute("DELETE FROM app.messages WHERE copy_id = 'copy-mark'")
+        scratch.migrate(command.upgrade, "head")
+
+
 DOCUMENT_LINKS_REVISION = "01b_6_document_links"
 
 
