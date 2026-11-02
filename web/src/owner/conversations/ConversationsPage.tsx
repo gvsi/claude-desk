@@ -5,8 +5,8 @@
  * a way back to the list. The list is polled.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useId } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router';
+import { useId, useLayoutEffect, useRef } from 'react';
+import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router';
 
 import { request } from '../../api/http.ts';
 import type { ConversationSummary } from '../../api/views.ts';
@@ -15,8 +15,8 @@ import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, Record
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
+import { followInAppLinks, returnThroughHistory } from '../inAppLinks.ts';
 import { isStartingSampleDesk } from '../knowledge/sampleDesk.ts';
-import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
 import { firstName, useDesks, useNeedsYou } from '../useDesks.ts';
@@ -24,6 +24,7 @@ import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { agentLine } from './copy.ts';
 import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
+import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
 import { conversationPath, conversationListStatus, whoLabel, type ConversationArrival } from './status.ts';
 
 import './Conversations.css';
@@ -71,7 +72,20 @@ export function ConversationsPage() {
   const recordedHistory = desks.data === undefined || isStartingSampleDesk(queryClient, desks.data, deskId);
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationType = useNavigationType();
   const titleId = useId();
+  const listRef = useRef<HTMLElement>(null);
+  const previousSession = useRef(sessionId);
+  useLayoutEffect(() => {
+    const previous = previousSession.current;
+    previousSession.current = sessionId;
+    if (sessionId !== undefined || previous === undefined || !window.matchMedia(CONVERSATIONS_SINGLE_COLUMN).matches) return;
+    if (navigationType !== 'POP' && location.state?.fromChat !== true) return;
+    // Back and All conversations return to the row; the shell owns focus for its navigation.
+    const href = conversationPath(deskId, previous);
+    const row = [...(listRef.current?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [])].find((link) => link.getAttribute('href') === href);
+    row?.focus();
+  }, [sessionId, deskId, navigationType, location.state]);
   // The list's title names the tab, with a conversation open beside it or on its own too.
   useDocumentTitle(inApp(TITLE));
 
@@ -137,7 +151,7 @@ export function ConversationsPage() {
       className={`cd-conversations${sessionId === undefined ? '' : ' cd-conversations--open'}`}
       onClick={followInAppLinks(navigate)}
     >
-      <nav className="cd-conversations__list" aria-labelledby={titleId}>
+      <nav ref={listRef} className="cd-conversations__list" aria-labelledby={titleId}>
         <h1 id={titleId} className="cd-conversations__title cd-type-page-title">
           {TITLE}
         </h1>
@@ -178,7 +192,10 @@ export function ConversationsPage() {
             {/* Under 1024 px the list, and its title, step aside for the conversation: the page keeps
                 its one top heading here, out of sight, while the conversation opens and once it has. */}
             <h1 className="cd-sr-only cd-conversations__open-title">{TITLE}</h1>
-            <p className="cd-conversations__back cd-type-meta">
+            <p
+              className="cd-conversations__back cd-type-meta"
+              onClick={returnThroughHistory(navigate, conversationsPath(deskId), false, { state: { fromChat: true } })}
+            >
               <TextLink href={conversationsPath(deskId)}>All conversations</TextLink>
             </p>
             <ConversationDetail key={sessionId} sessionId={sessionId} summary={open} listRead={listRead} notice={arrivalNotice(location.state)} />

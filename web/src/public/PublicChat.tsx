@@ -601,9 +601,42 @@ interface WaitingRequests {
  * composer. Showing a line makes the composer area taller and hiding one makes it shorter, which
  * only moves a receipt further the way it went, so a line never flickers in and out.
  */
-function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObject<HTMLElement | null>, shown: boolean): WaitingRequests {
+function useWaitingRequests(
+  end: RefObject<HTMLElement | null>,
+  composer: RefObject<HTMLElement | null>,
+  shown: boolean,
+  state: ChatState,
+  newChat: RefObject<HTMLButtonElement | null>,
+): WaitingRequests {
   const places = useRef(new Map<string, CancelPlace>());
   const [away, setAway] = useState<ReadonlySet<string>>(NONE);
+  const leftWithFocus = useRef<{ id: string; button: HTMLElement; margin: HTMLElement; receipt: number; line: Element | null; composer: boolean } | null>(null);
+
+  // As with "View request", the ref notes focus before React removes the control. Only a
+  // removed button hands its place on; ordinary ref updates and focus elsewhere leave it alone.
+  useLayoutEffect(() => {
+    const left = leftWithFocus.current;
+    leftWithFocus.current = null;
+    if (!left || left.button.isConnected || document.activeElement !== document.body) return;
+    if (state.error === 'session') {
+      newChat.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (state.openHolds.includes(left.id)) return;
+    const source = state.latest.get(left.id)?.source;
+    if (source?.kind === 'decision' && source.state === 'cancelled') return;
+    const box = left.composer ? composer.current?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled):not([readonly])') : null;
+    if (box) box.focus({ preventScroll: true });
+    else if (left.margin.isConnected) {
+      // A touch pointer must not raise the phone keyboard. The request's replacement receipt
+      // keeps the visitor's place instead, also when the composer cannot be written in.
+      const outcome = left.margin.children.item(left.receipt);
+      if (outcome instanceof HTMLElement && outcome !== left.line) {
+        outcome.tabIndex = -1;
+        outcome.focus({ preventScroll: true });
+      }
+    }
+  });
 
   const look = useCallback(() => {
     const now = new Set<string>();
@@ -639,8 +672,18 @@ function useWaitingRequests(end: RefObject<HTMLElement | null>, composer: RefObj
 
   const place = useCallback(
     (id: string, receipt: number) => (block: HTMLDivElement | null) => {
-      if (block === null) places.current.delete(id);
-      else places.current.set(id, { block, receipt });
+      if (block === null) {
+        const previous = places.current.get(id);
+        const button = previous?.block.querySelector<HTMLElement>(':scope > .cd-button');
+        const margin = previous?.block.parentElement;
+        if (button && margin && document.activeElement === button) {
+          leftWithFocus.current = {
+            id, button, margin, receipt: previous.receipt, line: receiptAt(previous),
+            composer: button.matches(':focus-visible') || !window.matchMedia('(pointer: coarse)').matches,
+          };
+        }
+        places.current.delete(id);
+      } else places.current.set(id, { block, receipt });
     },
     [],
   );
@@ -758,6 +801,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
+  const newChatRef = useRef<HTMLButtonElement>(null);
   // The chat's own path, without the owner's `?preview=`: the visitor cookie the preview's chat
   // runs on is the one `/d/<slug>` resumes. Setup's preview sits inside an owner screen, so its
   // links note no chat to go back to.
@@ -765,7 +809,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const paymentBlock = usePaymentLinks(messages, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // After useNewestInView, so it looks once the newest message is in its place.
-  const waiting = useWaitingRequests(endRef, composerRef, !opening && desk !== null);
+  const waiting = useWaitingRequests(endRef, composerRef, !opening && desk !== null, chat.state, newChatRef);
   // While the visitor types, the owner's view of the chat shows that someone is, never what.
   const visitorTyping = useVisitorTyping(slug);
   // The chat can be written in: it loaded, and its session hasn't ended.
@@ -994,7 +1038,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
       <Notice
         tone="error"
         action={
-          <Button variant="secondary" onClick={startNewChat}>
+          <Button variant="secondary" buttonRef={newChatRef} onClick={startNewChat}>
             {NEW_CHAT_LABEL[language]}
           </Button>
         }
@@ -1058,6 +1102,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         openStatus={openStatus}
         onAskForOwner={askForOwner}
         askWaits={sendHeld}
+        askDisabled={!ready}
         // While the owner has taken the chat over, the head says so in the disclosure's place, still
         // naming Claude as an AI, and Ask goes. The visitor chat's own value, from the kernel's
         // session mode, as it is: nothing on the page decides it.

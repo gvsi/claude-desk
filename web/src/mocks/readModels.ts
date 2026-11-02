@@ -307,6 +307,33 @@ function needsYouSession(session: SessionRecord | undefined, sessionId: string):
 }
 
 /**
+ * The kernel's rank of a rule card (`specificity` in `backend/desk/always_on.py`): one for a person
+ * or agent above one for a group, then a tool's own above a shared one, and the default ask below
+ * every card.
+ */
+function cardRank(card: RuleCard): number {
+  if (card.is_default === true) return -1;
+  return (card.who === 'person' || card.who === 'agent' ? 2 : 0) + (card.applies_to.startsWith('effect:') ? 0 : 1);
+}
+
+/**
+ * The rule card that held a request, as the API's Needs you picks it (`holding_card` in
+ * `backend/desk/api/owner_reads.py`): a hold's `card_ids` are every card behind its matching hold
+ * permits, sorted by ID, so the default ask for anyone can come first. Of those the Desk has, the
+ * most specific (`cardRank`), the ask cards among them when there are any, then the first by ID.
+ */
+function holdingCard(cards: readonly RuleCard[], cardIds: readonly string[]): RuleCard | null {
+  const known = cardIds.flatMap((id) => cards.find((card) => card.card_id === id) ?? []);
+  const top = Math.max(...known.map(cardRank));
+  const deciding = known.filter((card) => cardRank(card) === top);
+  const asks = deciding.filter((card) => card.mode === 'ask');
+  return (asks.length > 0 ? asks : deciding).reduce<RuleCard | null>(
+    (first, card) => (first === null || card.card_id < first.card_id ? card : first),
+    null,
+  );
+}
+
+/**
  * Every held request and open handoff, oldest first. Each quotes what its visitor wrote most
  * recently, as of this read (`fromTheVisitor`). A handoff also carries its chat's newest triage
  * summary (`newestTriageSummary`); a held request never does, as the API sends it, since a visitor
@@ -318,12 +345,14 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
     .filter((d) => d.decision.state === 'held')
     .map((d) => {
       const session = world.sessions.get(d.decision.session_id);
+      const cards = d.decision.policy_version === desk.policy.version
+        ? desk.policy.cards : desk.versions.get(d.decision.policy_version) ?? [];
       return {
         at: d.createdAt,
         item: {
           decision: d.decision,
           handoff: null,
-          held_by: desk.policy.cards.find((card) => card.card_id === d.decision.card_ids[0])?.reason ?? null,
+          held_by: holdingCard(cards, d.decision.card_ids)?.reason ?? null,
           held_at: isoTime(d.createdAt),
           session: needsYouSession(session, d.decision.session_id),
           from_the_visitor: fromTheVisitor(session),

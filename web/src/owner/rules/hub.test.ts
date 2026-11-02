@@ -16,6 +16,7 @@ import { PRESETS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { validateContract } from '../../mocks/validate.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
+import { targetText } from '../../test/changeRowWords.ts';
 import { changeRows } from './changeRows.ts';
 import { draftFromDiff, type RuleDraft } from './drafts.ts';
 import { governingRules, holdQuestion, hubSections, parseLimit, rowsChangedBy, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
@@ -90,7 +91,7 @@ describe('the Rules hub', () => {
     expect(() => hubSections({ ...rules, tools }, people())).not.toThrow();
     expect(hubSections({ ...rules, tools }, people()).flatMap((section) => section.tools).some((tool) => tool.key.startsWith('desk.'))).toBe(false);
     const rows = toolRuleRows(rowOf(rules, 'native.book'), rules.active, people(), tools);
-    expect(rows.find((row) => row.rule.card_id === 'changes')?.shared?.appliesTo).toContain('New client intake');
+    expect(rows.find((row) => row.rule.card_id === 'changes')?.shared?.titles).toContain('New client intake');
   });
 
   it('tools_group_by_connector', () => {
@@ -185,7 +186,7 @@ describe('the Rules hub', () => {
     expect(rows.map((r) => r.words.map((w) => w.text))).toEqual([['Anyone'], ["The record's owner, verified"]]);
     expect(rows.every((r) => r.shared !== undefined)).toBe(true);
     // Refund also sends money out, so the automatic private data rule covers it only with one on that.
-    expect(rows[1]?.shared?.appliesTo).toBe('Applies to every tool that touches private data: Share a document and See charges.');
+    expect(rows[1]?.shared).toEqual({ lead: 'Applies to every tool that touches private data', titles: ['Share a document', 'See charges'] });
   });
 
   it('agent_rule_comes_first', () => {
@@ -199,8 +200,9 @@ describe('the Rules hub', () => {
       const rows = toolRuleRows(rowOf(rules, tool), rules.active, people(), rules.tools);
       expect(rows.map((r) => r.rule.card_id), tool).toEqual(['rv-agent-charges', own]);
       const [agent, mine] = rows;
-      expect(agent?.shared).toEqual({ appliesTo: rivera.sharedChargeAppliesTo });
-      expect(agent?.shared?.appliesTo).toBe('Applies to every tool that charges money: Payment link and Charge within a signed limit.');
+      // The app's words for its group, then each tool's title as its own item, never one sentence.
+      expect(agent?.shared).toEqual(rivera.sharedChargeShared);
+      expect(agent?.shared).toEqual({ lead: 'Applies to every tool that charges money', titles: ['Payment link', 'Charge within a signed limit'] });
       expect(agent?.limit).toBe('$20');
       // The API names no agent yet.
       expect(agent?.words).toEqual([
@@ -224,14 +226,15 @@ describe('the Rules hub', () => {
     expect(listed).toEqual(rivera.connectors.sections.flatMap((s) => s.tools.map((t) => t.key)));
     expect(governingRules(rowOf(rules, 'native.fetch_website'), rules.active).map((c) => c.card_id)).toContain('card-reads-never');
     const rows = toolRuleRows(rowOf(rules, 'native.find_slots'), rules.active, people(), rules.tools);
-    expect(rows.find((r) => r.rule.card_id === 'card-reads-never')?.shared?.appliesTo).toBe('Applies to every tool that only reads: Find open times.');
+    expect(rows.find((r) => r.rule.card_id === 'card-reads-never')?.shared).toEqual({ lead: 'Applies to every tool that only reads', titles: ['Find open times'] });
     // The Desk's tools are required, so no caller drops the names of the tools a shared rule covers;
     // given none, a shared rule names its group alone.
     type Args = Parameters<typeof toolRuleRows>;
     expectTypeOf<[Args[0], Args[1], Args[2]]>().not.toExtend<Args>();
-    expect(toolRuleRows(rowOf(rules, 'native.find_slots'), rules.active, people(), []).find((r) => r.rule.card_id === 'card-reads-never')?.shared?.appliesTo).toBe(
-      'Applies to every tool that only reads.',
-    );
+    expect(toolRuleRows(rowOf(rules, 'native.find_slots'), rules.active, people(), []).find((r) => r.rule.card_id === 'card-reads-never')?.shared).toEqual({
+      lead: 'Applies to every tool that only reads',
+      titles: [],
+    });
   });
 
   it('outcome_change_keeps_cards_valid', () => {
@@ -566,7 +569,7 @@ describe('the rows a confirmed change lands on', () => {
    */
   const namesOf = (tools: readonly string[]) => new Set(tools.map((tool) => targetWords(tool, businessTools(view().tools))));
   /** The titles of the review's rows, each once. */
-  const titlesOf = (draft: RuleDraft) => new Set(changeRows(draft, people(), view().tools).map((row) => row.title));
+  const titlesOf = (draft: RuleDraft) => new Set(changeRows(draft, people(), view().tools).map((row) => targetText(row.title)));
 
   it('a_rule_replaced_by_one_that_differs_only_in_its_id_lands_nowhere', () => {
     // Quote and documents go to new cards that differ from Turner's only in their ids, and refunds

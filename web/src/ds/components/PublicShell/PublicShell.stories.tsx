@@ -6,7 +6,7 @@ import type { EvMessage, PublicDesk, SseEvent, StatusEvent } from '../../../api/
 import { contrastRatio } from '../../contrast.ts';
 import { rivera, type TranscriptTurn } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
-import { FollowTheChat } from '../../test/followTheChat.tsx';
+import { FollowTheChat, expectRoomUnderTheEnd } from '../../test/followTheChat.tsx';
 import { loadWebFonts } from '../../test/fonts.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Composer } from '../Composer/Composer.tsx';
@@ -913,7 +913,7 @@ async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Prom
 }
 
 const ownerInChatNote =
-  'The chat head of take-over option A: while Mike is in the chat it says so and that Claude, an AI, is paused until he hands it back, and Ask for Mike isn’t shown. Built from the signed option; its render and the by-eye comparison are tracked in issue #230. The conversation is the fixture’s take-over, its end kept above the composer as the page keeps it, and the about column shows the charter’s cards.';
+  'The chat head of take-over option A: while Mike is in the chat it says so and that Claude, an AI, is paused until he hands it back, and Ask for Mike isn’t shown. Checked against both renders on 2026-11-02 (issue #230): it draws the same page as the board story (Boards/Mike in the chat), which matches them to the pixel apart from the names, the content and the decisions signed after the boards. The boards keep the business and owner names they were drawn with, before the demo owner was renamed, as history. The conversation is the fixture’s take-over, without the board’s opening exchange about the water heater, its end kept above the composer as the page keeps it: on a phone, where the chat scrolls, its last row ends 24 px over the composer area; the about column shows the charter’s cards. The author’s name in the footer is a text link, signed after the boards (#697), where they draw it as plain text. Where the chat scrolls under its head, the page fades it out over 24 px (#670); the story doesn’t draw that fade.';
 
 export const OwnerInChat: Story = {
   args: { ownerInChat: true, openStatus: OPEN_EN, children: <TakeOverConversation language="en" /> },
@@ -937,6 +937,8 @@ export const OwnerInChatPhone: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(window.innerWidth).toBe(PHONE);
     await expectOwnerInChat(canvas.getByRole('main'), 'en');
+    // The chat scrolls here, so its end is kept as the page keeps it.
+    await expectRoomUnderTheEnd(canvasElement);
     // No sideways scroll: nothing reaches past the phone's width, the paused line wraps inside it.
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE);
     for (const el of canvasElement.querySelectorAll('.cd-public-shell *')) {
