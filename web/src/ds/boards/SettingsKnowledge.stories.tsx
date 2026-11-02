@@ -10,8 +10,8 @@ import { RiveraFrame } from './parts.tsx';
 import '../../owner/knowledge/Knowledge.css';
 
 const ITEMS: KnowledgeRowView[] = [
-  { id: 'website', kind: 'globe', title: 'Your website', detail: 'Website · Read during setup · Added Nov 1', readers: ['public'] },
-  { id: 'price-list', kind: 'list', title: 'Price list', detail: 'Price list · From your answers in setup · Added Nov 1', readers: ['public'] },
+  { id: 'website', kind: 'globe', title: 'turner-plumbing.example', singleLineTitle: true, detail: 'Website · Read during setup · Added Nov 1', readers: ['public'] },
+  { id: 'price-list', kind: 'list', title: 'Price list', singleLineTitle: true, detail: 'From your answers in setup · Added Nov 1', readers: ['public'] },
   ...MOCK_SOURCES,
 ];
 

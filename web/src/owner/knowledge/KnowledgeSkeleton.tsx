@@ -22,6 +22,11 @@ function ListShape({ rows, tiles = false }: { rows: number; tiles?: boolean }) {
   );
 }
 
+/** The same source-list shapes before and after the owner frame opens. */
+export function KnowledgeListSkeleton() {
+  return <ListShape rows={6} tiles />;
+}
+
 /** The source list, Add something column and static previews in the page’s responsive order. */
 export function KnowledgeSkeleton() {
   return (
@@ -29,7 +34,7 @@ export function KnowledgeSkeleton() {
       <PageHeaderSkeleton subtitleLines={1} />
       <div className="cd-knowledge">
         <div className="cd-knowledge__known">
-          <ListShape rows={6} tiles />
+          <KnowledgeListSkeleton />
         </div>
         <div className="cd-knowledge__add cd-knowledge-add__form">
           <Skeleton shape="line" text="section" width="55%" />

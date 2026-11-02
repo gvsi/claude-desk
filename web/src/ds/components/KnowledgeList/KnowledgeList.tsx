@@ -21,6 +21,8 @@ export interface KnowledgeRowView {
    * only you can see", and only "Only you".
    */
   title: string | null;
+  /** Keep a recognized short source title on one line beside its readers pill. */
+  singleLineTitle?: boolean;
   /**
    * The line under the title, in the screen's words: where the item came from ("From your answers
    * in setup", "turner-plumbing.example, read during setup") or when it was added ("Added Oct 27").
@@ -75,7 +77,7 @@ export function KnowledgeList({ items, title = 'What Claude knows', caption, not
                     {withheld ? (
                       <p className="cd-knowledge-list__title cd-type-body">{WITHHELD_TITLE}</p>
                     ) : (
-                      <p className="cd-knowledge-list__title cd-type-body" data-copy="user">
+                      <p className={`cd-knowledge-list__title cd-type-body${item.singleLineTitle ? ' cd-knowledge-list__title--single-line' : ''}`} title={item.singleLineTitle ? item.title ?? undefined : undefined} data-copy="user">
                         {item.title}
                       </p>
                     )}

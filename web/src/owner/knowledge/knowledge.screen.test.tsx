@@ -142,8 +142,8 @@ describe('knowledge', () => {
     await expect.element(list).toBeVisible();
     // Oldest first: the kernel stores the website read, then the price list.
     expect(list.getByRole('listitem').elements().filter((row) => row.querySelector('.cd-pill')?.textContent !== 'Mock').map((row) => row.textContent)).toEqual([
-      'Your website, turner-plumbing.example, read during setupWebsite · Read during setup · Added Oct 30Customers can see this',
-      'Price list, from your answers in setupPrice list · Added Oct 30Customers can see this',
+      'turner-plumbing.exampleWebsite · Read during setup · Added Oct 30Customers can see this',
+      'Price listFrom your answers in setup · Added Oct 30Customers can see this',
     ]);
     await expectScreenBasics(screen.container, { owner: true });
   });

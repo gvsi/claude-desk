@@ -13,12 +13,13 @@ import { useRef, useState } from 'react';
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
 import type { KnowledgeRow } from '../../api/views.ts';
-import { Button, KnowledgeAdd, KnowledgeList, LoadingLine, NAV_LABELS, Notice, PageHeader, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
+import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { startingDeskFor } from '../arrival/keptCopy.ts';
 import { VisionNote } from '../settings/VisionNote.tsx';
+import { KnowledgeListSkeleton } from './KnowledgeSkeleton.tsx';
 import { MOCK_SOURCES, MORE_SOURCES, SAMPLE_QUESTIONS } from './previewSources.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { useDesks } from '../useDesks.ts';
@@ -66,6 +67,19 @@ const knowledgeKey = (deskId: string) => ['knowledge', deskId] as const;
 const knowledgeQuery = (deskId: string) =>
   queryOptions({ queryKey: knowledgeKey(deskId), queryFn: () => request('knowledge', { params: { desk_id: deskId } }) });
 
+/** The setup read has no URL field: only its recognized title supplies a host. */
+function setupHost(item: KnowledgeRow): string | null {
+  if (item.source !== 'website' || item.title === null) return null;
+  const host = /^Your website, ([^,\s/]+), read during setup$/.exec(item.title)?.[1];
+  if (host === undefined) return null;
+  try {
+    const url = new URL(`https://${host}`);
+    return url.hostname === host && host.includes('.') ? host : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The list's rows in API order, each with when it was added on the business's clock. An item whose
  * title or text the kernel withheld is drawn as the design system draws one it keeps to the owner:
@@ -75,20 +89,23 @@ function rowsOf(items: readonly KnowledgeRow[], timeZone: string): KnowledgeRowV
   return items.map((item) => {
     const date = item.created_at === null ? '' : formatDate(item.created_at, timeZone);
     const kind = item.source === 'website' || item.source === 'web_search' ? 'globe' : item.source === 'upload' ? 'document' : item.item_id === 'kn-price-list' ? 'list' : 'note';
+    const host = setupHost(item);
+    const setupPrices = item.source === 'setup' && item.item_id === 'kn-price-list' && item.title === 'Price list, from your answers in setup';
     const label = kind === 'globe' ? 'Website' : kind === 'document' ? 'File' : kind === 'list' ? 'Price list' : 'Note';
     const fileTag = kind === 'document' && /\.pdf$/i.test(item.title ?? '') ? 'PDF' : kind === 'document' && /\.docx$/i.test(item.title ?? '') ? 'DOCX' : undefined;
     return {
       id: item.item_id,
+      ...(host !== null || setupPrices ? { singleLineTitle: true } : {}),
       kind,
       ...(fileTag === undefined ? {} : { fileTag }),
-      title: item.title === null || item.text === null ? null : item.title,
-      detail: [label, ...(item.source === 'website' ? ['Read during setup'] : []), ...(date === '' ? [] : [`Added ${date}`])].join(' · '),
+      title: item.title === null || item.text === null ? null : host ?? (setupPrices ? 'Price list' : item.title),
+      detail: [...(setupPrices ? ['From your answers in setup'] : [label, ...(item.source === 'website' ? ['Read during setup'] : [])]), ...(date === '' ? [] : [`Added ${date}`])].join(' · '),
       readers: item.readers,
     };
   });
 }
 
-/** "What Claude knows": the list once read, the loading line while it is, and a failed read with Try again over it. */
+/** "What Claude knows": the list once read, matching source-list shapes while it is, and a failed read with Try again over it. */
 function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
   const list = useQuery(knowledgeQuery(deskId));
   const failure = useReadFailure(list);
@@ -113,7 +130,7 @@ function WhatIKnow({ deskId, timeZone }: { deskId: string; timeZone: string }) {
       )}
       {list.data === undefined ? (
         failure === null ? (
-          <LoadingLine>Loading what I know</LoadingLine>
+          <div role="status" aria-label="Loading what I know"><span className="cd-sr-only">Loading what I know</span><KnowledgeListSkeleton /></div>
         ) : null
       ) : (
         // With nothing known yet, no list: the board never draws it empty. A failed read says so

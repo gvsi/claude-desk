@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, onTestFinished } from 'vitest';
 
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -118,4 +118,41 @@ it('mock_sources_do_not_follow_the_deleted_starting_desk', async () => {
   const list = screen.getByRole('list', { name: 'What Claude knows' });
   expect(list.getByText('Mock', { exact: true }).elements()).toHaveLength(0);
   expect(screen.getByText('Maintenance plan.pdf', { exact: true }).query()).toBeNull();
+});
+
+
+it.each(['desktop', 'phone'] as const)('setup_sources_have_short_single_line_titles_%s', async (viewport) => {
+  for (const [index, stored] of [...mockStore.world.knowledge.values()].entries()) stored.createdAt = Date.parse('2026-11-01T20:00:00Z') + index;
+  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { viewport, pollScale: 100 });
+  const list = screen.getByRole('list', { name: 'What Claude knows' });
+  await expect.element(list).toBeVisible();
+  const rows = list.getByRole('listitem').elements().slice(0, 2);
+  expect(rows.map((row) => row.querySelector('.cd-knowledge-list__title')?.textContent)).toEqual(['turner-plumbing.example', 'Price list']);
+  expect(rows.map((row) => row.querySelector('.cd-knowledge-list__detail')?.textContent)).toEqual([
+    'Website · Read during setup · Added Nov 1', 'From your answers in setup · Added Nov 1',
+  ]);
+  for (const row of rows) {
+    const title = row.querySelector('.cd-knowledge-list__title')!;
+    expect(title.getBoundingClientRect().height).toBe(parseFloat(getComputedStyle(title).lineHeight));
+  }
+});
+
+
+it('the_phone_source_list_keeps_its_skeleton_until_knowledge_arrives', async () => {
+  let release!: () => void;
+  const until = new Promise<void>((resolve) => { release = resolve; });
+  onTestFinished(() => release());
+  const answer = await mockStore.dispatch('knowledge', { params: { desk_id: RIVERA.deskId } });
+  mockStore.inject({ route: 'knowledge', status: 200, until, body: 'body' in answer ? answer.body : [] });
+  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { viewport: 'phone', pollScale: 100 });
+  await expect.element(screen.getByRole('region', { name: 'Add something', exact: true })).toBeVisible();
+  const known = screen.container.querySelector('.cd-knowledge__known')!;
+  const add = screen.getByRole('region', { name: 'Add something', exact: true }).element();
+  const pendingTop = add.getBoundingClientRect().top;
+  expect(known.querySelectorAll('.cd-knowledge-list__row')).toHaveLength(6);
+  release();
+  await expect.element(screen.getByRole('list', { name: 'What Claude knows' })).toBeVisible();
+  const loadedTop = add.getBoundingClientRect().top;
+  // The unknown rows can be taller than their shapes, but the source list never collapses to a line.
+  expect(Math.abs(loadedTop - pendingTop)).toBeLessThan(250);
 });
