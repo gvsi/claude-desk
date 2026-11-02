@@ -14,7 +14,10 @@ export interface OutcomeMenuProps {
   label: string;
   /** The outcome the screen shows: the active card's mode. */
   value: RuleMode;
-  /** For an auto card with an amount limit, the screen's formatted amount ("$300"). */
+  /**
+   * For an auto card with an amount limit, the screen's formatted amount ("$300"). No longer shown:
+   * the outcome is its word alone, and the limit lives in the rule's sentence (`ruleSentence`).
+   */
   limit?: string;
   /**
    * Makes the outcome a menu. Called once with the outcome the owner picked, when it differs from
@@ -36,13 +39,12 @@ interface Opening {
 let pageMenu: { close: () => void } | null = null;
 
 /**
- * A rule's outcome: its dot and its words ("Automatic", "Ask me first", "Never", or "Automatic up
- * to $300; over $300, ask me first" for an auto card with a limit). With `onChange` it is a menu
+ * A rule's outcome: its dot and its word ("Allow", "Ask me first" or "Never"). With `onChange` it is a menu
  * button that offers the three outcomes; the owner's pick goes to the screen, which drafts the
  * change and shows it in `ChangeReview` before anything applies.
  */
-export function OutcomeMenu({ label, value, limit, onChange, disabled = false }: OutcomeMenuProps) {
-  const phrase = outcomePhrase(value, limit);
+export function OutcomeMenu({ label, value, onChange, disabled = false }: OutcomeMenuProps) {
+  const phrase = outcomePhrase(value);
   const tone = OUTCOME_TONE[value];
   const ids = useId();
   const buttonRef = useRef<HTMLButtonElement>(null);

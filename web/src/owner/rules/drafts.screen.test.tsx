@@ -78,10 +78,10 @@ function rowTexts(screen: { container: HTMLElement }): string[] {
  * something, word for word as they read before tool titles were marked as user text.
  */
 const TITLED_JOB_ROWS = [
-  'ChangedQuoteQuotesBeforeQuoteAnyone · No discountsQuotes from your price list, at list price.AutomaticAfterApproved by your accountant ChangedAnyoneQuotes from your price list, at list price.Automatic',
-  'AddedApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Automatic',
+  'ChangedQuoteQuotesBeforeQuoteAnyone · No discountsQuotes from your price list, at list price.AllowAfterApproved by your accountant ChangedAnyoneQuotes from your price list, at list price.Allow',
+  'AddedApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Allow',
   'ChangedQuote, Book a visit, Save a lead, Request a callback, Emergency callback and Approved by your accountantShared ruleBeforeAnyoneChanges ask you first.Ask me firstAfterAnyoneChanges always ask you first. ChangedAsk me first',
-  'Turned onApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Automatic',
+  'Turned onApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Allow',
 ];
 
 /** The check panel's lines, in order. */
@@ -537,7 +537,7 @@ describe('rule draft review', () => {
     await expect.element(newLimit.getByText('New limit: no payment over $100 without asking you.', { exact: true })).toBeVisible();
     await expect.element(newLimit.getByText('Was $500', { exact: true })).toBeVisible();
     const row = lowered.screen.getByRole('region', { name: 'Changes' }).getByRole('listitem');
-    await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Automatic up to $300; over $300, ask me first', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Allow', { exact: true })).toBeVisible();
     await expect.element(row.getByRole('group', { name: 'Before' }).getByText(link.reason, { exact: true })).toBeVisible();
     await expect.element(row.getByRole('group', { name: 'After' }).getByText('Anyone · Up to $100 · Checked by the reviewer', { exact: true })).toBeVisible();
     // The new reason reads as a change, tagged as the other changed lines are.

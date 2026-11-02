@@ -344,7 +344,7 @@ function Body() {
                           className="cd-connector-section__tool-summary cd-rules-skeleton__summary cd-type-meta"
                           text="meta"
                         />
-                        <Outcome words={outcomePhrase(tool.mode, 'limit' in tool ? tool.limit : undefined)} />
+                        <Outcome words={outcomePhrase(tool.mode)} />
                         {CONNECTOR_PAGES_BUILT ? <Skeleton shape="block" className="cd-connector-section__chevron" width={16} height={16} /> : null}
                       </div>
                     ))}

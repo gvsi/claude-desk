@@ -318,12 +318,12 @@ describe('rules page', () => {
     // Each tool names its outcome in words, without a link.
     const root = screen.container;
     for (const words of [
-      /^Quote: Anyone · No discounts, Automatic$/,
-      /^Payment link: Anyone · Up to \$300 · Checked by the reviewer, Automatic up to \$300; over \$300, ask me first$/,
-      /^See charges: .*, Automatic$/,
+      /^Quote: Anyone · No discounts, Allow$/,
+      /^Payment link: Anyone · Up to \$300 · Checked by the reviewer, Allow$/,
+      /^See charges: .*, Allow$/,
       // A changed tool needs the owner's review before its outcome counts.
       /^Refund: .*, Needs your review$/,
-      /^Book a visit: 2 rules, Automatic$/,
+      /^Book a visit: 2 rules, Allow$/,
     ]) {
       const row = await expectToolRow(root, words);
       expect(row.querySelector('a'), String(words)).toBeNull();
@@ -385,7 +385,7 @@ describe('rules page', () => {
       SECTION_KEYS.map((key) => `${DESK}/connectors/${key}`),
     );
     expect(list.element().querySelectorAll('a.cd-connector-section__tool-link')).toHaveLength(11);
-    await expect.element(screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Automatic\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/quotes/native.quote`);
+    await expect.element(screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Allow\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/quotes/native.quote`);
     await expect.element(screen.getByRole('link', { name: /^Payment link: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/payments/native.payment_link`);
     await expect.element(screen.getByRole('link', { name: /^Refund: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/stripe/payments.create_refund`);
     // The sidebar's Connectors row comes with them.
@@ -411,7 +411,7 @@ describe('rules page', () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
     await expect.element(jobs.getByText('Emergency callback', { exact: true })).toBeVisible();
-    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Allow', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: label }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: label })).toBeVisible();
@@ -427,7 +427,7 @@ describe('rules page', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(desk().policy.cards).toContainEqual(urgent);
-    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Allow', { exact: true })).toBeVisible();
   });
 
   it('preset_menu_drafts_a_preset', async () => {
@@ -460,7 +460,7 @@ describe('rules page', () => {
     expect(requests('confirmRules').map((r) => r.body)).toEqual([{ version }]);
     expect(desk().policy.version).toBe(version);
     expect(screen.container.textContent).not.toMatch(/\bCustom\b/);
-    await expectToolRow(screen.container, /^Quote: Anyone · No discounts, Automatic$/);
+    await expectToolRow(screen.container, /^Quote: Anyone · No discounts, Allow$/);
   });
 
   it('preset_review_lists_every_removed_rule', async () => {
@@ -493,7 +493,7 @@ describe('rules page', () => {
     expect(requests('confirmRules')).toEqual([]);
     expect(desk().policy.version).toBe(7);
     expect(desk().policy.cards.map((card) => card.card_id)).toContain(EXTRA_RULES.danaBooking.card_id);
-    await expectToolRow(screen.container, /^Book a visit: 3 rules, Automatic$/);
+    await expectToolRow(screen.container, /^Book a visit: 3 rules, Allow$/);
   });
 
   it('rule_chat_shows_the_draft_inline', async () => {
@@ -745,7 +745,7 @@ describe('rules page', () => {
     const rows = reviewRows(screen);
     expect(rows.map((row) => row.title)).toEqual(['Refund']);
     expect(rows[0]?.after).toContain('Dana Whitfield');
-    expect(rows[0]?.after).toContain('Automatic up to $50; over $50, ask me first');
+    expect(rows[0]?.after).toContain('Allow');
     expect(desk().policy.version).toBe(7);
   });
 
@@ -815,9 +815,9 @@ describe('rules page', () => {
 
     const link = screen.getByRole('region', { name: 'Payment link' });
     await expect.element(link.getByText('Anyone · Up to $400 · Checked by the reviewer', { exact: true })).toBeVisible();
-    await expect.element(link.getByText('Automatic up to $400; over $400, ask me first', { exact: true })).toBeVisible();
+    await expect.element(link.getByText('Allow', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('region', { name: 'Refund' }).getByText('Never', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Automatic', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Allow', { exact: true })).toBeVisible();
     // A tool no rule covers asks.
     const quote = screen.getByRole('region', { name: 'Quote' });
     await expect.element(quote.getByText('Not covered by a rule you set, so I ask you.', { exact: true })).toBeVisible();
@@ -933,9 +933,9 @@ describe('rules page', () => {
     // agents' $20 deposit already fits, so it is the one change.
     const lowered = reviewRows(screen);
     expect(lowered.map((row) => row.title)).toEqual(['Payment link']);
-    expect(lowered[0]?.before).toContain('Automatic up to $300; over $300, ask me first');
+    expect(lowered[0]?.before).toContain('Allow');
     expect(lowered[0]?.before).toContain('Payment links up to $300, checked by the reviewer.');
-    expect(lowered[0]?.after).toContain('Automatic up to $100; over $100, ask me first');
+    expect(lowered[0]?.after).toContain('Allow');
     expect(lowered[0]?.after).toContain('Up to $100, your payment limit.');
     expect(lowered[0]?.after).not.toContain('$300');
     expect(screen.getByText('Your rules stay the same.', { exact: true }).elements()).toHaveLength(0);
@@ -956,7 +956,7 @@ describe('rules page', () => {
     const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
     for (const name of ['Payments', 'Stripe']) await expect.element(screen.getByRole('region', { name }).getByText(`${limit100}Updated`, { exact: true })).toBeVisible();
     // No rule beside it still takes more on its own.
-    await expectToolRow(screen.container, /^Payment link: .*, Automatic up to \$100; over \$100, ask me first$/);
+    await expectToolRow(screen.container, /^Payment link: .*, Allow$/);
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$300');
 
     // At 0, every payment asks, and no "$0" anywhere.
@@ -1127,7 +1127,7 @@ describe('rules page', () => {
     mockStore.world.addActiveRules(desk(), [EXTRA_RULES.agentCharges, EXTRA_RULES.danaBooking]);
     desk().suggestions.push(DANA_REFUNDS);
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expectToolRow(screen.container, /^Payment link: 2 rules · 1 shared, Automatic up to \$300; over \$300, ask me first$/);
+    await expectToolRow(screen.container, /^Payment link: 2 rules · 1 shared, Allow$/);
     await expectScreenBasics(screen.container, { owner: true });
 
     // With the panel open and a change drafted in it.

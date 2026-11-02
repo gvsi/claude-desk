@@ -1954,7 +1954,7 @@ it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async 
           expect(summary.getBoundingClientRect().right, row.getAttribute('data-skeleton-anchor')!).toBeLessThanOrEqual(outcome.getBoundingClientRect().left);
         }
         const paymentSummary = document.querySelector('[data-skeleton-anchor="rules-tool-5-0"] .cd-connector-section__tool-summary')!;
-        expect(paymentSummary.querySelectorAll('.cd-skeleton')).toHaveLength(2);
+        expect(paymentSummary.querySelectorAll('.cd-skeleton')).toHaveLength(1);
       }
     }, release: read.release,
   });
