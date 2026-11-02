@@ -82,8 +82,22 @@ it.each([1440, 390])('at %i px, Stripe connected in the chat needs review, and R
   await review.click();
   await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Stripe/ })).toBeVisible();
   const listed = screen.getByRole('region', { name: 'Tools' });
-  await expect.element(listed.getByText('See charges', { exact: true })).toBeVisible();
-  await expect.element(listed.getByText('Refund', { exact: true })).toBeVisible();
+  await expect.element(listed.getByRole('list').getByText('See charges', { exact: true })).toBeVisible();
+  await expect.element(listed.getByRole('list').getByText('Refund', { exact: true })).toBeVisible();
+  const rules = screen.getByRole('region', { name: 'The rules that will cover them' });
+  expect([...rules.element().querySelectorAll('.cd-rule-sentence__sentence')].map((el) => el.textContent)).toEqual([
+    'Claude asks you before showing customers their own charges',
+    'Claude asks you before any refund',
+  ]);
+  // No card covers either yet, so each starts at the ask Rules shows for it, for anyone, in Rules' words.
+  expect([...rules.element().querySelectorAll('.cd-rule-sentence__meta')].map((el) => el.textContent)).toEqual([
+    'See charges · Anyone', 'Refund · Anyone',
+  ]);
+  expect(rules.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
+  // Each tool's effects beside its title, as the signed review draws them.
+  await expect.element(listed.getByText('Private data', { exact: true }).first()).toBeVisible();
+  await expect.element(listed.getByText('Money', { exact: true })).toBeVisible();
+  await expect.element(screen.getByText('Until you set a limit in Rules, every payment asks you first.', { exact: true })).toBeVisible();
   expect(requests('setupConnect', mark)).toHaveLength(0);
   await expectScreenBasics(screen.container, { owner: true });
   expectNoHorizontalScroll();

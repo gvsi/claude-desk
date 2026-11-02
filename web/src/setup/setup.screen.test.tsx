@@ -246,9 +246,9 @@ const statuses = (state: SetupState, tools: readonly string[]) => tools.map((too
 
 /** Each tool a connector's review lists, with the outcome it starts at, in the owner's words. */
 function reviewOutcomes(screen: RenderResult): [string, string][] {
-  return [...screen.container.querySelectorAll('.cd-connector-review__tool')].map((tool) => [
-    tool.querySelector('.cd-connector-review__name')?.textContent?.trim() ?? '',
-    tool.querySelector('.cd-outcome, .cd-outcome-menu__phrase')?.textContent?.trim() ?? '',
+  return [...screen.container.querySelectorAll('.cd-connector-review__rules .cd-rule-sentence')].map((tool) => [
+    tool.querySelector('.cd-rule-sentence__meta .cd-user-name')?.textContent?.trim() ?? '',
+    tool.querySelector('.cd-rule-sentence__outcome')?.textContent?.trim() ?? '',
   ]);
 }
 
@@ -1897,8 +1897,8 @@ describe('setup', () => {
     const tools = ['payments.list_charges', 'payments.create_refund'];
     expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
     const review = screen.getByRole('region', { name: 'Tools' });
-    await expect.element(review.getByText('See charges', { exact: true })).toBeVisible();
-    await expect.element(review.getByText('Refund', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('See charges', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('Refund', { exact: true })).toBeVisible();
     expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
 
     // Connected is not on: back on the list, Stripe doesn't read "On" but "Needs review", it can't
@@ -1999,8 +1999,8 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Add Payments' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
     const review = screen.getByRole('region', { name: 'Tools' });
-    await expect.element(review.getByText('Payment link', { exact: true })).toBeVisible();
-    await expect.element(review.getByText('Charge within a signed limit', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('Payment link', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('Charge within a signed limit', { exact: true })).toBeVisible();
     expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
 
     // Opening its review turns nothing on: back on the list, Payments doesn't read "On".
