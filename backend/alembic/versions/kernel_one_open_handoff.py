@@ -59,7 +59,7 @@ back, so a `superseded` one is neither. On the live database the way back is a r
 "Rollback and teardown"). Like the revisions before it, the upgrade runs again over what it added.
 
 Revision ID: kernel_one_open_handoff
-Revises: 09_business_tools_view
+Revises: api_conversation_reads
 """
 
 from typing import Any
@@ -67,7 +67,7 @@ from typing import Any
 from alembic import op
 
 revision = "kernel_one_open_handoff"
-down_revision = "09_business_tools_view"
+down_revision = "api_conversation_reads"
 branch_labels = None
 depends_on = None
 
