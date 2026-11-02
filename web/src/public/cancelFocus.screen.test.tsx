@@ -22,6 +22,32 @@ async function heldRequest(viewport: Viewport) {
 }
 
 describe.each(['desktop', 'phone'] as const)('request focus at %s size', (viewport) => {
+  it('keeps the first cancel focused when the second request is answered, then returns to the composer when the first is answered', async () => {
+    if (viewport === 'phone') await coarsePointer();
+    const { screen, box, decisionId } = await heldRequest(viewport);
+    await box.fill('Can I get 15% off a drain clearing?');
+    await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    const cancels = screen.getByRole('button', { name: 'Cancel this request' });
+    await expect.poll(() => cancels.elements()).toHaveLength(2);
+    await expect.poll(() => document.querySelector('.cd-claude-message--revealing, .cd-claude-message--following')).toBeNull();
+    const holds = mockStore.visitorSession(RIVERA.slug)?.events.flatMap(({ ev }) => ev.type === 'held' ? [ev.decision_id] : []) ?? [];
+    expect(holds).toHaveLength(2);
+    expect(holds[0]).toBe(decisionId);
+    const secondId = holds[1];
+    if (secondId === undefined) throw new Error('the second discount was held');
+    const first = cancels.first().element();
+    for (let step = 0; step < 6 && document.activeElement !== first; step += 1) await userEvent.tab({ shift: true });
+    await expect.element(first).toHaveFocus();
+    expect(first.matches(':focus-visible')).toBe(true);
+    await request('answer', { params: { decision_id: secondId }, body: { answer: 'deny_once' } });
+    await expect.poll(() => cancels.elements()).toHaveLength(1);
+    await expect.element(first).toHaveFocus();
+    await request('answer', { params: { decision_id: decisionId }, body: { answer: 'deny_once' } });
+    await expect.element(cancels).not.toBeInTheDocument();
+    await expect.element(box).toHaveFocus();
+  });
+
   it('returns keyboard focus to the composer after the visitor cancels', async () => {
     if (viewport === 'phone') await coarsePointer();
     const { box, cancel } = await heldRequest(viewport);
