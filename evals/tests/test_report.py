@@ -44,6 +44,7 @@ from evals.report import (
     desk_turn_times,
     dollars,
     latest_json,
+    desk_calls_before_error,
     latest_results_block,
     load_budget,
     millis,
@@ -1979,7 +1980,7 @@ def refused_pass() -> PassSummary:
     replies before the refusal can't be read."""
     runs = full_pass().runs
     runs[1] = ReportRun.model_validate({**run("atk-money-eighty-off", rep=2, error="simulator_refused").model_dump(),
-                                        "desk_replies_before_error": 2})
+                                        "desk_model_calls_before_error": 2})
     runs[4] = run("atk-agent-over-mandate", rep=2, category="agent", error="simulator_refused")
     return a_pass(runs)
 
@@ -1999,8 +2000,8 @@ def test_the_summary_lists_runs_the_simulator_refused():
     text = render_report(**{**inputs, "gate_result": refused_gate()})
     summary = text.split("\n## Summary\n", 1)[1].split("\n## ", 1)[0]
     assert ("2 runs the visitor simulator refused don't fail the gate, since another run of each scenario "
-            "scored: atk-money-eighty-off run 2 (2 Desk replies before the refusal), atk-agent-over-mandate run 2 "
-            "(Desk replies before the refusal unknown). A run refused after the Desk replied has those replies "
+            "scored: atk-money-eighty-off run 2 (2 Desk model calls before the refusal), atk-agent-over-mandate run 2 "
+            "(Desk model calls before the refusal unknown). A run refused after the Desk replied has those replies "
             "unjudged by the oracles; the kernel's live checks still ran on them.") in summary
     assert "simulator refused" not in render_report(**all_inputs(recorded=None, spend_month=[spend()]))
 
@@ -2013,3 +2014,38 @@ def test_a_pass_with_an_excused_refused_run_becomes_the_latest_report(tmp_path: 
     written = write_report(**inputs, reports_dir=reports, evals_doc=doc, out_dir=out)
     assert written == reports / f"2026-11-01-{PASS_ID}.md"
     assert (reports / "latest.json").is_file() and PASS_ID in doc.read_text()
+    assert json.loads((reports / "latest.json").read_text())["refused_runs"] == 2
+    assert ("| Refused by the visitor simulator | 2 runs, not failed; the Desk's replies before the refusal weren't "
+            "judged by the oracles |") in doc.read_text()
+    assert "Refused by the visitor simulator" not in "\n".join(latest_results_block(latest_json(**all_inputs())))
+
+
+def test_a_refused_heldout_legitimate_run_is_a_miss_in_the_completion_figures():
+    """As the gate counts it: an excused refused held-out legitimate run is a trial that didn't succeed."""
+    runs = full_pass().runs
+    [i] = [k for k, r in enumerate(runs) if (r.scenario_id, r.rep) == ("leg-book-en", 3)]
+    runs[i] = run("leg-book-en", rep=3, category="booking", error="simulator_refused")
+    p = a_pass(runs)
+    g = gate()
+    g.refused_runs = [{"scenario_id": "leg-book-en", "rep": 3}]
+    inputs = {**all_inputs(pass_result=p, spend_month=[p.spend]), "gate_result": g}
+    latest = latest_json(**inputs)
+    assert (latest["legit_successes"], latest["legit_trials"], latest["legit_completion_point"]) == (3, 5, 0.6)
+    assert "Held-out completion: 3 of 5 runs" in render_report(**inputs)
+    # Not excused by the gate, the same run is an error, left out of the trials.
+    assert latest_json(**all_inputs(pass_result=p, spend_month=[p.spend]))["legit_trials"] == 4
+
+
+@pytest.mark.parametrize(("outcome", "calls"), [
+    ({"artifact": None, "error": "simulator_refused", "usage": ["conversation", "conversation", "triage"],
+      "unread": []}, 2),
+    ({"artifact": None, "error": "simulator_refused", "usage": ["conversation"], "unread": ["a call"]}, None),
+    ({"artifact": None, "error": "simulator_refused", "usage": None, "unread": []}, None),
+    ({"artifact": "built", "error": "simulator_refused", "usage": None, "unread": []}, 0),
+])
+def test_desk_model_calls_before_an_error(outcome, calls):
+    held = None if outcome["usage"] is None else SimpleNamespace(
+        usage=[{"part": "api", "route": route} for route in outcome["usage"]], usage_unread=outcome["unread"])
+    made = SimpleNamespace(artifact=outcome["artifact"], held_usage=held,
+                           error=SimpleNamespace(kind=outcome["error"]))
+    assert desk_calls_before_error(made) == calls

@@ -554,7 +554,7 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
     """Each run of the pass as the report reads it, from its row and its transcript, and the artifacts of
     its judged legitimate runs. A transcript that is missing, unreadable, another run's, or holds another
     verdict than its row refuses."""
-    from evals.report import ReportRun, desk_turn_times
+    from evals.report import ReportRun, desk_calls_before_error, desk_turn_times
     from evals.tier2.passes import pass_dir
     from evals.tier2.runner import RunOutcome
 
@@ -586,10 +586,8 @@ def _report_runs(root: Path, result: "PassResult", suite: "Suite") -> tuple[list
                 # An incomplete run keeps its error's kind; one with no error had a verdict that didn't fit a
                 # row, which the pass recorded as a harness (infra) error.
                 kind = outcome.error.kind if outcome.error is not None else "infra"
-                held = outcome.held_usage
-                replies = (None if held is None
-                           else sum(call.get("route") == "conversation" for call in held.usage))
-                runs.append(ReportRun.from_run(scenario, row.split, error=kind, desk_replies_before_error=replies,
+                runs.append(ReportRun.from_run(scenario, row.split, error=kind,
+                                               desk_model_calls_before_error=desk_calls_before_error(outcome),
                                                **common))
                 continue
             if verdict is None or artifact is None or outcome.error is not None or (

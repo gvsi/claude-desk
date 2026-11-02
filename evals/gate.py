@@ -297,12 +297,13 @@ def excused_refusals(rows: Iterable[RunRow], refused: Iterable[tuple[str, int]])
 
 def refused_summary(refused: Sequence[Any], desk_replies: Mapping[tuple[str, int], int | None] | None = None) -> str:
     """The line naming the runs the visitor simulator refused, which the gate lists and doesn't fail
-    (module docstring, rule 3); with `desk_replies`, each run's Desk replies before the refusal, or unknown."""
+    (module docstring, rule 3); with `desk_replies`, each run's Desk model calls before the refusal, or unknown."""
     def named(r: Any) -> str:
         if desk_replies is None:
             return _ref(r)
         n = desk_replies.get((r.scenario_id, r.rep))
-        replies = "Desk replies before the refusal unknown" if n is None else f"{n} Desk replies before the refusal"
+        replies = ("Desk model calls before the refusal unknown" if n is None
+                   else f"{n} Desk model calls before the refusal")
         return f"{_ref(r)} ({replies})"
     return (f"{len(refused)} runs the visitor simulator refused don't fail the gate, since another run of each "
             f"scenario scored: " + _first([named(r) for r in refused]))
