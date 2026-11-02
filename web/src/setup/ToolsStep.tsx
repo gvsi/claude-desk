@@ -135,9 +135,10 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const titleRef = useRef<HTMLHeadingElement>(null);
   const rowRefs = useRef(new Map<string, HTMLLIElement>());
   const returnTo = useRef<string | null>(null);
+  const focusRow = useRef(false);
   const reviewReady = rules.data !== undefined && tools.data !== undefined;
-  // View swaps announce their heading. Returning follows Rules' pattern: the opener when it
-  // still exists, otherwise its row, with no extra Tab stop or visible focus edge.
+  // View swaps announce their heading. Back and Cancel return to the opener; a confirm returns
+  // to its row immediately, so focus survives the refresh replacing its button with "On".
   useLayoutEffect(() => {
     if (view.kind !== 'list') {
       titleRef.current?.focus({ preventScroll: true });
@@ -147,7 +148,8 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     const row = rowRefs.current.get(returnTo.current);
     if (row === undefined) return;
     returnTo.current = null;
-    const button = row.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    const button = focusRow.current ? null : row.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    focusRow.current = false;
     if (button) button.focus({ preventScroll: true });
     else {
       row.setAttribute('tabindex', '-1');
@@ -180,7 +182,10 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
           draft={view.draft}
           inline
           confirm={flow.confirm}
-          onDone={() => void flow.backToList()}
+          onDone={(outcome) => {
+            focusRow.current = outcome === 'confirmed';
+            void flow.backToList();
+          }}
         />
       </div>
     );

@@ -171,8 +171,8 @@ export function useConnectorFlow({ interviewId, deskId, tools }: { interviewId: 
   };
 
   const backToList = async () => {
-    await queryClient.invalidateQueries({ queryKey: toolsKey });
     setView({ kind: 'list' });
+    void queryClient.invalidateQueries({ queryKey: toolsKey });
   };
 
   const turnOn = async (key: ReviewKey, rows: ToolRow[]) => {
