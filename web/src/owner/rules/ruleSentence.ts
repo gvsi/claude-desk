@@ -318,11 +318,34 @@ function toolsCovered(card: RuleCard, row: readonly RuleCard[], words: SentenceW
     .filter((title): title is string => title !== null && title.trim() !== '');
 }
 
-/** Who a card is for, in one line: "Anyone", "The record's owner, verified", "Dana Whitfield, verified". */
+/** The words every screen uses for a verified customer and for the record's owner, whose code proved it's them. */
+const VERIFIED_CUSTOMER = 'The customer, once verified';
+
+/**
+ * Who a card is for, in one line, the same on every screen (REV-RULES-D, v354): "Anyone", signed
+ * agents included; "The customer, once verified" for a verified customer or the record's owner; a
+ * person by name, "Dana Whitfield, verified" on private data; an agent by its name, else "One agent".
+ */
 function whoLine(card: RuleCard, words: SentenceWords): string {
+  if (card.who === 'anyone') return 'Anyone';
+  if (card.who === 'verified' || card.who === 'record_owner') return VERIFIED_CUSTOMER;
   return whoWords(card, words.people, words.agents)
     .map((word, index) => (index === 0 ? word.text : lowerFirst(word.text)))
     .join(', ');
+}
+
+/**
+ * The line under a rule's sentence in Rules' rule cell (REV-RULES-D, v354): who it is for, then its
+ * qualifiers, "Checked by the reviewer" and, past an automatic rule's amount limit, "Over $300, it
+ * asks you first". Never the tools, which head the cell.
+ */
+export function ruleQualifiers(card: RuleCard, words: SentenceWords): string {
+  const limit = limitOf(card);
+  return [
+    whoLine(card, words),
+    ...(card.mode === 'auto' && card.review ? ['Checked by the reviewer'] : []),
+    ...(limit === null ? [] : [`Over ${formatCents(limit)}, it asks you first`]),
+  ].join(' · ');
 }
 
 /**
@@ -478,6 +501,19 @@ export interface AlwaysOnSentence {
   parts: readonly SentencePart[];
   meta: RuleMeta;
 }
+
+/** An always-on rule over everything Claude does, whatever the tool: its key, its words and an optional line under them. */
+export interface AcrossDeskSentence {
+  key: 'ai' | 'log';
+  parts: readonly SentencePart[];
+  line?: string;
+}
+
+/** The always-on rules over every tool, as Rules' "Across your Desk" lists them (REV-RULES-D, v354). */
+export const ACROSS_DESK_SENTENCES: readonly AcrossDeskSentence[] = [
+  { key: 'ai', parts: [{ text: "Claude always says it's an AI" }], line: 'In every reply' },
+  { key: 'log', parts: [{ text: 'Claude logs every request, allowed or not, and shows it to you in Safety' }] },
+];
 
 /** The catalog's titles for these tools, as the always-on rows name them. */
 const titles = (...tools: (keyof typeof TOOL_NAMES)[]): { titles: string[] } => ({ titles: tools.map((tool) => TOOL_NAMES[tool].name) });

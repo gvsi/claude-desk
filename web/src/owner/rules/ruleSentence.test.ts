@@ -19,7 +19,9 @@ import {
   moneyCapMeta,
   moneyCapSentence,
   moneyCapToolSentence,
+  ACROSS_DESK_SENTENCES,
   ruleMeta,
+  ruleQualifiers,
   ruleSentence,
   type RuleMeta,
   type SentencePart,
@@ -62,7 +64,7 @@ describe('the C1 rows', () => {
 
   it('agent_payments_from_a_signed_limit', () => {
     expect(read(ruleSentence(cards['rv-mandate'], words))).toBe('Claude can take agent payments up to **$20** from a signed limit');
-    expect(line(ruleMeta(cards['rv-mandate'], words))).toBe('Charge within a signed limit · Signed agents');
+    expect(line(ruleMeta(cards['rv-mandate'], words))).toBe('Charge within a signed limit · Anyone');
   });
 
   it('bookings_in_their_hours', () => {
@@ -73,7 +75,7 @@ describe('the C1 rows', () => {
 
   it('a_refund_asks_first', () => {
     expect(read(ruleSentence(cards['rv-refund'], words))).toBe('Claude asks you before **any refund**');
-    expect(line(ruleMeta(cards['rv-refund'], words))).toBe('Refund · The customer who paid, verified');
+    expect(line(ruleMeta(cards['rv-refund'], words))).toBe('Refund · The customer, once verified');
   });
 });
 
@@ -127,7 +129,7 @@ describe('the C1 rows that join several tools', () => {
   it('documents_and_charges_once_confirmed', () => {
     const row = [cards['rv-docs'], cards['rv-charges']];
     expect(read(ruleSentence(row, words))).toBe("Claude can share customers' own documents and charges, once they've confirmed it's them");
-    expect(line(ruleMeta(row, words))).toBe("Share a document and See charges · The record's owner, verified");
+    expect(line(ruleMeta(row, words))).toBe('Share a document and See charges · The customer, once verified');
   });
 });
 
@@ -242,7 +244,7 @@ describe('any tool', () => {
   it('a_person_rule_names_them', () => {
     const verified = card({ card_id: 'v', applies_to: 'native.book', mode: 'auto', who: 'verified' });
     expect(read(ruleSentence(verified, words))).toBe("Claude can book visits, once they've confirmed it's them");
-    expect(line(ruleMeta(verified, words))).toBe('Book a visit · Verified customers');
+    expect(line(ruleMeta(verified, words))).toBe('Book a visit · The customer, once verified');
   });
 });
 
@@ -335,5 +337,38 @@ describe('never rows over several tools', () => {
     const neverQuote = card({ card_id: 'nq', applies_to: 'native.quote', mode: 'never', who: 'anyone' });
     const neverBook = card({ card_id: 'nb', applies_to: 'native.book', mode: 'never', who: 'anyone' });
     expect(read(ruleSentence([neverQuote, neverBook], words))).toBe('Claude never sends quotes from your price list and books visits');
+  });
+});
+
+describe("the rule cell's second line (REV-RULES-D, v354)", () => {
+  it('the_audience_reads_anyone_or_the_customer_once_verified', () => {
+    // One set of words on every screen: anyone, signed agents included, is "Anyone"; a verified
+    // customer and the record's owner, a refund's payer included, are "The customer, once verified".
+    expect(ruleQualifiers(cards['rv-quote'], words)).toBe('Anyone');
+    expect(ruleQualifiers({ ...cards['rv-mandate'], max_amount_cents: null }, words)).toBe('Anyone');
+    expect(ruleQualifiers(cards['rv-docs'], words)).toBe('The customer, once verified');
+    expect(ruleQualifiers(cards['rv-refund'], words)).toBe('The customer, once verified');
+    expect(ruleQualifiers(card({ card_id: 'v', applies_to: 'native.book', mode: 'auto', who: 'verified' }), words)).toBe('The customer, once verified');
+    // A person keeps their name, verified on private data; an agent its own.
+    const people: PeopleOut = { people: [{ person_id: 'per-dana', display_name: 'Dana Whitfield', masked_contact: 'd•••@example.com' }], leads: [] };
+    const dana = card({ card_id: 'd', applies_to: 'native.release_document', mode: 'auto', who: 'person', person_id: 'per-dana' });
+    expect(ruleQualifiers(dana, { ...words, people })).toBe('Dana Whitfield, verified');
+    expect(ruleQualifiers(card({ card_id: 'a', applies_to: 'native.book', mode: 'auto', who: 'agent', agent_key_id: 'k' }), words)).toBe('One agent');
+  });
+
+  it('names_no_tool_and_reads_the_reviewer_and_a_hold_as_qualifiers', () => {
+    // The tool heads the cell, so the line under its sentence names none.
+    expect(ruleQualifiers(cards['rv-link'], words)).toBe('Anyone · Checked by the reviewer · Over $300, it asks you first');
+    expect(ruleQualifiers(cards['rv-book-wk'], words)).toBe('Anyone · Checked by the reviewer');
+    // An automatic rule's limit asks past it; one that asks or never runs has no hold.
+    expect(ruleQualifiers({ ...cards['rv-link'], mode: 'ask', max_amount_cents: null, review: false }, words)).toBe('Anyone');
+    expect(ruleQualifiers({ ...cards['rv-mandate'], review: false }, words)).toBe('Anyone · Over $20, it asks you first');
+  });
+
+  it('the_desk_wide_rules_are_the_ai_disclosure_and_the_log', () => {
+    expect(ACROSS_DESK_SENTENCES.map((rule) => [rule.key, read(rule.parts), rule.line ?? null])).toEqual([
+      ['ai', "Claude always says it's an AI", 'In every reply'],
+      ['log', 'Claude logs every request, allowed or not, and shows it to you in Safety', null],
+    ]);
   });
 });
