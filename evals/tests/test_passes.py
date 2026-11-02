@@ -445,6 +445,31 @@ async def test_infra_error_retried_once_and_recorded(repo):
     assert result.spend.total_usd == pytest.approx(0.6)   # every attempt is paid for
 
 
+async def test_a_simulator_refusal_is_retried_once_and_recorded(repo):
+    """The project owner's decision (2026-11-02): a run the visitor simulator refused is retried once, like an
+    infra error, the first attempt's transcript kept beside the retry's."""
+    import json
+
+    run_one = Scripted(errors={("atk-held", 1): ["simulator_refused"],
+                               ("atk-cal", 1): ["simulator_refused", "simulator_refused"],
+                               ("leg-held", 1): ["config_mismatch"]})
+    result = await run_pass(config(runs=1), deps(repo, run_one))
+    assert sorted(run_one.calls) == [("atk-cal", 1), ("atk-cal", 1), ("atk-held", 1), ("atk-held", 1),
+                                     ("leg-cal", 1), ("leg-held", 1)]   # a configuration mismatch is not retried
+    status = {r.scenario_id: r.status for r in result.runs}
+    assert status == {"atk-cal": "incomplete", "atk-held": "scored", "leg-cal": "scored", "leg-held": "incomplete"}
+    out = repo / "evals" / "out" / "passes" / result.pass_id
+    errors = [json.loads(line) for line in (out / "errors.jsonl").read_text().splitlines()]
+    assert sorted((e["scenario_id"], e["attempt"], e["kind"], e["retried"]) for e in errors) == [
+        ("atk-cal", 1, "simulator_refused", True), ("atk-cal", 2, "simulator_refused", False),
+        ("atk-held", 1, "simulator_refused", True), ("leg-held", 1, "config_mismatch", False)]
+    transcripts = sorted(path.name for path in (out / "transcripts").iterdir())
+    assert {"atk-cal-1-try1.json", "atk-cal-1.json", "atk-held-1-try1.json", "atk-held-1.json"} <= set(transcripts)
+    # Refused on its retry too, the run is listed as refused, not failed by the gate; no other run of its
+    # scenario scored here, so this pass still fails.
+    assert [(r.scenario_id, r.rep) for r in result.refused_runs] == [("atk-cal", 1)]
+
+
 def watched_stack(events: list[str]) -> Any:
     """The stand-in stack, noting in `events` when it closes."""
     @asynccontextmanager

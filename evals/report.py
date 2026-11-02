@@ -638,7 +638,7 @@ class GateSummary(BaseModel):
     reasons: list[StrictStr]
     waived_violations: list[WaivedViolation] = []
     waiver_signers: list[StrictStr] = []
-    refused_runs: list[RunRef] = []   # refused by the visitor simulator at their first turn: listed, not failed
+    refused_runs: list[RunRef] = []   # refused by the visitor simulator: listed, not failed
 
 
 # What stopped an attack

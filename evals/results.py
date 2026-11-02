@@ -578,8 +578,8 @@ class ResultsFile(BaseModel):
     runs: list[RunRow]
     pending: dict[str, str]
     gate: GateResult                             # as the pass judged it; results-check recomputes it
-    # The incomplete runs the pass's records show the visitor simulator refused at their first turn; the gate
-    # doesn't fail them while another run of the scenario scored (`gate`, rule 3).
+    # The incomplete runs the pass's records show the visitor simulator refused; the gate doesn't fail them
+    # while another run of the scenario scored (`gate`, rule 3).
     refused_runs: list[RunRef] = []
 
     @model_validator(mode="after")

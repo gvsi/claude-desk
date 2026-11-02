@@ -35,7 +35,7 @@ Then, with `--results` and runs to make, `make kernel` (recorded as `StartChecks
 whether a pass was a `--results` pass is read from what it did, never from `config.results` alone:
 `results.unchecked_refusal`); then the runs, `--concurrency` at a time on
 one stack (`load_api_target()` from the working tree, or the deployment at `--base-url`). A run
-whose error is `infra` is retried once, and both attempts are recorded. Once spend reaches
+whose error is `infra` or `simulator_refused` is retried once, and both attempts are recorded. Once spend reaches
 `--max-usd`, no new run starts (`stopped_by_budget`). A dry run scripts every model for $0: the
 Desk's on the kernel target's `FakeAnthropic` and the visitor's on its own, both on provider
 `anthropic` whatever `MODEL_PROVIDER` says, recorded as provider `fake`. A `--base-url` pass
@@ -90,7 +90,7 @@ from pydantic import (
 
 from evals import results
 from evals.credentials import mask_credentials
-from evals.gate import GateInput, RunRef, RunRow, first_turn_refusal, gate, waiver_summary
+from evals.gate import GateInput, RunRef, RunRow, gate, simulator_refusal, waiver_summary
 from evals.results import API_ROUTES, KERNEL_ROUTES, SIMULATOR_ROUTES
 from evals.tier1.harness import load_landed
 from evals.tier2.runner import RunError, RunOutcome, SimulatorStats, run_scenario
@@ -286,7 +286,7 @@ class PassResult(BaseModel):
     simulator_fallbacks: dict[str, int]       # turns a fallback model served, and switches
     estimated_spend: list[EstimatedSpend] = []   # attempts in `spend` at a run's estimate, not priced
     start: StartChecks | None = None          # None in a pass.json from before passes recorded it
-    # The incomplete runs the visitor simulator refused at their first turn, read from errors.jsonl and the
+    # The incomplete runs the visitor simulator refused, read from errors.jsonl and the
     # transcripts (`refused_runs`) whenever a pass is made or loaded, never from pass.json.
     refused_runs: list[RunRef] = []
 
@@ -712,7 +712,8 @@ class _Pass:
                     self.stopped = True
                     return
                 outcome = await self._attempt(stack, scenario, rep, 1)
-                if outcome.error is not None and outcome.error.kind == "infra":
+                # A visitor simulator's refusal is retried once like infra (the project owner's decision, 2026-11-02).
+                if outcome.error is not None and outcome.error.kind in ("infra", "simulator_refused"):
                     retry = not self._spent_out()
                     self._record_error(outcome, 1, retried=retry)
                     if retry:   # the first attempt's transcript is kept beside the retry's
@@ -869,8 +870,8 @@ def load_pass(pass_id: str, root: Path = REPO_ROOT) -> PassResult:
 
 
 def refused_runs(out: Path, rows: Iterable[RunRow]) -> frozenset[tuple[str, int]]:
-    """The incomplete runs of the pass in `out` that its own records show the visitor simulator refused at
-    their first turn (`gate.first_turn_refusal`), by (scenario id, rep), read from `errors.jsonl` and each
+    """The incomplete runs of the pass in `out` that its own records show the visitor simulator refused
+    (`gate.simulator_refusal`), by (scenario id, rep), read from `errors.jsonl` and each
     run's final transcript, so a pass recorded before this was read is judged the same way. An
     `errors.jsonl` that can't be read names none; a transcript that can't be read leaves its run incomplete."""
     try:
@@ -889,7 +890,7 @@ def refused_runs(out: Path, rows: Iterable[RunRow]) -> frozenset[tuple[str, int]
         except (OSError, ValueError):
             transcript = None
         if (isinstance(transcript, dict) and (transcript.get("scenario_id"), transcript.get("rep")) == (
-                row.scenario_id, row.rep) and first_turn_refusal(by_run.get((row.scenario_id, row.rep), []),
+                row.scenario_id, row.rep) and simulator_refusal(by_run.get((row.scenario_id, row.rep), []),
                                                                   transcript)):
             found.add((row.scenario_id, row.rep))
     return frozenset(found)
@@ -1118,10 +1119,17 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
                           f"not {config.runs}")
     # Judge safety through the gate's sole waiver-matching path. Completion's lower-bar rule stays below.
     judged = gate(result, RecordedRates(history=[]), waivers=at_head.waivers)
-    # A run the simulator refused at its first turn passes the gate but is still incomplete, so no rate comes of it.
-    if not judged.passed or judged.skipped_runs or judged.refused_runs:
+    if not judged.passed or judged.skipped_runs:
         raise PassRefused("a rate is recorded only from a clean pass: no incomplete run, violation, skipped check or "
                           "budget stop")
+    # A refused run passes the gate (the project owner's decision, 2026-11-02). The rate counts held-out
+    # legitimate runs only, so a refused attack or calibration run leaves it whole; a refused held-out
+    # legitimate run would leave it counting fewer runs than the pass made.
+    heldout_legit = {(r.scenario_id, r.rep) for r in result.runs if r.suite == "legit" and r.split == "heldout"}
+    if refused := [f"{r.scenario_id} run {r.rep}" for r in judged.refused_runs
+                   if (r.scenario_id, r.rep) in heldout_legit]:
+        raise PassRefused("a rate is recorded only from a pass whose held-out legitimate runs all scored, and the "
+                          f"visitor simulator refused {', '.join(refused)}")
     suite = load_suite(evals_path(root, "tier2", "scenarios"))
     splits = load_splits(evals_path(root, "splits.yaml"))
     if result.heldout_sha256 != heldout_sha256(suite, splits):
