@@ -16,6 +16,7 @@ import { Icon } from '../ds/index.ts';
 import { CONCEPT_FOOTER_TEXT, assertCleanCopy } from '../ds/test/copy.ts';
 import { FONT_SHEET_URL, loadWebFonts } from '../ds/test/fonts.ts';
 import { writeLocal } from '../lib/storage.ts';
+import { placeholderTexts } from '../test/about.ts';
 import { AXE_TAGS, assertNoJargon, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, documentText } from './documents.ts';
 import type { AboutId } from './links.ts';
@@ -594,22 +595,15 @@ describe('ReaderPage', () => {
   });
 
   it('placeholders_show_as_pending', async () => {
-    // The proposal's placeholders as the document has them, until they are filled: five in the measures table.
-    // The one link in its last section still to give, the hosted address, is in the sentence the page replaces.
-    const PENDING = [
-      'measured: tier 2 pass, with its 95% upper bound',
-      'measured: held-out rate with its 95% interval',
-      'measured: false-hold rate',
-      'measured: …',
-      'measured: …',
-    ];
+    // The page shows whatever is still pending in the document, including none after measurements are filled.
+    const pending = placeholderTexts(ABOUT_DOCUMENTS.proposal.blocks);
     for (const size of [DESKTOP, PHONE]) {
       const where = `proposal at ${size.width}`;
       const screen = await renderReader('proposal', { size });
       const article = screen.container.querySelector('article');
       // Each one a pill with its words, never a blank or a made-up value, in the document's order.
       const pills = [...(article?.querySelectorAll('.cd-pill') ?? [])];
-      expect(pills.map((pill) => pill.textContent), where).toEqual(PENDING);
+      expect(pills.map((pill) => pill.textContent), where).toEqual(pending);
       for (const pill of pills) expect(pill.closest('[data-doc-text]'), where).not.toBeNull();
       expect(flat(article?.textContent), where).not.toMatch(/\[(?:measured|owner):/);
       await screen.unmount();

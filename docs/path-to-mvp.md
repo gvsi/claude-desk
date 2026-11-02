@@ -1,0 +1,85 @@
+# Path to MVP
+
+What the prototype needs to become a minimum viable product (MVP) for real businesses: real identity, real payment and message providers, and recovery when a model or a provider fails. The [architecture decisions](architecture-decisions.md) explain today's choices, and the [threat model](threat-model.md) says what they claim and what they don't.
+
+## Architecture
+
+Today the API runs conversations; the kernel holds business credentials, compiles and proves rules, and checks actions and replies. Postgres roles prevent API writes to kernel records. Both processes trust their shared host. Keep that authority boundary for an MVP, add browser-signed approvals and rule confirmations, and verify signed replies in the browser. Separating the kernel onto another host would require authenticated calls and credential isolation.
+
+Read the safety and usefulness numbers together: a Desk that refused everything would have no violations and complete nothing. Here, held-out means scenarios not used to tune the reviewer. The results cover only the attacks and assumptions the [evals guide](evals.md) lists.
+
+| Metric | Value | Source |
+|---|---|---|
+| Baseline violations across all judged runs (both suites and splits), unwaived | 0 in 260 judged runs | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+| Baseline violations across all judged runs, waived, with who signed | 2 AI-denial flags, signed by Giovanni Alcantara | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+| Held-out legitimate completion, completed / trials and Wilson 95% interval | 70 of 72 held-out runs (97.2%; Wilson 95% interval 90.4% to 99.2%) | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+| False holds on tools held-out legitimate tasks expect allowed, count / eligible decisions and rate | 0 of 78 decisions the held-out tasks expected allowed (0.0%) | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+
+Only the AI-denial check can be waived: the owner signs, one message at a time, for a correct refusal that quotes the line it won't say. A waived violation stays in the report, counted apart with who signed it.
+
+## Infrastructure
+
+The [service configuration](../infra/stacks/compute_express.py) runs exactly one task, a single copy of the API and kernel containers, each with [its own secrets](../infra/stacks/task.py). [RDS](../infra/stacks/data_stack.py) is private, encrypted and single-AZ, with backups and a final snapshot. [CloudFront](../infra/stacks/edge.py) serves S3 assets and uncached API traffic on one domain; the fallback compute mode uses an internal load balancer. This describes the configuration in the repository, not an audit of the live deployment.
+
+For an MVP, run the database across availability zones, rehearse restores and failover, and move rate limits into shared storage before adding tasks, since today each task keeps its own. Add a web application firewall, and alerts for spend, waits for database connections and the ledger, holds, payment reconciliation and failed replies. Set an availability target and name who is on call. The [deploy guide](deploy.md) covers releases and infrastructure costs.
+
+## Model integration
+
+Opus handles conversation, Sonnet reviews actions and Haiku judges possible promises and denials of being an AI inside the kernel's reply check. For the conversation model, [prompt caching](../backend/desk/api/model.py) covers the unchanging start of its prompt and the conversation so far. Keep each route's model explicit, with no silent fallback to another: if the reviewer fails, the action is held for the owner. Compare completion, violations, holds, cost and latency before changing models.
+
+| Metric | Value | Source |
+|---|---|---|
+| Reviewer skipped, share of tool decisions in held-out legitimate-task conversations | 84 of 102 (82.4%) | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+| Reviewer reached, share of tool decisions in held-out legitimate-task conversations | 18 of 102 (17.6%) | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+
+The two shares add up to the whole. Today's daily model budget counts the API's model calls but not the kernel's. An MVP needs each Desk's model spend reserved before every call on every route, settled correctly when calls run at once, and limits the owner can see.
+
+## Scaling and what breaks first
+
+Model cost and latency may limit useful traffic before the infrastructure does; only measurement can say. Proofs run when an owner changes rules, not during conversations. The demo rules' proof time below comes from the final pass's latency run; the 30-card time is the kernel core's, measured locally while other test suites ran on the same machine.
+
+| Constraint | Value | Source |
+|---|---|---|
+| Opus cost per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, mean / p50 / p95, including calls after tools | $0.021 / $0.018 / $0.036 over 142 replies | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+| Opus model time per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, p50 / p95, including calls after tools | 5,300 / 9,079 ms over 142 replies that called the model | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) |
+| Proof, Turner Plumbing's demo rules, local p50 / p95 | 651 / 692 ms (n = 20) | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b |
+| Proof, 30 rule cards, local p50 / p95 | 1,172 / 2,390 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
+| SSE streams per task, steady state | estimate: at most min(3S, 30I) for S visitor sessions across I internet addresses subject to the per-address limit; no total task cap | estimate: min(3 × S, 30 × I) = stream ceiling; [stream slots](../backend/desk/api/ratelimit.py). Excludes streams with no per-address limit and brief overlap while an older stream closes after a new one replaces it. |
+| API Postgres connection budget per task | estimate: up to 47 | estimate: (20 pool + 10 overflow) + 10 turn locks + 5 job connections + 1 event listener + 1 job listener = 47; [API pools](../backend/desk/api/main.py), [job pool](../backend/desk/db/session.py), [event listener](../backend/desk/api/sse.py), [job listener](../backend/desk/api/jobs.py). |
+| Postgres demand with T app tasks | estimate: up to 77T, plus admin and operational connections | estimate: T × (47 + 2 × (5 pool + 10 overflow)) = 77T; SQLAlchemy defaults left implicit by the [kernel](../backend/desk/kernel_service/app.py) and [mock provider](../backend/desk/mockpay/store.py). Database connection capacity is not pinned. |
+| Ledger writes to one busy Desk | estimate: at most 1,000 / L entries/s, L = amortized locked time per entry in ms through commit | estimate: 1 exclusive ledger-head lock / (L / 1,000) = 1,000 / L; [ledger append](../backend/desk/kernel_service/ledger.py), [lock order](../backend/desk/kernel_service/repo.py). L is not measured. |
+
+Before scaling, load-test three things: slow and reconnecting readers of the live-update stream (server-sent events), for memory and lag; waits for a database connection as tasks are added; and how long a Desk's ledger lock is waited for and held until each write commits. More tasks multiply database connections without easing one Desk's ledger, which takes one write at a time. Set the pool sizes left at library defaults, and keep connections in reserve for operators, first.
+
+## Latency and cost per conversation
+
+Each source names its report, pass, date and latency run. Full turns come from the latency run's scripted turns, 20 each of questions, quotes and bookings, not from the eval conversations; its slowest turns are mostly bookings. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column shows an estimate where the [master plan](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) gives one, beside local measurements, with the conversation size it assumed.
+
+| Metric | Environment | Value | Source | Planned estimate |
+|---|---|---|---|---|
+| Cost per legitimate-task conversation, both splits, mean / p50 / p95 | Local evals | $0.048 / $0.048 / $0.100 over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md) | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
+| Full turn, warm and cold first turns apart, p50 / p95 | Local | warm 4,579 / 10,393 ms (n = 57); cold first turn, 7,492 ms p50; slowest of 3: 7,669 ms | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b | — |
+| Finished model reply to reveal, p50 / p95 | Local | 1,229 / 3,909 ms (n = 60) | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b | p50 1.1 s, p95 2.8 s, capped at 8 s |
+| Reply check, p50 / p95 | Local, server-side | 1,206 / 3,887 ms (n = 60) | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b | — |
+| Decide, p50 / p95 | Local, server-side | 41 ms p50; slowest of 5: 46 ms | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b | — |
+| Reviewer when called, p50 / p95 | Local, server-side | Not measured in this latency run | [pass 20261102-193659-72c3a2, 2026-11-02](../evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b | 0.8–1.5 s, 4 s timeout |
+| Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | — |
+| Reviewer when called, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | — |
+
+All latency here is local: `make evals-latency PASS=<id>` measures it. Hosted latency wasn't measured. The harness refuses a run against the deployment until the deployment reports what its model calls cost, so that a run can stop at its spending limit.
+
+## What changes for real users
+
+Replace the Demo inbox with real codes by email or text that prove a visitor holds the contact, without revealing which contacts are on record. Connect a real payment provider through a reviewed MCP server, keeping approvals, protection against charging twice, spending reservations and reconciliation. Bind approvals and rule confirmations to the owner's browser key before real money moves.
+
+Replace per-visitor demo copies with real accounts: sign-in, team membership and account recovery, tested isolation of each business's data and credentials, and rules for how long data is kept. Add shared abuse and spend limits, real notifications and on-call recovery. Ask visitors before involving the owner; keep chat useful after holds and handoffs. Measure self-service and false holds alongside safety before expanding coverage.
+
+## Trade-offs made and deferred
+
+| Decision | Why now | Cost | Revisit when |
+|---|---|---|---|
+| Kernel beside the API rather than on another host | A small deployment with an explicit authority boundary | Shared host remains trusted | Host isolation is required for real tenant credentials |
+| Compiled cards and proofs rather than freehand policy | Owner confirmation has a precise meaning | Less expressive rules; proof wait on edits | Measured customer needs exceed card shapes |
+| Check before reveal rather than stream unchecked prose | A visitor never sees a draft that failed its check | Reveal delay and rewrites | Faster checks preserve the same boundary in evals |
+| Mock payments and delivery rather than live providers | Exercise the controls without moving money | No evidence of real contact possession or provider reliability | A real pilot has provider operations and recovery ready |
+| Fixed task count rather than automatic scaling | Keep process-local limits predictable | No measured high-load capacity or failover claim | Shared limits, connection budgets and load tests are in place |

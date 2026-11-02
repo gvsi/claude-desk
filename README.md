@@ -6,9 +6,9 @@ The demo business is Turner Plumbing. You play Mike Turner, its owner, while Cla
 
 ## Try it
 
-[owner: the hosted URL, after the first deploy]
+[desk.alcantara.xyz](https://desk.alcantara.xyz)
 
-The passcode comes with the link. Each visitor gets a fresh copy of the Turner Plumbing demo, tied to a browser cookie, with no account to create.
+The passcode comes with the submission. Each visitor gets a fresh copy of the Turner Plumbing demo, tied to a browser cookie, with no account to create.
 
 ## Things to try
 
@@ -67,15 +67,17 @@ The [threat model](docs/threat-model.md) lists what is claimed and what isn't, a
 
 ## Evidence
 
-Two eval suites run against the real kernel and Claude: an attack suite of hostile visitors and agents, and a legitimate-task suite of ordinary customer requests. The thresholds are tuned on one split of the scenarios and reported on another, held out.
+Two eval suites run against the real kernel and Claude: an attack suite of hostile visitors and agents, and a legitimate-task suite of ordinary customer requests. The scenarios are split in two: one for tuning the reviewer's thresholds, and one held out for reporting. The final pass ran on the kernel's initial thresholds, with none tuned.
 
 | Measure | Result |
 |---|---|
-| Baseline violations in the attack suite | [measured: held-out attack suite] |
-| Legitimate tasks completed | [measured: held-out legitimate-task suite] |
-| Legitimate requests held for the owner | [measured: held-out legitimate-task suite] |
-| From Claude's finished reply to the visitor seeing it, p50 and p95 | [measured: check-then-reveal latency] |
-| Model cost per conversation | [measured: cost per conversation] |
+| Baseline violations | 0 unwaived in 260 judged runs; 2 AI-denial flags waived by Giovanni Alcantara, one message at a time |
+| Legitimate tasks completed | 70 of 72 held-out runs (97.2%; Wilson 95% interval 90.4% to 99.2%) |
+| Tool decisions held for the owner that the task expected the Desk to make alone | 0 of 78 decisions the held-out tasks expected allowed (0.0%) |
+| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | 1,229 / 3,909 ms (n = 60) |
+| Model cost per conversation | $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies |
+
+From the [final eval pass's report](evals/reports/2026-11-02-20261102-193659-72c3a2.md): pass 20261102-193659-72c3a2, 2026-11-02.
 
 The attack suite tests the attacks we thought of: a clean run means none of those got through, not that no attack can.
 
@@ -109,6 +111,7 @@ Three calls I made against what the agents or reviewers pushed for: a Desk resol
 - [Design spec](docs/specs/2026-10-28-claude-desk-design.md): the product, the locked decisions and why.
 - [Threat model](docs/threat-model.md): what is claimed, what isn't, and where each control is enforced.
 - [Architecture decisions](docs/architecture-decisions.md): the main choices, with the alternatives and their costs.
+- [Path to MVP](docs/path-to-mvp.md): what changes for real users, scaling limits, latency and cost.
 - [Deploying](docs/deploy.md): the AWS runbook and its monthly cost.
 - [Continuous integration](docs/ci.md): what CI checks and what it can't.
 - [Plans](docs/plans/): the master plan and one plan per part, each with its Review Ledger.
