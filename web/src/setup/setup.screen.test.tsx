@@ -4688,6 +4688,27 @@ describe('consultant setup', () => {
     await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true }).getByRole('button', { name: 'Connect', exact: true })).toHaveFocus();
   });
 
+  it.each([0, 2])('typing_on_highlighted_choice_%i_goes_to_something_else_and_enter_sends_the_words', async (row) => {
+    // A highlighted row is a button, which takes no text: what the owner types goes to "Something else…",
+    // and Enter sends their words, never the row's label.
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.nth(row).element() as HTMLElement).focus();
+    await expect.element(options.nth(row)).toHaveAttribute('aria-current', 'true');
+    await userEvent.keyboard('We use Xero');
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveFocus();
+    await expect.element(other).toHaveValue('We use Xero');
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: 'We use Xero' });
+  });
+
   it('docks_only_the_live_question_above_the_composer_without_repeating_it', async () => {
     const state = await consultantAt();
     const question = state.messages.findLast((message) => message.choices?.length)!;

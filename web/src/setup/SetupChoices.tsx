@@ -60,6 +60,13 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
         move((active + (event.key === 'ArrowDown' ? 1 : rows - 1)) % rows);
       } else if (!otherInput && /^[1-9]$/.test(event.key) && Number(event.key) <= rows) {
         event.preventDefault(); move(Number(event.key) - 1);
+      } else if (offersOther && inside && !otherInput && event.key.length === 1 && event.key !== ' ') {
+        // A highlighted row is a button, which takes no text: what the owner types goes to "Something
+        // else…", this key first, so Enter sends their words and never the row they were on. Space stays
+        // the row's own key. The memory question has no such field, and its keys pick only its answers.
+        event.preventDefault();
+        setOther((words) => `${words}${event.key}`.slice(0, maxLength));
+        move(choices.length);
       } else if (event.key === 'Enter') {
         // Reading the owner's memory and website takes a choice made in the panel, never an Enter from the page.
         if (!offersOther && !inside) return;
@@ -70,7 +77,7 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
     };
     document.addEventListener('keydown', keydown);
     return () => document.removeEventListener('keydown', keydown);
-  }, [active, choices, disabled, onChoose, onDismiss, other, offersOther, rows]);
+  }, [active, choices, disabled, maxLength, onChoose, onDismiss, other, offersOther, rows]);
   return (
     <div className="cd-setup-question-panel"><Card as="section" labelledBy={questionId} padding={16}>
       <div className="cd-setup-q3" ref={root}>
