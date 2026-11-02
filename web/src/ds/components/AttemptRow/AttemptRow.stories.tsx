@@ -105,7 +105,7 @@ export const Recorded: Story = {
   args: {
     time: 'Yesterday, 10:10 pm',
     title: 'Asked for your number in plain digits, not a card',
-    who: 'Recorded by the checkpoint',
+    who: 'Recorded by your Desk as it happened',
     stoppedBy: 'reply',
     href: '#safety/msg-plain-digits',
     recorded: true,
@@ -116,7 +116,7 @@ export const Recorded: Story = {
   },
   play: async ({ canvas }) => {
     // The tag's word joins the row's name, before the checkpoint that stopped it.
-    const link = canvas.getByRole('link', { name: /^Yesterday, 10:10 pm Asked for your number in plain digits, not a card Recorded by the checkpoint Recorded Stopped by/ });
+    const link = canvas.getByRole('link', { name: /^Yesterday, 10:10 pm Asked for your number in plain digits, not a card Recorded by your Desk as it happened Recorded Stopped by/ });
     await expectStoppedBy(link, 'Reply checkpoint', ['passed', 'passed', 'passed', 'stopped']);
     const tag = within(link).getByText('Recorded');
     await expect(tag).toHaveTextContent(/^Recorded$/);
@@ -124,7 +124,7 @@ export const Recorded: Story = {
     expectComputed(tag, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap' });
 
     // On the line of where it came from, 10 px after it, its words on the same baseline.
-    const who = within(link).getByText('Recorded by the checkpoint');
+    const who = within(link).getByText('Recorded by your Desk as it happened');
     const whoBox = who.getBoundingClientRect();
     const tagBox = tag.getBoundingClientRect();
     await expect(Math.round(tagBox.left - whoBox.right)).toBe(10);
@@ -151,7 +151,7 @@ export const RecordedNarrow: Story = {
   },
   play: async ({ canvas }) => {
     const link = canvas.getByRole('link', { name: /Recorded Stopped by: Reply checkpoint$/ });
-    const who = within(link).getByText('Recorded by the checkpoint');
+    const who = within(link).getByText('Recorded by your Desk as it happened');
     const tag = within(link).getByText('Recorded');
     // Where it came from ellipsizes first; the tag keeps its whole width inside the row.
     await expect(who.scrollWidth).toBeGreaterThan(who.clientWidth);
@@ -166,13 +166,13 @@ export const TurnedDown: Story = {
     time: '9:52 am',
     why: 'Your rule says no',
     title: 'Asked for 50% off the drain clearing',
-    who: 'Recorded by the checkpoint',
+    who: 'Recorded by your Desk as it happened',
     stoppedBy: 'action',
     href: '#safety/dec-half-off',
   },
   play: async ({ canvas }) => {
     // Why it was turned down, then what they tried and where it came from under it, unchanged.
-    const link = canvas.getByRole('link', { name: /^9:52 am Your rule says no Asked for 50% off the drain clearing Recorded by the checkpoint/ });
+    const link = canvas.getByRole('link', { name: /^9:52 am Your rule says no Asked for 50% off the drain clearing Recorded by your Desk as it happened/ });
     await expectStoppedBy(link, 'Action checkpoint', ['passed', 'stopped', 'unreached', 'unreached']);
     const why = within(link).getByText('Your rule says no');
     const label = why.closest('.cd-status-label') as HTMLElement;
@@ -181,7 +181,7 @@ export const TurnedDown: Story = {
     const title = within(link).getByText('Asked for 50% off the drain clearing');
     expectComputed(title, { fontSize: '14px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(why.getBoundingClientRect().bottom).toBeLessThanOrEqual(title.getBoundingClientRect().top);
-    await expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(within(link).getByText('Recorded by the checkpoint').getBoundingClientRect().top);
+    await expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(within(link).getByText('Recorded by your Desk as it happened').getBoundingClientRect().top);
     // The time stands on the label's line: the same type, its words' tops level.
     const time = canvas.getByText('9:52 am');
     const timeTop = time.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(time).paddingTop);
@@ -194,7 +194,7 @@ export const TurnedDownNarrow: Story = {
     time: '9:52 am',
     why: "Your rules couldn't be checked, so I said no",
     title: 'Asked to book Saturday at 9:00 am',
-    who: 'Recorded by the checkpoint',
+    who: 'Recorded by your Desk as it happened',
     stoppedBy: 'action',
     href: '#safety/dec-saturday',
   },

@@ -36,12 +36,14 @@ export const LEDGER_KIND_COPY = {
 } as const satisfies Record<LedgerEvent['kind'], string>;
 
 /**
- * Where an entry came from, the same words on every row, detail and trace: the checkpoint wrote it,
- * or the chat service reported it and the checkpoint recorded the report unchecked.
+ * Where an entry came from, the same words on every row and detail, naming no part: the Desk's
+ * kernel wrote it as it happened, or the chat (the API) reported it and the kernel recorded the
+ * report unchecked. A kernel entry isn't called checked, since some are events ("Chat started").
+ * The full trace keeps its own technical line (`FullTrace`'s `traceLine.ts`).
  */
 export const ORIGIN_COPY = {
-  kernel: 'Recorded by the checkpoint',
-  api: 'Reported by the chat service, not checked by the checkpoint',
+  kernel: 'Recorded by your Desk as it happened',
+  api: 'Reported by the chat and recorded as reported, without a check',
 } as const satisfies Record<LedgerEvent['origin'], string>;
 
 /** Each checkpoint event's subject, in the owner's words and order, with one filter per category. */
@@ -112,7 +114,7 @@ export function rowLabel(a: Pick<Attempt, 'kind' | 'cause' | 'triage'>): string 
 }
 
 /** What Safety holds, under its title as the other owner pages say theirs: both of its views, in the owner's signed words. */
-export const SAFETY_SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
+export const SAFETY_SUBTITLE = 'Requests your Desk turned down, replies it stopped before they were shown, and the signed record of every entry.';
 
 /** The header's way to the requests held for the owner, which the reload's shapes measure too. */
 export const heldForYou = (n: number): string => `${n} held for you`;
@@ -126,7 +128,7 @@ export const CATEGORY_LABELS: readonly string[] = Object.values(CATEGORY_COPY);
 /** An entry replayed from the recorded history into this copy. */
 export const REPLAYED_LABEL = 'Recorded history, replayed into your copy';
 
-/** Where an entry came from, in `ORIGIN_COPY`'s words. Anything but the checkpoint reads as reported, never as checked. */
+/** Where an entry came from, in `ORIGIN_COPY`'s words. Anything but the kernel reads as reported, never as recorded as it happened. */
 export function originCopy(origin: string): string {
   return origin === 'kernel' ? ORIGIN_COPY.kernel : ORIGIN_COPY.api;
 }

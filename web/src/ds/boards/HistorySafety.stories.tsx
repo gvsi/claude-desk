@@ -24,7 +24,7 @@ import {
   one,
 } from './spec.ts';
 
-const FROM = 'Recorded by the checkpoint';
+const FROM = 'Recorded by your Desk as it happened';
 
 /** This week's attempts, newest first: today's live ones, then two from the recorded history. */
 const ATTEMPTS: Omit<AttemptRowProps, 'href'>[] = [

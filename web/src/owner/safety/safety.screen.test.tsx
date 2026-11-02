@@ -177,7 +177,7 @@ const STOPPED_REPLY = 'A reply was stopped before it was shown.';
 const NOTHING = "When a request is turned down or a reply is stopped, you'll see here what was asked and why. Try it yourself from your public page.";
 const HEADLINE = /^I turned down \d+ requests? this week\.$/;
 const NONE_TURNED_DOWN = "I didn't turn down any requests this week.";
-const SUBTITLE = 'Requests the checkpoint turned down, replies it stopped before they were shown, and the signed record of every entry.';
+const SUBTITLE = 'Requests your Desk turned down, replies it stopped before they were shown, and the signed record of every entry.';
 /** The record's check, passed, in the owner's words. */
 const UNCHANGED = 'No entry has been changed since it was written';
 
@@ -728,8 +728,8 @@ describe('Safety', () => {
   });
 
   it('every_entry_shows_its_origin', async () => {
-    const CHECKED = 'Recorded by the checkpoint';
-    const REPORTED = 'Reported by the chat service, not checked by the checkpoint';
+    const CHECKED = 'Recorded by your Desk as it happened';
+    const REPORTED = 'Reported by the chat and recorded as reported, without a check';
     const reported = entry(4, '2026-10-20T16:53:00.000000Z', { kind: 'rate_limit', origin: 'api', session_id: 'ses-2', summary: { limit: 'turns' } });
     injectLedger(ledgerPage([...threeEntries(), reported]));
     injectAttempts([
@@ -737,7 +737,7 @@ describe('Safety', () => {
       attempt(),
     ]);
     const { screen } = await renderRoute(`${SAFETY}/att-reported`);
-    const noOldWords = () => expect(document.body.textContent).not.toMatch(/From chat|From the chat service/);
+    const noOldWords = () => expect(document.body.textContent).not.toMatch(/From chat|chat service|by the checkpoint/);
 
     // Each attempt's row, and the attempt open beside the list, in the same words.
     const reportedRow = screen.getByRole('link', { name: /Someone sent messages faster/ });
