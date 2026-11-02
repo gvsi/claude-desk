@@ -47,13 +47,18 @@ const DESKTOP_CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'concept-footer', page: '.cd-concept-footer', size: true },
 ];
 
-it('public_chat_opens_in_place_desktop', async () => {
+it.each([[1512, 982], [1800, 1000]])('public_chat_opens_in_place_desktop_%s_%s', async (width, height) => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',
-    anchors: [...FIRST_VIEW_ANCHORS, { name: 'about-title', page: '.cd-public-shell__about > h2' }],
+    anchors: [
+      ...FIRST_VIEW_ANCHORS,
+      { name: 'about-title', page: '.cd-public-shell__about > h2' },
+      { name: 'about-column', page: '.cd-public-shell__about', size: true },
+      { name: 'about-status', page: '.cd-public-shell__about > .cd-public-shell__open-status', size: true },
+    ],
     open: async () => {
-      await renderRoute(CHAT, { pollScale: 100 });
+      await renderRoute(CHAT, { viewport: { width, height }, pollScale: 100 });
       await vi.waitFor(() => expect(read.held()).toBe(1));
     },
     release: read.release,

@@ -29,6 +29,11 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
   const about = footer ? (
     <div className="cd-public-shell__about" data-skeleton-anchor="about-column">
       <Skeleton shape="line" text="section" width={200} anchor="about-title" />
+      {aboutBeside ? (
+        <div className="cd-public-shell__open-status" data-skeleton-anchor="about-status">
+          <Skeleton shape="line" text="meta" width={170} />
+        </div>
+      ) : null}
       <div className="cd-public-shell__blocks">
         {[0, 1, 2, 3, 4].map((i) => (
           <SkeletonCard key={i} padding={16} className="cd-reply-card">
@@ -58,8 +63,9 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
   ) : null;
   return (
     <div ref={shell} className={`cd-public-shell cd-public-shell--skeleton cd-public-shell--first-view${footer ? '' : ' cd-public-shell--embedded'}`} lang={language}>
-      <PublicBrandHeaderSkeleton hours />
+      <PublicBrandHeaderSkeleton hours={!aboutBeside || !footer} />
       <div className="cd-public-shell__body">
+        {aboutBeside ? about : null}
         <div className="cd-public-shell__chat">
           <div className="cd-public-shell__chat-head" data-skeleton-anchor="chat-head">
             <div className="cd-public-shell__chat-title">
@@ -105,7 +111,6 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
           ) : null}
           {aboutBeside ? null : about}
         </div>
-        {aboutBeside ? about : null}
       </div>
     </div>
   );

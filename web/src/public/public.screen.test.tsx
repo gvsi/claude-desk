@@ -1,7 +1,7 @@
 /**
  * The public chat page in a real browser against the mock API: Turner Plumbing's Desk as a
  * stranger sees it, with the kernel's checked replies, the receipts under each message, a held
- * request they can cancel, the open status in the header and what happens when things fail.
+ * request they can cancel, the responsive open status and what happens when things fail.
  */
 import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
@@ -3928,9 +3928,9 @@ describe('public chat page', () => {
     const open = await renderRoute(PAGE);
     await expectOpenStatus(open.screen, 'Open now, until 6:00 pm', 'open');
     expect(open.screen.container.textContent).not.toContain('Claude can still help.');
-    // At the right of the header's name on a wide page.
-    const name = textBox(open.screen.getByRole('heading', { level: 1, name: 'Turner Plumbing' }).element());
-    expect(textBox(statusText()).left).toBeGreaterThanOrEqual(name.right);
+    // Under the About title on a wide page.
+    const aboutTitle = open.screen.getByRole('heading', { level: 2, name: 'About Turner Plumbing' }).element();
+    expect(statusLine().getBoundingClientRect().top).toBe(aboutTitle.getBoundingClientRect().bottom + 8);
 
     // Closed: its words, a hollow dot, then the page's own quieter line.
     mockStore.inject({ route: 'publicDesk', status: 200, body: deskWith('en', CLOSED.en) });
@@ -4073,7 +4073,7 @@ describe('public chat page', () => {
   });
 
   it('no_open_status_line_when_null', async () => {
-    const open = await renderRoute(PAGE);
+    const open = await renderRoute(PAGE, { viewport: 'phone' });
     await ready(open.screen);
     const header = (screen: RenderResult) => screen.getByRole('banner').element();
     // The header with the open status, less the status itself: what a Desk without hours shows.
@@ -4083,7 +4083,7 @@ describe('public chat page', () => {
     status?.remove();
 
     mockStore.inject({ route: 'publicDesk', status: 200, body: deskWith('en', null) });
-    const { screen } = await renderRoute(PAGE);
+    const { screen } = await renderRoute(PAGE, { viewport: 'phone' });
     await ready(screen);
     await sleep(100);
     expect(document.querySelector(OPEN_STATUS)).toBeNull();
@@ -4700,14 +4700,14 @@ function conversationAndComposer(screen: RenderResult): { composer: Element; con
   return { composer, conversation };
 }
 
-/** The open status, as the design system's PublicShell draws it in the header. */
+/** The open status, as the design system's PublicShell draws it. */
 const OPEN_STATUS = '.cd-public-shell__open-status';
 
-/** The open status the page shows, in the header. */
+/** The status is in About on wide pages, and in the brand header below 1280 px. */
 function statusLine(): HTMLElement {
   const line = document.querySelector<HTMLElement>(OPEN_STATUS);
   if (!line) throw new Error('no open status line');
-  expect(line.closest('header'), 'the open status sits in the header').not.toBeNull();
+  expect(line.closest(window.innerWidth >= 1280 ? '.cd-public-shell__about' : 'header')).not.toBeNull();
   return line;
 }
 

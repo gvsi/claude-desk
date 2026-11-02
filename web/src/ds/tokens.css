@@ -170,6 +170,7 @@
   --size-sidebar: 264px;
   --size-content: 960px;
   --size-reading: 640px;
+  --size-public-about: clamp(300px, 22vw, 400px);
   --size-conversation: 768px;
   --size-margin: 220px;
   --size-control: 32px;
