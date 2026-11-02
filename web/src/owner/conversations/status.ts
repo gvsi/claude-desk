@@ -7,7 +7,7 @@ import type { StatusTone } from '../../ds/index.ts';
 import {
   LATEST_DEPOSIT_PAID, LATEST_VISIT_BOOKED, TURNED_DOWN,
   VISITOR_QUOTED, VISITOR_LEAD_CAPTURED, VISITOR_OWNER_DECLINED,
-  VISITOR_DOCUMENT_SENT, VISITOR_VISIT_BOOKED, visitorCalledBack,
+  VISITOR_DOCUMENT_SENT, VISITOR_NO_MESSAGES, VISITOR_VISIT_BOOKED, visitorCalledBack,
 } from './copy.ts';
 
 export interface ConversationStatus {
@@ -92,7 +92,11 @@ export function conversationListStatus(s: ConversationSummary, held: number, ope
       document_sent: s.verified ? { tone: 'handled', text: VISITOR_DOCUMENT_SENT } : undefined,
       visit_booked: { tone: 'handled', text: VISITOR_VISIT_BOOKED },
     };
-    return (s.latest_outcome != null && Object.hasOwn(outcomes, s.latest_outcome) ? outcomes[s.latest_outcome] : undefined) ?? status;
+    const outcome = s.latest_outcome != null && Object.hasOwn(outcomes, s.latest_outcome) ? outcomes[s.latest_outcome] : undefined;
+    if (outcome !== undefined) return outcome;
+    // A visitor who opened the page but hasn't written yet. A reply without the field draws the row as before.
+    if (s.latest_visitor_text === null || s.latest_visitor_text?.trim() === '') return { tone: 'info', text: VISITOR_NO_MESSAGES };
+    return status;
   }
   const words: Partial<Record<NonNullable<ConversationSummary['latest_outcome']>, string>> = {
     visit_booked: LATEST_VISIT_BOOKED, deposit_paid: LATEST_DEPOSIT_PAID, turned_down: TURNED_DOWN };

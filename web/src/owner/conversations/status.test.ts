@@ -108,6 +108,25 @@ describe('conversationListStatus', () => {
       .toEqual({ tone: 'info', text: 'Your own preview' });
   });
 
+  it('says_no_messages_yet_for_a_visitor_who_hasnt_written', () => {
+    const silent = summary({ latest_visitor_text: null });
+    expect(conversationListStatus(silent, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'No messages yet' });
+    expect(conversationListStatus({ ...silent, latest_visitor_text: '  ' }, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'No messages yet' });
+    expect(conversationListStatus({ ...silent, display_name: 'Dana Whitfield', verified: true }, 0, false, 'Mike'))
+      .toEqual({ tone: 'info', text: 'No messages yet' });
+    // An outcome, an attention status and the owner's preview still win; Today's line is unchanged.
+    expect(conversationListStatus({ ...silent, latest_outcome: 'quoted' }, 0, false, 'Mike')).toEqual({ tone: 'handled', text: 'Quoted' });
+    expect(conversationListStatus(silent, 0, true, 'Mike')).toEqual({ tone: 'held', text: 'Wants you' });
+    expect(conversationListStatus({ ...silent, owner_preview: true }, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'Your own preview' });
+    expect(conversationStatus(silent, 0)).toBeNull();
+    // A visitor who wrote, or a reply without the field, draws the row as before.
+    expect(conversationListStatus(summary({ latest_visitor_text: 'Hi' }), 0, false, 'Mike')).toBeNull();
+    expect(conversationListStatus(summary(), 0, false, 'Mike')).toBeNull();
+    // Agents keep their own line.
+    const agent = summary({ kind: 'agent', latest_visitor_text: null });
+    expect(conversationListStatus(agent, 0, false, 'Mike')).toEqual(conversationStatus(agent, 0));
+  });
+
   it('uses_the_supplied_owner_first_name_and_requires_verification_for_an_invoice', () => {
     expect(conversationListStatus(summary({ latest_outcome: 'called_back' }), 0, false, 'Giovanni'))
       .toEqual({ tone: 'handled', text: 'Giovanni called back' });
