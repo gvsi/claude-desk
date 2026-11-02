@@ -666,6 +666,12 @@
   padding: var(--space-12) var(--space-8) 0;
 }
 
+/* While Today's latest read has failed, its line comes first in the card, 16 px over the night
+   read before, as Last 7 days' line is over its parts. */
+.cd-card > .cd-notice + :is(.cd-since__line, .cd-briefing, .cd-since__all) {
+  margin-top: var(--space-16);
+}
+
 /* The full briefing */
 .cd-briefing-page {
   display: flex;

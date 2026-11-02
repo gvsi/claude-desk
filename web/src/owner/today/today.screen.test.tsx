@@ -285,6 +285,33 @@ function watchZeroLinesOverAFailure(screen: RenderResult): () => string[] {
   return () => [...seen];
 }
 
+/**
+ * Whether "Since last night" draws "A quiet night", even for a moment, from the first frame it says
+ * its read failed until `recovering()`, and beside that line at any time. Once `recovering()` is
+ * called, a read that works may bring the quiet night back in place of the line.
+ */
+function watchQuietNightOverAFailure(): { drawn: () => boolean; recovering: () => void } {
+  let failed = false;
+  let recovering = false;
+  let drawn = false;
+  const look = () => {
+    const text = sinceLastNightHeading()?.closest('section')?.textContent ?? '';
+    const saysFailed = text.includes(UNAVAILABLE);
+    if (saysFailed) failed = true;
+    if (text.includes('A quiet night') && (saysFailed || (failed && !recovering))) drawn = true;
+  };
+  look();
+  const watch = new MutationObserver(look);
+  watch.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => watch.disconnect());
+  return {
+    drawn: () => drawn,
+    recovering: () => {
+      recovering = true;
+    },
+  };
+}
+
 /** The full-page shapes, with the real heading and no exposed navigation or Today yet. */
 function expectLoadingPage(): void {
   const layer = document.querySelector('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
@@ -1488,6 +1515,95 @@ describe('Today', () => {
     expect(weekZeroLines(screen)).toEqual(held);
     expect(block.getByRole('list', { name: 'Bookings per day' }).getByRole('listitem').elements()).toHaveLength(7);
     expect(drawn()).toEqual([]);
+  });
+
+  it('since_last_night_holds_back_a_quiet_night_while_its_read_fails', { timeout: 15_000 }, async () => {
+    // A quiet night is read, then Today's refreshes fail. "Since last night" says so in its card,
+    // with "Try again", and holds back "A quiet night", a zero the page can't check, nor says it
+    // while "Try again" reads. Once a read works, the failure's line goes and the quiet night is back.
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', retryScale: 0 });
+    const since = region(screen, 'Since last night');
+    const quiet = since.getByText('A quiet night', { exact: true });
+    await expect.element(quiet).toBeVisible();
+    expect(since.getByRole('alert').elements()).toHaveLength(0);
+
+    const watch = watchQuietNightOverAFailure();
+    const failing = failReads(todayReadPath);
+    const line = since.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    const retry = since.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    expect(quiet.elements()).toHaveLength(0);
+    // The card holds the failure's line alone.
+    const card = since.getByRole('alert').element().parentElement;
+    expect(card).toHaveClass('cd-card');
+    expect(card?.childElementCount).toBe(1);
+
+    // It stays while the polls read again and fail.
+    const failed = failing.count();
+    await vi.waitFor(() => expect(failing.count()).toBeGreaterThanOrEqual(failed + 2), { timeout: 4_000 });
+    expect(line.elements()).toHaveLength(1);
+    expect(quiet.elements()).toHaveLength(0);
+
+    // "Try again" reads again: busy while that read is out, and still no quiet night.
+    const read = holdReads(todayReadPath);
+    await retry.click();
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    expect(line.elements()).toHaveLength(1);
+    expect(quiet.elements()).toHaveLength(0);
+
+    // A read that works takes the failure's line away and brings the quiet night back.
+    watch.recovering();
+    failing.stop();
+    read.release();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(quiet).toBeVisible();
+    await expect.element(since.getByText('Nothing new since 6:00 pm yesterday.', { exact: true })).toBeVisible();
+    expect(since.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
+    expect(watch.drawn()).toBe(false);
+  });
+
+  it('since_last_night_keeps_its_night_while_its_read_fails', { timeout: 15_000 }, async () => {
+    // A night with things in it is read, then Today's refreshes fail. The card says so first, with
+    // "Try again", over what it read: the night's line, its rows and "See all" stay, as Last 7
+    // days' figures above zero do. Once a read works, the failure's line goes and the night stays.
+    await injectToday((t) => ({
+      ...t,
+      briefing: { ...t.briefing, total: 4, turned_down: 1, newest: { turned_down: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } },
+    }));
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const since = region(screen, 'Since last night');
+    const night = since.getByText(
+      '3 conversations since last night, all inside your rules. I booked one visit, answered one question and stopped one attempt.',
+      { exact: true },
+    );
+    await expect.element(night).toBeVisible();
+    const rows = since.getByRole('listitem');
+    expect(rows.elements()).toHaveLength(3);
+    const all = since.getByRole('link', { name: 'See all 4' });
+    await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
+
+    const failing = failReads(todayReadPath);
+    const line = since.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(line, { timeout: 4_000 }).toBeVisible();
+    await expect.element(since.getByRole('button', { name: 'Try again' })).toBeVisible();
+    await expect.element(night).toBeVisible();
+    expect(rows.elements()).toHaveLength(3);
+    await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
+    // The failure's line comes first in the card, 16 px over the night's line, as Last 7 days' is
+    // over its parts.
+    const notice = since.getByRole('alert').element();
+    expect(notice.parentElement).toHaveClass('cd-card');
+    expect(notice.parentElement?.firstElementChild).toBe(notice);
+    expect(Math.round(night.element().getBoundingClientRect().top - notice.getBoundingClientRect().bottom)).toBe(16);
+
+    failing.stop();
+    await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(night).toBeVisible();
+    expect(rows.elements()).toHaveLength(3);
+    await expect.element(all).toBeVisible();
+    expect(since.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
   });
 
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
