@@ -411,6 +411,11 @@ TEST_CLIENT_UNCLEAR = re.compile(r"[?¿]|^\W*(?:what|how|why|does|can|is|will|qu
                                  r"|^\W*do\s+(?:you|i|we|they|he|she|this|that)\b|\bif\b", re.IGNORECASE)
 TEST_CLIENT_SI = re.compile(r"\bsi\b", re.IGNORECASE)
 TEST_CLIENT_SI_ALONE = re.compile(r"^\W*si\s*(?:$|[,.!])", re.IGNORECASE)
+# A typed answer that also asks for something besides the offer, which is never a yes or a no: adding or setting up
+# anything but the owner or the test client, or a word of a request (a job, an app, a change).
+TEST_CLIENT_REQUEST = re.compile(r"\b(?:add|añade|agrega|set\s+up|create)\b"
+                                 r"(?!\s+(?:me|myself|us|it|that|this|(?:(?:a|the|my)\s+)?test\s+clients?)\b)"
+                                 r"|\b(?:jobs?|connect|change|remove|also|trabajos?|conecta)\b", re.IGNORECASE)
 
 # Each limit is taken only on the turn answering its own question (`LIMIT_QUESTIONS`), whose message carries the
 # owner's answer with no memory or website beside it and whose model alone has the field; a patch that carries it on
@@ -2928,10 +2933,12 @@ def _test_client_answered(interview: Interview) -> bool:
 def _reads_yes(text: str) -> bool | None:
     """The owner's answer to the test-client offer, read word by word by code alone: None when it asks something or
     says yes only on a condition (`TEST_CLIENT_UNCLEAR`, so "What does add me as a test client mean?" and "What happens
-    if I say yes?" are neither); else False when it has a "no" word or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and
-    "don't add me" are no); else True when it has a "yes" one (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client"
-    and "Sure, go ahead" are yes); else None."""
-    if TEST_CLIENT_UNCLEAR.search(text) or (TEST_CLIENT_SI.search(text) and not TEST_CLIENT_SI_ALONE.match(text)):
+    if I say yes?" are neither), or asks for something besides the offer (`TEST_CLIENT_REQUEST`, so "Yes please, and
+    add a retainer job" and "Add a deposit job, not connected to Stripe yet" are neither); else False when it has a
+    "no" word or phrase (`TEST_CLIENT_TYPED_NO`, so "Not now" and "don't add me" are no); else True when it has a
+    "yes" one (`TEST_CLIENT_TYPED_YES`, so "Add me as a test client" and "Sure, go ahead" are yes); else None."""
+    if (TEST_CLIENT_UNCLEAR.search(text) or TEST_CLIENT_REQUEST.search(text)
+            or (TEST_CLIENT_SI.search(text) and not TEST_CLIENT_SI_ALONE.match(text))):
         return None
     said = " {} ".format(" ".join(re.findall(r"[^\W_]+(?:'[^\W_]+)*", text.casefold().replace("\u2019", "'"))))
     if any(f" {phrase} " in said for phrase in TEST_CLIENT_TYPED_NO):
@@ -2963,11 +2970,14 @@ async def _consult_on_offer(owner: OwnerCtx, engine: AsyncEngine, model: ModelCl
     turn (`_advance`). When it leaves something new to show (a job it added, which the next planning call shows, or an
     app it names), the plan reopens on that card before the Tools step; deciding the last card, or "Use your
     suggestions", closes it again (`close_setup`), which asks the offer again. With nothing new to show, or with
-    Claude unavailable, the offer is asked again at once."""
+    Claude unavailable, the offer is asked again at once. A client without cards keeps no job the call adds: no card
+    could show it, and the plan won't close again to settle it."""
     following = await _next_step(owner, engine, model, interview)
     if following is None:
         _ask_test_client(interview)
         return
+    if not interview.shows_cards:
+        following = following.model_copy(update={"add_jobs": []})
     reply = Entry(role="claude", text=following.reply.strip())
     interview.transcript.append(reply)
     await _advance(owner, engine, model, interview, following, reply, close=_offer_again)

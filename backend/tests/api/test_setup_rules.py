@@ -99,6 +99,7 @@ from tests.api.test_setup_questions import (
     Owner,
     answer,
     begin,
+    card_answer,
     consent,
     cut_short,
     idle_in_transaction,
@@ -857,10 +858,17 @@ def consultant(reply: str = CONSULTANT_REPLY, **fields) -> Callable:
     ("yes", "yes"), ("Yes please!", "yes"), ("Sure, go ahead", "yes"), ("OK, add me", "yes"),
     ("Yes, add me as a test client", "yes"), ("Sí", "yes"), ("vale", "yes"),
     ("no", "no"), ("No, not now", "no"), ("don't add me", "no"), ("Maybe later", "no"), ("No gracias", "no"),
+    # Adding the owner, or the test client, is the offer itself, no other request.
+    ("Yes, add the test client", "yes"), ("Maybe add me later", "no"), ("No thanks", "no"),
     ("what does that mean?", "other"), ("Can you change my hours first?", "other"),
     # A question, or a yes only on a condition, is no yes, whatever words it holds.
     ("What does add me as a test client mean?", "other"), ("What happens if I say yes?", "other"),
     ("If it's free, yes", "other"),
+    # A request besides the offer is no yes or no either, whatever yes or no words it holds.
+    ("Please add a retainer job, but don't connect Stripe yet", "other"),
+    ("Add a deposit job too; I'll set the amount later", "other"), ("Also add a booking job, no deposits", "other"),
+    ("Add a retainer payment link, not connected to Stripe yet", "other"),
+    ("Yes please, and add a retainer job", "other"),
 ])
 async def test_a_typed_answer_to_the_test_client_offer_is_read_by_code(app, browser, fake, kernel_http, model,
                                                                        typed, read):
@@ -915,12 +923,22 @@ def watch_after_finish(monkeypatch) -> list[str]:
     return finished
 
 
-async def reopened(app, browser, kernel_http, model, monkeypatch, *, job: dict = RETAINER) -> tuple[Owner, dict]:
+def reopened_id_first(monkeypatch) -> None:
+    """The next card minted takes `REOPENED_ID`, and every one after it a new ID as usual, so two never share one."""
+    minted, mint = iter([REOPENED_ID]), setup.new_proposal_id
+    monkeypatch.setattr(setup, "new_proposal_id", lambda: next(minted, None) or mint())
+
+
+async def reopened(app, browser, kernel_http, model, engine, monkeypatch, *,
+                   job: dict = RETAINER) -> tuple[Owner, dict, setup.Interview]:
     """An owner with cards and business tools whose request typed at the test-client offer reopened the plan:
-    Claude's reply, then the job it added, shown as a waiting card by the next planning call."""
+    Claude's reply, then the job it added, shown as a waiting card by the next planning call. Also the interview as it
+    stood before, while the offer waited."""
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     owner, state = await offered(app, browser, kernel_http, model, cards=True)
-    monkeypatch.setattr(setup, "new_proposal_id", lambda: REOPENED_ID)
+    async with engine.connect() as conn:
+        before = await setup._load(conn, owner.copy_id, state["interview_id"])
+    reopened_id_first(monkeypatch)
     asked = len(model.requests)
     model.add(consultant(REOPENED_LINE, add_jobs=[job]),
               next_step("what_you_do", next={"kind": "job", "job": REOPENED_ID}, question=REOPENED_ASK))
@@ -928,13 +946,13 @@ async def reopened(app, browser, kernel_http, model, monkeypatch, *, job: dict =
                                      json={"question": "test_client", "text": REQUEST})
     assert reply.status_code == 200, reply.text
     assert len(model.requests) == asked + 2 and not model.script
-    return owner, reply.json()
+    return owner, reply.json(), before
 
 
 async def test_a_request_typed_at_the_test_client_offer_reopens_the_plan_on_its_card(
         app, browser, fake, kernel_http, model, engine, monkeypatch):
     finished = watch_after_finish(monkeypatch)
-    owner, state = await reopened(app, browser, kernel_http, model, monkeypatch)
+    owner, state, before = await reopened(app, browser, kernel_http, model, engine, monkeypatch)
     path = f"/api/owner/setup/{state['interview_id']}"
     # Claude's reply, then the job it added as a card that waits; the setup interview stays at its questions step.
     assert (state["step"], state["question"], state["pending_card"]) == ("questions", None, REOPENED_ID)
@@ -944,6 +962,14 @@ async def test_a_request_typed_at_the_test_client_offer_reopens_the_plan_on_its_
     assert (card["proposal_id"], card["state"], card["job"]["title"]) == (REOPENED_ID, "proposed", RETAINER["title"])
     assert finished == [] and not fake.called("PUT /desks/{id}/business_tools")
     assert (await say(owner, state, setup.TEST_CLIENT_NO)).status_code == 409    # the card waits, not the offer
+    # A payment needs its amount: accepting without one is refused, and a typed yes gets the amount line.
+    refused = await owner.browser.post(f"{path}/proposals/{REOPENED_ID}?cards=1", json={"accept": True})
+    assert (refused.status_code, refused.json()) == (422, {"error": "amount_required"})
+    model.add(card_answer("accept", reply="Retainer links it is.", next={"kind": "done"}, question=""))
+    typed = await owner.browser.post(f"{path}/answer?cards=1", json={"card": REOPENED_ID, "text": "Yes"})
+    assert typed.status_code == 200, typed.text
+    assert (typed.json()["pending_card"], typed.json()["question"]) == (REOPENED_ID, None)
+    assert typed.json()["messages"][-2:] == [owner_line("Yes"), claude_line(setup.AMOUNT_FIRST_LINE)]
     # Accepted with its amount, and Claude's next step is done: a second closing plan, then the offer again.
     model.add(next_step("what_you_do", reply="Retainer links it is.", next={"kind": "done"}),
               next_step("what_you_do", next={"kind": "done"}, plan=SECOND_PLAN))
@@ -954,6 +980,12 @@ async def test_a_request_typed_at_the_test_client_offer_reopens_the_plan_on_its_
     assert (closed["step"], closed["question"], closed["pending_card"]) == ("questions", "test_client", None)
     assert closed["messages"][-3:] == [claude_line("Retainer links it is."), claude_line(SECOND_PLAN), OFFER]
     assert finished == [] and not fake.called("PUT /desks/{id}/business_tools") and not model.script
+    # Finishing again adds the retainer to what the Desk helps with, and changes no other answer or covered topic.
+    async with engine.connect() as conn:
+        after = await setup._load(conn, owner.copy_id, state["interview_id"])
+    assert after.answers.model_dump(exclude={"how_we_help"}) == before.answers.model_dump(exclude={"how_we_help"})
+    assert after.covered == before.covered
+    assert after.answers.how_we_help == "\n".join(filter(None, [before.answers.how_we_help, RETAINER["how"]]))
     # "Not now" reaches the Tools step: the post-finish work runs once, with the retainer among the accepted jobs.
     done = await say(owner, state, setup.TEST_CLIENT_NO)
     assert (done.status_code, done.json()["step"]) == (200, "tools")
@@ -972,7 +1004,7 @@ async def test_an_app_named_at_the_test_client_offer_reopens_the_plan_on_its_car
         app, browser, fake, kernel_http, model, monkeypatch):
     finished = watch_after_finish(monkeypatch)
     owner, state = await offered(app, browser, kernel_http, model, cards=True)
-    monkeypatch.setattr(setup, "new_proposal_id", lambda: REOPENED_ID)
+    reopened_id_first(monkeypatch)
     path = f"/api/owner/setup/{state['interview_id']}"
     asked = len(model.requests)
     model.add(next_step("what_you_do", reply="It can keep your visits in one place.",
@@ -1005,7 +1037,7 @@ async def test_using_the_suggestions_while_a_reopened_card_waits_closes_and_offe
     intake = {"job": "intake", "title": "Take engagement requests", "who": "", "why": "Start agreed work sooner",
               "how": "Takes the details of each new engagement.", "autonomy": "auto",
               "config": {"block": "intake", "questions": ["What do you need help with?"]}}
-    owner, state = await reopened(app, browser, kernel_http, model, monkeypatch, job=intake)
+    owner, state, _ = await reopened(app, browser, kernel_http, model, engine, monkeypatch, job=intake)
     assert state["pending_card"] == REOPENED_ID
     # The waiting card settles as accepted, the plan closes again with a second closing plan, and the offer is asked
     # again: the Tools step and its post-finish work still wait for the offer's answer.
@@ -1040,10 +1072,12 @@ async def test_an_unavailable_claude_asks_the_test_client_offer_again(app, brows
 
 
 async def test_a_request_typed_at_the_offer_shows_no_card_to_a_client_without_cards(
-        app, browser, fake, kernel_http, model, monkeypatch):
+        app, browser, fake, kernel_http, model, engine, monkeypatch):
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=True)
     finished = watch_after_finish(monkeypatch)
     owner, state = await offered(app, browser, kernel_http, model)
+    async with engine.connect() as conn:
+        planned = (await setup._load(conn, owner.copy_id, state["interview_id"])).planned
     asked = len(model.requests)
     model.add(consultant(REOPENED_LINE, add_jobs=[RETAINER]))
     reply = await say(owner, state, REQUEST)
@@ -1054,6 +1088,9 @@ async def test_a_request_typed_at_the_offer_shows_no_card_to_a_client_without_ca
     assert (done["step"], done["question"], done["pending_card"]) == ("questions", "test_client", None)
     assert done["messages"][-4:] == [OFFER, owner_line(REQUEST), claude_line(REOPENED_LINE), OFFER]
     assert finished == []
+    # Nothing the call added is kept: a job no card can show would never settle.
+    async with engine.connect() as conn:
+        assert (await setup._load(conn, owner.copy_id, state["interview_id"])).planned == planned
 
 
 @pytest.mark.parametrize("failure", ["422", "500", "connect"])
