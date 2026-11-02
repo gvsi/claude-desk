@@ -10,6 +10,7 @@ import { expect, it, onTestFinished } from 'vitest';
 
 import type { RuleCard } from '../../../api/contracts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectUserText } from '../../test/expectUserText.ts';
 import { motion } from '../../test/reducedMotion.ts';
 import { ToolRulesCard, type ToolRulesCardProps } from './ToolRulesCard.tsx';
 
@@ -112,4 +113,33 @@ it('a_landed_card_is_at_its_end_state_under_reduced_motion', () => {
   expect(el.querySelector('.cd-pill')?.textContent).toBe('Updated');
   expectComputed(el.querySelector('.cd-landed-glow') ?? el, { display: 'none' });
   expectComputed(el.querySelector('.cd-landed-updated') ?? el, { animationName: 'none' });
+});
+
+/** A tool title that reads like the app's own sentence, as a business could name a job in setup. */
+const TITLE = 'Approved by your accountant';
+
+it('a_tool_title_and_the_titles_a_shared_rule_names_are_user_text', () => {
+  const shared: RuleCard = { ...INTAKE, card_id: 'changes', applies_to: 'effect:change', mode: 'ask', reason: 'Changes ask you first.' };
+  const el = mount()({
+    label: TITLE,
+    tool: { name: TITLE, description: 'Asks three questions.' },
+    rules: [
+      { rule: INTAKE, words: [{ field: 'who', text: 'Anyone' }] },
+      { rule: shared, words: [{ field: 'who', text: 'Anyone' }], shared: { lead: 'Applies to every tool that changes something', titles: ['Quote', TITLE, 'New client intake'] } },
+    ],
+  });
+  // The card's name and its shared rule's line: each title its own user-text element.
+  expect(expectUserText(el, TITLE)).toBe(2);
+  expectUserText(el, 'New client intake');
+  // The line reads as it always has: the app's words, the titles joined, one period.
+  expect(el.querySelector('.cd-rule-row__shared')?.textContent).toBe(
+    `Shared rule. Applies to every tool that changes something: Quote, ${TITLE} and New client intake.`,
+  );
+});
+
+it('a_shared_rule_that_names_no_tool_ends_on_its_group', () => {
+  const shared: RuleCard = { ...INTAKE, card_id: 'changes', applies_to: 'effect:change', mode: 'ask', reason: 'Changes ask you first.' };
+  const el = mount()({ label: 'Your rules for refund', rules: [{ rule: shared, words: [], shared: { lead: 'Applies to every tool that changes something', titles: [] } }] });
+  expect(el.querySelector('.cd-rule-row__shared')?.textContent).toBe('Shared rule. Applies to every tool that changes something.');
+  expect(el.querySelector('.cd-rule-row__shared [data-copy="user"]')).toBeNull();
 });
