@@ -1449,6 +1449,34 @@ describe('OwnerLayout', () => {
     expect(saved()).toBe(false);
   });
 
+  it('answering_cancelled_confirmation_reads_again_after_switching_desks', async () => {
+    const main = mockStore.world.desk(RIVERA.deskId)!;
+    mockStore.world.addDesk({ desk_id: 'desk-rivera-weekends', slug: 'rivera-weekends', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+    const { screen, router } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+
+    // The write never saved. Its confirming read stays out until leaving this Desk aborts it.
+    const desks = holdReads(ROUTES.desks.path);
+    mockStore.inject({ route: 'setAnswering', status: 'network' });
+    await answering.click();
+    await screen.getByRole('dialog').getByRole('button', { name: 'Take messages only', exact: true }).click();
+    await vi.waitFor(() => expect(desks.held()).toBe(1));
+    await expect.element(answering).toHaveAttribute('aria-checked', 'false');
+    expect(main.summary.answering).toBe(true);
+
+    const leftAt = performance.now();
+    await router.navigate('/app/desk-rivera-weekends/today');
+    await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+    await router.navigate(TODAY);
+    await expect.element(screen.getByRole('button', { name: `Switch Desk, current: ${main.summary.name}` })).toBeVisible();
+    expect(performance.now() - leftAt).toBeLessThan(FRESH_MS);
+    // The cancelled read must not make the optimistic list count as a fresh server answer.
+    await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(1));
+    desks.release();
+    await expect.element(answering).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('start_over_confirms_first', async () => {
     const { screen, router } = await renderRoute(TODAY);
     const startOver = screen.getByRole('button', { name: 'Start over' });
@@ -2559,7 +2587,7 @@ describe('Things to try ticks off', () => {
     await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
     const section = screen.getByRole('region', { name: 'Delete this Desk' });
     await section.getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     const animated = watchListAnimations();
     // The copy's Desks are read again without the main line: the Desk switcher goes.
