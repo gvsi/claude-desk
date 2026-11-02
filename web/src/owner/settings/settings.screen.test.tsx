@@ -254,6 +254,26 @@ describe('Settings', () => {
     expect(dialog.element().querySelector('b, i')).toBeNull();
   });
 
+  it('delete_desk_title_isolates_each_name', async () => {
+    const business = businessOut(mockStore.world);
+    const businessName = 'Turner \u202ePlumbing';
+    worker.use(http.get(ROUTES.desks.path, () => HttpResponse.json([{
+      ...business,
+      name: businessName,
+    }])));
+    const { screen } = await renderRoute(GENERAL);
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    const title = `Delete ${businessName}'s Main line?`;
+    const dialog = screen.getByRole('dialog');
+    const heading = dialog.getByRole('heading', { name: title, exact: true });
+    await expect.element(heading).toBeVisible();
+    await expect.element(dialog).toHaveAccessibleName(title);
+    expect(Array.from(heading.element().querySelectorAll('[data-copy="user"]'), (name) => [name.tagName, name.textContent])).toEqual([
+      ['BDI', businessName],
+      ['BDI', 'Main line'],
+    ]);
+  });
+
   it('delete_desk_confirms', async () => {
     const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     const section = main(screen).getByRole('region', { name: 'Delete this Desk' });
