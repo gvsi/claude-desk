@@ -50,6 +50,7 @@ export {
   type SkeletonProps,
   type SkeletonText,
 } from './components/Skeleton/Skeleton.tsx';
+export { useControlWidth } from './components/Skeleton/useControlWidth.ts';
 export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './components/Skeleton/SkeletonScreen.tsx';
 
 // Controls

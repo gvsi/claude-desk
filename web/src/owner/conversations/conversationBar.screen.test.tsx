@@ -516,7 +516,12 @@ describe('the open conversation bar', () => {
     await nextFrames();
     const shapeBar = document.querySelector<HTMLElement>(`${shapes} .cd-conversation__bar`)!;
     const shapeName = shapeBar.querySelector('[data-skeleton-anchor="conversation-name"]')!;
-    const before = { bar: rect(shapeBar), name: rect(shapeName), style: getComputedStyle(shapeBar) };
+    const before = {
+      bar: rect(shapeBar),
+      name: rect(shapeName),
+      latest: rect(shapeBar.querySelector('.cd-conversation__latest')!),
+      style: getComputedStyle(shapeBar),
+    };
     const look = [before.style.position, before.style.backgroundColor, before.style.borderBottom, before.style.paddingLeft];
     expect(shapeBar.querySelector('button'), 'the shapes draw no control').toBeNull();
 
@@ -529,6 +534,9 @@ describe('the open conversation bar', () => {
       expect(Math.abs(real[edge] - before.bar[edge]), `bar ${edge}: shape ${before.bar[edge]}, page ${real[edge]}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     }
     const name = screen.getByRole('heading', { level: 2, name: 'Visitor' }).element();
+    if (width >= 1024) {
+      expect(Math.abs(rect(bar.querySelector('.cd-conversation__latest')!).left - before.latest.left), 'Latest lands on its shape').toBeLessThanOrEqual(1);
+    }
     expect(Math.abs(rect(name).left - before.name.left), 'the name lands on its shape').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     expect(Math.abs(middle(name) - (before.name.top + before.name.bottom) / 2), 'the name lands on its shape\'s line').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     expectNoHorizontalScroll();

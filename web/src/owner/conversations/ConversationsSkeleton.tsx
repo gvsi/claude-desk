@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard } from '../../ds/index.ts';
+import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { publicLink } from '../customerLink.ts';
@@ -244,13 +244,18 @@ function useOpensAtTheEnd() {
  */
 export function ConversationSkeleton() {
   const region = useOpensAtTheEnd();
+  const who = useRef<HTMLDivElement>(null);
+  const dot = useRef<HTMLSpanElement>(null);
+  const nameWidth = useControlWidth(who, { label: VISITOR.text, className: 'cd-conversation__name cd-type-section', tagName: 'span' });
+  const dotWidth = useControlWidth(dot, { label: '·', className: 'cd-conversation__dot cd-type-meta', tagName: 'span' });
   return (
     <div className="cd-conversation cd-conversation-skeleton">
       <div className="cd-conversation__bar" data-skeleton-anchor="conversation-bar">
-        <div className="cd-conversation__who">
-          <Skeleton shape="line" text="section" width={64} anchor="conversation-name" />
+        <div ref={who} className="cd-conversation__who">
+          <Skeleton shape="line" text="section" width={nameWidth} anchor="conversation-name" />
           <Skeleton shape="block" measure={{ label: 'Public', className: 'cd-pill cd-type-pill', tagName: 'span' }} height="var(--space-20)" radius="full" />
         </div>
+        <span ref={dot} className="cd-conversation__dot cd-type-meta" style={{ width: dotWidth }} aria-hidden="true" />
         <div className="cd-conversation__latest">
           <Skeleton shape="line" text="meta" width={200} />
         </div>

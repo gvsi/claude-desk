@@ -869,7 +869,7 @@ describe('Conversations', () => {
     const line = latest.element();
     expect(line.tagName).toBe('P');
     expect(line.className).toBe('cd-conversation__latest cd-type-meta');
-    expect(line.parentElement?.classList.contains('cd-conversation__bar')).toBe(true);
+    expect(line.closest('.cd-conversation__bar')).not.toBeNull();
     expect(getComputedStyle(line).color).toBe(tokenColor('--text-secondary'));
     // The booked card and its checks stay under their message.
     await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
