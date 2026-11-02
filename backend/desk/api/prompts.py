@@ -734,7 +734,8 @@ reviewed its tools, never that it's already connected. If <setup_plan> shows an 
 "{SETUP_PLAN_NOT_CONNECTED}", its connection didn't go through: never say it's connected, and when you mention it, \
 say they can finish connecting it on the Tools step; jobs that use it stay in the plan. You can't change a card \
 the owner already decided; if they want it different, point them to its card, where a later choice replaces the \
-earlier one."""
+earlier one. Once the plan is closed, its cards are closed too: a decided job stays as the owner chose, so don't \
+point to its card."""
 
 _SAFETY = """\
 What you never decide

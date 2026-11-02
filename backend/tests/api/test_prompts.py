@@ -644,6 +644,16 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
         assert "documents_and_payments (a limit): whether the Desk may send customers their own documents" in system
 
 
+def test_a_closed_plans_cards_stay_as_decided():
+    # Setup points an owner who wants a decided card changed back to it, but not once the plan is closed: at the
+    # test-client offer every card is closed, and no later screen changes a job.
+    assert "Once the plan is closed, its cards are closed too" in SETUP_NEXT_SYSTEM
+    assert "point them to its card" in SETUP_NEXT_SYSTEM
+    for words in ("A yes to that offer puts the owner on record", "never point to a card or another place",
+                  "an app it already lists can't be proposed again"):
+        assert words in SETUP_OFFER_ANSWER_LINE
+
+
 def test_setup_writing_allows_markdown_but_no_exclamation_marks():
     """The setup chat renders Markdown, so setup's writing rule no longer bans headings, bold or emoji; it keeps the
     ban on exclamation marks, and keeps card fields, choices and the lines customers read plain text with no emoji.
