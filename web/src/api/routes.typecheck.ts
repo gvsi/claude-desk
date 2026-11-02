@@ -50,6 +50,10 @@ export const ROUTE_MODELS = {
   ownerMessage: 'OwnerMessageResult',
   ownerTyping: null,
   decision: 'Decision',
+  startDemoVisitor: 'DemoVisitorStarted',
+  demoVisitor: 'DemoVisitorRun',
+  demoVisitorRun: 'DemoVisitorRun',
+  stopDemoVisitor: 'DemoVisitorRun',
 
   // Safety
   safety: 'Attempt[]',

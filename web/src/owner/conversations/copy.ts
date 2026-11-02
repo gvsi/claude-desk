@@ -1,8 +1,32 @@
 import type { ConversationSummary } from '../../api/views.ts';
 import { formatCents, formatDayAndTime } from '../../lib/format.ts';
+import { afterName, firstName } from '../../lib/names.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 
 /** The note at the head of an owner's transcript, beside where the chat came from. */
 export const TRANSCRIPT_NOTE = 'Notes from the checks sit under each message. Select one for the full trace.';
+
+/**
+ * The take-over box's example, written as the owner would to the visitor: "Hi, it's Mike. What time
+ * suits you?", in the first name of `owner_display_name`, or the business's name when the
+ * owner gave none (an empty name, or setup's fallback "Owner"). A name that ends in a full stop
+ * ("Acme Inc.") ends the sentence itself.
+ */
+export function takeOverPlaceholder(ownerDisplayName: string, businessName: string): string {
+  const given = givenOwnerName(ownerDisplayName);
+  const first = given === null ? '' : firstName(given).trim();
+  const name = first === '' ? businessName : first;
+  return `Hi, it's ${name}${afterName(name, '. What time suits you?')}`;
+}
+
+/** The line under the take-over box: the visitor reads the owner's words as they are. */
+export const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';
+
+/** The whisper box's example on the plumbing demo (the copy's starting sample Desk). */
+export const WHISPER_PLACEHOLDER_SAMPLE = 'Ask if the leak is under the sink';
+
+/** The whisper box's example on every other Desk, which fits any business. */
+export const WHISPER_PLACEHOLDER = "Ask what they've tried so far";
 
 /** The head's "Latest" line once a booking ran and its booked card was shown: what got done, not the check. */
 export const LATEST_VISIT_BOOKED = 'Visit booked';
@@ -34,6 +58,23 @@ export function whisperHelper(name: string | null, here: boolean): string {
     ? `${who} is in the chat now. Claude will use your whisper in its reply right away.`
     : `${who} isn't in the chat now. Claude will use your whisper when they next write.`;
 }
+
+/**
+ * The note over a demo visitor's conversation (an AI the owner started to play a customer): while it
+ * runs, what it is and what to try, with Stop; once it ends, how it ended. Stopped by the owner is
+ * said so; a failure or the day's model budget stopped it early; every other ending (its goal met,
+ * the owner quiet, its limits, the chat closed, or a run the API no longer keeps) is "finished".
+ */
+export const DEMO_VISITOR_NOTE = {
+  running: 'A demo visitor, played by an AI. Take over or whisper to see how Claude responds.',
+  stop: 'Stop the demo visitor',
+  finished: 'The demo visitor finished.',
+  stopped: 'You stopped the demo visitor.',
+  stoppedEarly: 'The demo visitor stopped early.',
+} as const;
+
+/** The head's pill, and the row's, on a demo visitor's conversation. */
+export const DEMO_VISITOR_PILL = 'Demo visitor';
 
 /** An agent's row line when a request was refused for asking more than its signed limit. */
 export const AGENT_OVER_LIMIT = 'Asked to pay more than its limit, and was turned down.';

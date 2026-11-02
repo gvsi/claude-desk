@@ -212,7 +212,8 @@ async def test_scripts_override_outcomes_and_results(fake):
     assert refused_call.state == "refused" and refused_call.action is not None
     state.script("native.book", exec_state="failed")
     slot = min(state.desks[allowed.action.desk_id].slots)
-    booked = await decide(view, session_id, 0, "call-3", "native.book", {"slot_id": slot})
+    booked = await decide(view, session_id, 0, "call-3", "native.book",
+                          {"slot_id": slot, "name": "Jane Doe", "contact": "jane@example.com"})
     assert (await execute(view, booked, 0)).state == "failed"
     assert (await read_decision(view, booked.decision_id)).state == "failed"
 

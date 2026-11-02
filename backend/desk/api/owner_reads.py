@@ -25,13 +25,18 @@ record (a booking, a refusal; a decision whose entry can't be read counts as rep
 never count as needing the owner, so "needs you" is never flagged. A conversation, its transcript and a lead say
 whether they are recorded history too (`replayed`, from `history_sessions`), so the owner's screens label them and
 offer no take-over on them.
+
+Demo visitors: a conversation and its transcript say whether a demo visitor (an AI the owner started to play a
+customer, `demo_visitors.py`) is the one chatting (`demo_visitor`), from the `demo_visitor` row its chat was marked
+with when it opened, so they still say so once the process that ran it is gone. Its chat otherwise counts as any
+visitor's.
 """
 
 import asyncio
 import logging
 from collections import Counter, OrderedDict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -114,6 +119,15 @@ def utc(moment: datetime) -> datetime:
     return moment.astimezone(UTC)
 
 
+@dataclass(frozen=True)
+class DemoMark:
+    """A demo visitor's chat, as its `demo_visitor` row marks it: its persona's first name, and the run that opened
+    it (the row's `ref_id`; None for a row written before the run was recorded there)."""
+
+    first_name: str
+    run_id: str | None
+
+
 class People:
     """The Desk's visitor and agent sessions (the owner's session belongs to the copy, not to a Desk), and who each one
     is, for the owner: the verified person's display name, else the name the session's newest lead gave (untrusted),
@@ -134,12 +148,24 @@ class People:
             return None
         return self._verified.get(session_id) or self._leads.get(session_id)
 
-    def brief(self, session_id: str) -> NeedsYouSession | None:
+    def person(self, session_id: str) -> str | None:
+        """The person on record a visitor's session was verified as, else None: never an agent's or the owner's own
+        preview, even one verified as someone on record."""
+        row = self.sessions.get(session_id)
+        if row is None or row["kind"] != "visitor" or row["preview"] or not row["verified"]:
+            return None
+        return row["person_id"]
+
+    def brief(self, session_id: str, demo: dict[str, DemoMark] | None = None) -> NeedsYouSession | None:
+        """Who the session is, for Needs you. `demo` is the Desk's demo visitors' chats (`demo_visitors`): one of
+        them is flagged and, with no other name, named by its persona, as Conversations names it."""
         row = self.sessions.get(session_id)
         if row is None:
             return None
-        return NeedsYouSession(session_id=session_id, kind=row["kind"], display_name=self.name(session_id),
-                               verified=row["verified"], assurance=row["assurance"])
+        mark = (demo or {}).get(session_id)
+        return NeedsYouSession(session_id=session_id, kind=row["kind"],
+                               display_name=self.name(session_id) or (mark.first_name if mark else None),
+                               verified=row["verified"], assurance=row["assurance"], demo_visitor=mark is not None)
 
 
 async def people(ctx: OwnerCtx, desk_id: str) -> People:
@@ -185,18 +211,19 @@ async def recent_texts(ctx: OwnerCtx, desk_id: str, session_ids: Iterable[str], 
     return found
 
 
-async def texts_before_held(ctx: OwnerCtx, desk_id: str, decisions: Iterable[Decision], count: int = 2,
-                            kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, list[str | None]]:
-    """What each held request's visitor (or visiting agent) wrote in the turn that made it, by decision ID: the
-    newest `count` rows of `kinds` after Claude's newest `delivered` row before the request's held status in its chat
-    (its session's first `status` row naming the decision, written when the turn's call was held), oldest first,
-    read for every decision in one query. Without a prior Claude reply, the turn starts at the chat's beginning.
+async def texts_before_status(ctx: OwnerCtx, desk_id: str, requests: Iterable[tuple[str, str]], count: int = 2,
+                              kinds: tuple[str, ...] = VISITOR_TEXT) -> dict[str, list[str | None]]:
+    """What each request's visitor (or visiting agent) wrote in the turn that made it, by decision ID, for
+    `(decision_id, session_id)` pairs: the newest `count` rows of `kinds` after Claude's newest `delivered` row before
+    the request's status in its chat (its session's first `status` row naming the decision, written when the turn's
+    call was held, or for a refusal its receipt), oldest first, read for every decision in one query. Without a prior
+    Claude reply, the turn starts at the chat's beginning.
     If the window is empty (a prior turn's reply can arrive after the visitor's next line), quote the newest line before the
     status. A request with no such line maps to `[None]`; one whose status isn't
-    in the chat (held before the API showed it) is left out. If the API restarts after the kernel holds a request
+    in the chat (decided before the API showed it) is left out. If the API restarts after the kernel decides a request
     but before the chat shows it, the next request recovers the turn (`loop._drain` through `tools.recover_call`
-    and `_settle`) and writes the held status after that request's own message, so that message can be quoted too."""
-    wanted = sorted({(decision.decision_id, decision.session_id) for decision in decisions})
+    and `_settle`) and writes the status after that request's own message, so that message can be quoted too."""
+    wanted = sorted(set(requests))
     if not wanted:
         return {}
     shown = (select(MESSAGES.c.ref_id, MESSAGES.c.session_id, func.min(MESSAGES.c.n).label("at"))
@@ -338,10 +365,10 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
             if decision.state == "held" and decision.decision_id == row["decision_id"]]
     handoffs = [row for row in await ctx.ro.rows("handoffs", desk_id=desk_id, status="open", order_by=("handoff_id",))
                 if row["session_id"] in who.sessions]
-    # A held request quotes the words that made it (`texts_before_held`); a handoff, and a request whose held status
+    # A held request quotes the words that made it (`texts_before_status`); a handoff, and a request whose held status
     # isn't in its chat, the chat's latest.
-    requested = {decision_id: visitor_lines(said) for decision_id, said
-                 in (await texts_before_held(ctx, desk_id, [decision for _, decision in held])).items()}
+    requested = {decision_id: visitor_lines(said) for decision_id, said in (await texts_before_status(
+        ctx, desk_id, [(decision.decision_id, decision.session_id) for _, decision in held])).items()}
     asked = ([decision.session_id for _, decision in held if decision.decision_id not in requested]
              + [row["session_id"] for row in handoffs])
     texts = {session_id: visitor_lines(said) for session_id, said in (await recent_texts(ctx, desk_id, asked)).items()}
@@ -352,16 +379,17 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     summaries = {session_id: triage.summary
                  for session_id, triage in (await newest_triage(ctx.ro.conn, ctx.copy_id, desk_id, handed)).items()}
     held_by = await _held_by(ctx, desk_id, [decision for _, decision in held])
+    demo = await demo_visitors(ctx, desk_id)
     items = []
     for row, decision in held:
-        if (session := who.brief(decision.session_id)) is not None:
+        if (session := who.brief(decision.session_id, demo)) is not None:
             said = (requested[decision.decision_id] if decision.decision_id in requested
                     else texts.get(decision.session_id))
             items.append(NeedsYouItem(decision=decision, held_by=held_by[decision.decision_id],
                                       held_at=utc(row["created_at"]), handoff=None, session=session,
                                       from_the_visitor=said, claude_summary=None))
     for row in handoffs:
-        if (session := who.brief(row["session_id"])) is not None:
+        if (session := who.brief(row["session_id"], demo)) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],
                               callback_window=row["callback_window"], status=row["status"], kind=row["kind"])
             items.append(NeedsYouItem(decision=None, held_by=None, held_at=None, handoff=handoff, session=session,
@@ -447,6 +475,7 @@ REFUSAL_REASONS: dict[str, RefusalCause] = {
 REFUSAL_CHECKS: dict[str, RefusalCause] = {
     "answer_count": "incomplete_request",  # Intake needs one answer per configured question at normalization.
     "note_canary": "incomplete_request",  # A booking note holding private document text is refused at normalization.
+    "contact_needed": "incomplete_request",  # A booking with no name and phone number or email (#740).
     "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
     "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
@@ -468,7 +497,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
     Unknown codes/IDs and a missing, malformed or mismatched entry have no label. A valid entry has a `decide`
     event with matching `ref_id` and `session_id`, a dict summary with outcome `refuse`, and a matching summary
     decision ID when present. Early refusals omit the summary decision ID, so the event reference is required.
-    The web holds the labels.
+    The web holds the labels; `prompts.TURNED_DOWN_BECAUSE` holds the same words for a triage summary.
 
     Source                                           Cause                 Signed label
     reason: paused                                   paused                The chat was paused
@@ -485,7 +514,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
-      answer_count, note_canary                      incomplete_request    The request wasn't in a form I can use
+      answer_count, note_canary, contact_needed      incomplete_request    The request wasn't in a form I can use
       not_verified, no_mandate, mandate_exhausted,
       not_an_agent_with_a_mandate (unreachable),
       search_limit (execution only)                   null                  (no label)
@@ -574,6 +603,7 @@ class Activity:
     texts: list[Timed]                         # visitor and agent text rows
     replies: list[Timed]                       # Claude's delivered events whose handoff flag is false
     handoffs: list[Timed]                      # Claude's delivered events whose handoff flag is true
+    demo: dict[str, "DemoMark"] = field(default_factory=dict)  # the demo visitors' chats (`demo_visitors`)
 
 
 def _stopped_attempts(decisions: list[dict], ledger: list[dict], sessions: dict[str, dict]) -> list[Stopped]:
@@ -731,7 +761,7 @@ async def activity(ctx: OwnerCtx, desk_id: str, start: datetime) -> Activity:
         stopped=_stopped_attempts(decisions, ledger, who.sessions),
         holds=[Timed(at=utc(row["created_at"]), session_id=row["session_id"], ref_id=row["decision_id"])
                for row in decisions if row["outcome"] == "hold"],
-        stepped=stepped, texts=texts, replies=replies, handoffs=handoffs)
+        stepped=stepped, texts=texts, replies=replies, handoffs=handoffs, demo=await demo_visitors(ctx, desk_id))
 
 
 def _within(things: Iterable[Timed], start: datetime, end: datetime) -> list[Timed]:
@@ -781,13 +811,16 @@ def briefing_counts(done: Activity, start: datetime, end: datetime) -> Counted:
 
 def briefing_items(done: Activity, start: datetime, end: datetime) -> list[BriefingItem]:
     """Every briefing item from `start` to `end`, newest first: each refused request, booking and lead, and each
-    conversation Claude answered alone, at its newest such reply (`briefing_counts`)."""
+    conversation Claude answered alone, at its newest such reply (`briefing_counts`). One in a demo visitor's chat is
+    flagged, and named by its persona where the chat gave no name of its own, as Conversations names it."""
     who = done.people
 
     def item(kind: str, thing: Timed, ref_id: str | None = None, line: str | None = None,
              cause: RefusalCause | None = None) -> BriefingItem:
+        mark = done.demo.get(thing.session_id) if thing.session_id is not None else None
         return BriefingItem(kind=kind, at=thing.at, session_id=thing.session_id,
-                            display_name=who.name(thing.session_id), ref_id=ref_id or thing.ref_id, line=line, cause=cause)
+                            display_name=who.name(thing.session_id) or (mark.first_name if mark else None),
+                            ref_id=ref_id or thing.ref_id, line=line, cause=cause, demo_visitor=mark is not None)
 
     counted = briefing_counts(done, start, end)
     items = [item("turned_down", attempt, line=attempt.line, cause=attempt.cause) for attempt in counted.stopped]
@@ -1269,22 +1302,37 @@ async def transcript_replayed(ctx: OwnerCtx, desk_id: str, session_id: str) -> b
     return session_id in recorded
 
 
+async def demo_visitors(ctx: OwnerCtx, desk_id: str, session_id: str | None = None) -> dict[str, DemoMark]:
+    """The Desk's demo visitors' chats (only `session_id`'s, when given), each with its persona's first name and the
+    run that opened it: the sessions whose transcript holds a `demo_visitor` row (module docstring). A chat names its
+    own run, so the owner's page reads that run's ending after a newer one has started, and after a restart."""
+    only = [] if session_id is None else [MESSAGES.c.session_id == session_id]
+    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text, MESSAGES.c.ref_id).where(
+        MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "demo_visitor", *only))
+    return {session_id: DemoMark(first_name=text, run_id=run_id) for session_id, text, run_id in rows.all()}
+
+
 async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
     """The leads visitors left on the Desk, newest first, their names and notes as typed (untrusted text). A lead is
     recorded history unless the session it was left in is known live (`history_sessions`), failing closed as
-    `decision_replayed` does: one with no session, or a session the ledger doesn't show opening, counts as history."""
+    `decision_replayed` does: one with no session, or a session the ledger doesn't show opening, counts as history. A
+    lead a demo visitor left is flagged (`demo_visitors`)."""
     _, live = await history_sessions(ctx, desk_id)
+    demo = await demo_visitors(ctx, desk_id)
     rows = sorted(await ctx.ro.rows("leads", desk_id=desk_id),
                   key=lambda row: (utc(row["created_at"]), row["lead_id"]), reverse=True)
     return [Lead(lead_id=row["lead_id"], display_name=row["display_name"], note=row["note"],
-                 created_at=row["created_at"], replayed=row["session_id"] not in live) for row in rows]
+                 created_at=row["created_at"], replayed=row["session_id"] not in live,
+                 demo_visitor=row["session_id"] in demo) for row in rows]
 
 
-async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) -> list[ConversationSummary]:
+async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None,
+                        demo: dict[str, DemoMark] | None = None) -> list[ConversationSummary]:
     """The Desk's conversations: each visitor or agent session with a transcript row or a decision, the latest
     activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
     visitor typed (`visitor_line`); an agent's carries none, and instead its newest outcome's facts
-    (`agent_outcomes`)."""
+    (`agent_outcomes`). A demo visitor's is flagged (`demo_visitors`, or `demo` when the caller read them already)
+    and, with no other name, named by its persona."""
     who = who or await people(ctx, desk_id)
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
@@ -1305,18 +1353,23 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
     outcomes |= {session_id: Outcome(outcome)
                  for session_id, outcome in (await visitor_outcomes(ctx, desk_id, visitors, decisions)).items()}
     recorded, _ = await history_sessions(ctx, desk_id)
+    demo = await demo_visitors(ctx, desk_id) if demo is None else demo
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
             continue
         outcome = outcomes.get(session_id, Outcome())
+        mark = demo.get(session_id)
         found.append(ConversationSummary(
-            session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
-            mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
+            session_id=session_id, kind=row["kind"],
+            display_name=who.name(session_id) or (mark.first_name if mark else None),
+            verified=row["verified"], person_id=who.person(session_id), mode=row["mode"],
+            last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
             latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcome.outcome,
             latest_outcome_starts_at=outcome.starts_at, latest_outcome_cents=outcome.cents,
-            latest_outcome_cause=outcome.cause, replayed=session_id in recorded))
+            latest_outcome_cause=outcome.cause, replayed=session_id in recorded, demo_visitor=mark is not None,
+            demo_visitor_run_id=mark.run_id if mark else None))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found
@@ -1329,7 +1382,7 @@ async def today(ctx: OwnerCtx, desk_id: str, now: datetime) -> Today:
     _, business = await desk_zone(ctx, desk_id)
     frame = windows(now, business["timezone"])
     done = await activity(ctx, desk_id, frame.start)
-    live = [summary for summary in await conversations(ctx, desk_id, done.people)
+    live = [summary for summary in await conversations(ctx, desk_id, done.people, done.demo)
             if summary.last_activity >= frame.now - LIVE_FOR]
     return Today(greeting_name=(business["owner_display_name"].split() or [""])[0], needs_you_count=len(held),
                  live=live, briefing=briefing(done, frame), this_week=this_week(done, frame),
@@ -1343,9 +1396,12 @@ async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     """The Desk's refused requests and Claude's stopped drafts, newest first, each with its AI-written triage once
     written (Plan 02b, Task 10), else None. Only refusals count in Today; their nullable `cause` maps the decision's
     `policy_ids`, its already-read ledger decide summary's `reason`/`check` and the session's verified state
-    through `refusal_cause`.
-    Sessions, decisions and ledger entries share one snapshot so a newly verified session's refusal cannot be
-    labelled with an older verification state. No kernel call runs while the snapshot is open."""
+    through `refusal_cause`. A refused request quotes what its visitor wrote in the turn that made it, read from its
+    receipt in the chat as Needs you reads a held request's (`texts_before_status`), and nothing when the chat never
+    showed the receipt: no fallback to the chat's latest lines, which an old entry would misquote. A stopped draft
+    quotes nothing.
+    Sessions, decisions, ledger entries and the chat's rows share one snapshot so a newly verified session's refusal
+    cannot be labelled with an older verification state. No kernel call runs while the snapshot is open."""
     conn = ctx.ro.conn
     await conn.commit()
     await conn.execution_options(isolation_level="REPEATABLE READ")   # reset when the connection is pooled again
@@ -1353,13 +1409,16 @@ async def attempts(ctx: OwnerCtx, desk_id: str) -> list[Attempt]:
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     ledger = await ctx.ro.rows("ledger_entries", desk_id=desk_id, order_by=("seq",))
     triage = await triaged(ctx.ro.conn, ctx.copy_id, desk_id=desk_id)
-    await conn.commit()
     found = sorted(_stopped_attempts(decisions, ledger, sessions), key=lambda attempt: attempt.ref_id, reverse=True)
     found.sort(key=lambda attempt: attempt.at, reverse=True)
+    said = await texts_before_status(ctx, desk_id, [(attempt.ref_id, attempt.session_id) for attempt in found
+                                                    if attempt.kind == "refused" and attempt.session_id is not None])
+    await conn.commit()
     return [Attempt(ref_id=attempt.ref_id, kind=attempt.kind, reason_plain=attempt.reason_plain,
                     card_ids=list(attempt.card_ids), origin=attempt.origin, created_at=attempt.at,
-                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq,
-                    cause=attempt.cause) for attempt in found]
+                    triage=triage.get(attempt.ref_id), ledger_seq=attempt.ledger_seq, cause=attempt.cause,
+                    from_the_visitor=visitor_lines(said.get(attempt.ref_id, ())) if attempt.kind == "refused" else None)
+            for attempt in found]
 
 
 # The Desk list (#233) -----------------------------------------------------------------------------------------

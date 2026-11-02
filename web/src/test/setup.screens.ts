@@ -44,6 +44,8 @@ beforeEach(() => {
   writeLocal('payChats', null);
   // Which notifications count as unread depends on what this browser has seen.
   forgetSeen();
+  // Whether a reload's loading page draws a "Not live yet" card depends on the Desks this browser saw.
+  writeLocal('todaySetup', null);
 });
 
 afterEach(async () => {

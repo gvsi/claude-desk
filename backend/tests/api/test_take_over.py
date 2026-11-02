@@ -382,6 +382,8 @@ async def test_hand_back_answers_the_waiting_visitor_once(app, browser, fake, ke
     assert "<visitor_message>Do you fix leaks?</visitor_message>" in json.dumps(model.requests[0].messages)
     assert types(events) == ["owner_joined", "owner_left", "writing", "message", "turn_end"]
     assert (events[-2][1].author, events[-2][1].generation) == ("claude", 2)
+    # The waiting line is resumed work: the visitor's stream is told which generation's turn answers it.
+    assert (events[1][1].resuming, events[1][1].generation) == (True, 2)
     assert await control_types(engine, chat.session_id) == ["run_resumable"]
     assert len(fake.called("POST /check_reply")) == 1
 
@@ -434,11 +436,14 @@ async def test_hand_back_without_a_waiting_visitor_starts_nothing(app, browser, 
 
     async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
         assert (await mode_change(chat, "handback", 1)).status_code == 200
-        await stream.until(lambda events: "owner_left" in types(events))
+        left = await stream.until(lambda events: "owner_left" in types(events))
         await app.state.runtime.runner.drain()
 
     assert len(model.requests) == calls_before
     assert await control_types(engine, chat.session_id) == []
+    # Nothing waits, so the visitor's stream isn't told to wait for a resumed turn.
+    owner_left = next(event for _, event in left if event.type == "owner_left")
+    assert (owner_left.resuming, owner_left.generation) == (False, None)
     assert await conversation_notes(engine, chat.session_id, "text", "wake") == [
         (NOTES["taken_over"], False), (NOTES["handed_back"], False)]
 

@@ -520,16 +520,19 @@ const entries = [
     body: "Your Chen & Co. CPA code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
     created_at: '2026-10-30T21:14:02.551870Z',
     decision_id: null,
+    title: null,
   },
   {
     // The held consultation's alert: the decision's reason_plain and its id, as the kernel pairs
-    // them, written when the hold was made, 24 hours before it expires.
+    // them, written when the hold was made, 24 hours before it expires, and titled with the
+    // alert's preview line, as the owner reads it.
     entry_id: 'inbox-hold-consultation',
     to: 'owner',
     kind: 'alert',
     body: heldConsultation.reason_plain,
     created_at: '2026-10-30T18:12:09.774120Z',
     decision_id: heldConsultation.decision_id,
+    title: 'A request needs your answer',
   },
   {
     entry_id: 'inbox-checkpoint-chen',
@@ -544,6 +547,7 @@ const entries = [
     }),
     created_at: '2026-10-30T16:30:00.004211Z',
     decision_id: null,
+    title: null,
   },
 ] satisfies DemoInboxEntry[];
 

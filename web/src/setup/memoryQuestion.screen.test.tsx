@@ -15,12 +15,11 @@ import { worker } from '../mocks/browser.ts';
 import { growingWords } from '../mocks/ownerStreams.ts';
 import { CPA_COPY, MEMORY_LABEL } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
-import { SETUP_COPY } from './copy.ts';
+import { SETUP_COPY, START_EXAMPLES } from './copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
-const CPA_DESCRIPTION =
-  "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+const CPA_DESCRIPTION = START_EXAMPLES.en.examples[3]!.description;
 const TITLE = "Let's set up your Desk";
 const YES = 'Yes, use it';
 const NO = "No, I'll type it";
@@ -162,6 +161,33 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     await userEvent.keyboard('{Enter}');
     await expect.element(screen.getByRole('region', { name: CPA_COPY.first, exact: true })).toBeVisible();
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: false }]);
+  });
+
+  it.each([
+    [YES, 'sure', '1'],
+    [YES, 'no thanks', '2'],
+    [NO, 'no thanks', '2'],
+  ])('typing_on_%s_picks_nothing_until_an_answer_is_picked: %s', async (answer, words, pick) => {
+    // Its answers are the only way to answer it: words typed with one highlighted go nowhere, and neither a
+    // space among them nor Enter after them, pressed again or after any key that doesn't move, picks an answer.
+    // A number key does.
+    const { state, ask } = await waitingInterview();
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    const panel = screen.getByRole('region', { name: ask, exact: true });
+    await expect.poll(() => panel.element().contains(document.activeElement)).toBe(true);
+    await userEvent.keyboard(answer === YES ? '1' : '2');
+    const row = screen.getByRole('button', { name: answer, exact: true });
+    await expect.element(row).toHaveFocus();
+    await userEvent.keyboard(`${words}{Enter}`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Nor after a typo is erased, or a key that neither moves nor picks, or with a modifier.
+    await userEvent.keyboard('s{Backspace}{Enter}{Home}{Enter}{End}{Enter}{ArrowRight}{Enter}{Alt>}{Enter}{/Alt}{Control>} {/Control}{Alt>} {/Alt}');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect.element(row).toHaveFocus();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveValue('');
+    expect(requests('setupConsent')).toHaveLength(0);
+    await userEvent.keyboard(`${pick}{Enter}`);
+    await expect.poll(() => requests('setupConsent').map((r) => r.body)).toEqual([{ allow: pick === '1' }]);
   });
 
   it('takes_focus_on_its_panel_as_it_docks_so_its_keys_work_at_once', async () => {

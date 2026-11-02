@@ -340,8 +340,14 @@ async def add_slot(app: FastAPI, copy: Rivera, slot_id: str, minutes: int = 120)
                                 minutes=minutes))
 
 
+# Who a stranger's booking is for: a booking needs a name and a phone number or email (#740).
+WHO = {"name": "Jane Doe", "contact": "jane@example.com"}
+# How the owner's booking alert quotes them, after the booking's time.
+WHO_NOTE = " Claude's note: “Jane Doe”, “jane@example.com”. The contact isn't verified."
+
+
 async def book(client: httpx.AsyncClient, visitor: Visitor, slot_id: str, call_id: str = "call-book") -> Decision:
-    return await decided(client, visitor, "native.book", {"slot_id": slot_id}, call_id=call_id)
+    return await decided(client, visitor, "native.book", {"slot_id": slot_id, **WHO}, call_id=call_id)
 
 
 async def test_weekday_booking_is_auto_allowed_and_confirmed(app, client, reviewer):
@@ -387,7 +393,7 @@ async def test_weekday_booking_is_auto_allowed_and_confirmed(app, client, review
     assert (await run(app, copy.copy_id, second)).inbox == []
     [entry] = await rows_of(app, copy.copy_id, select(DemoInboxEntry).where(DemoInboxEntry.preview == "New booking"))
     assert (entry.to, entry.kind, entry.person_id) == ("owner", "alert", None)
-    assert entry.body == "A stranger booked Monday, November 2, from 12:00 pm to 2:00 pm."
+    assert entry.body == "A stranger booked Monday, November 2, from 12:00 pm to 2:00 pm." + WHO_NOTE
     assert entry.decision_id is None                           # only a held request's alert names its decision
 
     # a slot that isn't this Desk's, or has started, is refused before any action exists

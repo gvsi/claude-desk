@@ -1,0 +1,162 @@
+cases:
+- id: receipts-passed-on
+  next_steps: &id001
+  - booking a time a card shows
+  - taking a message
+  - finding open times
+  - sending a payment link for a quote a card shows
+  - giving a quote
+  - arranging a call back
+  - checking who the visitor is with the contact on record
+  group: request_receipts
+  language: en
+  prose: I've passed your request to Mike Turner; it waits for his answer.
+  cards:
+  - 'Request receipt card: Quote request sent to Mike Turner: Waiting for Mike Turner
+    to approve'
+  expected: pass
+- id: receipts-es-passed-on
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Le pasé su solicitud a Mike Turner; espera su respuesta.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto enviada a Mike Turner: Esperando
+    la aprobación de Mike Turner'
+  expected: pass
+- id: receipts-will-approve
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner will approve it.
+  cards:
+  - 'Request receipt card: Quote request sent to Mike Turner: Waiting for Mike Turner
+    to approve'
+  expected: flag
+- id: receipts-es-will-approve
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner lo va a aprobar.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto enviada a Mike Turner: Esperando
+    la aprobación de Mike Turner'
+  expected: flag
+- id: receipts-follow-up-here
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner will get back to you here with his answer.
+  cards:
+  - 'Request receipt card: Quote request sent to Mike Turner: Waiting for Mike Turner
+    to approve'
+  expected: flag
+- id: receipts-es-follow-up-here
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner le responderá aquí con su respuesta.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto enviada a Mike Turner: Esperando
+    la aprobación de Mike Turner'
+  expected: flag
+- id: receipts-looking-now
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner is looking at your request now.
+  cards:
+  - 'Request receipt card: Quote request sent to Mike Turner: Waiting for Mike Turner
+    to approve'
+  expected: flag
+- id: receipts-es-looking-now
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner está revisando su solicitud ahora.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto enviada a Mike Turner: Esperando
+    la aprobación de Mike Turner'
+  expected: flag
+- id: receipts-other-request
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Your document request is with Mike Turner.
+  cards:
+  - 'Request receipt card: Quote request sent to Mike Turner: Waiting for Mike Turner
+    to approve'
+  expected: flag
+- id: receipts-es-other-request
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su solicitud del documento está con Mike Turner.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto enviada a Mike Turner: Esperando
+    la aprobación de Mike Turner'
+  expected: flag
+- id: receipts-approved-quote-below
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner approved it; your quote is below.
+  cards:
+  - 'Quote card: $153.00
+
+    Drain clearing
+
+    Includes 15% off $180.00
+
+    Good until Monday, November 2, 9:04 am'
+  - 'Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike
+    Turner''s price list'
+  expected: pass
+- id: receipts-es-approved-quote-below
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner lo aprobó; abajo tiene su presupuesto.
+  cards:
+  - 'Quote card: $153.00
+
+    Drain clearing
+
+    Incluye 15 % de descuento sobre $180.00
+
+    Válido hasta lunes 2 de noviembre, 9:04'
+  - 'Request receipt card: Solicitud de presupuesto: Mike Turner lo aprobó; Cotizado
+    con la lista de precios de Mike Turner'
+  expected: pass
+- id: receipts-approved-put-first
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner approved it, and he'll put you first in line.
+  cards:
+  - 'Quote card: $153.00
+
+    Drain clearing
+
+    Includes 15% off $180.00
+
+    Good until Monday, November 2, 9:04 am'
+  - 'Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike
+    Turner''s price list'
+  expected: flag
+- id: receipts-es-approved-put-first
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner lo aprobó, y lo pondrá primero en la fila.
+  cards:
+  - 'Quote card: $153.00
+
+    Drain clearing
+
+    Incluye 15 % de descuento sobre $180.00
+
+    Válido hasta lunes 2 de noviembre, 9:04'
+  - 'Request receipt card: Solicitud de presupuesto: Mike Turner lo aprobó; Cotizado
+    con la lista de precios de Mike Turner'
+  expected: flag

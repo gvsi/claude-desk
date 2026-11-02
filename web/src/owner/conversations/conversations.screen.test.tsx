@@ -22,6 +22,7 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
 import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.ts';
+import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
@@ -50,6 +51,9 @@ const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
 /** The whisper box's line while the visitor is in the chat, and while they aren't. */
 const HERE = (name: string) => `${name} is in the chat now. Claude will use your whisper in its reply right away.`;
 const AWAY = (name: string) => `${name} isn't in the chat now. Claude will use your whisper when they next write.`;
+
+/** The line under the take-over box: what was its placeholder before it gave an example. */
+const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';
 
 /** A held card's slot in the conversation: the card and what follows it there. */
 function slotOf(card: Element): Element {
@@ -445,6 +449,72 @@ describe('Conversations', () => {
     const note = document.querySelector('.cd-conversation__controls .cd-take-over__lead')!.getBoundingClientRect();
     expect(Math.abs(note.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
     expect(document.querySelector('.cd-conversation__controls .cd-take-over__action')).toBeNull();
+    expectNoHorizontalScroll();
+  });
+
+  // Board REV-CNVW B: from 1024 px the list grows with the window, 24% of it, between 280 and 400 px.
+  it.each([[1024, 768, 280], [1280, 800, 307.2], [1440, 900, 345.6], [1512, 982, 362.88], [1800, 1009, 400]])(
+    'list_column_is_24_percent_of_the_window_between_280_and_400_at_%sx%s',
+    async (width, height, expected) => {
+      const { screen } = await renderRoute(LIST, { viewport: { width, height } });
+      const list = screen.getByRole('navigation', { name: 'Conversations' });
+      await expect.element(list.getByRole('link').first()).toBeVisible();
+      const listRect = list.element().getBoundingClientRect();
+      expect(Math.abs(listRect.width - expected), 'list width').toBeLessThanOrEqual(0.5);
+      // The pane starts at the list's hairline.
+      const pane = document.querySelector<HTMLElement>('.cd-conversations__open')!.getBoundingClientRect();
+      expect(Math.abs(pane.left - listRect.right)).toBeLessThanOrEqual(0.5);
+      expectNoHorizontalScroll();
+    },
+  );
+
+  // The list loads at the width it lands at: its shapes hold the same column.
+  it.each([[1024, 768], [1440, 900], [1800, 1009]])('list_shapes_hold_the_lists_width_at_%sx%s', async (width, height) => {
+    const hold = holdReads(ROUTES.conversations.path.replace('{desk_id}', RIVERA.deskId));
+    const { screen } = await renderRoute(LIST, { viewport: { width, height } });
+    const list = screen.getByRole('navigation', { name: 'Conversations' });
+    await expect.poll(() => list.element().querySelector('[data-skeleton-anchor="conversation-row-0"]')).not.toBeNull();
+    const loading = list.element().getBoundingClientRect().width;
+    hold.release();
+    await expect.element(list.getByRole('link').first()).toBeVisible();
+    expect(Math.abs(list.element().getBoundingClientRect().width - loading)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(loading - Math.min(400, Math.max(280, width * 0.24)))).toBeLessThanOrEqual(0.5);
+  });
+
+  // With no conversation open, the pane says what opens there, centred in it both ways.
+  it.each([[1024, 768], [1440, 900], [1800, 1009]])('empty_pane_centres_its_empty_state_at_%sx%s', async (width, height) => {
+    const { screen } = await renderRoute(LIST, { viewport: { width, height } });
+    const title = screen.getByText('Choose a conversation to read it.', { exact: true });
+    await expect.element(title).toBeVisible();
+    await expect.element(screen.getByText('Its chat opens here, where you can take over or whisper to Claude.', { exact: true })).toBeVisible();
+    const pane = document.querySelector<HTMLElement>('.cd-conversations__open')!;
+    const empty = pane.querySelector<HTMLElement>('.cd-empty-state')!;
+    expect(empty).not.toBeNull();
+    // No icon, no action: the two lines only.
+    expect(empty.querySelector('svg, button, a')).toBeNull();
+    expect(empty.contains(title.element())).toBe(true);
+    const centre = (rect: DOMRect) => [(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2] as const;
+    const [paneX, paneY] = centre(pane.getBoundingClientRect());
+    const [boxX, boxY] = centre(empty.getBoundingClientRect());
+    expect(Math.abs(boxX - paneX), 'centred across').toBeLessThanOrEqual(2);
+    expect(Math.abs(boxY - paneY), 'centred down').toBeLessThanOrEqual(2);
+    // Its words, as drawn, are centred too: the box holds them evenly.
+    const range = document.createRange();
+    range.selectNodeContents(empty);
+    const [wordsX, wordsY] = centre(range.getBoundingClientRect());
+    expect(Math.abs(wordsX - paneX), 'words centred across').toBeLessThanOrEqual(2);
+    expect(Math.abs(wordsY - paneY), 'words centred down').toBeLessThanOrEqual(2);
+    // At most 480 px wide, its lines balanced; with the room, the body stays on one line.
+    expect(empty.getBoundingClientRect().width).toBeLessThanOrEqual(480);
+    expect(getComputedStyle(empty).getPropertyValue('text-wrap-style')).toBe('balance');
+    const body = screen.getByText('Its chat opens here, where you can take over or whisper to Claude.', { exact: true }).element();
+    if (width >= 1800) expect(body.getBoundingClientRect().height).toBe(Number.parseFloat(getComputedStyle(body).lineHeight));
+    for (const line of [title.element(), body]) {
+      const lineRange = document.createRange();
+      lineRange.selectNodeContents(line);
+      const [lineX] = centre(lineRange.getBoundingClientRect());
+      expect(Math.abs(lineX - paneX), 'each line centred across').toBeLessThanOrEqual(2);
+    }
     expectNoHorizontalScroll();
   });
 
@@ -1446,6 +1516,45 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('take_over_box_gives_an_example_in_the_owners_first_name_and_keeps_its_warning_under_it', async () => {
+    // In a chat Mike Turner took over, the empty box shows what he might write, as himself; the
+    // warning that was its placeholder stays in sight as the box's helper line, and still describes it.
+    const chat = named(DANA_LIVE, DANA);
+    chat.state = { ...chat.state, mode: 'owner' };
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Mike. What time suits you?");
+    await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveAccessibleDescription(TAKE_OVER_HELPER);
+  });
+
+  it('take_over_box_on_a_desk_whose_owner_gave_no_name_speaks_as_the_business', async () => {
+    // Setup gave the Desk its fallback owner, "Owner": the example speaks as the business instead.
+    const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has the new Desk');
+    const chat = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(chat, 'Do you fit sash windows?');
+    chat.state = { ...chat.state, mode: 'owner' };
+    const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
+    const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Fenster & Fenster. What time suits you?");
+    await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
+  });
+
+  it('whisper_box_on_another_desk_asks_what_they_have_tried', async () => {
+    // Off the plumbing demo, the whisper's example is one that fits any business.
+    const { deskId } = await liveSetupDeskIds('A hair salon in Oakland');
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has the new Desk');
+    const chat = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(chat, 'Can you fix a bad dye job?');
+    const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Ask what they've tried so far");
+    await expect.element(box).toHaveAccessibleDescription(AWAY('The visitor'));
+  });
+
   it('whisper_in_ai_mode', async () => {
     const chat = session(DANA_LIVE);
     const streamed = chat.events.length;
@@ -1453,7 +1562,7 @@ describe('Conversations', () => {
 
     // While Claude answers, the owner's words go to Claude only.
     const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
-    await expect.element(box).toHaveAttribute('placeholder', "Whisper to Claude. They won't see it.");
+    await expect.element(box).toHaveAttribute('placeholder', 'Ask if the leak is under the sink');
     const words = 'mention the Thursday 8 am opening';
     await box.fill(words);
     await userEvent.keyboard('{Enter}');

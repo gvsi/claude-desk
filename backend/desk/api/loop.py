@@ -10,6 +10,12 @@ changed system prompt opens too), then calls Claude on the system prompt and too
 each response by its stop reason. Claude only proposes: every tool call goes through `/decide`
 (`tools.route_call`), and every reply through `/check_reply` and `deliver()` (`tools.send_reply`).
 
+When a response's calls showed an executed receipt, the turn then reads each decision its session still waits on,
+with the session's own credential, before any reply of that response (`_surface_settled`): the kernel settles on that
+read what the execution closed (a booking closes the session's earlier held quotes with a discount), and each decision
+it shows final is left as a `decision_due` row, which the session's open stream or next request shows. It doesn't
+look when the calls stop the turn for a reason that would fail every read (`LOOKS_AFTER`).
+
 `run_pending(caller, model, ...)` is how a request starts turns (Task 6): one session's turns run one at a time,
 under the turn lock (`turn_lock`), until no work is waiting (an agent's request runs one turn at most).
 
@@ -36,15 +42,15 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from desk.api.deliver import run_lock
-from desk.api.jobs import defer_turn_annotations
+from desk.api.deliver import NOT_FINAL, run_lock
+from desk.api.jobs import defer_turn_annotations, waiting_decisions
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.metrics import RevealMetric, TurnMetric, over_daily_budget, record_model_call
 from desk.api.model import ModelClient, ModelRequest, ModelResponse, ModelUnavailable, ThinkingBoundElsewhere
 from desk.api.prompts import NOTES, DeskIdentity, conversation_system
 from desk.api.ratelimit import RateLimiter, RateLimitLedger
 from desk.api.ro import KernelRO
-from desk.api.sse import append_metric, emit
+from desk.api.sse import append_control, append_metric, emit
 from desk.api.store import (
     OpenToolUse,
     Said,
@@ -88,7 +94,7 @@ from desk.api.tools import (
     tool_delta,
 )
 from desk.api.triage import Stopped
-from desk.contracts import SessionState
+from desk.contracts import SessionState, shown_owner
 from desk.events import EvError, EvTurnEnd, EvWriting
 from desk.kernel_api import TURN_TEXT_CHARS, SessionContext, TurnRequest
 
@@ -100,6 +106,12 @@ MAX_MODEL_CALLS = 6
 THINKING = frozenset({"thinking", "redacted_thinking"})
 # The static error a visitor sees when a turn fails ("Fail-closed behavior"); other ends are silent.
 ERROR_CODES = {"session_ended": "session", "kernel_unavailable": "kernel_unavailable", "internal": "internal"}
+# The stops after which a turn whose call ran still reads what its session waits on (`_surface_settled`): none (the
+# turn goes on), a call that raised, and a take-over or stale generation (`fenced`), since a session's
+# `GET /decisions/{id}` checks neither its mode nor its generation and a take-over leaves an agent's request unspent.
+# Any other stop would fail every read: the kernel refuses an agent's request already answered (`turn_over`) and a
+# session it ended, ledgering each refusal, and a kernel out of reach would only be waited on again.
+LOOKS_AFTER: frozenset[TurnOutcome | None] = frozenset({None, "internal", "fenced"})
 
 
 def _utc_now() -> datetime:
@@ -166,8 +178,45 @@ async def desk_identity(conn: AsyncConnection, caller: Caller) -> DeskIdentity:
     business = await ro.one("businesses", business_id=desk["business_id"])
     if business is None:
         raise LookupError("the caller's business isn't in its copy")
+    # An owner who gave no name is called by the business's name, as the kernel's lines call them (`shown_owner`).
     return DeskIdentity(business_name=business["name"], desk_name=desk["name"],
-                        owner_name=business["owner_display_name"], kind=caller.kind)
+                        owner_name=shown_owner(business["owner_display_name"], business["name"]),
+                        kind=caller.kind)
+
+
+async def _surface_settled(conn: AsyncConnection, caller: Caller) -> None:
+    """After a response's calls ran and one showed an executed receipt: each decision the session still waits on
+    (`jobs.waiting_decisions`) is read with its own client (`GET /decisions/{id}`). The kernel settles on a read what
+    an execution closed, as it applies expiry (a booking cancels the session's earlier held quotes with a discount),
+    and the minute sweep reads only kernel_ro. Each one the read shows final gets one `decision_due` row, as the sweep
+    writes it, for the session's open stream or next request to show (`runner.TurnRunner.handle_control`); one not
+    final gets none, which would keep the sweep from marking it later. Nothing waiting, no kernel call. It runs before
+    the response's replies, while an agent's request is unspent, holds no lock across a kernel call, and never raises:
+    a failure is logged by type only and skipped, for the sweep or the owner's reads to settle. A kernel out of reach
+    ends the look at once, so a turn waits out the client's timeout once at most, not once per waiting decision; a
+    turn whose calls already found every read bound to fail (the kernel out of reach, an agent's request already
+    answered, the session ended) doesn't look at all (`LOOKS_AFTER`), so it adds no refused read to the ledger."""
+    try:
+        waiting = [row.decision_id for row in await conn.execute(waiting_decisions(caller.ids))]
+        await conn.commit()
+    except Exception as error:
+        logger.error("a session's waiting decisions couldn't be looked up (%s)", type(error).__name__)
+        with contextlib.suppress(Exception):
+            await conn.rollback()
+        return
+    for decision_id in waiting:
+        try:
+            decision = await caller.kernel.call("GET /decisions/{id}", path={"id": decision_id})
+            if decision.session_id == caller.session_id and decision.state not in NOT_FINAL:
+                await append_control(conn, caller.ids, "decision_due", {"decision_id": decision_id})
+                await conn.commit()
+        except KernelUnavailable as error:                  # the next read would wait as long: none is tried
+            logger.warning("a waiting decision couldn't be read after a call ran (%s)", type(error).__name__)
+            break
+        except Exception as error:
+            logger.warning("a waiting decision couldn't be read after a call ran (%s)", type(error).__name__)
+            with contextlib.suppress(Exception):
+                await conn.rollback()
 
 
 class NotSent(Exception):
@@ -472,7 +521,10 @@ class _Turn:
         agent's request) while a sibling call still runs. One results row answers every call, in block order. A draft
         the check blocked (kept for the owner: `_reply`) commits with it, unless another reply's check follows: it then
         commits before that check, so no lock of the session is held across a kernel call, and it stays before
-        whatever that reply shows.
+        whatever that reply shows. When a call showed an executed receipt, what the session still waits on is read
+        before any reply is checked, while an agent's request is unspent (`_surface_settled`), unless the calls stop
+        the turn for a reason that would fail every read (`LOOKS_AFTER`): the kernel out of reach, an agent's request
+        already answered, the session ended. A fenced turn still looks: a take-over leaves the session's reads working.
 
         A call that raised before the kernel had it didn't run, and ends the turn with the static error. One that
         raised once the kernel may have had it is found by its call ID and settled (`_recover_raised`); if nothing
@@ -511,6 +563,10 @@ class _Turn:
             self.execute_ms += outcome.execute_ms
         self.tool_calls += len(calls)
         stop = _stop([*outcomes.values(), *unread]) or ("internal" if raised else None)
+        if stop in LOOKS_AFTER and any(
+                outcome.status is not None and outcome.status.phase == "receipt"
+                and outcome.status.decision.state == "executed" for outcome in outcomes.values()):
+            await _surface_settled(conn, self.caller)          # before a reply spends an agent's request
         if len(outcomes) < len(calls):                     # a call left open: no results row until it is settled
             return stop
         shown = kept = False
@@ -597,7 +653,7 @@ class _Turn:
             decide_ms=self.decide_ms, execute_ms=self.execute_ms, total_ms=_ms(self.started), outcome=outcome,
             rebound=self.rebound))
         if self.visitor:
-            await emit(conn, ids, EvTurnEnd(type="turn_end"))
+            await emit(conn, ids, EvTurnEnd(type="turn_end", generation=self.generation))
         await conn.commit()
         if not self.annotates:
             return

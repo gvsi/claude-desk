@@ -18,7 +18,6 @@
   --line-control: rgba(250,249,245,0.22);
   --line-control-hover: rgba(250,249,245,0.30);
   --line-field: rgba(250,249,245,0.36);
-  --line-field-focus: var(--text-tertiary);
   --line-focus: var(--text-secondary);
   --fill-card: rgba(250,249,245,0.03);
   --fill-count: rgba(250,249,245,0.05);

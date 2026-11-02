@@ -6,6 +6,7 @@ import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
 import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
+import { Pill } from '../Pill/Pill.tsx';
 import { PresetMenu } from '../PresetMenu/PresetMenu.tsx';
 import { PageHeaderSkeleton as HeaderShapes } from './PageHeaderSkeleton.tsx';
 import { PageHeader, type PageHeaderProps } from './PageHeader.tsx';
@@ -97,6 +98,61 @@ export const Phone: Story = {
     await expect(action.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     await expect(Math.round(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(8);
     await expect(subtitle.getBoundingClientRect().right).toBeGreaterThan(action.getBoundingClientRect().left);
+  },
+};
+
+/** Knowledge's header: a page this prototype only mocks says so once, with a Pill beside its title. */
+const knowledgeHeader = {
+  title: 'Knowledge',
+  subtitle: 'What Claude answers from. It never changes your rules.',
+  badge: <Pill>Mock</Pill>,
+};
+
+/** The vertical middle of an element's box. */
+const middle = (el: Element) => {
+  const box = el.getBoundingClientRect();
+  return box.top + box.height / 2;
+};
+
+export const WithABadge: Story = {
+  name: 'With a badge',
+  args: knowledgeHeader,
+  parameters: {
+    canvas: 'N-Run2-Settings-Knowledge',
+    canvasNote: 'Knowledge’s header: one Mock pill beside the title says the page is a mock, in place of a pill on each of its mock parts.',
+  },
+  play: async ({ canvas }) => {
+    const title = canvas.getByRole('heading', { level: 1, name: 'Knowledge' });
+    const pill = canvas.getByText('Mock');
+    // Beside the title and outside it, so the heading's name stays the page's name.
+    await expect(title.contains(pill)).toBe(false);
+    await expect(title).toHaveAccessibleName('Knowledge');
+    await expect(Math.round(pill.getBoundingClientRect().left - title.getBoundingClientRect().right)).toBe(8);
+    await expect(Math.round(middle(pill))).toBe(Math.round(middle(title)));
+    // The title keeps its 32 px line, and the subtitle its place 4 px under it.
+    await expect(title.getBoundingClientRect().height).toBe(32);
+    const subtitle = canvas.getByText(knowledgeHeader.subtitle);
+    await expect(Math.round(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(4);
+  },
+};
+
+export const WithABadgeOnAPhone: Story = {
+  name: 'With a badge on a phone',
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  args: knowledgeHeader,
+  parameters: {
+    canvas: 'N-Run2-Settings-Knowledge',
+    canvasNote: 'Knowledge’s header on a phone: the Mock pill stays beside the title, and the subtitle runs under both.',
+  },
+  play: async ({ canvas }) => {
+    await expect(window.innerWidth).toBe(390);
+    const title = canvas.getByRole('heading', { level: 1, name: 'Knowledge' });
+    const pill = canvas.getByText('Mock');
+    await expect(Math.round(pill.getBoundingClientRect().left - title.getBoundingClientRect().right)).toBe(8);
+    await expect(Math.round(middle(pill))).toBe(Math.round(middle(title)));
+    const subtitle = canvas.getByText(knowledgeHeader.subtitle);
+    await expect(Math.round(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(8);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };
 

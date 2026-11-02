@@ -484,6 +484,24 @@ describe('Today', () => {
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
   });
 
+  it('held_row_quotes_its_rule_after_a_colon_with_one_full_stop', async () => {
+    // "Answer a held request" names the rule after a colon, as the owner's words, and adds a full
+    // stop only when the rule has none. A hold with no rule keeps the plain line.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const heldBy = (rule: string | null) => () => mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [{ ...seeded, held_by: rule }] });
+
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy('Quotes at list price') });
+    const line = region(screen, 'Things to try').getByText('A request is waiting for your answer: Quotes at list price.', { exact: true });
+    await expect.element(line).toBeVisible();
+    expect([...line.element().querySelectorAll('[data-copy="user"]')].map((span) => span.textContent)).toEqual(['Quotes at list price']);
+
+    const { screen: none } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy(null) });
+    const plain = region(none, 'Things to try').getByText('A request is waiting for your answer.', { exact: true });
+    await expect.element(plain).toBeVisible();
+    expect(plain.element().querySelector('[data-copy="user"]')).toBeNull();
+  });
+
   it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
     // The greeting says the owner's first name after the time of day. An owner who gave no name has
     // setup's fallback, "Owner", in its place, and a blank name is none either: the greeting then
@@ -739,12 +757,12 @@ describe('Today', () => {
 
   it('notifications_are_counted_in_the_sidebar_on_every_page', async () => {
     // Notifications is the sidebar's, under Safety, on every page of a Desk: read once as the frame
-    // first draws, and not again as the owner moves between pages. The demo bar keeps Start over alone.
+    // first draws, and not again as the owner moves between pages. The demo bar keeps Reset demo alone.
     const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
     const row = mainNav(screen).getByRole('link', { name: 'Notifications 1 unread', exact: true });
     await expect.element(row).toBeVisible();
-    expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Start over']);
+    expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Reset demo']);
     expect(requests('ownerInbox')).toHaveLength(1);
 
     // On to Today, which opens without reading them again; the sidebar keeps the count.
@@ -768,6 +786,9 @@ describe('Today', () => {
     await mainNav(screen).getByRole('link', { name: /^Conversations/ }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
 
+    // Dropped between Conversations' polls: a poll still out would reach the hold below, though
+    // sent before it, and be counted as Today's read.
+    await expect.poll(() => queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('idle');
     queryClient.removeQueries({ queryKey: needsYouKey(RIVERA.deskId) });
     const needsYou = holdReads(needsYouPath);
     await mainNav(screen).getByRole('link', { name: 'Today' }).click();
@@ -933,6 +954,93 @@ describe('Today', () => {
     expect(sawFailure()).toBe(true);
     expect(requests('today').length).toBeGreaterThan(2);
     expect(requests('needsYou').length).toBeGreaterThan(2);
+  });
+
+  it.each(['Since last night', 'Last 7 days', 'Needs you'])('retry_keeps_keyboard_order_after_recovery_in_%s', async (name) => {
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const section = region(screen, name);
+    const next = name === 'Needs you' ? section.getByRole('button', { name: 'Allow this time' }) : section.getByRole('link').first();
+    await expect.element(next).toBeVisible();
+    const route = name === 'Needs you' ? 'needsYou' : 'today';
+    mockStore.inject({ route, status: 503, times: 10_000 });
+    const retry = section.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+
+    // A retry that still fails keeps the same button and its keyboard focus. The failing read is held,
+    // so its busy state shows however fast the failure would come back.
+    const path = ROUTES[route].path.replace('{desk_id}', RIVERA.deskId);
+    const failing = holdReads(path);
+    (retry.element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    failing.release();
+    await expect.element(retry).not.toHaveAttribute('aria-busy');
+    await expect.element(retry).toHaveFocus();
+
+    const read = holdReads(path);
+    (retry.element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await expect.element(retry).toHaveFocus();
+    mockStore.reset('rivera');
+    read.release();
+
+    await expect.element(retry).not.toBeInTheDocument();
+    await expect.element(section.getByRole('heading', { name, exact: true })).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+    await userEvent.tab();
+    await expect.element(next).toHaveFocus();
+  });
+
+  it.each(['Since last night', 'Last 7 days', 'Needs you'].flatMap((name) => [
+    { name, keyboard: false },
+    { name, keyboard: true },
+  ]))('retry_recovery_leaves_focus_elsewhere in $name (keyboard: $keyboard)', async ({ name, keyboard }) => {
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const section = region(screen, name);
+    await expect.element(section).toBeVisible();
+    const route = name === 'Needs you' ? 'needsYou' : 'today';
+    mockStore.inject({ route, status: 503, times: 10_000 });
+    const retry = section.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    const elsewhere = screen.getByRole('button', { name: 'Copy your Desk link' });
+    const read = holdReads(ROUTES[route].path.replace('{desk_id}', RIVERA.deskId));
+
+    if (keyboard) {
+      (retry.element() as HTMLElement).focus();
+      await userEvent.keyboard('{Enter}');
+    } else {
+      // A programmatic retry starts the read without giving the button focus.
+      (elsewhere.element() as HTMLElement).focus({ preventScroll: true });
+      (retry.element() as HTMLElement).click();
+    }
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    (elsewhere.element() as HTMLElement).focus({ preventScroll: true });
+    mockStore.reset('rivera');
+    read.release();
+
+    await expect.element(retry).not.toBeInTheDocument();
+    await expect.element(elsewhere).toHaveFocus();
+  });
+
+  it('retry_recovery_with_nothing_needing_the_owner_focuses_the_next_section', async () => {
+    mockStore.reset('rivera_quiet');
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const needs = region(screen, 'Needs you');
+    const retry = needs.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    const read = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    (retry.element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    mockStore.reset('rivera_quiet');
+    read.release();
+
+    await expect.element(needs).not.toBeInTheDocument();
+    await expect.element(region(screen, 'Since last night').getByRole('heading', { name: 'Since last night', exact: true })).toHaveFocus();
+    await userEvent.tab();
+    await expect.element(region(screen, 'Last 7 days').getByRole('link', { name: 'Open Safety' })).toHaveFocus();
   });
 
   it('needs_you_read_failure_says_so', async () => {
@@ -3040,34 +3148,39 @@ describe("Today's top band", () => {
     expectComputed(band.querySelector('.cd-today__greeting')!, { paddingTop: '16px' });
 
     // How your Desk works 32 px under the header, then Things to try 32 px under it, in the band:
-    // four equal cards in one row, 16 px apart, across the band, each card's next step on one line.
+    // five equal cards, three across in two rows, 16 px apart, across the band, each row's next steps on one line.
     expect(band.contains(things.element())).toBe(true);
     const how = region(screen, 'How your Desk works').element();
     expect(box(how).top - box(header).bottom).toBeCloseTo(32, 0);
     expect(box(things.element()).top - box(how).bottom).toBeCloseTo(32, 0);
     const cards = things.getByRole('listitem').elements();
-    expect(cards).toHaveLength(4);
+    expect(cards).toHaveLength(5);
     const rects = cards.map(box);
-    for (const rect of rects) {
-      expect(rect.top).toBeCloseTo(rects[0]!.top, 0);
-      expect(rect.width).toBeCloseTo(rects[0]!.width, 0);
-      expect(rect.height).toBeCloseTo(rects[0]!.height, 0);
+    const rows = [rects.slice(0, 3), rects.slice(3)];
+    for (const rect of rects) expect(rect.width).toBeCloseTo(rects[0]!.width, 0);
+    for (const row of rows) {
+      for (const rect of row) {
+        expect(rect.top).toBeCloseTo(row[0]!.top, 0);
+        expect(rect.height).toBeCloseTo(row[0]!.height, 0);
+      }
+      for (let i = 1; i < row.length; i += 1) expect(row[i]!.left - row[i - 1]!.right).toBeCloseTo(16, 0);
+      expect(row[0]!.left).toBeCloseTo(box(band).left, 0);
     }
-    for (let i = 1; i < 4; i += 1) expect(rects[i]!.left - rects[i - 1]!.right).toBeCloseTo(16, 0);
-    expect(rects[0]!.left).toBeCloseTo(box(band).left, 0);
-    expect(rects[3]!.right).toBeCloseTo(box(band).right, 0);
+    expect(rects[3]!.top - rects[0]!.bottom).toBeCloseTo(16, 0);
+    expect(rects[2]!.right).toBeCloseTo(box(band).right, 0);
     for (const card of cards) {
       expectComputed(card, { borderTopWidth: '1px', borderTopLeftRadius: '12px', paddingTop: '16px', paddingLeft: '16px' });
     }
     const steps = cards.map((card) => drawnControls(card));
     expect(steps.map((found) => found.map((el) => el.textContent))).toEqual([
       ['Open your public page'],
+      ['Start a demo visitor'],
       ['Show me ideas'],
       ['Open the request'],
       ['Start a Desk'],
     ]);
     const stepTops = steps.map(([step]) => box(step!).top);
-    for (const top of stepTops) expect(top).toBeCloseTo(stepTops[0]!, 0);
+    for (const row of [stepTops.slice(0, 3), stepTops.slice(3)]) for (const top of row) expect(top).toBeCloseTo(row[0]!, 0);
     // The card wrapper has no chrome of its own on a laptop.
     expectComputed(things.element().querySelector(':scope > .cd-card')!, { borderTopWidth: '0px', paddingTop: '0px', backgroundColor: 'rgba(0, 0, 0, 0)' });
     // "Hide this list" on the title's line, the caption under both; the Vision link 12 px under the cards.
@@ -3076,7 +3189,7 @@ describe("Today's top band", () => {
     expect(hide.top + hide.height / 2).toBeCloseTo(thingsTitle.top + thingsTitle.height / 2, 0);
     expect(hide.right).toBeCloseTo(box(band).right, 0);
     const vision = box(things.getByRole('link', { name: 'Vision: where a Desk could go next' }).element().closest('p')!);
-    expect(vision.top - rects[0]!.bottom).toBeCloseTo(12, 0);
+    expect(vision.top - rects.at(-1)!.bottom).toBeCloseTo(12, 0);
 
     // The right column no longer has the public page card or its line.
     expect(screen.getByRole('heading', { name: 'Your public page' }).query()).toBeNull();
@@ -3133,8 +3246,8 @@ describe("Today's top band", () => {
 
     // Each row is one control named by its title, with a chevron at its right and no button inside.
     const rows = things.getByRole('listitem').elements();
-    expect(rows).toHaveLength(4);
-    const names = ['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
+    expect(rows).toHaveLength(5);
+    const names = ['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
     for (const [i, row] of rows.entries()) {
       const controls = drawnControls(row);
       expect(controls, names[i]).toHaveLength(1);
@@ -3190,25 +3303,25 @@ describe("Today's top band", () => {
     const things = region(screen, 'Things to try');
     await expect.element(things).toBeVisible();
     const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
-    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
-    const row = () => things.getByRole('listitem').nth(2).element();
+    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    const row = () => things.getByRole('listitem').nth(3).element();
     await expect.element(things.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
     expect(drawnControls(row())).toEqual([]);
     expect(row().querySelector('.cd-status-dot--held')).toBeNull();
     expect(row().querySelector(`path[d="${CHEVRON_PATH}"]`)).toBeNull();
 
-    // The owner chats in a preview: one of the four is done, and all four still show.
+    // The owner chats in a preview: one of the five is done, and all five still show.
     await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
-    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    expect(titles()).toHaveLength(4);
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(titles()).toHaveLength(5);
 
     // Once something is held, the same card in the same place shows the dot and its next step.
     await visitorSays('Can I get 50% off if I pay cash?');
     await expect
       .element(things.getByText('A request is waiting for your answer.', { exact: true }), { timeout: 3_000 })
       .toBeVisible();
-    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
     expect(row().querySelector('.cd-status-dot--held')).not.toBeNull();
     const step = drawnControls(row());
     expect(step).toHaveLength(1);
@@ -3638,7 +3751,7 @@ describe("Today's unfinished setup", () => {
     const screen = await saveAndExitAtTools(state);
     const row = createRow(screen);
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
-    await expect.element(region(screen, 'Things to try').getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(region(screen, 'Things to try').getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Not live yet', { exact: true })).toBeVisible();
     expect(row.element().textContent).not.toMatch(/live/i);
     // It keeps its own words, so its Done pill is read out.

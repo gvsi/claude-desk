@@ -74,10 +74,12 @@ export function conversationPath(deskId: string, sessionId: string): string {
 
 /**
  * What Today hands the conversation's page when it opens it: a line to show there, such as why
- * joining the chat didn't go through.
+ * joining the chat didn't go through; or the demo visitor's run it started in the chat, which the
+ * page reads by its ID.
  */
 export interface ConversationArrival {
-  notice: string;
+  notice?: string;
+  demoVisitorRun?: string;
 }
 
 

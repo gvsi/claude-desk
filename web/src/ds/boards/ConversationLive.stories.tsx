@@ -71,6 +71,7 @@ const meta = {
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
       '"Dana is typing" is the signed typing bubble (N-Typing-Bubble-Run1) where the board writes a line.',
       'The list column, the conversation head and its "Latest" line are page layout the web app (plan 04) owns, composed here from ConversationListItem, Pill and the tokens; the page fills the main area (AppShell fill), so the list starts where the sidebar ends.',
+      'In the app, from 1024 px the list grows with the window, 24% of it between 280 and 400 px (board REV-CNVW B); this board keeps its own fixed column.',
       'The sidebar is the panel with its seam and the Claude acts for you switch at its foot, as on Today (owner decision 2026-10-29: one sidebar look on every page; the conversation boards are drawn with the one sidebar).',
     ].join(' '),
   },

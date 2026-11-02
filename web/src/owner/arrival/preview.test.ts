@@ -85,7 +85,7 @@ function drawn({ today: t, needsYou: held, inbox }: Reads) {
     },
     this_week: t.this_week,
     needs_you: held.map((item) => ({ held_at: when(item.held_at), held_by: item.held_by, from_the_visitor: item.from_the_visitor, reason: item.decision?.reason_plain })),
-    inbox: inbox.map((entry) => ({ to: entry.to, kind: entry.kind, body: entry.body, created_at: when(entry.created_at) })),
+    inbox: inbox.map((entry) => ({ to: entry.to, kind: entry.kind, title: entry.title ?? null, body: entry.body, created_at: when(entry.created_at) })),
   };
 }
 
@@ -129,6 +129,9 @@ describe('The preview behind the intro dialog', () => {
       const copy = mockCopy(opened, readAt);
       expect(drawn(still)).toEqual(drawn(copy));
       expect(shown(still, readAt)).toEqual(shown(copy, readAt));
+      // The preview's inbox goes into the cache as is, past `ownerInboxQuery`'s read, so it holds
+      // none of the record's checkpoints, which the owner's inbox leaves out.
+      expect(still.inbox.some((entry) => entry.kind === 'head_checkpoint')).toBe(false);
     });
   });
 

@@ -9,9 +9,9 @@ const meta = {
   title: 'Vision/AccessPanel',
   component: AccessPanel,
   args: {
-    name: 'Luis',
-    canOpen: ['Job cards', 'Customer history', 'Warranties', 'Photos'],
-    cantOpen: ['Invoices', 'Payroll'],
+    name: 'Jordan',
+    canOpen: ['Calendar holds', 'Shared docs', 'Team notes'],
+    cantOpen: ['Budgets', '1:1 notes'],
     onEditAccess: fn(),
   },
   // As the team Desk's board draws it: a 260 px column beside the conversation.
@@ -27,10 +27,10 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Teammate: Story = {
+export const Colleague: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
-    // access_panel_lists_what_they_can_and_cant_open: a card named for the teammate's access.
-    const panel = canvas.getByRole('region', { name: 'Luis’s access' });
+    // access_panel_lists_what_they_can_and_cant_open: a card named for the colleague's access.
+    const panel = canvas.getByRole('region', { name: 'Jordan’s access' });
     expectComputed(panel, {
       backgroundColor: 'rgba(250, 249, 245, 0.03)',
       borderTopWidth: '1px',
@@ -40,14 +40,14 @@ export const Teammate: Story = {
       paddingLeft: '16px',
     });
 
-    // Two lists, each named by its heading line: what Luis can open, then what he can't.
-    const can = canvas.getByRole('list', { name: 'Luis can open' });
+    // Two lists, each named by its heading line: what Jordan can open, then what he can't.
+    const can = canvas.getByRole('list', { name: 'Jordan can open' });
     const cant = canvas.getByRole('list', { name: 'Can’t open' });
     await expect(within(can).getAllByRole('listitem').map((item) => item.textContent)).toEqual(args.canOpen);
     await expect(within(cant).getAllByRole('listitem').map((item) => item.textContent)).toEqual(args.cantOpen);
     await expectListsKeepTheirRole(canvasElement);
     // The name is the owner's own words, set off as user text, first in its line.
-    const name = canvas.getByText('Luis');
+    const name = canvas.getByText('Jordan');
     await expect(name).toHaveAttribute('data-copy', 'user');
     await expect(name.parentElement?.firstChild).toBe(name);
 
@@ -90,13 +90,13 @@ export const Teammate: Story = {
 
 /** Nothing held back: "Can’t open" says so in words, not with an empty row. */
 export const OpensEverything: Story = {
-  args: { name: 'Grace', canOpen: ['Job cards', 'Customer history', 'Warranties', 'Photos', 'Invoices', 'Payroll'], cantOpen: [] },
+  args: { name: 'Sam', canOpen: ['Calendar holds', 'Shared docs', 'Team notes', 'Budgets', '1:1 notes'], cantOpen: [] },
   parameters: {
     canvas: 'none',
-    canvasNote: 'N-R2-Vision-TeamDesk draws Luis, who can’t open two things; an office manager who can open everything says so under “Can’t open”.',
+    canvasNote: 'N-R2-Vision-TeamDesk draws Jordan, who can’t open two things; the owner, Sam, who can open everything says so under “Can’t open”.',
   },
   play: async ({ canvas }) => {
-    await expect(canvas.getByRole('region', { name: 'Grace’s access' })).toBeVisible();
+    await expect(canvas.getByRole('region', { name: 'Sam’s access' })).toBeVisible();
     await expect(canvas.queryByRole('list', { name: 'Can’t open' })).toBeNull();
     await expect(canvas.getByText('Nothing on this Desk.')).toBeVisible();
   },
