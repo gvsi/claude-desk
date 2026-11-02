@@ -226,11 +226,11 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
     await held;
     await route.continue();
   });
-  await page.goto('/about/prediction#characteristics');
+  await page.goto('/about/prediction#how-its-measured');
   await expect(title(page, 'Capability prediction')).toBeVisible(FIRST_DRAW);
   const atSection = () =>
     page.evaluate(() => {
-      const section = document.getElementById('characteristics');
+      const section = document.getElementById('how-its-measured');
       if (!section) return false;
       return Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) <= 1;
     });
@@ -276,12 +276,12 @@ test('going_back_returns_to_the_readers_place', async ({ page }) => {
 });
 
 test('back_from_a_contents_link_returns_to_the_readers_place', async ({ page }) => {
-  // Part way down the prediction, the reader follows "Limitations" in the contents list: the page moves there,
+  // Part way down the prediction, the reader follows "Why the limits stay in code" in the contents list: the page moves there,
   // gliding unless the reader asked for reduced motion, and the address names it. Back returns to where they were,
   // and Forward to the section.
-  const atLimitations = () =>
+  const atLimits = () =>
     page.evaluate(() => {
-      const section = document.getElementById('limitations');
+      const section = document.getElementById('why-the-limits-stay-in-code');
       if (!section) return false;
       return Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) <= 1;
     });
@@ -295,23 +295,23 @@ test('back_from_a_contents_link_returns_to_the_readers_place', async ({ page }) 
     const contents = page.getByRole('navigation', { name: 'On this page' });
     // Clicked where it is: Playwright's own click may scroll the pinned list's link into view first, which moves the
     // reader's place.
-    await contents.getByRole('link', { name: 'Limitations', exact: true }).evaluate((link: HTMLElement) => link.click());
-    await page.waitForURL('**/about/prediction#limitations');
-    await expect.poll(atLimitations, `${reducedMotion}: followed`).toBe(true);
-    await expect(page.locator('#limitations'), `${reducedMotion}: focus on the section`).toBeFocused();
-    await expect(contents.getByRole('link', { name: 'Limitations', exact: true })).toHaveAttribute('aria-current', 'location');
+    await contents.getByRole('link', { name: 'Why the limits stay in code', exact: true }).evaluate((link: HTMLElement) => link.click());
+    await page.waitForURL('**/about/prediction#why-the-limits-stay-in-code');
+    await expect.poll(atLimits, `${reducedMotion}: followed`).toBe(true);
+    await expect(page.locator('#why-the-limits-stay-in-code'), `${reducedMotion}: focus on the section`).toBeFocused();
+    await expect(contents.getByRole('link', { name: 'Why the limits stay in code', exact: true })).toHaveAttribute('aria-current', 'location');
 
     await page.goBack();
     await page.waitForURL((url) => url.pathname === '/about/prediction' && url.hash === '');
     await expectBackAt(page, before, `${reducedMotion}: back`);
     await page.goForward();
-    await page.waitForURL('**/about/prediction#limitations');
-    await expect.poll(atLimitations, `${reducedMotion}: forward`).toBe(true);
+    await page.waitForURL('**/about/prediction#why-the-limits-stay-in-code');
+    await expect.poll(atLimits, `${reducedMotion}: forward`).toBe(true);
   }
 });
 
 test('back_before_the_type_loads_keeps_the_readers_place', async ({ page }) => {
-  // The reading type's font files are held back, so the type is still loading when the reader follows "Limitations"
+  // The reading type's font files are held back, so the type is still loading when the reader follows "Why the limits stay in code"
   // and presses Back. Once it loads, the window stays where Back put it rather than going back to the section.
   let release = () => {};
   const held = new Promise<void>((resolve) => {
@@ -330,12 +330,12 @@ test('back_before_the_type_loads_keeps_the_readers_place', async ({ page }) => {
   const contents = page.getByRole('navigation', { name: 'On this page' });
   // Clicked where it is: Playwright's own click may scroll the pinned list's link into view first, which moves the
   // reader's place.
-  await contents.getByRole('link', { name: 'Limitations', exact: true }).evaluate((link: HTMLElement) => link.click());
-  await page.waitForURL('**/about/prediction#limitations');
+  await contents.getByRole('link', { name: 'Why the limits stay in code', exact: true }).evaluate((link: HTMLElement) => link.click());
+  await page.waitForURL('**/about/prediction#why-the-limits-stay-in-code');
   await expect
     .poll(() =>
       page.evaluate(() => {
-        const section = document.getElementById('limitations');
+        const section = document.getElementById('why-the-limits-stay-in-code');
         return section ? Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) : 1e9;
       }),
     )
@@ -361,8 +361,8 @@ test('about_pages_print_without_the_pinned_bar', async ({ page }) => {
 });
 
 test('an_unplayed_chart_prints_complete', async ({ page }) => {
-  // Opened at a section past the lead chart, which hasn't been in view, so it waits to play.
-  await page.goto('/about/prediction#limitations');
+  // Opened at a section past the chart, which hasn't been in view, so it waits to play.
+  await page.goto('/about/prediction#why-the-limits-stay-in-code');
   await expect(title(page, 'Capability prediction')).toBeVisible(FIRST_DRAW);
   const chart = page.locator('figure.cd-about-chart');
   await expect(chart).toHaveAttribute('data-play', 'ready');
