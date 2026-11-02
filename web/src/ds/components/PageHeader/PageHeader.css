@@ -31,6 +31,23 @@
   text-wrap: balance;
 }
 
+/* A badge beside the title (Knowledge's "Mock"): 8 px after it, centred on its 32 px line, as
+   SectionHeader sets its count. The title shrinks so a long one wraps beside the badge. */
+.cd-page-header__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-page-header__title-row > .cd-page-header__title {
+  min-width: 0;
+}
+
+.cd-page-header__title-row > :not(.cd-page-header__title) {
+  flex: none;
+}
+
 .cd-page-header__subtitle {
   margin: 0;
   color: var(--text-secondary);

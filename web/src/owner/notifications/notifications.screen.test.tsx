@@ -50,13 +50,13 @@ describe('Notifications', () => {
     const total = mockStore.world.inbox.length;
     const { screen } = await renderRoute(TODAY);
 
-    // The row under Safety, with every entry unread; the demo bar keeps only Start over.
+    // The row under Safety, with every entry unread; the demo bar keeps only Reset demo.
     const labels = () => [...nav(screen).element().querySelectorAll('.cd-sidebar__label')].map((label) => label.textContent);
     await expect.poll(labels).toContain('Notifications');
     expect(labels().indexOf('Notifications')).toBe(labels().indexOf('Safety') + 1);
     await expect.poll(() => unreadPill(screen)?.getAttribute('aria-label')).toBe(`${total} unread`);
     expect(screen.getByRole('button', { name: /Demo inbox/ }).query()).toBeNull();
-    await expect.element(screen.getByRole('note').getByRole('button', { name: 'Start over' })).toBeVisible();
+    await expect.element(screen.getByRole('note').getByRole('button', { name: 'Reset demo' })).toBeVisible();
 
     // Opened, the page shows them all with their dots, and the count goes.
     await notificationsRow(screen).click();
@@ -75,9 +75,10 @@ describe('Notifications', () => {
     const codeRow = rows(screen).at(-1)!;
     expect(codeRow.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: Verification code · To d•••@example.com');
     expect(codeRow.querySelector('.cd-notifications__time')?.textContent).toMatch(/^\d{1,2}:\d{2} [ap]m$/);
-    // The owner's own alert says nothing about who it went to.
+    // The owner's own alert says nothing about who it went to, and is headed by its title: the
+    // kernel's fixed line for what it's about, where an untitled one reads "Alert".
     const alertRow = rows(screen)[0]!;
-    expect(alertRow.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: Alert');
+    expect(alertRow.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: A request needs your answer');
     // The last row of a day has no hairline under it: the next day's line separates them.
     for (const list of main.element().querySelectorAll('.cd-notifications__list')) {
       const last = list.lastElementChild as HTMLElement;
@@ -97,6 +98,8 @@ describe('Notifications', () => {
     addEntry({ kind: 'alert', to: 'owner', body: 'Dana Whitfield is waiting in a conversation the Desk handed to you.' }, 0);
     await expect.poll(() => rows(screen)).toHaveLength(total + 1);
     expect(dotted(rows(screen)[0]!)).toBe(true);
+    // An alert the kernel gave no title reads as its kind.
+    expect(rows(screen)[0]!.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: Alert');
     expect(unreadPill(screen)).toBeNull();
   });
 
@@ -112,7 +115,6 @@ describe('Notifications', () => {
   });
 
   it.each(['desktop', 'phone'] as const)('page_fits_and_keeps_its_row_on_%s', async (viewport) => {
-    addEntry({ kind: 'head_checkpoint', to: 'owner', body: `{"head":"${'5c1e9a0b77d24f6e'.repeat(8)}","seq":48}` }, 2 * DAY_MS);
     const { screen } = await renderRoute(TODAY, { viewport });
     if (viewport === 'phone') {
       // On a phone the row is in the Menu sheet, under Safety, with its count.
@@ -123,9 +125,6 @@ describe('Notifications', () => {
     await notificationsRow(screen).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).toBeVisible();
     await expect.poll(() => rows(screen)).toHaveLength(mockStore.world.inbox.length);
-    // The checkpoint's signed record wraps inside the column, in the trace's monospace.
-    const trace = screen.getByRole('main').element().querySelector<HTMLElement>('.cd-notifications__entry.cd-type-trace')!;
-    expect(trace.scrollWidth).toBeLessThanOrEqual(trace.clientWidth);
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
   });

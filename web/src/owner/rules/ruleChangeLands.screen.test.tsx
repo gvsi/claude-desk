@@ -55,6 +55,30 @@ const answerWithNoRefunds = () => answerWith({ ...rivera.ruleCards['rv-refund'],
 /** Claude answers the next request on Rules with documents that are never shared. */
 const answerWithNoDocuments = () => answerWith({ ...rivera.ruleCards['rv-docs'], mode: 'never', reason: 'Documents are never shared.' }, STOP_DOCUMENTS_ANSWER);
 
+/** No Saturday rule: Saturday bookings now ask, by default, so the change lands on "Anything not listed here", in Rules' first screen. */
+const ASK_SATURDAYS = 'Ask me before Saturday bookings';
+
+/** Claude answers the next request on Rules with Turner's rules less the Saturday booking rule. */
+function answerWithoutSaturday(): void {
+  worker.use(
+    http.post(
+      CHAT_PATH,
+      () => {
+        const draft = mockStore.world.draftCards(desk(), desk().policy.cards.filter((card) => card.card_id !== 'rv-book-sat'));
+        return HttpResponse.json({ answer: 'Saturday bookings ask you first.', draft });
+      },
+      { once: true },
+    ),
+  );
+}
+
+/** "Anything not listed here", where a removed rule's change lands. */
+function fallback(root: HTMLElement): HTMLElement {
+  const row = [...root.querySelectorAll<HTMLElement>('[data-fallback]')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
+  if (!row) throw new Error('no fallback row on Rules');
+  return row;
+}
+
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
 
@@ -78,15 +102,17 @@ const receiptWords = (version: number) => `Confirmed. Version ${version} of your
 const SELECTED = 'rgb(60, 57, 47)';
 const CLEAR = 'rgba(0, 0, 0, 0)';
 
-/** The rows on Rules a change can land on, by name, in the page's order: the Desk's own jobs, then each connector's tools. */
+/**
+ * The tools on Rules a change can land on, by name, in the page's order: the Desk's own jobs, then
+ * each connector's tools, each with the rules under it, drawn on the page rather than in its shapes.
+ */
 function landingRows(root: HTMLElement): { name: string; row: HTMLElement }[] {
-  return [...root.querySelectorAll<HTMLElement>('.cd-business-jobs .cd-tool-rules, .cd-connector-section__tool')].map((row) => ({
-    name: row.querySelector('.cd-tool-rules__tool-name, .cd-connector-section__tool-name')?.textContent ?? '',
-    row,
-  }));
+  return [...root.querySelectorAll<HTMLElement>('section[data-tool]')]
+    .filter((row) => row.closest('.cd-skeleton-screen__layer') === null)
+    .map((row) => ({ name: row.getAttribute('aria-label') ?? '', row }));
 }
 
-/** The row on Rules named `name`: a connector's tool, or one of the Desk's own jobs. */
+/** The tool on Rules named `name`, with its rules: a connector's tool, or one of the Desk's own jobs. */
 function toolRow(root: HTMLElement, name: string): HTMLElement {
   const row = landingRows(root).find((each) => each.name === name)?.row;
   if (!row) throw new Error(`no ${name} row on Rules`);
@@ -99,9 +125,9 @@ function fillOf(row: HTMLElement): string {
   return glow === null ? 'none' : getComputedStyle(glow).backgroundColor;
 }
 
-/** The row's words, at the right: its rules and its outcome. */
+/** A tool's first rule, in its words. */
 function wordsOf(row: HTMLElement): string {
-  return row.querySelector('.cd-connector-section__tool-summary')?.textContent ?? '';
+  return row.querySelector('.cd-rule-sentence__sentence')?.textContent ?? '';
 }
 
 /** Whether `row` says it was updated. */
@@ -233,7 +259,7 @@ describe('a confirmed rule change in Ask Claude', () => {
   it('the_changed_row_lights_up_holds_lets_go_and_keeps_updated', async () => {
     const { screen, log } = await askForTheWeekdayChange();
     const root = screen.container;
-    expect(wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts');
+    expect(wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price');
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
@@ -241,7 +267,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     // The Quote row, which the change changed, says so, lit in the selected fill, with its new words.
     await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
     await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
-    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts · Weekdays, all day');
+    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
     // Then it lets go, and keeps "Updated".
     await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
     expect(saysUpdated(toolRow(root, 'Quote'))).toBe(true);
@@ -260,13 +286,13 @@ describe('a confirmed rule change in Ask Claude', () => {
     await log.getByRole('button', { name: 'Confirm change' }).click();
     await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
 
-    // To All rules and back: Rules opens afresh, and nothing on it says it was updated.
-    await screen.getByRole('link', { name: 'See all rules' }).first().click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // To another page and back: Rules opens afresh, and nothing on it says it was updated.
+    await router.navigate(`${DESK}/profile`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts · Weekdays, all day');
-    expect([...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].filter(saysUpdated)).toEqual([]);
+    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
+    expect([...root.querySelectorAll<HTMLElement>('section[data-tool]')].filter(saysUpdated)).toEqual([]);
     expect(root.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
   });
 
@@ -280,39 +306,43 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(inView(toolRow(root, 'Share a document'), main)).toBe(false);
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
-    // It comes to the middle of what shows, where it lights up.
+    // Its rule comes to the middle of what shows, where it lights up.
     await expect.poll(() => saysUpdated(toolRow(root, 'Share a document'))).toBe(true);
-    await expect.poll(() => offMiddle(toolRow(root, 'Share a document'), main)).toBeLessThan(2);
+    const changed = () => toolRow(root, 'Share a document').querySelector('[data-landed]')!;
+    await expect.poll(() => offMiddle(changed(), main)).toBeLessThan(2);
     expect(fillOf(toolRow(root, 'Share a document'))).not.toBe('none');
     expect(updatedRows(root)).toEqual(['Share a document']);
   });
 
   it('a_row_above_what_shows_scrolls_as_near_the_middle_as_rules_goes', async () => {
-    // A Desk with no jobs above its connectors, so the Quote row sits in Rules' first screen.
-    desk().tools = desk().tools.filter((row) => row.source !== 'business');
-    const { screen, log } = await askForTheWeekdayChange();
+    // "Anything not listed here" sits in Rules' first screen, where a removed rule's change lands.
+    answerWithoutSaturday();
+    const { screen, log } = await askForTheWeekdayChange({}, ASK_SATURDAYS);
     const root = screen.container;
-    // Rules scrolled to its end, the Quote row far above what shows.
+    // Rules scrolled to its end, the row far above what shows.
     const main = screen.getByRole('main').element();
     main.scrollTop = main.scrollHeight;
-    await expect.poll(() => inView(toolRow(root, 'Quote'), main)).toBe(false);
+    await expect.poll(() => inView(fallback(root), main)).toBe(false);
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
-    // The Quote row is in Rules' first screen, so Rules goes back to its top, the row in view.
-    await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
-    await expect.poll(() => inView(toolRow(root, 'Quote'), main)).toBe(true);
+    // It is in Rules' first screen, so Rules goes back to its top, the row in view.
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
+    await expect.poll(() => inView(fallback(root), main)).toBe(true);
     await expect.poll(() => main.scrollTop).toBe(0);
   });
 
   it('a_row_in_view_stays_where_it_is', async () => {
-    const { screen, log } = await askForTheWeekdayChange();
+    answerWithoutSaturday();
+    const { screen, log } = await askForTheWeekdayChange({}, ASK_SATURDAYS);
     const root = screen.container;
     const main = screen.getByRole('main').element();
-    expect(inView(toolRow(root, 'Quote'), main)).toBe(true);
+    expect(inView(fallback(root), main)).toBe(true);
     const top = main.scrollTop;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
+    await expect.poll(() => fillOf(fallback(root))).toBe(SELECTED);
     expect(main.scrollTop).toBe(top);
+    // Weekday bookings, unchanged, carry neither.
+    expect(saysUpdated(toolRow(root, 'Book a visit'))).toBe(false);
   });
 
   it('a_failed_confirm_lands_nothing_and_keeps_its_error', async () => {
@@ -326,7 +356,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(log.element().textContent).not.toContain('Confirmed.');
     expect(log.element().querySelector('.cd-margin-receipt')).toBeNull();
     // No row on Rules lights up or says it was updated, and the version stays.
-    const rows = [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__tool')];
+    const rows = [...screen.container.querySelectorAll<HTMLElement>('section[data-tool]')];
     expect(rows.length).toBeGreaterThan(5);
     expect(rows.filter(saysUpdated)).toEqual([]);
     expect(screen.container.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
@@ -476,11 +506,15 @@ describe('a preset or a new payment limit', () => {
     expect(listed).not.toContain('Share a document');
     await screen.getByRole('button', { name: 'Confirm change' }).click();
 
-    // Back on Rules, exactly those rows say "Updated" and light up; Quote and Share a document don't.
+    // Back on Rules, the rules it changed say "Updated" and light up, under exactly those tools; its
+    // weekday booking rule differs from Turner's only in its id, so Book a visit's rule doesn't, and
+    // the Saturday rule it removed lands on "Anything not listed here". Quote and Share a document don't.
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => updatedRows(root).sort()).toEqual(listed);
-    for (const name of listed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
-    for (const name of ['Quote', 'Share a document']) {
+    const changed = listed.filter((name) => name !== 'Book a visit' && landingRows(root).some((row) => row.name === name));
+    await expect.poll(() => updatedRows(root).sort()).toEqual(changed);
+    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
+    for (const name of ['Quote', 'Share a document', 'Book a visit']) {
       expect(saysUpdated(toolRow(root, name)), name).toBe(false);
       expect(fillOf(toolRow(root, name)), name).toBe('none');
     }
@@ -498,7 +532,7 @@ describe('a preset or a new payment limit', () => {
     // Whether Rules draws any of the old version's rows, or its line, while the read is held.
     let oldShown = false;
     const watch = new MutationObserver(() => {
-      if (showsOutsideShapes(root, '.cd-connector-section__tool') || showsOutsideShapes(root, 'Version 7 of your rules')) oldShown = true;
+      if (showsOutsideShapes(root, 'section[data-tool]') || showsOutsideShapes(root, 'Version 7 of your rules')) oldShown = true;
     });
     watch.observe(root, { childList: true, subtree: true, characterData: true });
     onTestFinished(() => watch.disconnect());
@@ -590,9 +624,9 @@ describe('a preset or a new payment limit', () => {
   });
 
   it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
-    // All rules, then Rules, then a preset's review, whose confirm is held.
-    const { screen, router } = await renderRoute(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // Another page, then Rules, then a preset's review, whose confirm is held.
+    const { screen, router } = await renderRoute(`${DESK}/profile`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
     await router.navigate(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
@@ -627,7 +661,7 @@ describe('a preset or a new payment limit', () => {
     // Stripe at the top of what shows, Payments above it out of view.
     stripe.element().scrollIntoView({ block: 'start' });
     await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
-    const paymentsLimit = () => screen.getByRole('region', { name: 'Payments' }).element().querySelector('.cd-money-limit') as HTMLElement;
+    const paymentsLimit = () => screen.getByRole('region', { name: 'Payments' }).element().querySelector('[data-money-limit]') as HTMLElement;
     expect(inView(paymentsLimit(), main)).toBe(false);
 
     // A lower limit from Stripe's line, confirmed on its review.
@@ -665,8 +699,8 @@ describe('a preset or a new payment limit', () => {
       return place === before;
     }).toBe(true);
     // (Navigated to directly: clicking a link would first scroll it into view, moving the place.)
-    await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await router.navigate(`${DESK}/profile`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     await expect.poll(() => main.scrollTop).toBe(place);
@@ -686,11 +720,11 @@ describe('a preset or a new payment limit', () => {
     // Back on Rules: the limit's line in both groups has the new amount and says it was updated.
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
-    const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
+    const limit100 = 'Claude asks you before any payment over $100, whatever the rules below say';
     for (const name of ['Payments', 'Stripe']) {
       const line = screen.getByRole('region', { name }).getByText(startingWith(limit100));
       await expect.element(line).toBeVisible();
-      await expect.poll(() => line.element().querySelector('.cd-pill')?.textContent, { message: name }).toBe('Updated');
+      await expect.poll(() => line.element().closest('[data-money-limit]')?.querySelector('.cd-pill')?.textContent, { message: name }).toBe('Updated');
     }
     // Payment link's own $300, brought down to the new limit, lands too; nothing else does.
     await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
@@ -751,7 +785,7 @@ describe('focus once a review Rules opened returns', () => {
 
     // The new limit lands on its line, in view where Rules was, and focus is on Payments' "Change".
     const payments = screen.getByRole('region', { name: 'Payments' });
-    await expect.poll(() => payments.element().querySelector('.cd-money-limit .cd-pill')?.textContent).toBe('Updated');
+    await expect.poll(() => payments.element().querySelector('[data-money-limit] .cd-pill')?.textContent).toBe('Updated');
     await expect.element(payments.getByRole('button', { name: 'Change' })).toHaveFocus();
     await pause(300);
     expect(main.scrollTop).toBe(place);
@@ -786,7 +820,7 @@ describe('under reduced motion', () => {
     // The row: "Updated" and its new words at once, with no fill to hold and nothing cross-fading.
     await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
     const quote = toolRow(root, 'Quote');
-    expect(wordsOf(quote)).toBe('Anyone · No discounts · Weekdays, all day');
+    expect(wordsOf(quote)).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
     expect(quote.querySelector('.cd-cross-fade')).toBeNull();
     const glow = quote.querySelector('.cd-landed-glow');
     expect(glow === null || getComputedStyle(glow).display === 'none').toBe(true);
@@ -837,9 +871,9 @@ describe('on a phone', () => {
   });
 
   it('a_change_left_behind_with_back_never_lands_on_a_later_visit', async () => {
-    // From All rules to Rules, so Back has somewhere to go.
-    const rendered = await renderRoute(`${DESK}/rules/all`, { viewport: 'phone' });
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    // From another page to Rules, so Back has somewhere to go.
+    const rendered = await renderRoute(`${DESK}/profile`, { viewport: 'phone' });
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
     await rendered.router.navigate(`${DESK}/rules`);
     answerWithNoRefunds();
     const composer = rendered.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
@@ -853,7 +887,7 @@ describe('on a phone', () => {
 
     // Back with the sheet still open, then Forward to Rules: a new visit, where nothing says it was updated.
     await rendered.router.navigate(-1);
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
     await rendered.router.navigate(1);
     await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     const root = rendered.screen.container;
@@ -963,10 +997,10 @@ describe("the business's own jobs", () => {
 
     // The intake card comes into view, lit, with "Updated" by its title and its new words.
     const intake = () => jobCard(root, 'New client intake');
-    await expect.poll(() => intake().querySelector('.cd-tool-rules__tool .cd-pill')?.textContent).toBe('Updated');
+    await expect.poll(() => intake().querySelector('.cd-pill')?.textContent).toBe('Updated');
     await expect.poll(() => fillOf(intake())).toBe(SELECTED);
     await expect.poll(() => inView(intake(), main)).toBe(true);
-    await expect.poll(() => intake().querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_ASKS.reason);
+    await expect.poll(() => wordsOf(intake())).toBe('Claude asks you before using new client intake');
     // The other job carries neither.
     const booking = jobCard(root, 'Book a free intro call');
     expect(booking.querySelector('.cd-pill')).toBeNull();

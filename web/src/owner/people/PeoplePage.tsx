@@ -118,6 +118,7 @@ export function PeoplePage() {
                     time={formatWhen(lead.created_at, business.timezone, now)}
                     note={lead.note ?? ''}
                     recorded={lead.replayed === true}
+                    demoVisitor={lead.demo_visitor === true}
                   />
                 </li>
               ))}

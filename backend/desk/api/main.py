@@ -6,10 +6,11 @@
 before the app, so a provider without its credential, or `ANTHROPIC_CUSTOM_HEADERS` set, refuses to start. The
 lifespan opens the kernel client, checks it is the production one when it must be, then opens the database engine,
 the turn locks' pool, the run events listener, the turn runner, the built-in agent's client of the public A2A
-endpoint and its runs (`agents.py`), and the job queue with its two workers (`jobs.py`), and closes them in the reverse
-order: the workers' jobs, setup's consent runs, the owner's rule drafting and proving work (`proving.py`), the agent's runs
-and the runner's turns first, with the model client it built (never an injected one) last. Building the app sets the
-job queue's loggers (`procrastinate` and its children) to WARNING and filters them (`JobRecords`): Procrastinate names
+endpoint and its runs (`agents.py`), the demo visitors' runs (`demo_visitors.py`), and the job queue with its two
+workers (`jobs.py`), and closes them in the reverse order: the workers' jobs, setup's consent runs, the owner's rule
+drafting and proving work (`proving.py`), the demo visitors' and the agent's runs and the runner's turns first, with
+the model client it built (never an injected one) last. Building the app sets the job queue's loggers
+(`procrastinate` and its children) to WARNING and filters them (`JobRecords`): Procrastinate names
 each job with its arguments below WARNING and when a job fails, and the resume job's signed decision quotes the
 visitor. It also redacts link tokens from every log record the process makes (`log_redaction`), uvicorn's access log
 included, and logs an unexpected error in a route by its type and route only (`unexpected_errors`). In production
@@ -31,6 +32,7 @@ whose cookie names no open session on its Desk answers 401 `{error: "no_session"
 
 import asyncio
 import contextlib
+import functools
 import logging
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
@@ -39,12 +41,13 @@ from typing import Any
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from desk.api import a2a, log_redaction, unexpected_errors
 from desk.api.agents import DemoAgents, a2a_client
 from desk.api.cookies import clear_visitor_cookie
+from desk.api.demo_visitors import DemoVisitors, visitor_client
 from desk.api.deps import ApiProblem, Runtime, runtime
 from desk.api.jobs import WORKERS, JobEnv, jobs_app, run_worker
 from desk.api.kernel_client import KernelFailed, KernelHttp, KernelUnavailable, assert_production_safe
@@ -54,9 +57,10 @@ from desk.api.passcode import check_passcode_hash
 from desk.api.ratelimit import RateLimited, RateLimiter, StreamSlots
 from desk.api.routes import agents, owner, proxy, public, rules, setup
 from desk.api.runner import TurnRunner
-from desk.api.schemas import ApiError, HealthOut, operation_ids
+from desk.api.schemas import ApiError, DemoVisitorRun, HealthOut, operation_ids
 from desk.api.settings import Settings
 from desk.api.sse import Listener
+from desk.api.store import Ids, append_message
 from desk.db.session import API_CONNECT_OPTIONS, procrastinate_connector
 
 logger = logging.getLogger(__name__)
@@ -188,6 +192,16 @@ async def health(request: Request) -> HealthOut | JSONResponse:
     return HealthOut(ok=True, kernel=kernel)
 
 
+async def _mark_demo_visitor(engine: AsyncEngine, ids: Ids, run: DemoVisitorRun) -> None:
+    """Mark a demo visitor's chat in its transcript (a `demo_visitor` row naming its persona in `text` and its run in
+    `ref_id`), once its session is open and before it says anything, so the owner's reads label the chat, and name the
+    run whose ending its page reads, after this process is gone. A failure here ends the run before it writes
+    (`DemoVisitors`' `on_open`), so no demo visitor chats unmarked."""
+    async with engine.connect() as conn:
+        await append_message(conn, ids, "demo_visitor", text=run.first_name, ref_id=run.run_id)
+        await conn.commit()
+
+
 async def _stop(task: asyncio.Task) -> None:
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
@@ -246,6 +260,11 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
             agents = DemoAgents(state.model, a2a=agent_client, engine=engine, clock=state.clock,
                                 production=settings.production)
             stack.push_async_callback(agents.close)        # before its client, the runner and the pools
+            # Each demo visitor's own client of the public visitor endpoints, made when its run starts.
+            visitors = DemoVisitors(state.model, client=lambda: visitor_client(settings, state.a2a_transport),
+                                    engine=engine, clock=state.clock, production=settings.production,
+                                    on_open=functools.partial(_mark_demo_visitor, engine))
+            stack.push_async_callback(visitors.close)      # before the runner and the pools
             stack.push_async_callback(state.proving.close)  # no proving work outlives the pools it runs on
             stack.push_async_callback(state.turn_runs.close)
             await stack.enter_async_context(jobs.open_async())
@@ -255,7 +274,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                                          name="desk-jobs-worker")
             stack.push_async_callback(_stop, worker)        # first out: no job outlives the pools it runs on
             state.kernel, state.engine, state.listener, state.runner = kernel, engine, listener, runner
-            state.agents = agents
+            state.agents, state.demo_visitors = agents, visitors
             if settings.passcode_hash is None:
                 logger.warning("PASSCODE_HASH is not set, so no passcode creates a copy "
                                "(make one with: cd backend && uv run python scripts/hash_passcode.py)")
@@ -263,6 +282,7 @@ def create_app(settings: Settings, *, kernel_transport: Any = None, model: Any =
                 yield
             finally:
                 state.kernel = state.engine = state.listener = state.runner = state.agents = None
+                state.demo_visitors = None
 
     app = FastAPI(title="Claude Desk API", version="0.1.0", lifespan=lifespan, openapi_url=None, docs_url=None,
                   redoc_url=None)

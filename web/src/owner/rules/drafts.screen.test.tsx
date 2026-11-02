@@ -207,7 +207,7 @@ describe('rule draft review', () => {
         for (const side of row.querySelectorAll('[role="group"]')) {
           expect(side.querySelectorAll('.cd-rule-sentence')).toHaveLength(1);
           expect(side.querySelector('.cd-rule-sentence__sentence')?.textContent).toMatch(/^Claude /);
-          expect(side.querySelector('.cd-rule-sentence__meta')?.textContent).toMatch(/ · (Anyone|The customer who paid, verified)$/);
+          expect(side.querySelector('.cd-rule-sentence__meta')?.textContent).toMatch(/ · (Anyone|The customer, once verified)$/);
           expect(side.querySelector('.cd-rule-sentence__outcome')?.textContent).toMatch(/^(Allow|Ask me first|Never)$/);
         }
       }

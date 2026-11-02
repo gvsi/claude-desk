@@ -1,9 +1,10 @@
 """English: the visitor's status lines, the owner's alert previews and owner-only lines, and the
 clause cards.
 
-`{owner}` is the business's `owner_display_name`. Status lines carry no digits, currency or
-percentages: only clause cards rendered from facts do. Cards read datetimes in the business's
-time zone ("Tuesday, November 3, 2:00 pm"), money as `$1,234.56` and percentages as "10%".
+`{owner}` is the business's `owner_display_name`, or the business's name when the owner gave none
+(`cards.shown_owner`). Status lines carry no digits, currency or percentages: only clause cards
+rendered from facts do. Cards read datetimes in the business's time zone ("Tuesday, November 3,
+2:00 pm"), money as `$1,234.56` and percentages as "10%".
 """
 
 from datetime import datetime, time, timedelta
@@ -19,10 +20,14 @@ STATUS: dict[str, str] = {
     "refused": "Not something I can do here",
     # refused's line when the baseline's mandate rule alone refused an agent's charge above what its mandate has left
     "refused_over_mandate": "Refused: over the signed limit for this agent",
+    # refused's line when a booking was refused for want of a name and a phone number or email (`contact_needed`)
+    "refused_contact_needed": "To book, I need your name and a phone number or email",
     "approved": "{owner} approved this",
     "denied": "{owner} decided not to go ahead",
     "expired": "This request timed out",
     "cancelled": "Cancelled",
+    # cancelled's line when the visitor's own booking closed a held request (`decide.supersede_if_booked`)
+    "closed_by_booking": "Closed: your booking replaced this request",
     "executed": "Done",
     "failed": "That didn't go through",
     "unknown": "Still confirming this",
@@ -54,7 +59,7 @@ OWNER_STATUS: dict[str, str] = {
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a
 # visitor or another agent sees instead of the generic "executed" line. Like the status lines they
-# name the owner and nothing else, so they never carry an amount, a time or a date.
+# name the owner (or the business when the owner gave none) and no request data: no amount, time or date.
 EXECUTED: dict[str, str] = {
     "purpose_payment": "{title}: payment link made",
     "urgent": "{title}: urgent request sent to {owner}",
@@ -86,7 +91,7 @@ MESSAGES: dict[str, str] = {
     "inbox_code_body": ("Your {business} code is {code}. It expires in ten minutes. "
                         "If you didn't ask for it, ignore this message."),
     "offer_callback": "Would you like me to arrange a callback?",
-    "check_status": "Please check the request status in this chat.",
+    "check_status": "Your request is waiting for approval; you can see where it stands in this chat.",
 }
 
 # Owner-only, in English: the preview line of a Demo inbox alert.
@@ -159,9 +164,11 @@ def quote(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def handoff(fact: Fact | None, desk: DeskInfo) -> Card:
-    """`Let me check with {owner}.` / `{owner} will reply here.`"""
-    owner = desk.owner_display_name
-    return Card(title=f"Let me check with {owner}.", lines=(f"{owner} will reply here.",))
+    """`Let me check with {owner}.` / `{owner} will reply here.`, the first ending on the name's own full stop
+    when it has one (a business name such as "Turner Plumbing, Inc.")."""
+    owner = desk.owner
+    stop = "" if owner.endswith(".") else "."
+    return Card(title=f"Let me check with {owner}{stop}", lines=(f"{owner} will reply here.",))
 
 
 def booking_options(fact: Fact | None, desk: DeskInfo) -> Card:
@@ -184,9 +191,9 @@ def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
         from desk.kernel_service.adapters.base import quoted
         return Card(title=date(start), lines=(f"{quoted(found['appointment_type'])} at {clock(start)}",
                                               f"About {found['appointment_minutes']} minutes",
-                                              f"With {desk.owner_display_name}"))
+                                              f"With {desk.owner}"))
     return Card(title=date(start), lines=(f"{clock(start)} to {clock(end)}",
-                                          f"With {desk.owner_display_name}"))
+                                          f"With {desk.owner}"))
 
 
 def charter_text(fact: Fact | None, desk: DeskInfo) -> Card:
@@ -201,7 +208,7 @@ def verify_prompt(fact: Fact | None, desk: DeskInfo) -> Card:
 def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
     """`{owner} will call you back on {day}, between {start} and {end}`; without a window
     `{owner} will call you back`. The fact holds only the window, never the visitor's text."""
-    owner = desk.owner_display_name
+    owner = desk.owner
     window = callback_window(fact, desk)
     if window is None:
         return Card(title=f"{owner} will call you back")
@@ -258,7 +265,7 @@ def link_cancelled(fact: Fact | None, desk: DeskInfo) -> Card:
     from that link's own `payment_link` fact."""
     return Card(title=money(claims(fact)["total"]), lines=(
         title_claim(fact),
-        f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
+        f"This payment link was cancelled because {desk.owner}'s rules changed. "
         "Ask again if you still want to pay."))
 
 
@@ -302,35 +309,19 @@ def open_status(is_open: bool, boundary: datetime | None, as_of: datetime) -> st
     return f"Closed now. Opens {_day(boundary, as_of)} at {clock(boundary)}"
 
 
-# The Agent Card on the public page (`render.agent_card`): plain prose the kernel writes, with no
-# amount, key, mandate or private field. A tool reads by what an agent can ask for, never by name.
+# The Agent Card on the public page (`render.agent_card`): one block for each thing an agent can ask
+# for, in plain words the kernel writes, with no amount, key, mandate, name or private field. A tool
+# reads by what an agent can ask for, never by name. Where to send requests and how to sign them is
+# the API's code-built card (`AgentCardOut`), and the page itself says who answers.
 AGENT_TOOLS: dict[str, str] = {
-    "native.quote": "get a quote from the price list",
-    "native.find_slots": "find open times",
-    "native.book": "book a visit",
-    "native.payment_link": "get a payment link for a quote",
-    "native.charge_mandate": "pay for a quote within the limit of a signed mandate",
-    "native.capture_lead": "leave contact details",
-    "native.request_callback": "ask for a callback",
-    "native.start_verification": "verify a customer with a code sent to their contact on record",
-    "native.release_document": "receive a verified customer's own documents",
-    "payments.list_charges": "list a verified customer's own charges",
+    "native.quote": "Get a quote from the price list",
+    "native.find_slots": "Find open times",
+    "native.book": "Book a visit",
+    "native.payment_link": "Get a payment link for a quote",
+    "native.charge_mandate": "Pay for a quote within the limit of a signed mandate",
+    "native.capture_lead": "Leave contact details",
+    "native.request_callback": "Ask for a callback",
+    "native.start_verification": "Verify a customer with a code sent to their contact on record",
+    "native.release_document": "Receive a verified customer's own documents",
+    "payments.list_charges": "List a verified customer's own charges",
 }
-
-AGENT_CARD: tuple[str, ...] = (
-    "Visiting agents can talk to {business} here too. Answers come from Claude, an AI, working within "
-    "{owner}'s rules, unless a message is marked as {owner}'s own.",
-    "What an agent can do here: {tools}.",
-    "Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug.",
-    "Sign every request with Ed25519 and send the headers X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce and "
-    "X-Agent-Sig. The signature covers the RFC 8785 canonical JSON of desk_slug, ts, nonce and body_sha256, the "
-    "lowercase hex SHA-256 of the raw request body.",
-    "A signature counts for 5 minutes either side of its timestamp, and each nonce covers one turn of the "
-    "conversation.",
-    "Agent keys only say which agent is asking. They are not business credentials: they can't change {owner}'s "
-    "rules or show anyone's private data, and money moves only as those rules and a signed mandate allow.",
-)
-AGENT_CARD_NO_TOOLS = "nothing for now"
-# What the card says for a business or owner name the public page withholds (`public.header_of`)
-AGENT_CARD_BUSINESS = "this business"
-AGENT_CARD_OWNER = "the owner"

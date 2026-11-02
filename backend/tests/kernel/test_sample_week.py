@@ -736,7 +736,8 @@ async def strikes_until_paused(app, client, created: CopyCreated, reviewer) -> l
     for n in range(decide.BREAKER_STRIKES + 1):
         response = await client.post("/decide", headers=headers, json={
             "session_id": opened["state"]["session_id"], "generation": 0,
-            "call": {"call_id": f"try-{n}", "tool": "native.book", "args": {"slot_id": slots[n].slot_id}}})
+            "call": {"call_id": f"try-{n}", "tool": "native.book", "args": {
+                "slot_id": slots[n].slot_id, "name": "Jane Doe", "contact": "jane@example.com"}}})
         assert response.status_code == 200, response.text
         modes.append((await client.get("/whoami", headers=headers)).json()["session"]["mode"])
     return modes

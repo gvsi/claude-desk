@@ -120,7 +120,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import zip_longest
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AwareDatetime,
@@ -133,9 +133,13 @@ from pydantic import (
     ValidationError,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
-from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems, skipped_summary, waiver_summary
+from evals.gate import (
+    SHOWN, GateInput, GateResult, RunRef, RunRow, Target, coverage_problems, excused_refusals, refused_summary,
+    skipped_summary, waiver_summary,
+)
 from evals.gate import gate as gate_of
 from evals.oracles.canonical import sha256_hex
 from evals.tier1.harness import load_landed
@@ -574,6 +578,17 @@ class ResultsFile(BaseModel):
     runs: list[RunRow]
     pending: dict[str, str]
     gate: GateResult                             # as the pass judged it; results-check recomputes it
+    # The incomplete runs the pass's records show the visitor simulator refused; the gate doesn't fail them
+    # while another run of the scenario scored (`gate`, rule 3).
+    refused_runs: list[RunRef] = []
+
+    @model_validator(mode="after")
+    def _refused_are_incomplete_rows(self) -> Self:
+        named = [(r.scenario_id, r.rep) for r in self.refused_runs]
+        incomplete = {(r.scenario_id, r.rep) for r in self.runs if r.status == "incomplete"}
+        if len(set(named)) != len(named) or not set(named) <= incomplete:
+            raise ValueError("refused_runs names each refused run once, and only incomplete rows")
+        return self
 
     @field_validator("gated", mode="before")
     @classmethod
@@ -587,7 +602,8 @@ class ResultsFile(BaseModel):
 
     def gate_input(self) -> GateInput:
         return GateInput(runs=self.runs, pending=self.pending, runs_per_scenario=self.runs_per_scenario,
-                         heldout_sha256=self.heldout_sha256, provider=self.providers.api)
+                         heldout_sha256=self.heldout_sha256, provider=self.providers.api,
+                         refused=frozenset((r.scenario_id, r.rep) for r in self.refused_runs))
 
     def dumps(self) -> str:
         return json.dumps(self.model_dump(mode="json", by_alias=True), indent=1) + "\n"
@@ -619,7 +635,7 @@ def results_file(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT) -> Res
         providers=ResultsProviders(api=p.providers.api, simulator=p.providers.simulator, kernel_checks="anthropic"),
         model_ids=p.model_ids, landed=list(p.landed), suite_sha256=p.suite_sha256, heldout_sha256=p.heldout_sha256,
         recorded_rate=rate_ref(rates), runs=list(p.runs), pending=dict(p.pending),
-        gate=gate_of(p, rates, waivers=waivers),
+        gate=gate_of(p, rates, waivers=waivers), refused_runs=list(p.refused_runs),
     )
 
 
@@ -671,7 +687,7 @@ def pass_target(p: Any, root: Path = REPO_ROOT) -> Target:
     return Target.of(suite, splits, landed)
 
 
-def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
+def selection_problems(p: Any, root: Path = REPO_ROOT, *, excuse_refused: bool = False) -> list[str]:
     """Why a finished pass (`PassResult`) doesn't hold one judged run of every scenario and repetition
     its config selected, or an empty list when it does. Its rows and pending scenarios are reconciled
     (`coverage_problems`) with the suite at its commit, read from git (`pass_target`), narrowed to what its
@@ -679,7 +695,9 @@ def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
     anything else, each selected scenario waiting for an unlanded plan listed in `pending` with no rows;
     and every row is scored, never incomplete. The rows are reconciled one by one, never counted, so a row
     removed from `runs.jsonl` or written twice is named. A commit or suite that can't be read is a problem,
-    never a pass. Calibration and the latest report rely on it."""
+    never a pass. Calibration and the latest report rely on it; with `excuse_refused` (the report's), a run the
+    visitor simulator refused that the gate excuses (`gate.excused_refusals`) isn't counted as unjudged, and
+    calibration stays strict."""
     try:
         target = pass_target(p, root)
     except ResultsRefused as refused:
@@ -689,7 +707,9 @@ def selection_problems(p: Any, root: Path = REPO_ROOT) -> list[str]:
                                  if config.suite in ("all", scenario.suite) and config.split in ("all", scenario.split)
                                  and (not config.only or sid in config.only)}, landed=target.landed)
     problems = coverage_problems(p.gate_input(), selected)
-    if unjudged := [f"{r.scenario_id} run {r.rep}" for r in p.runs if r.status != "scored"]:
+    excused = excused_refusals(p.runs, ((r.scenario_id, r.rep) for r in p.refused_runs)) if excuse_refused else set()
+    if unjudged := [f"{r.scenario_id} run {r.rep}" for r in p.runs
+                    if r.status != "scored" and (r.scenario_id, r.rep) not in excused]:
         shown = ", ".join(unjudged[:SHOWN]) + (f" and {len(unjudged) - SHOWN} more" if len(unjudged) > SHOWN else "")
         problems.append(f"{len(unjudged)} runs weren't judged (an error, or records the verdict couldn't read): "
                         f"{shown}")
@@ -931,8 +951,9 @@ def _check(base: str, root: Path) -> str:
     skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
     lowered = [notice for entry in rates.history[len(before):] if (notice := lowered_notice(entry))]
     waived = [waiver_summary(result)] if result.waived_violations else []
+    refused = [refused_summary(result.refused_runs)] if result.refused_runs else []
     return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
-                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *waived, *lowered])
+                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *refused, *waived, *lowered])
 
 
 def _check_unarmed(rev: str, base: str, root: Path) -> None:

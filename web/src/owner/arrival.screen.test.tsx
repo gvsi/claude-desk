@@ -1,7 +1,7 @@
 /**
  * The first visit and the owner's frame in a real browser against the mock API: the intro dialog
  * over a still preview of Turner's Today, the passcode that opens a fresh copy, and the owner
- * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, start over),
+ * shell around Today (the reviewer bar, the sidebar with its switchers and Answering, Reset demo),
  * with the public page always a new tab away and never opened on Today itself.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
@@ -15,7 +15,7 @@ import { routes } from '../app/routes.tsx';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
-import type { SetupState } from '../api/views.ts';
+import type { NeedsYouItem, SetupState } from '../api/views.ts';
 import { breakItIdeas } from '../lib/breakItIdeas.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
@@ -37,6 +37,7 @@ const INTRO =
 const ENDED = 'Your demo session ended. Enter the passcode to start a fresh copy.';
 const THINGS = [
   ['Chat as a customer', 'Turner’s public page opens in a new tab.'],
+  ['Watch a demo visitor', 'An AI plays a customer on your Desk.'],
   ['Try to break it', 'Ask for a discount or someone else’s details.'],
   ['Answer a held request', 'One is waiting for you on Today.'],
   ['Create your own Desk', 'It gets a live link you can share.'],
@@ -160,6 +161,26 @@ describe('Arrival', () => {
     await expect.element(screen.getByRole('dialog', { name: TITLE })).not.toBeInTheDocument();
     await expect.element(screen.getByText(/^You're Mike Turner today\. This is a concept prototype\.$/)).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening), Mike$/ })).toBeVisible();
+  });
+
+  it.each(['desktop', 'phone'] as const)('intro_dialog_lists_the_five_things_in_order_on_%s', async (viewport) => {
+    const { screen } = await renderRoute('/', { viewport, seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    await settled(dialog.element());
+    const items = dialog.getByRole('list').getByRole('listitem').elements();
+    // The five Today counts, in Today's order, the demo visitor second with the first sentence of its line.
+    expect(items.map((item) => item.querySelector('.cd-intro__thing-title')?.textContent)).toEqual(THINGS.map(([title]) => title));
+    expect(items.map((item) => item.textContent)).toEqual(THINGS.map(([title, detail]) => `${title}${detail}`));
+    expect(items[1]?.querySelector('svg path[d]')).not.toBeNull();
+    // Each detail stays on one line.
+    for (const detail of items.map((item) => item.querySelector('.cd-intro__thing-detail') as HTMLElement)) {
+      expect(detail.getClientRects()).toHaveLength(1);
+    }
+    // On a phone too, "Start the demo" and the footer are in view as the dialog opens.
+    await expect.element(dialog.getByRole('button', { name: 'Start the demo' })).toBeInViewport();
+    await expect.element(dialog.getByText(/^Concept prototype by/)).toBeInViewport();
+    expectNoHorizontalScroll();
   });
 
   it('the_illustration_plays_once_as_the_window_changes', async () => {
@@ -565,7 +586,7 @@ describe('Arrival', () => {
     const tryAgain = screen.getByRole('button', { name: 'Try again' });
 
     // The Desks reads since the demo last started. A count from the mock's reset would also hold
-    // Start over's own reads, which can reach the mock after it.
+    // Reset demo's own reads, which can reach the mock after it.
     let desksBefore = 0;
     const desksReadSinceStart = () => requests('desks').length - desksBefore;
     /** Starts the demo with the copy's Desks lost on the network `lost` times, and watches the way to Today. */
@@ -577,10 +598,10 @@ describe('Arrival', () => {
       await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
       return pages;
     };
-    /** Start over, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
+    /** Reset demo, then the session ends: the app holds copy 2's Desks, and the passcode opens copy 1, which they don't list. */
     const startOverThenEnd = async () => {
-      await screen.getByRole('button', { name: 'Start over' }).click();
-      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('button', { name: 'Reset demo' }).click();
+      await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
       await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
       // The new copy's own Today drawn (the greeting alone could be the old Today's), and its Desks
       // reads over: a read still on its way would otherwise land after the reset, in the next
@@ -1262,7 +1283,8 @@ describe('OwnerLayout', () => {
       ['people', 'Customers', 'Customers'],
       ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
-      ['rules/all', 'All rules', 'All rules'],
+      // All rules' old address opens Rules, every rule now on one page.
+      ['rules/all', 'Rules', 'Rules'],
       ['safety', 'Safety', 'Safety'],
       ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
@@ -1463,9 +1485,9 @@ describe('OwnerLayout', () => {
 
   it('start_over_confirms_first', async () => {
     const { screen, router } = await renderRoute(TODAY);
-    const startOver = screen.getByRole('button', { name: 'Start over' });
+    const startOver = screen.getByRole('button', { name: 'Reset demo' });
     await startOver.click();
-    const dialog = screen.getByRole('dialog', { name: 'Start over with a fresh copy?' });
+    const dialog = screen.getByRole('dialog', { name: 'Reset demo?' });
     await expect.element(dialog).toBeVisible();
     await expect
       .element(dialog.getByText("You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind.", { exact: true }))
@@ -1474,7 +1496,7 @@ describe('OwnerLayout', () => {
 
     // Escape keeps this copy.
     await userEvent.keyboard('{Escape}');
-    await expect.element(screen.getByRole('dialog', { name: 'Start over with a fresh copy?' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('dialog', { name: 'Reset demo?' })).not.toBeInTheDocument();
     await expect.element(startOver).toHaveFocus();
     expect(requests('startOver')).toEqual([]);
 
@@ -1486,7 +1508,7 @@ describe('OwnerLayout', () => {
     // Confirmed: one start over, and the new copy's first Today, with no "not found" on the way.
     const sawNotFound = watchFor("This page doesn't exist");
     await startOver.click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     const fresh = mockStore.world.ids.deskId;
     expect(fresh).not.toBe(RIVERA.deskId);
@@ -1508,8 +1530,8 @@ describe('OwnerLayout', () => {
     expect(requests('ownerInbox')).toHaveLength(1);
 
     // Straight away, while this copy's inbox was just read: the new copy's Today reads its own.
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${mockStore.world.ids.deskId}/today`);
     await expect.element(heldCard(screen)).toBeVisible();
     await expect.element(notificationsRow(screen)).toBeVisible();
@@ -1533,11 +1555,11 @@ describe('OwnerLayout', () => {
     // Today opens without it; the sidebar counts the notifications once their read is in.
     await expectTodayOpensWithoutItsInbox();
 
-    // Start over while this copy's first inbox read is out, and hold the new copy's Desks.
+    // Reset demo while this copy's first inbox read is out, and hold the new copy's Desks.
     const newInbox = holdReads(ROUTES.ownerInbox.path);
     const newDesks = holdReads(ROUTES.desks.path);
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     const fresh = `/app/${mockStore.world.ids.deskId}/today`;
     expect(router.state.location.pathname).toBe(fresh);
@@ -1577,7 +1599,7 @@ describe('OwnerLayout', () => {
     const heading = screen.getByRole('heading', { level: 1, name: /, Mike$/ });
     const answering = screen.getByRole('switch', { name: 'Claude acts for you' });
 
-    // An Answering change is still out when Start over opens a fresh copy, and fails after it:
+    // An Answering change is still out when Reset demo opens a fresh copy, and fails after it:
     // refused (the old copy's Desk is gone), then with its answer lost.
     for (const status of [404, 'network'] as const) {
       await expect.element(heading).toBeVisible();
@@ -1589,8 +1611,8 @@ describe('OwnerLayout', () => {
       await screen.getByRole('dialog').getByRole('button', { name: /^(Take messages only|Let Claude act)$/ }).click();
       await expect.element(answering).toHaveAttribute('aria-checked', 'false');
 
-      await screen.getByRole('button', { name: 'Start over' }).click();
-      await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+      await screen.getByRole('button', { name: 'Reset demo' }).click();
+      await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
       await expect.poll(() => router.state.location.pathname).not.toBe(before);
       const fresh = `/app/${mockStore.world.ids.deskId}/today`;
       expect(router.state.location.pathname).toBe(fresh);
@@ -1618,7 +1640,8 @@ describe('OwnerLayout', () => {
     // Safety's record. Each page is measured once every read on it is in, so nothing loads in above
     // a control, or below it, while the column is being scrolled. The built-in agent's charge over
     // its signed limit is refused first, so Safety's count of refused requests loads in above the
-    // record too.
+    // record too. At the desktop size Safety fits the window, so its column doesn't scroll there and
+    // nothing can pass under the bar: focus coming back is checked where the controls are.
     const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
     await mockStore.dispatch('sendAgent', { params: { slug: RIVERA.slug }, body: { task: 'push_the_limit', idempotency_key: 'refuse-1' } });
@@ -1638,6 +1661,7 @@ describe('OwnerLayout', () => {
       },
       {
         path: SAFETY_ENTRIES,
+        fitsOnDesktop: true,
         settled: async (screen: RenderResult) => {
           await expect.element(screen.getByText(/^I turned down \d+ requests? this week\.$/)).toBeVisible();
           await expect.element(screen.getByRole('list', { name: 'Every entry, newest first' })).toBeVisible();
@@ -1648,13 +1672,19 @@ describe('OwnerLayout', () => {
         ],
       },
     ];
-    for (const { path, settled, controls } of pages) {
+    for (const { path, settled, controls, ...page } of pages) {
       const { screen } = await renderRoute(path, { viewport });
       await settled(screen);
       const found = controls(screen);
       for (const control of found) await expect.element(control).toBeVisible();
       expectTheColumnStartsBelowTheBar();
-      for (const control of found) await expectFocusComesBackBelowTheBar(control.element() as HTMLElement);
+      if ('fitsOnDesktop' in page && viewport === 'desktop') {
+        const { column } = ownerFrame();
+        expect(column.scrollHeight, 'the page fits the window').toBeLessThanOrEqual(column.clientHeight);
+        for (const control of found) await expectKeyboardFocusInSight(control.element() as HTMLElement, () => {});
+      } else {
+        for (const control of found) await expectFocusComesBackBelowTheBar(control.element() as HTMLElement);
+      }
     }
   });
 });
@@ -1675,13 +1705,13 @@ describe('Today', () => {
     const things = screen.getByRole('region', { name: 'Things to try' });
     await expect.element(things).toBeVisible();
     const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
-    const all = ['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
+    const all = ['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
     expect(titles()).toEqual(all);
     // Let Today poll a few times: nothing is held, so the item says where a request will show, with
     // no next step and no held dot.
     await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(2);
     expect(titles()).toEqual(all);
-    const waiting = things.getByRole('listitem').nth(2);
+    const waiting = things.getByRole('listitem').nth(3);
     await expect.element(waiting.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
     expect(waiting.getByRole('button').elements()).toHaveLength(0);
     expect(waiting.element().querySelector('.cd-status-dot--held')).toBeNull();
@@ -1691,11 +1721,12 @@ describe('Today', () => {
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Can I get 50% off if I pay cash?' } });
     await expect.poll(() => titles(), { timeout: 2_000 }).toEqual([
       'Chat as a customer',
+      'Watch a demo visitor',
       'Try to break it',
       'Answer a held request',
       'Create your own Desk',
     ]);
-    const held = things.getByRole('listitem').nth(2);
+    const held = things.getByRole('listitem').nth(3);
     await expect
       .element(held.getByText('A request is waiting for your answer.', { exact: true }))
       .toBeVisible();
@@ -1826,7 +1857,7 @@ describe('Things to try ticks off', () => {
     expect(item.querySelector('.cd-pill .cd-status-dot--handled')).not.toBeNull();
     expect(item.querySelector('.cd-status-dot--held')).toBeNull();
     expect(row.getByRole('button').elements()).toHaveLength(0);
-    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   });
 
   it('the_check_draws_from_its_short_arm', async () => {
@@ -1862,7 +1893,9 @@ describe('Things to try ticks off', () => {
     draw.finish();
   });
 
-  it.each(['desktop', 'phone'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (viewport) => {
+  it.each(['desktop', 'phone', 'phone_under_a_long_rule'] as const)('the_section_under_the_list_holds_then_glides_up_at_%s', async (at) => {
+    const viewport = at === 'desktop' ? 'desktop' : 'phone';
+    if (at === 'phone_under_a_long_rule') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -1874,8 +1907,9 @@ describe('Things to try ticks off', () => {
     await allow.click();
     const frames = await watching;
 
-    // The phone row reserves its end line's room, so Needs you stays still through every frame.
-    expectHeldThenGlided(frames, row.element() as HTMLElement, viewport === 'phone');
+    // The phone row reserves its end line's room, so Needs you stays still through every frame;
+    // under a rule whose line runs past that room, it glides up once the check has drawn.
+    expectHeldThenGlided(frames, row.element() as HTMLElement, at === 'phone');
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
   });
@@ -1929,11 +1963,11 @@ describe('Things to try ticks off', () => {
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
     const frames = await watching;
 
-    // The row never keeps a height. From 640 px its card shares its row's height, so Needs you stays put.
+    // The row never keeps a height: Needs you is where the row's own height puts it at once, never
+    // anywhere between (its card is the tallest in its row of two, so the row comes up with it).
     expect(frames.every((frame) => frame.kept === '')).toBe(true);
     const from = frames[0]?.below ?? 0;
     const to = frames.at(-1)?.below ?? 0;
-    expect(to).toBeCloseTo(from, 0);
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5 || Math.abs(frame.below - to) < 0.5)).toBe(true);
   });
 
@@ -2019,17 +2053,17 @@ describe('Things to try ticks off', () => {
     // Today's first read. Today's own reads, after the answer, are, and the row is done at load.
     late.release();
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
-    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     expect(animated()).toEqual([]);
   });
 
   it('starting_over_starts_the_list_afresh', async () => {
     const { screen, router } = await renderRoute(TODAY);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
-    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
-    await screen.getByRole('button', { name: 'Start over' }).click();
-    await screen.getByRole('dialog', { name: 'Start over with a fresh copy?' }).getByRole('button', { name: 'Start over' }).click();
+    await screen.getByRole('button', { name: 'Reset demo' }).click();
+    await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     // The new copy's list has nothing done, and its held request waits.
     await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
@@ -2048,7 +2082,7 @@ describe('Things to try ticks off', () => {
     const animated = watchListAnimations();
     await screen.getByRole('button', { name: 'Show things to try' }).click();
     await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
-    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(requests('needsYou').length + 2);
     expect(animated()).toEqual([]);
   });
@@ -2056,10 +2090,14 @@ describe('Things to try ticks off', () => {
   it.each([
     ['expired', 'desktop', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
     ['expired', 'phone', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
+    ['expired', 'phone_under_a_long_rule', 'This request expired before you answered. Nothing was done.', 'Expired before you answered. Nothing was done.'],
     ['cancelled', 'desktop', 'The visitor cancelled before you answered. Nothing was done.', 'Cancelled before you answered. Nothing was done.'],
-  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, viewport, cardLine, rowLine) => {
+  ] as const)('late_answer_settles_the_row_in_its_slot_when_%s_at_%s', async (state, at, cardLine, rowLine) => {
     // The answer comes back 409: the request had already ended. That isn't an answer, so nothing
-    // ticks; the row stays in its slot and says how it ended.
+    // ticks; the row stays in its slot and says how it ended. Under a long rule, its row on a phone
+    // is taller than the line it settles with, so what follows glides up.
+    const viewport = at === 'desktop' ? 'desktop' : 'phone';
+    if (at === 'phone_under_a_long_rule') holdUnderALongRule();
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = thingsToTry(screen);
     const row = thingRow(screen, 'Answer a held request');
@@ -2074,7 +2112,7 @@ describe('Things to try ticks off', () => {
     const frames = await watching;
 
     await expect.element(card.getByText(cardLine, { exact: true })).toBeVisible();
-    expectSettledInItsSlot(frames, item, viewport === 'phone');
+    expectSettledInItsSlot(frames, item, at === 'phone');
     expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
     await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
     // No check, no pill and no button, nor an empty place for one: the card right below has the request.
@@ -2162,7 +2200,7 @@ describe('Things to try ticks off', () => {
     mockStore.world.appendLedger(desk, { kind: 'execute', origin: 'kernel', session_id: held.session_id, ref_id: held.decision_id, summary: { decision_id: held.decision_id, action_id: held.action?.action_id ?? null, state: 'executed', reconciled: true } });
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
-    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   });
 
   it('dismiss_and_a_new_hold_keep_the_settled_row_in_place', async () => {
@@ -2280,7 +2318,7 @@ describe('Things to try ticks off', () => {
     expect(item.querySelector('.cd-things__check, .cd-pill, .cd-status-dot')).toBeNull();
     expect(card.element().contains(document.activeElement)).toBe(true);
     // It isn't counted: the count is the copy's second Desk alone.
-    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   });
 
   it.each([
@@ -2322,7 +2360,7 @@ describe('Things to try ticks off', () => {
     const row = thingRow(screen, 'Answer a held request');
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
-    await expect.element(thingsToTry(screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Open the request' }).elements()).toHaveLength(0);
     // Done before this view, so its check is drawn still: nothing in the list animated.
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(2);
@@ -2344,7 +2382,7 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done. Safety shows what was stopped.', { exact: true })).toBeVisible();
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.getByRole('button').elements()).toHaveLength(0);
-    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     // Nothing was delivered in the chat, so the owner hasn't chatted as a customer yet.
     expect(thingRow(screen, 'Chat as a customer').getByRole('link', { name: 'Open your public page' }).elements()).toHaveLength(1);
   });
@@ -2376,29 +2414,36 @@ describe('Things to try ticks off', () => {
     await expect.element(greetingLink).toHaveFocus();
   });
 
-  it('all_four_done', async () => {
+  it('all_five_done', async () => {
     // A copy with a second Desk already: "Create your own Desk" is done from the start.
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_two_desks' });
     const things = thingsToTry(screen);
     await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
-    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
     // The owner chats in a preview of the Desk, and Claude replies; then a reply there is stopped.
     await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
     await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
-    await expect.element(things.getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     const preview = mockStore.visitorSession(RIVERA.slug);
     if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
     mockStore.world.reply(preview, [proseBlock('It costs $1 today.')], 'en', { blocked: true });
     await expect.element(thingRow(screen, 'Try to break it').getByText('Done. Safety shows what was stopped.', { exact: true })).toBeVisible();
-    await expect.element(things.getByText('3 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('3 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
     // And the held request is answered.
     await heldCard(screen).getByRole('button', { name: 'Deny this time' }).click();
     await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
-    await expect.element(things.getByText('All 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    expect(things.getByText('Done', { exact: true }).elements()).toHaveLength(4);
+    await expect.element(things.getByText('4 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+
+    // And a demo visitor has run: started, and stopped before it says anything.
+    const started = await mockStore.dispatch('startDemoVisitor', { params: { desk_id: RIVERA.deskId }, body: { idempotency_key: 'all-five' } });
+    if ('network' in started || started.status !== 202) throw new Error('the demo visitor starts');
+    const { run_id: runId } = started.body as { run_id: string };
+    await mockStore.dispatch('stopDemoVisitor', { params: { desk_id: RIVERA.deskId, run_id: runId } });
+    await expect.element(things.getByText('All 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(things.getByText('Done', { exact: true }).elements()).toHaveLength(5);
     expect(things.getByRole('listitem').getByRole('button').elements()).toHaveLength(0);
     // "Hide this list" still hides it.
     await things.getByRole('button', { name: 'Hide this list' }).click();
@@ -2444,25 +2489,25 @@ describe('Things to try ticks off', () => {
     const done = thingRow(live.screen, 'Create your own Desk');
     await expect.element(done.getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
     expect(done.getByText('Done', { exact: true }).elements()).toHaveLength(1);
-    await expect.element(thingsToTry(live.screen).getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(live.screen).getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     expect(live.screen.getByRole('heading', { name: /^Finish setting up/ }).elements()).toHaveLength(0);
   });
 
-  it('count_reads_of_4_before_anything_is_held', async () => {
+  it('count_reads_of_5_before_anything_is_held', async () => {
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet' });
     const things = thingsToTry(screen);
     const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
     await expect.element(things).toBeVisible();
-    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
 
-    // The owner chats in a preview and Claude replies: one of the four is done, and all four show.
+    // The owner chats in a preview and Claude replies: one of the five is done, and all five show.
     await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
     await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
-    await expect.element(things.getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     // Nothing is held, so "Answer a held request" still waits, in its place.
     await expect.poll(() => requests('needsYou').length, { timeout: 5_000 }).toBeGreaterThan(2);
-    expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
   });
 
   it('answer_done_line_stays_on_the_starting_desk_while_progress_follows_the_copy', async () => {
@@ -2474,7 +2519,7 @@ describe('Things to try ticks off', () => {
     const row = thingRow(screen, 'Answer a held request');
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
-    await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
     expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
@@ -2501,9 +2546,9 @@ describe('Things to try ticks off', () => {
     const row = thingRow(screen, 'Try to break it');
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
-    await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    // Safety lists what was stopped, not every request Claude declines in its own words.
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was stopped and why.", { exact: true })).toBeVisible();
+    await expect.element(thingsToTry(screen).getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    // The detail points at each reply's receipt; Safety lists only what was stopped.
+    await expect.element(row.getByText("Ask for a discount or someone else's details. Each reply's receipt shows the checks.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.
@@ -2536,13 +2581,16 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
     expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
-    await expect.element(things.getByText('3 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('3 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
-    // Every read behind them was the main line's.
+    // Every read behind them was the main line's. Only "Watch a demo visitor", which is copy-wide (a
+    // demo visitor runs on the Desk it was started from), also reads this Desk's conversations.
     for (const key of ['conversations', 'ledger'] as const) {
-      expect(requests(key).length, key).toBeGreaterThan(0);
-      expect(requests(key).filter((r) => !r.path.startsWith(mainLinePath(key))), key).toEqual([]);
+      expect(requests(key).filter((r) => r.path.startsWith(mainLinePath(key))).length, key).toBeGreaterThan(0);
     }
+    expect(requests('ledger').filter((r) => !r.path.startsWith(mainLinePath('ledger')))).toEqual([]);
+    const elsewhere = requests('conversations').filter((r) => !r.path.startsWith(mainLinePath('conversations')));
+    expect(elsewhere.filter((r) => !r.path.startsWith(`/api/owner/desks/${encodeURIComponent(RIVERA.emergenciesDeskId)}/conversations`))).toEqual([]);
   });
 
   it('deleting_the_desk_the_copy_started_with_keeps_what_was_seen', async () => {
@@ -2550,13 +2598,13 @@ describe('Things to try ticks off', () => {
     const things = thingsToTry(screen);
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
     await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
-    await expect.element(things.getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
 
     // The owner deletes the main line in its Settings, and lands on Emergencies' Today.
     await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
     const section = screen.getByRole('region', { name: 'Delete this Desk' });
     await section.getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete “Main line” for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     const animated = watchListAnimations();
     // The copy's Desks are read again without the main line: the Desk switcher goes.
@@ -2569,7 +2617,7 @@ describe('Things to try ticks off', () => {
       await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
       expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
       await expect.element(thingRow(screen, 'Create your own Desk').getByText('Done. Your new Desk is live.', { exact: true })).toBeVisible();
-      await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+      await expect.element(thingsToTry(screen).getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     };
     await expectWhatWasSeen();
     // And nothing more is read from the Desk that's gone.
@@ -2760,6 +2808,28 @@ interface ListFrame {
   below: number;
 }
 
+/**
+ * A rule long enough that "Answer a held request" takes three lines on a phone, more than the room
+ * the row keeps for the longest line it can end on.
+ */
+const LONG_RULE = 'Quotes from your price list, at list price, with no discount unless you agree to it first.';
+
+/**
+ * Needs you names `LONG_RULE` for each held request, as it would for an owner's "Ask me first" rule
+ * worded that long. Every read is the mock's own, so an answered request leaves it as before.
+ */
+function holdUnderALongRule(): void {
+  worker.use(
+    http.get(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId), async () => {
+      const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+      if ('network' in answer) return HttpResponse.error();
+      if (answer.status !== 200) return HttpResponse.json(answer.body as JsonBodyType, { status: answer.status });
+      const items = (answer.body as NeedsYouItem[]).map((item) => (item.decision ? { ...item, held_by: LONG_RULE } : item));
+      return HttpResponse.json(items as JsonBodyType, { status: 200 });
+    }),
+  );
+}
+
 /** A move this small (in px) can't show whether it eased: it fits in a frame or two whatever the curve. */
 const TOO_SMALL_TO_EASE = 4;
 
@@ -2811,7 +2881,10 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, 
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
-  if (keepsHeight || cardsShareTheirRow()) {
+  // A phone row with its end line's room reserved, or a card whose row keeps its height (another
+  // card in it is as tall), moves nothing.
+  // Three across, a second Desk's "Answer a held request" is the tallest in its row, so what follows still glides up (second_desk tests).
+  if (keepsHeight || (cardsShareTheirRow() && Math.abs(to - from) < 0.5)) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
     return;

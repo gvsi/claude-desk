@@ -10,6 +10,15 @@ notification defaults. The alert is read only from the owner's Demo inbox, so th
 stays empty. An optional untrusted note is saved separately as an owner-only knowledge fact,
 quoted in the owner's alert, and never returned with the session's booking fact.
 
+A booking needs a name and a way to reach the person (#740), so the owner can fulfil it: the
+session is verified (its person's contact is on record), or it saved a lead with a name and a phone
+number or email (`native.capture_lead`), or the call passes `name` and `contact` itself. Anything
+less, or a `contact` that is no phone number or email, is refused at step 1 (`contact_needed`),
+whose status line tells Claude to ask for them and book again. The call's `name`, `contact` and
+`address` are untrusted text, like the note: checked for canaries, kept out of the result, saved
+only in the owner-only note fact and quoted in the owner's alert, which says when the contact the
+call passed isn't verified.
+
 A booking also closes the session's open handoffs the handoff card opened, in its own
 transaction, as the owner taking the conversation over does (`sessions.close_card_handoffs`, the
 owner's decision of 2026-11-01): the visitor has what they asked for done, so the owner's Needs you
@@ -33,7 +42,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from desk.contracts import SLOT_ID_PATTERN, Claim, Fact, Label, NormalizedAction, Principal, ResourceRef, ToolProfile
-from desk.db.models import Booking, CalendarSlot, Person
+from desk.db.models import Booking, CalendarSlot, Lead, Person
 from desk.db.models import Fact as FactRow
 from desk.kernel_service import demo_inbox, labels, render, sessions
 from desk.kernel_service.adapters import register
@@ -44,16 +53,31 @@ from desk.kernel_service.repo import KernelCtx, new_id
 ONE_BOOKING_PER_SLOT = "bookings_one_confirmed_per_slot"    # the database's unique index on confirmed bookings
 
 
+NAME_CHARS = 80                           # as a saved lead's name
+CONTACT_CHARS = 120                       # as a contact on record
+LEAD_CONTACT = " · "                      # a lead's note ends with the contact it was given (`capture_lead.lead_note`)
+# Said once, in the native tool's description and in each typed booking's.
+NEEDS_CONTACT = (
+    "It needs the visitor's name and a phone number or email, passed as name and contact, unless the visitor is "
+    "verified or they were saved with capture_lead in this conversation; it's refused without them.")
+
+
 class BookArgs(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     slot_id: str = Field(pattern=SLOT_ID_PATTERN)
     note: str | None = Field(None, max_length=QUOTED_CHARS, description='Optional details for the owner only.')
+    name: str | None = Field(None, max_length=NAME_CHARS,
+                             description="The visitor's name, as they gave it. For the owner only.")
+    contact: str | None = Field(None, max_length=CONTACT_CHARS,
+                                description="A phone number or email the visitor gave. For the owner only.")
+    address: str | None = Field(None, max_length=QUOTED_CHARS,
+                                description="Where the visit is, when it's at the visitor's place. For the owner only.")
 
-    @field_validator('note')
+    @field_validator('note', 'name', 'contact', 'address')
     @classmethod
-    def blank_owner_note(cls, note: str | None) -> str | None:
-        return note if note and note.strip() else None
+    def blank_owner_text(cls, text: str | None) -> str | None:
+        return text if text and text.strip() else None
 
 
 PROFILE = ToolProfile(
@@ -61,8 +85,39 @@ PROFILE = ToolProfile(
     adapter="desk.kernel_service.adapters.book", resource_kind="slot",
     description_confirmed=(
         "Books one open appointment time by the slot_id that find_slots gave. The time comes from the "
-        "business's records and the visitor sees the confirmed booking in a card, never in your own words."),
+        "business's records and the visitor sees the confirmed booking in a card, never in your own words. "
+        + NEEDS_CONTACT),
     input_schema=BookArgs.model_json_schema(), status="enabled")
+
+
+def reachable(contact: str) -> bool:
+    """A phone number of 7 to 15 digits or an email address, as a contact on record must be."""
+    from desk.kernel_service.desks import valid_contact    # desks imports the adapters
+    return valid_contact(contact)
+
+
+async def saved_lead(ctx: KernelCtx, principal: Principal) -> bool:
+    """Whether the session saved a lead with a name and a phone number or email."""
+    leads = (await ctx.db.execute(ctx.repo.scoped(select(Lead.display_name, Lead.note).where(
+        Lead.desk_id == principal.desk_id, Lead.session_id == principal.session_id)))).all()
+    return any(name and name.strip() and note and reachable(note.rsplit(LEAD_CONTACT, 1)[-1])
+               for name, note in leads)
+
+
+async def can_reach(ctx: KernelCtx, principal: Principal, args: BookArgs) -> bool:
+    """A booking's name and way to reach the person: the session's verified person, the call's own
+    `name` and `contact`, or a lead the session saved. A `contact` that is no phone number or email
+    never counts."""
+    if args.contact is not None and not reachable(args.contact):
+        return False
+    if principal.person_id is not None or (args.name is not None and args.contact is not None):
+        return True
+    return await saved_lead(ctx, principal)
+
+
+def owner_details(args: BookArgs) -> tuple[str, ...]:
+    """The call's untrusted text for the owner, in the order the alert quotes it."""
+    return tuple(text for text in (args.name, args.contact, args.address, args.note) if text)
 
 
 async def find_slot(ctx: KernelCtx, desk_id: str, slot_id: str, *, lock: bool = False) -> CalendarSlot | None:
@@ -125,7 +180,7 @@ def model_view(fact_id: str, booking_id: str) -> dict[str, Any]:
 class BookAdapter:
     profile = PROFILE
     Args = BookArgs
-    free_text_fields = frozenset({"note"})
+    free_text_fields = frozenset({"note", "name", "contact", "address"})
     model_view_keys = frozenset({"fact_id", "booking_id", "status"})
     releases_private_data = False         # the booking the session made, labelled for the session too
     locks_session = True                  # it closes the session's card handoffs: the session row FOR UPDATE in T2
@@ -135,11 +190,14 @@ class BookAdapter:
         return None
 
     async def normalize(self, nctx: NormalizeCtx, args: BookArgs) -> Normalized:
-        if args.note and labels.find_canaries(args.note, await labels.copy_canaries(nctx.ctx)):
+        texts = owner_details(args)
+        if texts and labels.find_canaries(" ".join(texts), await labels.copy_canaries(nctx.ctx)):
             raise AdapterRefusal("note_canary")
         slot = await find_slot(nctx.ctx, nctx.desk_row.desk_id, args.slot_id)
         if slot is None or slot.starts_at <= nctx.ctx.clock.now():
             raise AdapterRefusal("no_such_slot")
+        if not await can_reach(nctx.ctx, nctx.principal, args):
+            raise AdapterRefusal("contact_needed")
         return Normalized(resource=ResourceRef(kind="slot", id=slot.slot_id, owner_person_id=None),
                           starts_at=slot.starts_at)
 
@@ -169,19 +227,24 @@ class BookAdapter:
                                 Claim(key="appointment_minutes", kind="text", value=str(minutes))])
         ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, fact, now, session_id=xctx.session_row.session_id,
                                    action_id=action.action_id))
-        if args.note:
+        texts = owner_details(args)
+        if texts:
+            given = [(key, getattr(args, key)) for key in ("name", "contact", "address", "note") if getattr(args, key)]
             note = Fact(fact_id=f"booking_note:{booking.booking_id}", kind="knowledge", status="committed",
                         source="kernel", claims=[Claim(key="booking", kind="ref", value=booking.booking_id),
-                                                  Claim(key="note", kind="text", value=args.note)],
+                                                  *(Claim(key=key, kind="text", value=text) for key, text in given)],
                         label=Label(readers=["owner"]))
             ctx.db.add(labels.fact_row(action.copy_id, action.desk_id, note, now,
                                        session_id=xctx.session_row.session_id, action_id=action.action_id))
         await ctx.db.flush()
         who = await _who(ctx, xctx.principal, label.record_owner)
         booked_type = f"{quoted(appointment[0])} " if appointment is not None else ""
-        note_text = f" {claudes_note((args.note,))}" if args.note else ""
-        await demo_inbox.alert_owner(ctx, action.desk_id, "booking", render.owner_preview("booking"),
-                                     f"{who} booked {booked_type}{owner_when(slot.starts_at, slot.minutes, tz)}.{note_text}")
+        note_text = f" {claudes_note(texts)}" if texts else ""
+        # a contact the call passed is only what Claude wrote: a verified person's is the one on record
+        unverified = ". The contact isn't verified." if args.contact and label.record_owner is None else ""
+        await demo_inbox.alert_owner(
+            ctx, action.desk_id, "booking", render.owner_preview("booking"),
+            f"{who} booked {booked_type}{owner_when(slot.starts_at, slot.minutes, tz)}.{note_text}{unverified}")
         await sessions.ledger_card_handoffs_closed(ctx, xctx.session_row, closed, "booking")
         return AdapterResult(facts=[fact], model_view=model_view(fact.fact_id, booking.booking_id))
 

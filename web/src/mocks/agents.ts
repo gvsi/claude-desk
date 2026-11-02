@@ -18,20 +18,33 @@ export const MOCK_PUBLIC_ORIGIN = 'https://desk.example';
 
 /**
  * What agents can do at Turner's Desk, as the kernel renders the Agent Card's blocks (kernel plan
- * 01c): prose, by plain label and without amounts.
+ * 01c): one prose block for each tool an agent may be given there, by its plain label, with no
+ * amount and nothing about the protocol, which `agentCardOut` carries.
  */
 export const AGENT_CARD_BLOCKS: Readonly<Record<Language, readonly RenderedBlock[]>> = {
   en: [
     proseBlock('Get a quote from the price list'),
-    proseBlock('Find open times and book a visit'),
-    proseBlock('Pay the service call deposit within a signed limit'),
-    proseBlock('Ask Mike for a callback'),
+    proseBlock('Find open times'),
+    proseBlock('Book a visit'),
+    proseBlock('Get a payment link for a quote'),
+    proseBlock('Pay for a quote within the limit of a signed mandate'),
+    proseBlock('Leave contact details'),
+    proseBlock('Ask for a callback'),
+    proseBlock('Verify a customer with a code sent to their contact on record'),
+    proseBlock("Receive a verified customer's own documents"),
+    proseBlock("List a verified customer's own charges"),
   ],
   es: [
-    proseBlock('Pedir un presupuesto con la lista de precios'),
-    proseBlock('Ver horarios libres y reservar una visita'),
-    proseBlock('Pagar el depósito de la visita dentro de un límite firmado'),
-    proseBlock('Pedir que Mike devuelva la llamada'),
+    proseBlock('Pedir una cotización de la lista de precios'),
+    proseBlock('Buscar horarios libres'),
+    proseBlock('Reservar una visita'),
+    proseBlock('Pedir un enlace de pago para una cotización'),
+    proseBlock('Pagar una cotización dentro del límite de un mandato firmado'),
+    proseBlock('Dejar datos de contacto'),
+    proseBlock('Pedir que te devuelvan la llamada'),
+    proseBlock('Verificar a un cliente con un código enviado a su contacto registrado'),
+    proseBlock('Recibir los documentos propios de un cliente verificado'),
+    proseBlock('Ver los cargos propios de un cliente verificado'),
   ],
 };
 
@@ -79,7 +92,7 @@ export function agentCardOut(slug: string): AgentCardOut {
 export const AGENT_NAME = rivera.conversations.alexAgent.name;
 
 /** The built-in agent's tasks, as the API names them (plan 02b's `DEMO_TASKS`). */
-export const DEMO_AGENT_TASKS = ['book_visit', 'quote_and_deposit', 'push_the_limit'] as const;
+export const DEMO_AGENT_TASKS = ['book_visit', 'ask_question', 'quote_and_deposit', 'push_the_limit'] as const;
 
 export type DemoAgentTask = (typeof DEMO_AGENT_TASKS)[number];
 
@@ -141,7 +154,7 @@ const AGENT_DECISIONS = {
  */
 interface Exchange {
   request: string;
-  decision: DecisionSpec;
+  decision?: DecisionSpec;
   reply: readonly RenderedBlock[];
 }
 
@@ -186,6 +199,11 @@ function exchangesFor(task: DemoAgentTask): Exchange[] {
           reply: [blocks.prose.details.en, blocks.booking_confirmed.en],
         },
       ];
+    case 'ask_question':
+      return [{
+        request: 'Do you flush water heaters, for Alex Kim?',
+        reply: [proseBlock('Yes, we do water heater flushes.')],
+      }];
     case 'quote_and_deposit':
       return fixtureExchanges();
     case 'push_the_limit':
@@ -226,8 +244,8 @@ function turnsFor(world: MockWorld, desk: DeskRecord, agent: SessionRecord, task
     },
     (n) => {
       const ctx = world.context(agent, 'en', exchange.request);
-      const allowed = desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
-      const receipts = allowed ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
+      const allowed = exchange.decision === undefined || desk.summary.answering || TOOLS_WHILE_NOT_ANSWERING.has(exchange.decision.tool);
+      const receipts = allowed && exchange.decision !== undefined ? [ctx.status('receipt', ctx.decide(exchange.decision))] : [];
       for (const receipt of receipts) world.emit(agent, receipt);
       const reply = ctx.reply((allowed ? exchange.reply : [handoffBlock('en', ctx.owner)]).map(copyBlock));
       world.emit(agent, reply);

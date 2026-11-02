@@ -253,6 +253,8 @@ export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './comp
 export { ToolTitleList, type ToolTitles } from './components/RuleRow/ToolTitles.tsx';
 export { RuleSentence, type RuleMeta, type RuleSentenceProps, type SentencePart } from './components/RuleSentence/RuleSentence.tsx';
 export { EffectTags, effectTags, type EffectTagsProps } from './components/EffectTags/EffectTags.tsx';
+export { AdvancedDetails, DetailsSlot, type AdvancedDetailsProps, type DetailsCode, type DetailsField } from './components/AdvancedDetails/AdvancedDetails.tsx';
+export { jsonText } from './components/AdvancedDetails/detailsJson.ts';
 export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';
 export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
@@ -264,7 +266,7 @@ export {
   type ConnectorSectionProps,
   type ToolSummaryView,
 } from './components/ConnectorSection/ConnectorSection.tsx';
-export { describeEffects } from './components/ConnectorSection/describeEffects.ts';
+export { describeEffects, effectPhrases } from './components/ConnectorSection/describeEffects.ts';
 export { ConnectorList, type ConnectorListProps } from './components/ConnectorList/ConnectorList.tsx';
 export {
   ConnectorDirectory,
@@ -281,7 +283,7 @@ export {
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
-export { AskClaudePanel, useAskClaudeIsSheet, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
+export { ASK_CLAUDE_PLACEHOLDER, AskClaudePanel, useAskClaudeIsSheet, type AskClaudePanelProps } from './components/AskClaudePanel/AskClaudePanel.tsx';
 export { clickedControl } from './components/AskClaudePanel/clickedControl.ts';
 
 // The preset menu and the payment limit
@@ -342,3 +344,4 @@ export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from '
 export { SidebarSkeleton } from './components/Sidebar/SidebarSkeleton.tsx';
 export { ReviewerBarSkeleton } from './components/ReviewerBar/ReviewerBarSkeleton.tsx';
 export { PageHeaderSkeleton, type PageHeaderSkeletonProps } from './components/PageHeader/PageHeaderSkeleton.tsx';
+export { LandedGlow, UpdatedPill } from './components/ConnectorSection/Landing.tsx';

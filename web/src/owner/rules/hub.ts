@@ -9,6 +9,7 @@ import { MONEY_EFFECTS, type PolicyVersion, type RuleCard, type ToolName } from 
 import type { AnyToolName, NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   describeEffects,
+  reviewChanges,
   ruleWordsLine,
   rulesForTool,
   type ConnectorView,
@@ -233,12 +234,18 @@ export function hubSections(view: RulesView, people: PeopleOut | null | undefine
   });
 }
 
-/** The rows on Rules a confirmed change changed: its tools' rows, and the payment limit's line. */
+/** The rows on Rules a confirmed change changed: its tools, its cards, what it removed, and the payment limit. */
 export interface ChangedRows {
   /** The tools whose rules the change changed, or which it turned on, in the order of `tools`. */
   tools: AnyToolName[];
-  /** It changed the payment limit, whose line leads Payments and Stripe. */
+  /** It changed the payment limit. */
   moneyLimit: boolean;
+  /** The cards whose rules it changed or added, by id: their rows land. Absent from an older caller, which lands by tool. */
+  cards?: string[];
+  /** It removed a rule, so what that rule covered now asks first, by default. */
+  fallback?: boolean;
+  /** The tools it turned on: every rule on them lands, since each now applies. */
+  turnedOn?: AnyToolName[];
 }
 
 /**
@@ -249,7 +256,15 @@ export interface ChangedRows {
  * replaces with one that differs only in its id changes no row.
  */
 export function rowsChangedBy(draft: RuleDraft, tools: readonly Pick<ToolRow, 'tool' | 'effects' | 'source' | 'business'>[]): ChangedRows {
-  return { tools: reviewedTools(draft, tools), moneyLimit: draft.moneyCap !== null };
+  const catalog = [...tools, ...draft.turnedOn];
+  const changes = reviewChanges(draft.before, draft.after, (tool) => catalog.find((row) => row.tool === tool)?.effects ?? []);
+  return {
+    tools: reviewedTools(draft, tools),
+    moneyLimit: draft.moneyCap !== null,
+    cards: [...new Set(changes.flatMap(({ after }) => (after === null ? [] : [after.card_id])))],
+    fallback: changes.some(({ after }) => after === null),
+    turnedOn: draft.turnedOn.map((row) => row.tool),
+  };
 }
 
 /** The payment limit's field, when it holds anything but whole dollars. */

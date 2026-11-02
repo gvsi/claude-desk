@@ -33,7 +33,7 @@ The plan runner for this repo. Adapted from obra/superpowers 6.4.1 (MIT, `LICENS
 1. Open the ledger, or create it with first line `# Ledger — plan: docs/plans/<file>`. After compaction, trust the ledger and `git log` over your memory.
 2. Ledger `Plan BASE <sha>` (the `origin/main` commit the worktree started from) before Task 1.
 3. **Resume** task by task. `Task <N>: complete` or `set aside` → skip. `Task <N>: start` with no later line → commits in `<BASE>..HEAD` go straight to review; none → re-dispatch the implementer. Last line is a fix round → continue at the next round with the recorded BASE. Never re-record BASE for a started task.
-4. Read the plan, the master plan sections it consumes, the spec and `.local/constitution.md` (when it exists) once. One todo per task. Note tasks that share a file or interface, and rule on any conflict before Task 1.
+4. Read the plan, the master plan sections it consumes and the spec once. One todo per task. Note tasks that share a file or interface, and rule on any conflict before Task 1.
 
 ## The task loop
 

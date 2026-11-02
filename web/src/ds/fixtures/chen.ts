@@ -174,7 +174,7 @@ const connectorViews = {
     id: 'leads',
     name: 'Leads and callbacks',
     icon: 'leads',
-    description: "Saves visitors' details and asks you to call back.",
+    description: "Saves visitors’ details and asks you to call back.",
     source: { kind: 'built_in' },
   },
   verification: {
@@ -188,7 +188,7 @@ const connectorViews = {
     id: 'documents',
     name: 'Documents',
     icon: 'documents',
-    description: "Sends clients their own documents after they confirm it's them.",
+    description: "Sends clients their own documents after they confirm it’s them.",
     source: { kind: 'built_in' },
   },
   /** Not on Chen & Co.'s Desk yet: the built-in connector Linda adds in the add-a-connector example. */
@@ -226,7 +226,7 @@ const hubSections = [
       {
         key: 'native.find_slots',
         name: 'Find open times',
-        description: "Reads the times you're free. Changes nothing.",
+        description: "Reads the times you’re free. Changes nothing.",
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
@@ -250,7 +250,7 @@ const hubSections = [
       {
         key: 'native.capture_lead',
         name: 'Save a lead',
-        description: "Keeps a visitor's details for you. Can be undone.",
+        description: "Keeps a visitor’s details for you. Can be undone.",
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
@@ -273,7 +273,7 @@ const hubSections = [
     tools: [
       {
         key: 'native.start_verification',
-        name: "Confirm it's them",
+        name: "Confirm it’s them",
         description: 'Sends a code to the contact on record.',
         summary: 'Always on',
         mode: 'auto',
@@ -364,7 +364,7 @@ const paymentsReview = {
     {
       key: 'native.charge_mandate',
       name: 'Charge within a signed limit',
-      description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
+      description: "Lets a visiting agent pay from its owner’s signed limit. Charges money. Can't be undone.",
       mode: 'ask',
       coveredBy: [noMoneyWithoutARule],
     },
@@ -520,16 +520,19 @@ const entries = [
     body: "Your Chen & Co. CPA code is 482913. It expires in ten minutes. If you didn't ask for it, ignore this message.",
     created_at: '2026-10-30T21:14:02.551870Z',
     decision_id: null,
+    title: null,
   },
   {
     // The held consultation's alert: the decision's reason_plain and its id, as the kernel pairs
-    // them, written when the hold was made, 24 hours before it expires.
+    // them, written when the hold was made, 24 hours before it expires, and titled with the
+    // alert's preview line, as the owner reads it.
     entry_id: 'inbox-hold-consultation',
     to: 'owner',
     kind: 'alert',
     body: heldConsultation.reason_plain,
     created_at: '2026-10-30T18:12:09.774120Z',
     decision_id: heldConsultation.decision_id,
+    title: 'A request needs your answer',
   },
   {
     entry_id: 'inbox-checkpoint-chen',
@@ -544,6 +547,7 @@ const entries = [
     }),
     created_at: '2026-10-30T16:30:00.004211Z',
     decision_id: null,
+    title: null,
   },
 ] satisfies DemoInboxEntry[];
 

@@ -24,6 +24,7 @@ import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
 import { useTodayNow } from './todayClock.ts';
 import { skeletonSetupOf, TodaySkeleton } from './TodaySkeleton.tsx';
+import { useReadRecoveryFocus } from './useReadRecoveryFocus.ts';
 
 import './Today.css';
 
@@ -144,6 +145,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const needsYouSection = useRef<HTMLElement>(null);
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
+  const needsYouRetryRef = useReadRecoveryFocus(() =>
+    (needsYouSection.current ?? liveNow.current ?? sinceLastNight.current)?.querySelector<HTMLElement>('h2') ?? null,
+  );
   const [returning] = useState(() => briefingOpener?.deskId === deskId && briefingOpener.key === location.key ? briefingOpener : null);
   // This return spends the hash landing for the entry that opened the briefing.
   // Fresh hash entries and returns from other pages still land as usual.
@@ -314,6 +318,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                 registerCard={registerCard}
                 answeredFocus={answeredFocus}
                 readFailure={readFailure}
+                retryRef={needsYouRetryRef}
                 sectionRef={needsYouSection}
                 onDismiss={dismissAnswer}
                 onDone={callbackDone}
