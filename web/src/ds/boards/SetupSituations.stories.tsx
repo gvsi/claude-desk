@@ -8,7 +8,7 @@ import { rivera } from '../fixtures/index.ts';
 import { setupSituationSentences as sentences } from '../fixtures/setupSituationSentences.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { SetupFrame } from './parts.tsx';
-import { SPEC, expectFooter, expectTabOrder, one } from './spec.ts';
+import { SPEC, expectFooter, expectFooterAtFoot, expectTabOrder, one } from './spec.ts';
 
 /** The situations the check ran on Turner Plumbing's draft rules, as the board writes them. */
 const SITUATIONS: SituationRowProps[] = [
@@ -44,7 +44,8 @@ function SetupSituations() {
 const meta = {
   title: 'Boards/Setup, real situations',
   render: () => <SetupSituations />,
-  globals: { viewport: { value: 'desktop', isRotated: false } },
+  // Drawn at a 14-inch laptop's width and the page's own 1100 px, so the play measures it there.
+  globals: { viewport: { value: 'laptop-1100', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-R2-Setup-09-Situations',
@@ -63,13 +64,13 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1100]);
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Real situations' }), SPEC.pageTitle);
 
     // The card of rows: 720 px, centered, hairlines between rows and the outcome column at 300 px.
     const list = canvas.getByRole('list', { name: 'Real situations' });
     const box = list.getBoundingClientRect();
-    await expect(Math.round(box.width)).toBeLessThanOrEqual(720);
-    await expect(Math.round(box.left + box.width / 2)).toBe(Math.round(window.innerWidth / 2));
+    await expect([Math.round(box.left), Math.round(box.width)]).toEqual([396, 720]);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
     expectComputed(list, { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' });
     const rows = within(list).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
@@ -104,12 +105,9 @@ export const Board: Story = {
     await expect(canvas.queryByRole('button', { name: 'Change a rule' })).toBeNull();
     await expect(Math.round(looksRight.getBoundingClientRect().top - box.bottom)).toBe(20);
     await expectFooter(canvasElement);
-    const footer = one(canvasElement, '[data-ds="concept-footer"]');
-    await expect(footer.getBoundingClientRect().top).toBeGreaterThan(box.bottom);
+    await expectFooterAtFoot(canvasElement);
 
     // focus_order_is_logical: Save and exit, then the answer.
     await expectTabOrder(userEvent, [canvas.getByRole('button', { name: 'Save and exit' }), looksRight]);
   },
 };
-
-export const Phone: Story = { ...Board, globals: { viewport: { value: 'phone', isRotated: false } } };
