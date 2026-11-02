@@ -50,6 +50,7 @@ export {
   type SkeletonProps,
   type SkeletonText,
 } from './components/Skeleton/Skeleton.tsx';
+export { useControlWidth } from './components/Skeleton/useControlWidth.ts';
 export { SKELETON_DELAY_MS, SkeletonScreen, type SkeletonScreenProps } from './components/Skeleton/SkeletonScreen.tsx';
 
 // Controls
@@ -161,6 +162,7 @@ export {
   type DemoInboxPanelProps,
 } from './components/DemoInboxPanel/DemoInboxPanel.tsx';
 export { DemoInboxSheet, type DemoInboxSheetProps } from './components/DemoInboxSheet/DemoInboxSheet.tsx';
+export { INBOX_COPY, type InboxCopy } from './components/DemoInboxPanel/inboxCopy.ts';
 
 // Setup
 export { SituationRow, type SituationRowProps } from './components/SituationRow/SituationRow.tsx';

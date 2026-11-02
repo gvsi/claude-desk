@@ -1891,6 +1891,16 @@ function interviewForDesk(world: MockWorld, deskId: string): Interview | undefin
   return [...interviewsOf(world).values()].find((interview) => interview.state.desk_id === deskId);
 }
 
+/**
+ * The jobs the owner turned down on their current card ("Not now", or a typed no), read from the interview
+ * whatever a request shows of its cards. Setup's own decline of a payment left without an amount isn't theirs.
+ */
+export function setupDeclinedJobs(world: MockWorld, interviewId: string): Set<JobProposal['job']> {
+  const messages = interviewsOf(world).get(interviewId)?.state.messages ?? [];
+  return new Set(messages.flatMap(({ card, owner_decided }) =>
+    card?.job && owner_decided === true && card.superseded_by === null && card.state === 'declined' ? [card.job.job] : []));
+}
+
 /** The unreviewed About for the owner's draft, kept even when the public scan refuses it. */
 export function setupAbout(world: MockWorld, desk: DeskRecord): string | null {
   return interviewForDesk(world, desk.summary.desk_id)?.about ?? null;

@@ -93,6 +93,7 @@ it.each([
   ['globe', 3, 'M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'],
   ['list', 6, 'M3 12h.01'],
   ['note', 2, 'M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z'],
+  ['bell', 2, 'M10.268 21a2 2 0 0 0 3.464 0'],
 ] as const)('source_and_sidebar_icon_%s_uses_lucides_grid_and_stroke', (name, shapes, firstPath) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement('div');

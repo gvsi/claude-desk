@@ -120,8 +120,10 @@ export function useEndInView(): EndInView {
     const scroller = scrollerOf(region);
     atTheEnd.current = false;
     ends.current.set(scroller, endOf(scroller));
+    // It stops where the scroller's padding and its own margin say, clear of the bar pinned there.
     const padding = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
-    scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientTop - padding;
+    const margin = Number.parseFloat(getComputedStyle(element).scrollMarginTop) || 0;
+    scroller.scrollTop += element.getBoundingClientRect().top - scroller.getBoundingClientRect().top - scroller.clientTop - padding - margin;
   }, [region]);
 
   return { ref: setRegion, follow, ready: region !== null, reveal };
