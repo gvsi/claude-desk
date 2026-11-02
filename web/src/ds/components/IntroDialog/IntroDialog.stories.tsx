@@ -247,6 +247,7 @@ const meta = {
       'You’re Mike Turner today, owner of Turner Plumbing. His Desk answers customers and their agents under his rules. Try it, then try to break it.',
     thingsToTry: [
       { title: 'Chat as a customer', detail: 'Turner’s public page opens in a new tab.', icon: 'person' },
+      { title: 'Watch a demo visitor', detail: 'An AI plays a customer on your Desk.', icon: 'agent' },
       { title: 'Try to break it', detail: 'Ask for a discount or someone else’s details.', icon: 'safety' },
       { title: 'Answer a held request', detail: 'One is waiting for you on Today.', icon: 'check' },
       { title: 'Create your own Desk', detail: 'It gets a live link you can share.', icon: 'plus' },
@@ -259,7 +260,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Intro-D',
     canvasNote:
-      'N-Intro-D draws the reply card’s mark at 18 px inside a dark 32 px tile; the owner dropped that frame on 2026-10-30, so the mark stands alone at 32 px, with no tile, in its dark ink (N-Explore-Mark-Decided), and the brand’s mark has no tile. The board’s brand row ends in a “Demo” pill; the owner replaced it on 2026-10-30 with the Wordmark’s “Preview” badge, the sidebar lockup’s one label.',
+      'N-Intro-D draws the reply card’s mark at 18 px inside a dark 32 px tile; the owner dropped that frame on 2026-10-30, so the mark stands alone at 32 px, with no tile, in its dark ink (N-Explore-Mark-Decided), and the brand’s mark has no tile. The board’s brand row ends in a “Demo” pill; the owner replaced it on 2026-10-30 with the Wordmark’s “Preview” badge, the sidebar lockup’s one label. It lists five things to try, “Watch a demo visitor” second as on Today, where N-Intro-D lists four (owner, 2026-11-02; canvas #artboard-86459332202f at 1512, #artboard-7ff46ba2f288 at 390).',
   },
 } satisfies Meta<typeof IntroDialog>;
 
@@ -349,7 +350,7 @@ export const Default: Story = {
     expectComputed(title, { fontFamily: /Source Serif 4/, fontSize: '28px', lineHeight: '35px', fontWeight: '460' });
     expectComputed(title, { letterSpacing: '-0.2px', textWrapStyle: 'balance' });
 
-    // things_to_try_in_order: four items under their heading, each title with its detail.
+    // things_to_try_in_order: five items under their heading, each title with its detail.
     await expect(within(dialog).getByRole('heading', { level: 3, name: 'Things to try' })).toBeVisible();
     // list_role_survives_unstyled_markers: Safari announces the list only with role="list".
     await expect(within(dialog).getByRole('list')).toHaveAttribute('role', 'list');
