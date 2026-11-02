@@ -450,11 +450,29 @@ describe('Today', () => {
     const cards = needs.getByRole('article').elements().map((a) => a.getAttribute('aria-label'));
     expect(cards).toEqual([`Held for you: ${SEEDED_REASON}`, 'Held for you: A visitor asked to book Sunday at 10:00 pm.']);
     await expect
-      .element(things.getByText(`A request is waiting for your answer. Held by your rule: ${SEEDED_RULE}`, { exact: true }))
+      .element(things.getByText(`A request is waiting for your answer: ${SEEDED_RULE}`, { exact: true }))
       .toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
     await things.getByRole('button', { name: 'Open the request' }).click();
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+  });
+
+  it('held_row_quotes_its_rule_after_a_colon_with_one_full_stop', async () => {
+    // "Answer a held request" names the rule after a colon, as the owner's words, and adds a full
+    // stop only when the rule has none. A hold with no rule keeps the plain line.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const heldBy = (rule: string | null) => () => mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [{ ...seeded, held_by: rule }] });
+
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy('Quotes at list price') });
+    const line = region(screen, 'Things to try').getByText('A request is waiting for your answer: Quotes at list price.', { exact: true });
+    await expect.element(line).toBeVisible();
+    expect([...line.element().querySelectorAll('[data-copy="user"]')].map((span) => span.textContent)).toEqual(['Quotes at list price']);
+
+    const { screen: none } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy(null) });
+    const plain = region(none, 'Things to try').getByText('A request is waiting for your answer.', { exact: true });
+    await expect.element(plain).toBeVisible();
+    expect(plain.element().querySelector('[data-copy="user"]')).toBeNull();
   });
 
   it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
@@ -3072,7 +3090,7 @@ describe("Today's top band", () => {
     // Once something is held, the same card in the same place shows the dot and its next step.
     await visitorSays('Can I get 50% off if I pay cash?');
     await expect
-      .element(things.getByText('A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.', { exact: true }), { timeout: 3_000 })
+      .element(things.getByText('A request is waiting for your answer: Quotes from your price list, at list price.', { exact: true }), { timeout: 3_000 })
       .toBeVisible();
     expect(titles()).toEqual(['Chat as a customer', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
     expect(row().querySelector('.cd-status-dot--held')).not.toBeNull();

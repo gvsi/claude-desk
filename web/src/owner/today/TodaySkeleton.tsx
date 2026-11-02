@@ -31,8 +31,8 @@ const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control
 // A different Desk's names, request, rule or recorded activity may land with one accepted move.
 const DETAILS = [
   TODAY_COPY.chatDetail,
-  `${TODAY_COPY.breakBeforeOwner}${rivera.business.ownerName.split(' ')[0]}${TODAY_COPY.breakAfterOwner}`,
-  `${TODAY_COPY.waiting} ${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`,
+  TODAY_COPY.breakDetail,
+  `${TODAY_COPY.waitingFor}${rivera.ruleCards['rv-quote'].reason}`,
   TODAY_COPY.createDetail,
 ] as const;
 

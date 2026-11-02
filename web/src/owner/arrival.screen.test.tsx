@@ -1696,7 +1696,7 @@ describe('Today', () => {
     ]);
     const held = things.getByRole('listitem').nth(2);
     await expect
-      .element(held.getByText('A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.', { exact: true }))
+      .element(held.getByText('A request is waiting for your answer: Quotes from your price list, at list price.', { exact: true }))
       .toBeVisible();
     await expect.element(held.getByRole('button', { name: 'Open the request' })).toBeVisible();
     expect(held.element().querySelector('.cd-status-dot--held')).not.toBeNull();
@@ -2501,8 +2501,8 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
     await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    // Safety lists what was stopped, not every request Claude declines in its own words.
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. The receipt under each reply shows what the checks did.", { exact: true })).toBeVisible();
+    // The detail points at each reply's receipt; Safety lists only what was stopped.
+    await expect.element(row.getByText("Ask for a discount or someone else's details. Each reply's receipt shows the checks.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.
@@ -2751,15 +2751,16 @@ interface ListFrame {
 const TOO_SMALL_TO_EASE = 4;
 
 /**
- * What follows the list held its place while the row's check drew, then moved up one way only, by
- * way of places between (when it moved more than a few px), to where the row's own height puts it:
- * the row keeps no least height at the end.
+ * What follows the list held its place while the row's check drew, then, when the row ends shorter,
+ * moved up one way only, by way of places between (when it moved more than a few px), to where the
+ * row's own height puts it: the row keeps no least height at the end.
  */
 function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): void {
   const from = frames[0]?.below ?? 0;
   const to = frames.at(-1)?.below ?? 0;
-  // A card whose row keeps its height (its open ideas didn't make it the tallest) moves nothing.
-  if (cardsShareTheirRow() && Math.abs(to - from) < 0.5) {
+  // A row that ends as tall as it was moves nothing: a card whose row keeps its height (its open
+  // ideas didn't make it the tallest), or a row whose done line takes as many lines as its detail.
+  if (Math.abs(to - from) < 0.5) {
     expect(frames.some((frame) => frame.checkDrawing), 'the check drew').toBe(true);
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
@@ -2785,8 +2786,8 @@ function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): v
 
 /**
  * A row that settled with a line and no check: it stayed in the list in its slot, what follows held
- * its place as the line came in, then moved up one way only, by way of places between, to where the
- * row's own height puts it.
+ * its place as the line came in, then, when the row ends shorter, moved up one way only, by way of
+ * places between, to where the row's own height puts it.
  */
 function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement): void {
   expect(frames.every((frame) => frame.drawn), 'the row stayed in the list').toBe(true);
@@ -2798,7 +2799,8 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement):
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
-  if (cardsShareTheirRow()) {
+  // Cards side by side keep their row's height; a row whose line takes as many lines as its detail keeps its own.
+  if (cardsShareTheirRow() || Math.abs(to - from) < 0.5) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
     return;

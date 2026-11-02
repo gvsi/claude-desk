@@ -38,7 +38,7 @@ export const Board: Story = {
 
     // The held row says what is waiting with the held item's own rule.
     await expect(
-      canvas.getByText(`A request is waiting for your answer. Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`),
+      canvas.getByText(`A request is waiting for your answer: ${rivera.ruleCards['rv-quote'].reason}`),
     ).toBeVisible();
 
     // The right column is "Last 7 days"; recorded history is named there and at Since last night.
