@@ -1641,3 +1641,16 @@ export const Cancelled: Story = {
     await expectFinal(canvasElement, rivera.decisions.cancelled, 'The visitor cancelled before you answered. Nothing was done.', 'info');
   },
 };
+
+export const CancelledByBooking: Story = {
+  args: { decision: rivera.cancelledByBooking, waiting: 'Web chat, 6 min ago' },
+  parameters: {
+    canvasNote:
+      "No board shows a request a booking closed; the kernel's owner-only line takes the place of 'Waiting for your answer', as on the cancelled card.",
+  },
+  play: async ({ canvasElement }) => {
+    // booking_closed_has_no_answers
+    await expectFinal(canvasElement, rivera.cancelledByBooking, 'The visitor booked before you answered, so this request closed.', 'info');
+    await expect(canvasElement).not.toHaveTextContent('The visitor cancelled before you answered.');
+  },
+};

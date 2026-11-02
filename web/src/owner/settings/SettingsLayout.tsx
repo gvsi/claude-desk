@@ -6,7 +6,6 @@ import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { BillingPage } from './BillingPage.tsx';
 import { GeneralPage } from './GeneralPage.tsx';
-import { KnowledgePage } from './KnowledgePage.tsx';
 import { NotificationsPage } from './NotificationsPage.tsx';
 
 import './Settings.css';
@@ -26,12 +25,10 @@ export interface SettingsSection {
 /**
  * Settings' sections in SubNav's order, the one list SubNav and the `settings/*` routes both read,
  * so a section is added in one place. Connectors have their own tab, so there is no Integrations
- * entry. Each section joins when its page does: Knowledge after General, Channels after
- * Notifications.
+ * entry. Channels joins after Notifications when its page does.
  */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { key: 'general', label: 'General', path: 'general', element: <GeneralPage /> },
-  { key: 'knowledge', label: 'Knowledge', path: 'knowledge', element: <KnowledgePage /> },
   { key: 'notifications', label: 'Notifications', path: 'notifications', element: <NotificationsPage /> },
   // Channels goes here.
   { key: 'billing', label: 'Billing', path: 'billing', element: <BillingPage /> },

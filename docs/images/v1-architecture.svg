@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1040" height="376" viewBox="0 0 1040 376" role="img" aria-labelledby="title desc">
   <title id="title">v1 architecture: Claude proposes; the kernel decides what runs and what is shown</title>
-  <desc id="desc">A visitor or their agent talks to the chat layer, where Claude proposes each action and drafts each reply and holds no business credential. The kernel, its own process holding every business credential, decides each action (runs, owner decides or refused), checks each reply (shown or handed off) and signs a ledger of every decision and check.</desc>
+  <desc id="desc">A visitor or their agent talks to the chat layer, where Claude proposes each action and drafts each reply and holds no business credential. The kernel, its own process holding every business credential, decides each action with Cedar rules from the owner's cards, where a Sonnet review can only narrow (runs, owner decides or refused), checks each reply with prices, dates and discounts only in typed cards, where Sonnet and Jev can only add blocks (shown or handed off), and signs a ledger of every decision and check.</desc>
   <style>
     text { font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: rgba(250,249,245,0.92); }
     .name { font-size: 15px; font-weight: 600; }
     .line { font-size: 12px; fill: rgba(250,249,245,0.64); }
+    .tech { font-weight: 520; fill: rgba(250,249,245,0.92); }
     .kicker { font-size: 12px; font-weight: 600; fill: rgba(250,249,245,0.64); }
     .voice { font-family: "Source Serif 4", Georgia, "Times New Roman", serif; font-size: 17px; }
     .pill { font-size: 13px; }
@@ -35,9 +36,11 @@
   <text class="line" x="994" y="54" text-anchor="end">Its own process; holds every business credential</text>
 
   <rect class="box" x="436" y="74" width="184" height="80" rx="12"/>
-  <text class="name" x="452" y="100">Decide</text>
-  <text class="line" x="452" y="120">Cedar rules compiled from</text>
-  <text class="line" x="452" y="136">the owner’s cards</text>
+  <text class="name" x="452" y="92">Decide</text>
+  <text class="line" x="452" y="110"><tspan class="tech">Cedar</tspan> rules from</text>
+  <text class="line" x="452" y="122">the owner’s cards</text>
+  <text class="line" x="452" y="138">A <tspan class="tech">Sonnet</tspan> review can</text>
+  <text class="line" x="452" y="150">only narrow</text>
   <path class="arrow" d="M630 114h28M653 109l5 5-5 5"/>
   <rect class="pillbox" x="668" y="98" width="80" height="32" rx="16"/>
   <circle cx="684" cy="114" r="4" fill="#6fa859"/>
@@ -50,9 +53,11 @@
   <text class="pill" x="926" y="119">Refused</text>
 
   <rect class="box" x="436" y="170" width="184" height="96" rx="12"/>
-  <text class="name" x="452" y="196">Check reply</text>
-  <text class="line" x="452" y="216">Prices, dates and discounts</text>
-  <text class="line" x="452" y="232">only in typed cards</text>
+  <text class="name" x="452" y="190">Check reply</text>
+  <text class="line" x="452" y="210">Prices, dates and discounts</text>
+  <text class="line" x="452" y="222">only in typed cards</text>
+  <text class="line" x="452" y="242"><tspan class="tech">Sonnet</tspan> and <tspan class="tech">Jev</tspan> can</text>
+  <text class="line" x="452" y="254">only add blocks</text>
   <path class="arrow" d="M630 218h28M653 213l5 5-5 5"/>
   <rect class="pillbox" x="668" y="202" width="88" height="32" rx="16"/>
   <circle cx="684" cy="218" r="4" fill="#6fa859"/>

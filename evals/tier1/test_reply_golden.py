@@ -308,6 +308,13 @@ def offered(caller: Caller, kind: str, language: str = "en") -> Expect:
                           **shown_blocks(OFFERED), "blocks.0.text": OFFER[language]})
 
 
+def status_lined(caller: Caller, kind: str, language: str = "en") -> Expect:
+    """A check failed only for its prose, with no card to keep, while a held request awaits the owner: a `kind`
+    violation, and only the kernel's status line to show, as prose in `language`."""
+    return Expect(fields={"ok": False, "generation": caller.state.generation, "violations.0.kind": kind,
+                          **shown_blocks(OFFERED), "blocks.0.text": STATUS_LINES["check_status"][language]})
+
+
 async def owner_says(k: KernelHarness, desk: GoldenDesk, session: Caller, text: str, *, expect: Expect) -> Any:
     """The owner's say into a session (`POST /owner/messages`, Plan 01b)."""
     return await k.call(
@@ -663,7 +670,7 @@ async def test_visitor_bound_kernel_text_has_no_digits(k: KernelHarness, fake: F
     quote = await make_quote_fact(k, desk, visitor, "drain")
     verdicts = [
         await check_reply(k, visitor, CLEAN_EN, expect=passes(visitor, ["prose"])),
-        await check_reply(k, visitor, NUMBER_PROSE, expect=offered(visitor, "number_in_prose")),
+        await check_reply(k, visitor, NUMBER_PROSE, expect=status_lined(visitor, "number_in_prose")),   # held
         await check_reply(k, visitor, QUOTE_PROSE, [{"template": "quote", "fact_id": quote}],
                           expect=passes(visitor, ["prose", "quote"])),
     ]

@@ -90,7 +90,8 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(screen.getByRole('region', { name: ask, exact: true }).elements()).toHaveLength(0);
     // Nothing spins: the press is answered in the conversation.
     expect(screen.container.querySelector('[aria-busy="true"].cd-button, .cd-button__spinner')).toBeNull();
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeDisabled();
+    // The message box takes typing meanwhile; Send waits for the turn.
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeEnabled();
     expect(log.element().querySelectorAll('.cd-visitor-message')).toHaveLength(1);
     expectNoHorizontalScroll();
     held.release();
@@ -234,5 +235,8 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: false }]);
     await expect.element(box).toHaveValue('Mostly individuals, some small businesses.');
     expect(requests('setupAnswer')).toHaveLength(0);
+    // The owner was typing, so the box kept focus through the turn, and the question docking under
+    // it doesn't take it.
+    await expect.element(box).toHaveFocus();
   });
 });

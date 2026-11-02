@@ -80,7 +80,7 @@ export const AddPayments: Story = {
 
 export const Writing: Story = {
   args: { busy: true, children: <VisitorMessage text={OWNER_WORDS} /> },
-  play: async ({ canvas }) => {
+  play: async ({ args, canvas, userEvent }) => {
     // While Claude writes, three dots show inside the log, with words for screen readers and no draft.
     const log = canvas.getByRole('log');
     const writing = within(log).getByRole('status');
@@ -89,6 +89,14 @@ export const Writing: Story = {
     await expect(writing.querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     await expect(within(writing).getByText('Claude is writing')).toHaveClass('cd-sr-only');
     await expect(within(log).queryByText(CLAUDE_WORDS)).toBeNull();
+    // The composer takes the next question meanwhile, and keeps it: Send and Enter wait for the answer.
+    const box = canvas.getByRole('textbox', { name: 'Ask Claude' });
+    await userEvent.click(box);
+    await userEvent.keyboard('And on holidays?{Enter}');
+    await expect(box).toHaveValue('And on holidays?');
+    await expect(box).toHaveFocus();
+    await expect(canvas.getByRole('button', { name: 'Send' })).toBeDisabled();
+    await expect(args.onSend).not.toHaveBeenCalled();
   },
 };
 

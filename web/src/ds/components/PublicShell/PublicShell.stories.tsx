@@ -223,7 +223,8 @@ export const Rivera: Story = {
     const log = within(main).getByRole('log', { name: 'Conversation with Turner Plumbing' });
     const input = within(main).getByRole('textbox', { name: 'Message Turner Plumbing' });
     await expect(input.getBoundingClientRect().top).toBeGreaterThan(log.getBoundingClientRect().bottom);
-    const footer = within(main).getByText('Concept prototype by Giovanni Alcantara, not an Anthropic product');
+    const footer = main.querySelector('[data-ds="concept-footer"]') as HTMLElement;
+    await expect(footer).toHaveTextContent(/^Concept prototype by Giovanni Alcantara, not an Anthropic product$/);
     await expect(footer.getBoundingClientRect().top).toBeGreaterThan(input.getBoundingClientRect().bottom);
     await expect(within(main).getByText('Claude Desk')).toBeVisible();
 

@@ -30,9 +30,10 @@
   color: var(--text-primary);
 }
 
-/* The conversation scrolls; a little room on every side keeps the focus rings of its cards inside.
-   It is positioned, so a receipt's screen-reader label in it scrolls with it instead of stretching
-   the document. */
+/* The conversation scrolls; a little room on every side keeps the focus rings of its cards inside,
+   and 24 px at its foot is the room a chat leaves under its last message, so scrolled to its end
+   that message sits 24 px above the conversation's foot. It is positioned, so a receipt's
+   screen-reader label in it scrolls with it instead of stretching the document. */
 .cd-ask-claude__log {
   position: relative;
   display: flex;
@@ -41,7 +42,7 @@
   gap: var(--space-16);
   min-height: 0;
   margin: calc(-1 * var(--space-4));
-  padding: var(--space-4);
+  padding: var(--space-4) var(--space-4) var(--space-24);
   overflow-y: auto;
 }
 

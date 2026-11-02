@@ -1,10 +1,10 @@
 # KnowledgeAdd
 
-`KnowledgeAdd` is "Add something" on Settings › Knowledge: a note to type or a file to pick, and once the kernel has stored it, an "Added" card whose switch lets customers see it.
+`KnowledgeAdd` is "Add something" on Knowledge: a note to type or a file to pick, and once the kernel has stored it, an "Added" card whose switch lets customers see it.
 
 ## When to use
 
-- On Settings › Knowledge, under "What I know now" (`KnowledgeList`), as N-Run2-Settings-Knowledge draws it.
+- On Knowledge, under "What Claude knows" (`KnowledgeList`), as N-Run2-Settings-Knowledge draws it.
 - Not for changing an item added before: the list's rows are read only, and only the item just added carries the switch.
 
 ## What the consumer provides
@@ -63,3 +63,5 @@
 | `readers` | `readonly string[]` | Required. The returned `label.readers`; "public" turns the switch on. |
 | `onPublicChange` | `(makePublic: boolean) => void` | Required. The switch was turned. |
 | `note` | `ReactNode` | The screen's line under the switch, in its own words. |
+
+Under the file caption, “A website” holds a local value with the example “turner-plumbing.example/blog”. “Add a website” is a secondary button beside a Mock pill. It is inert and sends no request. The caption explains: “Claude doesn’t read websites you add in this prototype yet.”

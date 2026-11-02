@@ -13,7 +13,7 @@
 import { Fragment, useId } from 'react';
 import { Link } from 'react-router';
 
-import { ConceptFooter } from '../../ds/index.ts';
+import { ConceptFooter, Icon } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { AboutBar } from '../AboutBar.tsx';
 import { readNext } from '../links.ts';
@@ -235,7 +235,10 @@ function PictureCards() {
   );
 }
 
-/** "Read next" at the end: the next page in the About set, its title and summary, the whole card one link. */
+/**
+ * "Read next" at the end: the next page in the About set, its title and summary, the whole card one link, with
+ * the arrow the other About pages' card ends with.
+ */
 function ReadNext() {
   const next = readNext('vision');
   return (
@@ -247,6 +250,7 @@ function ReadNext() {
         {next.title}
       </Link>
       <p className="va-next__summary">{next.summary}</p>
+      <Icon name="arrow-right" className="va-next__arrow" />
     </div>
   );
 }

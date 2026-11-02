@@ -17,3 +17,13 @@ def test_the_kernels_call_back_offer_is_the_apis_signed_offer(language):
     signed = STATUS_LINES["offer_callback"][language]
     assert render.status("offer_callback", language) == signed
     assert reply_check.call_back_offer(language) == RenderedBlock(kind="prose", text=signed)
+
+
+@pytest.mark.parametrize("language", ["en", "es"])
+def test_the_kernels_status_line_is_the_apis_signed_check_status_line(language):
+    """The line a reply blocked only for its prose shows while a held request awaits the owner is the API's signed
+    `STATUS_LINES["check_status"]`, word for word."""
+    signed = STATUS_LINES["check_status"][language]
+    assert set(STATUS_LINES["check_status"]) == set(render.MESSAGES)
+    assert render.status("check_status", language) == signed
+    assert reply_check.status_line(language) == RenderedBlock(kind="prose", text=signed)

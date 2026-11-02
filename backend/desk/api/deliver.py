@@ -53,9 +53,10 @@ AUTHOR_BY_VIA = {"model": "claude", "api": "claude", "owner": "owner", "kernel":
 
 
 def visitor_safe(decision: Decision) -> Decision:
-    """Copy a kernel decision without the owner-only execution refusal reason before a visitor or agent crossing.
+    """Copy a kernel decision without its owner-only line (`owner_plain`: why an execution was refused, or that the
+    visitor's booking closed a held request) before a visitor or agent crossing.
 
-    The signed visitor fields stay unchanged; the owner's original record keeps its reason. Serialized job
+    The signed visitor fields stay unchanged; the owner's original record keeps its line. Serialized job
     arguments must also exclude the cleared `owner_plain` field, so no visitor-side store carries even its key.
     """
     return decision.model_copy(update={"owner_plain": None})

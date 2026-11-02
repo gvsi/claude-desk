@@ -30,7 +30,7 @@
 }
 
 /* On owner screens a line is a button that opens the full trace: no chrome of its own, the line
-   brightens on hover, and the focus ring comes from the base styles. */
+   brightens on hover, and the focus edge comes from the base styles. */
 .cd-margin-line--button {
   width: 100%;
   padding: 0;

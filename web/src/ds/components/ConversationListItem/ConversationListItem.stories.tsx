@@ -201,7 +201,7 @@ export const Quoted: Story = {
 
 export const QuotedLong: Story = {
   args: {
-    name: 'Visitor',
+    name: rivera.conversations.danaLive.name.repeat(8),
     time: '1:55 am',
     status: undefined,
     quote: '<b>Can someone come today?</b> The water is up to the kitchen door and the shutoff under the sink won’t turn.',
@@ -221,12 +221,16 @@ export const QuotedLong: Story = {
     await expect(quote!.scrollWidth).toBeGreaterThan(quote!.clientWidth);
     const link = canvasElement.querySelector('a')!;
     await expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
+    const name = link.querySelector('.cd-conversation-item__name')!;
+    await expect(name.scrollWidth).toBeGreaterThan(name.clientWidth);
+    const time = link.querySelector('.cd-conversation-item__time')!;
+    await expect(Math.round(time.getBoundingClientRect().right)).toBe(Math.round(quote!.getBoundingClientRect().right));
     await expect(Math.round(link.getBoundingClientRect().height)).toBe(52);
   },
 };
 
 export const StatusOverQuote: Story = {
-  args: { name: 'Visitor', time: '10:58 am', status: { tone: 'held', text: 'Needs you' }, quote: 'Can I get 15% off if I pay cash?' },
+  args: { name: 'Visitor', time: '10:58 am', status: { tone: 'held', text: 'Needs you' }, quote: 'Can I get 15% off if I pay cash?', quoteWithStatus: false },
   parameters: {
     canvas: 'none',
     canvasNote: 'Nearest board UXC-P802-After (#artboard-a4106a75e939): a held conversation keeps "Needs you" in its place, so status wins over the quote.',
@@ -235,5 +239,19 @@ export const StatusOverQuote: Story = {
     await expect(canvas.getByRole('link', { name: 'Visitor 10:58 am Needs you' })).toBeVisible();
     await expect(canvas.queryByText(/15% off/)).toBeNull();
     await expect(canvasElement.querySelector('.cd-conversation-item__quote')).toBeNull();
+  },
+};
+
+export const PreviewWithStatus: Story = {
+  args: { name: 'Visitor', time: '10:58 am', status: { tone: 'held', text: 'Needs you' }, quote: 'Can I get 15% off if I pay cash?', recorded: true },
+  parameters: { canvas: 'none', canvasNote: 'Conversations keeps the visitor preview above status and the Recorded tag.' },
+  play: async ({ canvas }) => {
+    const link = canvas.getByRole('link', { name: 'Visitor 10:58 am “Can I get 15% off if I pay cash?” Needs you Recorded' });
+    const preview = canvas.getByText('“Can I get 15% off if I pay cash?”');
+    const status = canvas.getByText('Needs you').parentElement!;
+    expectComputed(preview, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' });
+    await expect(status.getBoundingClientRect().top).toBe(preview.getBoundingClientRect().bottom);
+    await expect(canvas.getByText('Recorded').parentElement).toBe(status);
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(69);
   },
 };
