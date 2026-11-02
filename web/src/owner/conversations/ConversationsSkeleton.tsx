@@ -246,11 +246,11 @@ function useOpensAtTheEnd() {
 
 /**
  * The open conversation's pane as shapes, from its own classes, as a fresh copy's held chat (what
- * Today's "Open the request" opens) draws: who it is with (their name, the level pill and the
- * latest line); the transcript's header lines; the visitor's bubble at the right; Claude's
- * handoff card at the left with its two receipt lines; and the held request's card, each part as
- * tall as it lands. The transcript's region opens at its end, as the chat's does, over the room
- * the owner's controls take.
+ * Today's "Open the request" opens) draws: the head's name, level pill and latest line, followed
+ * by its opening lines and hairline; the visitor's bubble at the right; Claude's handoff card at
+ * the left with its two receipt lines; and the held request's card, each part as tall as it lands.
+ * The transcript's region opens at its end, as the chat's does, over the room the owner's
+ * controls take.
  */
 export function ConversationSkeleton() {
   const region = useOpensAtTheEnd();
@@ -260,23 +260,19 @@ export function ConversationSkeleton() {
         <Skeleton shape="line" text="section" width={64} anchor="conversation-name" />
         <Skeleton shape="block" measure={{ label: 'Public', className: 'cd-pill cd-type-pill', tagName: 'span' }} height="var(--space-20)" radius="full" />
         <Skeleton shape="line" text="meta" width={200} />
+        <div className="cd-conversation__about" data-skeleton-anchor="conversation-about">
+          <MeasuredLines
+            parts={[`Today at 12:00 pm, web chat from ${FRESH_LINK}`]}
+            className="cd-conversation__line cd-type-caption"
+            text="caption"
+            fallback={1}
+            width="70%"
+          />
+          <MeasuredLines parts={[TRANSCRIPT_NOTE]} className="cd-conversation__line cd-type-caption" text="caption" fallback={1} width="65%" />
+        </div>
       </div>
       <div ref={region} className="cd-conversation__scroll">
         <div className="cd-transcript">
-          <div className="cd-transcript-row cd-transcript-header" data-skeleton-anchor="transcript-head">
-            <div className="cd-transcript-row__main">
-              <MeasuredLines
-                parts={[`Today at 12:00 pm, web chat from ${FRESH_LINK}`]}
-                className="cd-transcript-header__caption cd-type-caption"
-                text="caption"
-                fallback={1}
-                width="70%"
-              />
-            </div>
-            <div className="cd-transcript-row__margin">
-              <MeasuredLines parts={[TRANSCRIPT_NOTE]} className="cd-transcript-header__caption cd-type-caption" text="caption" fallback={1} width="65%" />
-            </div>
-          </div>
           <VisitorShape words={HELD_CHAT.question} anchor="first-message" />
           <div className="cd-transcript-row">
             <div className="cd-transcript-row__main">

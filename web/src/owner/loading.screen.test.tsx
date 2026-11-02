@@ -1255,7 +1255,7 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
 /** Each part of the fresh copy's held chat, by the shape that stands for it and the part itself. */
 const CHAT_PARTS = {
   name: { name: 'conversation-name', page: '.cd-conversation__name', dimensions: ['height', 'bottom'] },
-  head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height', 'bottom'] },
+  head: { name: 'conversation-about', page: '.cd-conversation .cd-conversation__head > .cd-conversation__about', dimensions: ['height', 'bottom'] },
   visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height', 'bottom'] },
   reply: { name: 'reply-card', page: '.cd-conversation .cd-transcript .cd-reply-card', dimensions: ['height', 'bottom'] },
   receipt0: { name: 'receipt-0', page: '.cd-conversation .cd-transcript .cd-transcript-row__margin > :first-child', dimensions: ['height', 'bottom'] },

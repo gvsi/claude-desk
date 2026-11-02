@@ -221,6 +221,12 @@ afterEach(() => {
 
 describe('Conversations', () => {
   it.each([[1512, 982], [390, 844]])('day_rules_and_visitor_previews_fit_at_%sx%s', async (width, height) => {
+    // Midday keeps the two day groups stable across midnight and daylight-saving changes.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-30T19:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const summaries = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
     const base = summaries[0]!;
     const longName = DANA.repeat(16);
@@ -591,9 +597,7 @@ describe('Conversations', () => {
     await expect.element(card).toBeVisible();
     expect(card.getByRole('button', { name: 'Join the chat' }).elements()).toHaveLength(0);
     expect(card.getByRole('button').elements()).toHaveLength(1);
-    const header = log(screen).element().querySelector('.cd-transcript-header');
-    expect(header).not.toBeNull();
-    expect(card.element().compareDocumentPosition(header!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.element().compareDocumentPosition(log(screen).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(card.element().parentElement?.parentElement).toHaveClass('cd-conversation__scroll');
     await expectScreenBasics(screen.container, { owner: true });
     await card.getByRole('button', { name: 'Mark done' }).click();
