@@ -1889,47 +1889,12 @@ const APPROVED_REFUND_SUGGESTION: Suggestion = {
 };
 
 const RULES_ANCHORS: readonly SkeletonAnchor[] = [
-  { name: 'rules-jobs-title', page: '.cd-business-jobs__title', size: true },
-  { name: 'rules-job', page: '.cd-business-jobs > .cd-card', size: true },
-  ...[
-    ['rules-job-name', '.cd-tool-rules__tool-name'],
-    ['rules-job-description', '.cd-tool-rules__tool-description'],
-    ['rules-job-reason', '.cd-rule-row__reason'],
-    ['rules-job-words', '.cd-rule-row__words'],
-    ['rules-job-outcome', '.cd-outcome'],
-    ['rules-job-fallback', '.cd-tool-rules__fallback-line'],
-  ].map(([name, selector]) => ({ name: name!, page: `.cd-business-jobs ${selector}`, size: true })),
-  ...rivera.connectors.sections.flatMap(({ tools }, i) => [
-    { name: `rules-connector-${i}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__header`, dimensions: ['bottom', 'height'] as const },
-    ...tools.map((_, j) => ({ name: `rules-tool-${i}-${j}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__tool:nth-child(${j + 1})`, size: true, dimensions: ['bottom'] as const })),
+  { name: 'rules-card', page: '.cd-rules__groups > .cd-card', size: true },
+  ...['auto', 'ask', 'never'].flatMap((mode) => [
+    { name: `rules-group-${mode}`, page: `.cd-rules__group:nth-child(${['auto', 'ask', 'never'].indexOf(mode) + 1}) .cd-rules__group-title`, size: true },
   ]),
-  { name: 'rules-all', page: '.cd-rules__all', dimensions: ['bottom', 'height'] },
-  { name: 'rules-always', page: '.cd-always-on .cd-section-header__heading', dimensions: ['bottom', 'height'] },
+  { name: 'rules-fallback', page: '.cd-rules__fallback', size: true },
 ];
-
-it('rules_outcome_shapes_remeasure_when_fonts_become_ready', async () => {
-  let ready!: (fonts: FontFaceSet) => void;
-  const pending = new Promise<FontFaceSet>((resolve) => { ready = resolve; });
-  const fonts = vi.spyOn(document.fonts, 'ready', 'get').mockReturnValue(pending);
-  onTestFinished(() => fonts.mockRestore());
-  const host = document.createElement('div');
-  document.body.append(host);
-  const root = createRoot(host);
-  onTestFinished(() => { root.unmount(); host.remove(); ready(document.fonts); });
-  flushSync(() => root.render(<RulesSkeleton withHeader={false} />));
-  const outcome = host.querySelector<HTMLElement>('.cd-connector-section__tool-outcome')!;
-  const shape = outcome.querySelector<HTMLElement>('.cd-skeleton')!;
-  const before = Number.parseFloat(shape.style.width);
-  expect(before).toBeGreaterThan(0);
-  // A changed font metric becomes available with fonts.ready, without a loadingdone event.
-  host.className = 'cd-test-rules-fonts';
-  const style = document.createElement('style');
-  style.textContent = '.cd-test-rules-fonts .cd-connector-section__tool-outcome { font-size: 24px; }';
-  document.head.append(style);
-  onTestFinished(() => style.remove());
-  ready(document.fonts);
-  await vi.waitFor(() => expect(Number.parseFloat(shape.style.width)).toBeGreaterThan(before));
-});
 
 it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async (viewport) => {
   const { screen, router } = await openToday(viewport === 'phone' ? 'phone' : 'desktop');
@@ -1944,18 +1909,7 @@ it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async 
       await router.navigate(RULES);
       await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
       expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
-      if (typeof viewport === 'number') {
-        await nextFrames();
-        const rows = document.querySelectorAll('.cd-rules__region .cd-skeleton-screen__layer .cd-connector-section__tool');
-        expect(rows.length).toBeGreaterThan(0);
-        for (const row of rows) {
-          const summary = row.querySelector('.cd-connector-section__tool-summary')!;
-          const outcome = row.querySelector('.cd-connector-section__tool-outcome')!;
-          expect(summary.getBoundingClientRect().right, row.getAttribute('data-skeleton-anchor')!).toBeLessThanOrEqual(outcome.getBoundingClientRect().left);
-        }
-        const paymentSummary = document.querySelector('[data-skeleton-anchor="rules-tool-5-0"] .cd-connector-section__tool-summary')!;
-        expect(paymentSummary.querySelectorAll('.cd-skeleton')).toHaveLength(1);
-      }
+
     }, release: read.release,
   });
   await landing.expectStill();
@@ -2222,8 +2176,8 @@ it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', 
 it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: RULES, queryKey: ['rules', RIVERA.deskId], readPath: RULES_READ,
-    region: '.cd-rules__region', landed: '.cd-connector-list',
-    prime: RULES, primeLanded: '.cd-connector-list', error: '.cd-rules > [role="alert"]',
+    region: '.cd-rules__region', landed: '.cd-rules__groups',
+    prime: RULES, primeLanded: '.cd-rules__groups', error: '.cd-rules > [role="alert"]',
   });
 });
 
@@ -2439,7 +2393,7 @@ it('safety_entries_reload_keeps_its_existing_loader', async () => {
 
 it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i', async (width) => {
   const { screen } = await renderRoute(RULES, { viewport: { width, height: width === 390 ? 844 : 900 }, pollScale: 100 });
-  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   if (width >= 1280) {
     await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Why was this quote held?');
@@ -2490,20 +2444,20 @@ it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s
   const tops = watchTop(() => {
     const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
     return layer && layer.getAttribute('data-state') !== 'leaving'
-      ? layer.querySelector('[data-skeleton-anchor="rules-connector-0"]')
-      : landedElement('.cd-connector-section__header');
+      ? layer.querySelector('[data-skeleton-anchor="rules-card"]')
+      : landedElement('.cd-rules__groups > .cd-card');
   });
   read.release();
   await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
-  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const card = landedElement('.cd-rules__suggestions > .cd-card')!.getBoundingClientRect();
   const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
   expect(tops()).toHaveLength(2);
   expect(tops()[1]! - tops()[0]!, 'one downward move, explained by the returned card').toBe(Math.round(card.height + gap));
-  const landed = landedElement('.cd-connector-section__header')!.getBoundingClientRect();
+  const landed = landedElement('.cd-rules__groups > .cd-card')!.getBoundingClientRect();
   for (let frame = 0; frame < 10; frame += 1) await nextFrames();
-  expect(landedElement('.cd-connector-section__header')!.getBoundingClientRect().top).toBe(landed.top);
+  expect(landedElement('.cd-rules__groups > .cd-card')!.getBoundingClientRect().top).toBe(landed.top);
   expect(tops()).toHaveLength(2);
 });
 
@@ -2516,42 +2470,21 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
     open: async () => {
       await router.navigate(RULES);
       await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
-      expect(landedElement('.cd-connector-list')).toBeNull();
+      expect(landedElement('.cd-rules__groups')).toBeNull();
     },
     release: held.release,
   });
 });
 
-it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', async (viewport) => {
-  // Decision 15: a fresh Turner copy has an Emergency callback. A Desk without jobs, such as
-  // Acme, loses that section once when its reads settle; its connectors then stay in place.
+it.each(['desktop', 'phone'] as const)('rules_without_jobs_draws_the_same_grouped_layout at %s', async (viewport) => {
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   desk.summary.business_name = 'Acme Accounting';
   desk.tools = desk.tools.filter((row) => row.source !== 'business');
-  // Isolate the absent jobs section from Acme's data-dependent question about a held quote.
-  const held = [...mockStore.world.decisions.values()].find((item) => item.decision.reason_plain === rivera.decisions.held.reason_plain)!;
-  await mockStore.dispatch('answer', { params: { decision_id: held.decision.decision_id }, body: { answer: 'deny_once' } });
-  const { screen, router } = await openToday(viewport);
-  const read = holdReads(RULES_READ);
-  await router.navigate(RULES);
-  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-  const jobs = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-business-jobs')!;
-  expect(jobs.textContent).toBe('');
-  const height = jobs.getBoundingClientRect().height;
-  const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
-  const tops = watchTop(() => {
-    const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
-    return layer && layer.getAttribute('data-state') !== 'leaving'
-      ? layer.querySelector('[data-skeleton-anchor="rules-connector-0"]')
-      : landedElement('.cd-connector-section__header');
-  });
-  read.release();
-  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  desk.policy.cards = desk.policy.cards.filter((card) => !card.applies_to.startsWith('desk.'));
+  const { screen } = await renderRoute(RULES, { viewport });
+  await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
+  await settled(document.body);
   expect(landedElement('.cd-business-jobs')).toBeNull();
-  expect(tops()).toHaveLength(2);
-  expect(tops()[1]! - tops()[0]!, 'one upward move, explained by the absent jobs section').toBe(-Math.round(height + gap));
-  for (let frame = 0; frame < 10; frame += 1) await nextFrames();
-  expect(tops()).toHaveLength(2);
+  expect(screen.getByRole('region', { name: 'Allow', exact: true }).element().textContent).toContain('Claude can take leads and callbacks');
   expectNoHorizontalScroll();
 });

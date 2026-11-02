@@ -19,7 +19,7 @@ import type { DeskRecord } from '../../mocks/world.ts';
 import { targetText } from '../../test/changeRowWords.ts';
 import { changeRows } from './changeRows.ts';
 import { draftFromDiff, type RuleDraft } from './drafts.ts';
-import { governingRules, holdQuestion, hubSections, parseLimit, rowsChangedBy, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
+import { governingRules, holdQuestion, hubSections, parseLimit, rowsChangedBy, rulesGroups, toolFallback, toolLine, toolRuleRows, withOutcome } from './hub.ts';
 import { targetWords } from './ruleWords.ts';
 
 /** The mock's main Desk, a fresh Turner copy for every test. */
@@ -65,6 +65,58 @@ beforeEach(() => {
 });
 
 describe('the Rules hub', () => {
+  it('reads_the_active_rules_in_c1_order_with_their_holds_and_four_always_on_rules', () => {
+    const groups = rulesGroups(view(), people());
+    expect(groups.map((group) => group.title)).toEqual(['Allow', 'Ask me first', 'Never · always on, every Desk']);
+    const sentences = groups.map((group) => group.rows.map((row) => row.parts.map((part) => part.text).join('')));
+    expect(sentences).toEqual([
+      [
+        'Claude can send quotes from your price list, at list price',
+        'Claude can show your open times',
+        'Claude can book visits on weekdays, 8:00 am to 6:00 pm',
+        'Claude can book visits on Saturdays, 9:00 am to 1:00 pm',
+        'Claude can take leads and callbacks, urgent ones too',
+        "Claude can share customers' own documents and charges, once they've confirmed it's them",
+        'Claude can send payment links up to $300',
+        'Claude can take agent payments up to $20 from a signed limit',
+      ],
+      [
+        'Claude asks you before any discount',
+        'Claude asks you before payment links over $300 or agent payments over $20',
+        'Claude asks you before any payment over $500, whatever the other rules say',
+        'Claude asks you before any refund',
+      ],
+      [
+        "Claude never says it's anything but an AI",
+        'Claude never shows private data to anyone but its verified owner',
+        'Claude never sends a code anywhere but the contact on record',
+        'Claude never moves money without your rule or a signed limit',
+      ],
+    ]);
+    expect(groups[0]?.rows.flatMap((row) => row.cards.map((card) => card.applies_to))).not.toContain('native.start_verification');
+  });
+
+  it('joins_only_matching_conditions_and_keeps_personal_business_and_never_rules', () => {
+    const rules = view([rivera.personalBookingCard]);
+    const openTimes = rules.active.cards.find((card) => card.applies_to === 'native.find_slots')!;
+    const weekday = rules.active.cards.find((card) => card.card_id === 'rv-book-wk')!;
+    openTimes.hours = weekday.hours;
+    const groups = rulesGroups(rules, people());
+    expect(groups[0]?.rows.find((row) => row.cards.includes(openTimes))?.cards).toEqual([openTimes, weekday]);
+    expect(groups[0]?.rows.find((row) => row.cards.some((card) => card.card_id === rivera.personalBookingCard.card_id))?.cards).toHaveLength(1);
+    const urgent = rules.active.cards.find((card) => card.card_id === 'rv-urgent')!;
+    urgent.mode = 'never';
+    const changed = rulesGroups(rules, people());
+    expect(changed[2]?.rows[0]?.cards).toEqual([urgent]);
+    expect(changed[0]?.rows.find((row) => row.cards.some((card) => card.applies_to === 'native.capture_lead'))?.parts.map((part) => part.text).join('')).toBe('Claude can take leads and callbacks');
+  });
+
+  it('a_shared_sentence_names_the_actual_tools_where_its_change_lands', () => {
+    const groups = rulesGroups(view([rivera.sharedChargeCard]), people());
+    const shared = groups[0]?.rows.find((row) => row.cards.some((card) => card.card_id === rivera.sharedChargeCard.card_id));
+    expect(shared?.toolKeys).toEqual(['native.payment_link', 'native.charge_mandate']);
+  });
+
   it('says_the_payment_tools_cant_be_undone_as_the_kernels_profiles_do', () => {
     // A charge can't be taken back: the kernel's payment link and signed-limit profiles say so.
     const rules = view();

@@ -80,10 +80,17 @@ const CLEAR = 'rgba(0, 0, 0, 0)';
 
 /** The rows on Rules a change can land on, by name, in the page's order: the Desk's own jobs, then each connector's tools. */
 function landingRows(root: HTMLElement): { name: string; row: HTMLElement }[] {
-  return [...root.querySelectorAll<HTMLElement>('.cd-business-jobs .cd-tool-rules, .cd-connector-section__tool')].map((row) => ({
-    name: row.querySelector('.cd-tool-rules__tool-name, .cd-connector-section__tool-name')?.textContent ?? '',
-    row,
-  }));
+  return [...root.querySelectorAll<HTMLElement>('.cd-rules__row[data-rule-key]')]
+    .filter((row) => !/^(discount:|holds$|money-cap$|always:)/.test(row.dataset.ruleKey ?? ''))
+    .flatMap((row) => [...row.querySelectorAll('.cd-rule-sentence__meta [data-copy="user"]')]
+      .map((title) => ({ name: title.textContent ?? '', row })));
+}
+
+/** A removed rule returns to the default, represented by the sentence below the card. */
+function fallback(root: HTMLElement): HTMLElement {
+  const row = root.querySelector<HTMLElement>('.cd-rules__fallback');
+  if (!row) throw new Error('no fallback sentence on Rules');
+  return row;
 }
 
 /** The row on Rules named `name`: a connector's tool, or one of the Desk's own jobs. */
@@ -101,7 +108,7 @@ function fillOf(row: HTMLElement): string {
 
 /** The row's words, at the right: its rules and its outcome. */
 function wordsOf(row: HTMLElement): string {
-  return row.querySelector('.cd-connector-section__tool-summary')?.textContent ?? '';
+  return row.querySelector('.cd-rule-sentence__sentence')?.textContent ?? '';
 }
 
 /** Whether `row` says it was updated. */
@@ -233,7 +240,7 @@ describe('a confirmed rule change in Ask Claude', () => {
   it('the_changed_row_lights_up_holds_lets_go_and_keeps_updated', async () => {
     const { screen, log } = await askForTheWeekdayChange();
     const root = screen.container;
-    expect(wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts');
+    expect(wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price');
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
@@ -241,7 +248,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     // The Quote row, which the change changed, says so, lit in the selected fill, with its new words.
     await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
     await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
-    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts · Weekdays, all day');
+    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
     // Then it lets go, and keeps "Updated".
     await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
     expect(saysUpdated(toolRow(root, 'Quote'))).toBe(true);
@@ -251,7 +258,7 @@ describe('a confirmed rule change in Ask Claude', () => {
       expect(fillOf(toolRow(root, name)), name).toBe('none');
     }
     // The version line says the new one.
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Never · always on, every Desk' })).toBeVisible();
   });
 
   it('leaving_rules_and_coming_back_clears_updated', async () => {
@@ -265,15 +272,15 @@ describe('a confirmed rule change in Ask Claude', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts · Weekdays, all day');
-    expect([...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].filter(saysUpdated)).toEqual([]);
+    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
+    expect([...root.querySelectorAll<HTMLElement>('.cd-rules__row')].filter(saysUpdated)).toEqual([]);
     expect(root.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
   });
 
   it('a_row_out_of_view_scrolls_to_the_middle', async () => {
     // A change to the Share a document row, halfway down Rules, below what shows at its top.
     answerWithNoDocuments();
-    const { screen, log } = await askForTheWeekdayChange({}, STOP_DOCUMENTS);
+    const { screen, log } = await askForTheWeekdayChange({ viewport: { width: 1440, height: 600 } }, STOP_DOCUMENTS);
     await expect.element(log.getByText(STOP_DOCUMENTS_ANSWER, { exact: true })).toBeVisible();
     const root = screen.container;
     const main = screen.getByRole('main').element();
@@ -326,11 +333,11 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(log.element().textContent).not.toContain('Confirmed.');
     expect(log.element().querySelector('.cd-margin-receipt')).toBeNull();
     // No row on Rules lights up or says it was updated, and the version stays.
-    const rows = [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__tool')];
+    const rows = [...screen.container.querySelectorAll<HTMLElement>('.cd-rules__row')];
     expect(rows.length).toBeGreaterThan(5);
     expect(rows.filter(saysUpdated)).toEqual([]);
     expect(screen.container.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
-    await expect.element(screen.getByText('Version 7 of your rules, checked against the always-on rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Never · always on, every Desk' })).toBeVisible();
     expect(desk().policy.version).toBe(7);
   });
 });
@@ -410,21 +417,15 @@ function holdRules(): { held: () => number; release: () => void } {
 function showsOutsideShapes(root: HTMLElement, selectorOrWords: string): boolean {
   const outside = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest('.cd-skeleton-screen__layer') == null;
   if (selectorOrWords.startsWith('.')) return [...root.querySelectorAll(selectorOrWords)].some(outside);
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+  for (const node of root.querySelectorAll('p')) {
     if (node.textContent?.includes(selectorOrWords) && outside(node)) return true;
   }
   return false;
 }
 
-/** Text that starts with `words`, whatever follows them. */
-const startingWith = (words: string) => new RegExp(`^${words.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`);
-
 /** The names of the rows on Rules (jobs and tools) that say they were updated, in the page's order. */
 function updatedRows(root: HTMLElement): string[] {
-  return landingRows(root)
-    .filter(({ row }) => saysUpdated(row))
-    .map(({ name }) => name);
+  return [...new Set(landingRows(root).filter(({ row }) => saysUpdated(row)).map(({ name }) => name))];
 }
 
 describe('a preset or a new payment limit', () => {
@@ -448,18 +449,18 @@ describe('a preset or a new payment limit', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     expect(desk().policy.version).toBe(version);
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Never · always on, every Desk' })).toBeVisible();
     // Every row whose rules it changed lands; the starter's own tools and the Desk's jobs stay unchanged.
-    const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
-    await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
-    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
+    expect(updatedRows(root)).toEqual([]);
+    await expect.poll(() => fillOf(fallback(root))).toBe(SELECTED);
     for (const name of ['Emergency callback', 'Find open times', 'Save a lead', 'Request a callback']) {
       expect(fillOf(toolRow(root, name)), name).toBe('none');
       expect(saysUpdated(toolRow(root, name)), name).toBe(false);
     }
     expect(flashed).toBe(false);
-    await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
-    expect(updatedRows(root).sort()).toEqual([...changed].sort());
+    await expect.poll(() => fillOf(fallback(root)), { timeout: 5_000 }).toBe(CLEAR);
+    expect(saysUpdated(fallback(root))).toBe(true);
   });
 
   it('a_preset_lands_only_on_the_rows_its_review_listed', async () => {
@@ -478,8 +479,9 @@ describe('a preset or a new payment limit', () => {
 
     // Back on Rules, exactly those rows say "Updated" and light up; Quote and Share a document don't.
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => updatedRows(root).sort()).toEqual(listed);
-    for (const name of listed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
+    expect(updatedRows(root).sort()).toEqual(listed.filter((name) => landingRows(root).some((row) => row.name === name)));
+    for (const name of listed.filter((name) => landingRows(root).some((row) => row.name === name))) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
     for (const name of ['Quote', 'Share a document']) {
       expect(saysUpdated(toolRow(root, name)), name).toBe(false);
       expect(fillOf(toolRow(root, name)), name).toBe('none');
@@ -492,13 +494,12 @@ describe('a preset or a new payment limit', () => {
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
-    const version = desk().lastVersion;
     // Every read of the rules after the confirm is held, as on a slow network.
     const reads = holdRules();
     // Whether Rules draws any of the old version's rows, or its line, while the read is held.
     let oldShown = false;
     const watch = new MutationObserver(() => {
-      if (showsOutsideShapes(root, '.cd-connector-section__tool') || showsOutsideShapes(root, 'Version 7 of your rules')) oldShown = true;
+      if (showsOutsideShapes(root, '.cd-rules__row') || showsOutsideShapes(root, 'Claude can send quotes from your price list, at list price')) oldShown = true;
     });
     watch.observe(root, { childList: true, subtree: true, characterData: true });
     onTestFinished(() => watch.disconnect());
@@ -515,10 +516,10 @@ describe('a preset or a new payment limit', () => {
 
     // The read lands: the new version's line, and the rows it changed say so.
     reads.release();
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toContain('Quote');
-    await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
-    expect(showsOutsideShapes(root, 'Version 7 of your rules')).toBe(false);
+    await expect.element(screen.getByRole('region', { name: 'Never · always on, every Desk' })).toBeVisible();
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
+    await expect.poll(() => fillOf(fallback(root))).toBe(SELECTED);
+    expect(showsOutsideShapes(root, 'Claude can send quotes from your price list, at list price')).toBe(false);
   });
 
   /** Rules, then the "Ask me first" preset's review, ready to confirm. Returns the version it makes. */
@@ -531,10 +532,10 @@ describe('a preset or a new payment limit', () => {
   }
 
   /** Turner's version 7 line, drawn on the page rather than in its loading shapes. */
-  const showsVersion7 = (root: HTMLElement) => showsOutsideShapes(root, 'Version 7 of your rules');
+  const showsVersion7 = (root: HTMLElement) => showsOutsideShapes(root, 'Claude can send quotes from your price list, at list price');
 
   it('rules_that_keep_coming_back_older_end_the_reading_state_after_a_few_seconds', async () => {
-    const { screen, root, version } = await reviewAskMeFirst();
+    const { screen, root } = await reviewAskMeFirst();
     // Every read after the confirm answers with the rules as they were, as a read that lags behind it might.
     const older = rulesView(desk());
     let lagging = true;
@@ -562,13 +563,13 @@ describe('a preset or a new payment limit', () => {
 
     // A later read with the confirmed version still lands the change.
     lagging = false;
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    await expect.element(screen.getByRole('region', { name: 'Never · always on, every Desk' })).toBeVisible();
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
     expect(showsVersion7(root)).toBe(false);
   });
 
   it('a_read_waiting_for_the_network_ends_the_reading_state_at_once', async () => {
-    const { screen, root, version } = await reviewAskMeFirst();
+    const { screen, root } = await reviewAskMeFirst();
     // Offline as the change is confirmed: the read of the new rules waits for the network.
     onTestFinished(() => onlineManager.setOnline(true));
     onlineManager.setOnline(false);
@@ -585,8 +586,8 @@ describe('a preset or a new payment limit', () => {
 
     // Back online, the read goes out, and the change lands.
     onlineManager.setOnline(true);
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    await expect.element(screen.getByRole('region', { name: 'Never · always on, every Desk' })).toBeVisible();
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
   });
 
   it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
@@ -607,164 +608,48 @@ describe('a preset or a new payment limit', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     held.release();
     await expect.poll(() => desk().policy.version).toBe(version);
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Never · always on, every Desk' })).toBeVisible();
     await pause(300);
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
   });
 
-  it.each(['Turner Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
-    // Acme has none of the sample's suggestions, so Rules waits for its first reads before drawing.
-    // A short window, so Payments can be wholly out of view above Stripe. The Desk keeps its job, so
-    // Back lands its place on a page whose jobs section is drawn above it (#620).
-    renameBusiness(business);
-    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
-    const root = screen.container;
-    const stripe = screen.getByRole('region', { name: 'Stripe' });
-    await expect.element(stripe.getByRole('button', { name: 'Change' })).toBeVisible();
-    // The shell's main area, once the Desk has opened, which scrolls on its own.
-    const main = screen.getByRole('main').element();
-    // Stripe at the top of what shows, Payments above it out of view.
-    stripe.element().scrollIntoView({ block: 'start' });
-    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
-    const paymentsLimit = () => screen.getByRole('region', { name: 'Payments' }).element().querySelector('.cd-money-limit') as HTMLElement;
-    expect(inView(paymentsLimit(), main)).toBe(false);
-
-    // A lower limit from Stripe's line, confirmed on its review.
-    await stripe.getByRole('button', { name: 'Change' }).click();
-    await stripe.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('100');
-    await stripe.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
-    // Back on Acme's Rules, its first Needs you read is held, so the new rules arrive while Rules
-    // still shows its loading line; the sample's Rules doesn't wait for it.
-    const needsYou = business === 'Acme Accounting' ? holdNeedsYou() : null;
-    const version = desk().lastVersion;
-    await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    if (needsYou !== null) {
-      await expect.poll(needsYou.held).toBeGreaterThan(0);
-      await expect.poll(() => desk().policy.version).toBe(version);
-      await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
-      await pause(300);
-      needsYou.release();
-    }
-
-    // The first row it changed, Payments' limit, comes into view and says so; the rule it lowered
-    // lights up.
-    await expect.poll(() => paymentsLimit()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
-    await expect.poll(() => inView(paymentsLimit(), main)).toBe(true);
-    await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
-    expect(fillOf(toolRow(root, 'Payment link'))).not.toBe('none');
-    // Once it has come to rest, that is the owner's place: All rules, then Back, returns to it, on a
-    // new visit with nothing updated.
-    let place = -1;
-    await expect.poll(async () => {
-      const before = main.scrollTop;
-      await pause(150);
-      place = main.scrollTop;
-      return place === before;
-    }).toBe(true);
-    // (Navigated to directly: clicking a link would first scroll it into view, moving the place.)
-    await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
-    await router.navigate(-1);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => main.scrollTop).toBe(place);
-    expect(updatedRows(root)).toEqual([]);
-  });
-
-  it('a_new_limit_lands_on_its_line_and_the_rule_it_lowered', async () => {
-    const { screen, router } = await renderRoute(`${DESK}/rules`);
-    const root = screen.container;
-    const payments = screen.getByRole('region', { name: 'Payments' });
-    await payments.getByRole('button', { name: 'Change' }).click();
-    await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('100');
-    await payments.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
-    await screen.getByRole('button', { name: 'Confirm change' }).click();
-
-    // Back on Rules: the limit's line in both groups has the new amount and says it was updated.
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    expect(router.state.location.pathname).toBe(`${DESK}/rules`);
-    const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
-    for (const name of ['Payments', 'Stripe']) {
-      const line = screen.getByRole('region', { name }).getByText(startingWith(limit100));
-      await expect.element(line).toBeVisible();
-      await expect.poll(() => line.element().querySelector('.cd-pill')?.textContent, { message: name }).toBe('Updated');
-    }
-    // Payment link's own $300, brought down to the new limit, lands too; nothing else does.
-    await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
-    await expect.poll(() => fillOf(toolRow(root, 'Payment link'))).toBe(SELECTED);
-    expect(desk().policy.auto_money_cap_cents).toBe(10_000);
-  });
 });
 
 describe('focus once a review Rules opened returns', () => {
-  /** The words of the payment limit's field. */
-  const LIMIT_FIELD = 'Most a payment can be without asking you, in dollars';
-
-  /**
-   * Rules with Payments at the top of what shows, then its limit's review from Payments' "Change",
-   * by keyboard: 600, then Enter. Returns the place Rules was at.
-   */
-  async function reviewPaymentsLimit() {
-    const rendered = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
-    const { screen } = rendered;
-    const payments = screen.getByRole('region', { name: 'Payments' });
-    await expect.element(payments.getByRole('button', { name: 'Change' })).toBeVisible();
-    // The shell's main area, once the Desk has opened, which scrolls on its own.
+  it.each(['Keep my rules', 'Back'] as const)('preset_review_exit_%s_restores_focus_and_place_after_first_load', async (exit) => {
+    renameBusiness('Acme Accounting');
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     const main = screen.getByRole('main').element();
-    payments.element().scrollIntoView({ block: 'start' });
-    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    await screen.getByRole('button', { name: 'Start from a preset' }).click();
+    (screen.getByRole('menuitem', { name: 'Ask me first' }).element() as HTMLElement).blur();
+    const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
+    main.scrollTop = main.scrollHeight;
+    await heard;
     const place = main.scrollTop;
-    payments.getByRole('button', { name: 'Change' }).element().focus();
-    await userEvent.keyboard('{Enter}');
-    await expect.element(payments.getByRole('textbox', { name: LIMIT_FIELD })).toHaveFocus();
-    await userEvent.keyboard('600{Enter}');
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
-    return { ...rendered, main, place };
-  }
-
-  /** Presses `name` on the review by keyboard, as the owner tabs to it. */
-  async function press(screen: Awaited<ReturnType<typeof renderRoute>>['screen'], name: string) {
-    screen.getByRole('button', { name }).element().focus();
-    await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-  }
-
-  it('keep_my_rules_puts_focus_back_on_the_change_that_opened_it', async () => {
-    const { screen, main, place } = await reviewPaymentsLimit();
-    await press(screen, 'Keep my rules');
-
-    // Back on Rules at its place, focus on Payments' "Change", not the page: the next Tab goes on from there.
-    const change = screen.getByRole('region', { name: 'Payments' }).getByRole('button', { name: 'Change' });
-    await expect.element(change).toHaveFocus();
-    expect(main.scrollTop).toBe(place);
-    await pause(300);
-    expect(document.activeElement).toBe(change.element());
-    expect(main.scrollTop).toBe(place);
+    expect(place).toBeGreaterThan(0);
+    (screen.getByRole('menuitem', { name: 'Ask me first' }).element() as HTMLElement).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    const needsYou = holdNeedsYou();
+    if (exit === 'Back') await router.navigate(-1);
+    else await screen.getByRole('button', { name: 'Keep my rules' }).click();
+    await expect.poll(needsYou.held).toBeGreaterThan(0);
+    needsYou.release();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
+    await expect.poll(() => main.scrollTop).toBe(place);
+    await expect.element(screen.getByRole('button', { name: 'Start from a preset' })).toHaveFocus();
+    expect(desk().policy.version).toBe(7);
   });
 
-  it('confirm_change_puts_focus_back_on_the_change_that_opened_it', async () => {
-    const { screen, main, place } = await reviewPaymentsLimit();
-    await press(screen, 'Confirm change');
-
-    // The new limit lands on its line, in view where Rules was, and focus is on Payments' "Change".
-    const payments = screen.getByRole('region', { name: 'Payments' });
-    await expect.poll(() => payments.element().querySelector('.cd-money-limit .cd-pill')?.textContent).toBe('Updated');
-    await expect.element(payments.getByRole('button', { name: 'Change' })).toHaveFocus();
-    await pause(300);
-    expect(main.scrollTop).toBe(place);
-    expect(document.activeElement).toBe(payments.getByRole('button', { name: 'Change' }).element());
-  });
-
-  it('keep_my_rules_on_a_preset_puts_focus_back_on_start_from_a_preset', async () => {
+  it('a_confirmed_preset_returns_focus_and_reveals_its_changed_sentence', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
-    await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
-    await press(screen, 'Keep my rules');
+    await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
+    await screen.getByRole('button', { name: 'Confirm change' }).click();
+    await expect.poll(() => saysUpdated(fallback(screen.container))).toBe(true);
     await expect.element(screen.getByRole('button', { name: 'Start from a preset' })).toHaveFocus();
+    await expect.poll(() => inView(fallback(screen.container), screen.getByRole('main').element())).toBe(true);
   });
 });
 
@@ -786,7 +671,7 @@ describe('under reduced motion', () => {
     // The row: "Updated" and its new words at once, with no fill to hold and nothing cross-fading.
     await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
     const quote = toolRow(root, 'Quote');
-    expect(wordsOf(quote)).toBe('Anyone · No discounts · Weekdays, all day');
+    expect(wordsOf(quote)).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
     expect(quote.querySelector('.cd-cross-fade')).toBeNull();
     const glow = quote.querySelector('.cd-landed-glow');
     expect(glow === null || getComputedStyle(glow).display === 'none').toBe(true);
@@ -942,7 +827,7 @@ describe("the business's own jobs", () => {
 
   /** The card of the job named `name` on Rules. */
   function jobCard(root: HTMLElement, name: string): HTMLElement {
-    const card = [...root.querySelectorAll<HTMLElement>('[aria-label="Your Desk’s jobs"] section')].find((el) => el.getAttribute('aria-label') === name);
+    const card = landingRows(root).find((each) => each.name === name)?.row;
     if (!card) throw new Error(`no ${name} job on Rules`);
     return card;
   }
@@ -956,21 +841,18 @@ describe("the business's own jobs", () => {
     // Rules scrolled to its end, the jobs at its top out of view.
     const main = screen.getByRole('main').element();
     main.scrollTop = main.scrollHeight;
-    await expect.poll(() => inView(jobCard(root, 'New client intake'), main)).toBe(false);
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
 
     // The intake card comes into view, lit, with "Updated" by its title and its new words.
     const intake = () => jobCard(root, 'New client intake');
-    await expect.poll(() => intake().querySelector('.cd-tool-rules__tool .cd-pill')?.textContent).toBe('Updated');
+    await expect.poll(() => intake().querySelector('.cd-pill')?.textContent).toBe('Updated');
     await expect.poll(() => fillOf(intake())).toBe(SELECTED);
     await expect.poll(() => inView(intake(), main)).toBe(true);
-    await expect.poll(() => intake().querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_ASKS.reason);
+    await expect.poll(() => wordsOf(intake())).toBe('Claude asks you before using new client intake');
     // The other job carries neither.
-    const booking = jobCard(root, 'Book a free intro call');
-    expect(booking.querySelector('.cd-pill')).toBeNull();
-    expect(fillOf(booking)).toBe('none');
+    expect(landingRows(root).map(({ name }) => name)).not.toContain('Book a free intro call');
   });
 });
 
@@ -997,8 +879,8 @@ describe('under StrictMode, as the app renders', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
-    const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
-    await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
+    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
+    expect(updatedRows(root)).toEqual([]);
     expect(saysUpdated(toolRow(root, 'Emergency callback'))).toBe(false);
     expect(root.textContent).not.toContain('Your rules are updated.');
   });

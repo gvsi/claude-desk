@@ -5,7 +5,6 @@
  */
 import { onlineManager } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
-import type { RouteObject } from 'react-router';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 
@@ -13,7 +12,6 @@ import { observeRequests, OWNER_ERROR_COPY, RULES_UNAVAILABLE_COPY } from '../..
 import { ROUTES } from '../../api/routes.ts';
 import type { RuleCard } from '../../api/contracts.ts';
 import type { Suggestion } from '../../api/views.ts';
-import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { lineWords } from '../../ds/test/lineWords.ts';
 import { settled } from '../../ds/test/settled.ts';
@@ -170,70 +168,54 @@ function failNeedsYou(): { failed: () => number; recover: () => void } {
 }
 
 /** Turner's payment limit, atop Payments and Stripe. */
-const LIMIT_500 = 'No payment over $500 goes through without asking you, whatever the rules below say.';
+const LIMIT_500 = 'Claude asks you before any payment over $500, whatever the other rules say';
 
 const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
 
-/** The connector sections, in order, by their names. */
-const SECTIONS = ['Quotes', 'Bookings', 'Leads and callbacks', 'Verification', 'Documents', 'Payments', 'Stripe'] as const;
-
-/** Each section's connector, in the same order: its page is `connectors/{key}`. */
-const SECTION_KEYS = ['quotes', 'bookings', 'leads', 'verification', 'documents', 'payments', 'stripe'] as const;
-
-/** A tool's row on Rules in the owner's words: "{name}: {rule words}, {outcome}". */
-function toolRowWords(row: Element): string {
-  const part = (selector: string) => row.querySelector(selector)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-  return `${part('.cd-connector-section__tool-name')}: ${part('.cd-connector-section__tool-summary')}, ${part('.cd-connector-section__tool-outcome')}`;
-}
-
-/**
- * The app's routes with a stand-in page where the Connectors page will be, under the Desk, so a
- * test can open it with the Connectors pages switched on.
- */
-function withConnectorsPage(): RouteObject[] {
-  return routes.map((route) => {
-    if (route.path !== '/app/:deskId' || route.index === true) return route;
-    return { ...route, children: [...(route.children ?? []), { path: 'connectors', element: <h1>Connectors</h1> }] };
-  });
-}
-
-/**
- * The tool row on Rules whose words (`toolRowWords`) match `words`, once it shows, linked to its
- * page or not.
- */
-async function expectToolRow(root: HTMLElement, words: RegExp): Promise<HTMLElement> {
-  const find = () => [...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find((row) => words.test(toolRowWords(row)));
-  await expect.poll(() => find() !== undefined, { message: `a tool row reading ${words}` }).toBe(true);
-  const row = find() as HTMLElement;
-  await expect(row).toBeVisible();
-  return row;
+/** Find a rule sentence in the new page by its text. */
+async function expectRule(root: HTMLElement, words: RegExp): Promise<HTMLElement> {
+  const find = () => [...root.querySelectorAll<HTMLElement>('.cd-rules__row')].find((row) => words.test(row.textContent ?? ''));
+  await expect.poll(() => find() !== undefined).toBe(true);
+  return find()!;
 }
 
 describe('rules page', () => {
-  it('rules_header_links_to_all_rules_before_the_preset_and_keeps_the_lower_link', async () => {
-    const { screen, router } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
-    const header = screen.container.querySelector('.cd-rules__header');
-    const all = header?.querySelector<HTMLAnchorElement>('a');
-    expect(all, 'See all rules in the header').not.toBeNull();
-    expect(all?.textContent).toBe('See all rules');
-    const actions = all?.closest('.cd-page-header__actions');
-    const preset = screen.getByRole('button', { name: 'Start from a preset' }).element();
-    expect(actions?.contains(preset)).toBe(true);
-    expect(all!.compareDocumentPosition(preset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'See all rules' }).elements()).toHaveLength(2);
-    const lower = screen.container.querySelector('.cd-rules__all .cd-text-link');
-    expect(lower?.getAttribute('href')).toBe(`${DESK}/rules/all`);
+  it.each(['desktop', 'phone'] as const)('rules_are_one_card_of_sentences_at_%s', async (viewport) => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
+    const allow = screen.getByRole('region', { name: 'Allow', exact: true });
+    await expect.element(allow).toBeVisible();
+    expect([...screen.container.querySelectorAll('.cd-rules__group h2')].map((heading) => heading.textContent)).toEqual([
+      'Allow', 'Ask me first', 'Never · always on, every Desk',
+    ]);
+    expect(screen.container.querySelectorAll('.cd-rules__groups > .cd-card')).toHaveLength(1);
+    expect(allow.element().querySelectorAll('.cd-rule-sentence')).toHaveLength(8);
+    expect(allow.element().textContent).not.toContain("Confirm it's them");
+    const never = screen.getByRole('region', { name: 'Never · always on, every Desk' });
+    expect(never.element().querySelectorAll('.cd-rule-sentence')).toHaveLength(4);
+    await expect.element(screen.getByText('Anything not listed here, Claude asks you first.', { exact: true })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'See all rules' }).elements()).toHaveLength(1);
+    for (const selector of ['.cd-business-jobs', '.cd-connector-section', '.cd-connector-list__summary']) {
+      expect(pagePart(selector)).toBeNull();
+    }
     await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+  });
 
-    await userEvent.click(all!);
+  it('rules_header_links_to_all_rules_once_before_the_preset', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
+    const all = screen.getByRole('link', { name: 'See all rules' });
+    expect(all.elements()).toHaveLength(1);
+    const preset = screen.getByRole('button', { name: 'Start from a preset' }).element();
+    expect(all.element().compareDocumentPosition(preset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await all.click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules/all`);
   });
 
   it('rules_phone_preset_menu_spans_the_actions_row_and_keeps_keyboard_navigation', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     const actions = screen.container.querySelector('.cd-rules__header .cd-page-header__actions')!;
     const button = screen.getByRole('button', { name: 'Start from a preset' });
     await button.click();
@@ -260,7 +242,7 @@ describe('rules page', () => {
     // A text link shows keyboard focus in its words and underline, both the primary ink, the underline
     // 2 px; no ring and no edge around it.
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     const link = screen.container.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
     await expectTabOrderFromTop([link]);
     link.focus();
@@ -275,7 +257,7 @@ describe('rules page', () => {
 
   it('rules_header_actions_share_the_phone_row_with_a_full_height_link', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     const header = screen.container.querySelector('.cd-rules__header .cd-page-header')!;
     const actions = header.querySelector('.cd-page-header__actions')!;
     const all = actions.querySelector('a')!;
@@ -296,120 +278,44 @@ describe('rules page', () => {
     expectNoHorizontalScroll();
   });
 
-  it('rules_page_groups_outcomes_by_connector', async () => {
-    // Refund's definition changed and waits for review.
-    desk().tools = desk().tools.map((tool) =>
-      tool.tool === 'payments.create_refund' ? { ...tool, status: 'needs_review', pending_sha256: 'b'.repeat(64), review_reason: 'changed' } : tool,
-    );
+  it('rules_name_tools_and_audiences_in_the_board_order', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
-
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    const list = screen.getByRole('list', { name: 'Connectors' });
-    await expect.element(list).toBeVisible();
-    const sections = [...list.element().querySelectorAll<HTMLElement>(':scope > li > section')];
-    expect(sections.map((section) => section.getAttribute('aria-label'))).toEqual([...SECTIONS]);
-    // Each header names its connector without a link: the connectors' pages aren't built yet.
-    sections.forEach((section, i) => {
-      const header = section.querySelector('.cd-connector-section__header');
-      expect(header?.tagName, SECTIONS[i]).toBe('DIV');
-      expect(header?.textContent, SECTIONS[i]).toContain(SECTIONS[i]);
-    });
-
-    // Each tool names its outcome in words, without a link.
-    const root = screen.container;
-    for (const words of [
-      /^Quote: Anyone · No discounts, Allow$/,
-      /^Payment link: Anyone · Up to \$300 · Checked by the reviewer, Allow$/,
-      /^See charges: .*, Allow$/,
-      // A changed tool needs the owner's review before its outcome counts.
-      /^Refund: .*, Needs your review$/,
-      /^Book a visit: 2 rules, Allow$/,
-    ]) {
-      const row = await expectToolRow(root, words);
-      expect(row.querySelector('a'), String(words)).toBeNull();
-    }
-
-    // No "Built in", "Integrations", "Custom" or mode switch anywhere; the always-on rules close the page.
-    const text = screen.container.querySelector('main')?.textContent ?? '';
-    for (const word of [/Built in/, /Integrations/, /\bCustom\b/]) expect(text).not.toMatch(word);
-    expect(screen.container.querySelector('[role="radiogroup"], .cd-segmented-control')).toBeNull();
-    await expect.element(screen.getByRole('region', { name: 'Always on' })).toBeVisible();
-    await expect.element(screen.getByText('No money moves without your rule or a signed limit', { exact: true })).toBeVisible();
-    await expectScreenBasics(screen.container, { owner: true });
+    const allow = screen.getByRole('region', { name: 'Allow', exact: true });
+    await expect.element(allow).toBeVisible();
+    const rows = [...allow.element().querySelectorAll('.cd-rule-sentence')];
+    expect(rows.map((row) => row.querySelector('.cd-rule-sentence__meta')?.textContent)).toEqual([
+      'Quote · Anyone', 'Find open times · Anyone', 'Book a visit · Anyone', 'Book a visit · Anyone',
+      'Save a lead, Request a callback and Emergency callback · Anyone',
+      "Share a document and See charges · The record's owner, verified",
+      'Payment link · Anyone', 'Charge within a signed limit · Signed agents',
+    ]);
+    expect(rows[2]?.querySelector('strong')?.textContent).toBe('weekdays, 8:00 am to 6:00 pm');
+    expect(rows[6]?.querySelector('strong')?.textContent).toBe('$300');
+    await expectOwnerBoard(screen.container, { current: 'Rules' });
     expect(requests('rules').length).toBeGreaterThan(0);
   });
 
-  it('connector_rows_have_no_links_until_their_pages_are_built', async () => {
+  it('sentence_rows_are_read_only_and_all_rules_keeps_the_tools', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
-    const list = screen.getByRole('list', { name: 'Connectors' });
-    const sections = list.element();
-
-    // No connector header or tool row is a link, has a chevron, or links anywhere under Connectors.
-    expect(sections.querySelectorAll('.cd-connector-section__header')).toHaveLength(SECTIONS.length);
-    expect(sections.querySelectorAll('.cd-connector-section__tool')).toHaveLength(11);
-    expect(list.getByRole('link').elements()).toEqual([]);
-    expect(sections.querySelectorAll('a, .cd-connector-section__chevron')).toHaveLength(0);
-    expect(screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
-    // Nor has the sidebar a Connectors row; "See all rules" still links to every rule.
-    expect(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Connectors' }).elements()).toEqual([]);
-    const all = screen.getByRole('link', { name: 'See all rules' }).last();
-    await expect.element(all).toHaveAttribute('href', `${DESK}/rules/all`);
-
-    // Tab passes them by: in the connectors it stops only on the payment limit's two "Change".
-    const changes = [...sections.querySelectorAll<HTMLElement>('.cd-money-limit button')];
-    expect(changes.map((button) => button.textContent)).toEqual(['Change', 'Change']);
-    const reached = await expectTabOrderFromTop([...changes, all.element() as HTMLElement]);
-    expect(reached.filter((el) => sections.contains(el))).toEqual(changes);
-
-    // All rules draws each tool's name and line without a link too: Turner's urgent job first, then
-    // the connectors' eleven tools.
-    const house = await renderRoute(`${DESK}/rules/all`);
-    await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
-    const main = house.screen.getByRole('main').element();
-    expect(main.querySelectorAll('.cd-tool-rules__tool')).toHaveLength(12);
-    expect(main.querySelectorAll('a.cd-tool-rules__tool, .cd-tool-rules__chevron')).toHaveLength(0);
-    expect(house.screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
-    await expect.element(house.screen.getByRole('region', { name: 'Payment link' }).getByText('Payment link', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
+    expect(screen.container.querySelector('.cd-rules__groups a, .cd-rules__groups button')).toBeNull();
+    await screen.getByRole('link', { name: 'See all rules' }).click();
+    await expect.element(screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
+    expect(screen.getByRole('main').element().querySelectorAll('.cd-tool-rules__tool')).toHaveLength(12);
   });
 
-  it('connector_rows_link_to_their_pages_once_built', async () => {
+  it('rules_stay_sentences_when_connector_pages_are_enabled', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { connectorPages: true });
-    const list = screen.getByRole('list', { name: 'Connectors' });
-    await expect.element(list).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
-
-    // Each header links to its connector's page, and each tool to its own, naming its outcome.
-    const sections = [...list.element().querySelectorAll<HTMLElement>(':scope > li > section')];
-    expect(sections.map((section) => section.querySelector('a.cd-connector-section__header')?.getAttribute('href'))).toEqual(
-      SECTION_KEYS.map((key) => `${DESK}/connectors/${key}`),
-    );
-    expect(list.element().querySelectorAll('a.cd-connector-section__tool-link')).toHaveLength(11);
-    await expect.element(screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Allow\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/quotes/native.quote`);
-    await expect.element(screen.getByRole('link', { name: /^Payment link: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/payments/native.payment_link`);
-    await expect.element(screen.getByRole('link', { name: /^Refund: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/stripe/payments.create_refund`);
-    // The sidebar's Connectors row comes with them.
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
+    expect(screen.container.querySelector('.cd-rules__groups a')).toBeNull();
     await expect.element(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Connectors' })).toHaveAttribute('href', `${DESK}/connectors`);
-
-    // All rules links each tool's name and line to its page.
-    const house = await renderRoute(`${DESK}/rules/all`, { connectorPages: true });
-    await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
-    const link = house.screen.getByRole('region', { name: 'Payment link' }).element().querySelector('a.cd-tool-rules__tool');
-    expect(link?.getAttribute('href')).toBe(`${DESK}/connectors/payments/native.payment_link`);
-    expect(house.screen.getByRole('main').element().querySelectorAll('a.cd-tool-rules__tool')).toHaveLength(11);
-
-    // On a Connectors page, the sidebar marks its row as the current one, and only that row.
-    const connectors = await renderRoute(`${DESK}/connectors`, { connectorPages: true, routes: withConnectorsPage() });
-    const nav = connectors.screen.getByRole('navigation', { name: 'Main' });
-    await expect.element(nav.getByRole('link', { name: 'Connectors' })).toHaveAttribute('aria-current', 'page');
-    expect([...nav.element().querySelectorAll('[aria-current="page"]')].map((row) => row.textContent)).toEqual(['Connectors']);
   });
 
   it.each(['Ask me first', 'Recommended rules'])('preset_review_%s_keeps_emergency_callbacks_automatic', async (label) => {
     await page.viewport(1440, 900);
     const urgent = desk().policy.cards.find((card) => card.card_id === 'rv-urgent');
     const { screen } = await renderRoute(`${DESK}/rules`);
-    const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+    const jobs = screen.getByRole('region', { name: 'Allow', exact: true });
     await expect.element(jobs.getByText('Emergency callback', { exact: true })).toBeVisible();
     await expect.element(jobs.getByText('Allow', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
@@ -460,7 +366,7 @@ describe('rules page', () => {
     expect(requests('confirmRules').map((r) => r.body)).toEqual([{ version }]);
     expect(desk().policy.version).toBe(version);
     expect(screen.container.textContent).not.toMatch(/\bCustom\b/);
-    await expectToolRow(screen.container, /^Quote: Anyone · No discounts, Allow$/);
+    await expectRule(screen.container, /Claude can send quotes/);
   });
 
   it('preset_review_lists_every_removed_rule', async () => {
@@ -493,7 +399,7 @@ describe('rules page', () => {
     expect(requests('confirmRules')).toEqual([]);
     expect(desk().policy.version).toBe(7);
     expect(desk().policy.cards.map((card) => card.card_id)).toContain(EXTRA_RULES.danaBooking.card_id);
-    await expectToolRow(screen.container, /^Book a visit: 3 rules, Allow$/);
+    await expectRule(screen.container, /Dana Whitfield/);
   });
 
   it('rule_chat_shows_the_draft_inline', async () => {
@@ -765,8 +671,8 @@ describe('rules page', () => {
     // row the change landed on: Refund, which has no control of its own while the Connectors pages
     // aren't built, so the row itself takes focus, from a script only, never as a Tab stop.
     const refund = () =>
-      [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find(
-        (row) => row.querySelector('.cd-connector-section__tool-name')?.textContent === 'Refund',
+      [...screen.container.querySelectorAll<HTMLElement>('.cd-rules__row')].find(
+        (row) => row.querySelector('.cd-rule-sentence__sentence')?.textContent === 'Claude can send refunds up to $50',
       );
     await expect.poll(() => refund()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
     await expect.poll(() => document.activeElement === refund()).toBe(true);
@@ -782,8 +688,8 @@ describe('rules page', () => {
     desk().policy = { ...desk().policy, auto_money_cap_cents: 0 };
     desk().suggestions.push(DANA_REFUNDS);
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' }).getByText('Every payment asks you first.', { exact: true })).toBeVisible();
-    expect(screen.getByText('Every payment asks you first.', { exact: true }).elements()).toHaveLength(2);
+    await expect.element(screen.getByText('Claude asks you before any payment', { exact: true })).toBeVisible();
+    expect(screen.getByText('Claude asks you before any payment', { exact: true }).elements()).toHaveLength(1);
     await screen.getByRole('button', { name: 'Draft this rule' }).click();
     await expect.element(screen.getByText("You haven't set a limit for taking money without asking. Set one first.", { exact: true })).toBeVisible();
     expect(requests('draftSuggestion')).toHaveLength(1);
@@ -802,7 +708,7 @@ describe('rules page', () => {
     };
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     // The lower "See all rules" stays at the end of Rules, so scroll down to reach it.
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     const scroller = screen.getByRole('main').element();
     scroller.scrollTop = scroller.scrollHeight;
     expect(scroller.scrollTop).toBeGreaterThan(0);
@@ -846,182 +752,56 @@ describe('rules page', () => {
     expect(screen.container.textContent?.split(REVIEWER_LINE)).toHaveLength(2);
   });
 
-  it('always_on_ends_with_a_link_to_safety_where_every_attempt_is_shown', async () => {
-    const { screen, router } = await renderRoute(`${DESK}/rules`);
-    const always = screen.getByRole('region', { name: 'Always on' });
-    await expect.element(always).toBeVisible();
-    const link = screen.getByRole('link', { name: 'Open Safety' });
-    await expect.element(link).toHaveAttribute('href', `${DESK}/safety`);
-    // Under Always on's rules, in meta type, as the lower "See all rules" is above them.
-    const line = link.element().closest('p');
-    expect(line?.classList.contains('cd-type-meta')).toBe(true);
-    expect(always.element().compareDocumentPosition(line!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const list = always.element().querySelector('.cd-always-on__list')!;
-    expect(Math.round(line!.getBoundingClientRect().top - list.getBoundingClientRect().bottom)).toBe(12);
-    // It opens this Desk's Safety.
-    await userEvent.click(link.element());
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety' })).toBeVisible();
-    expect(router.state.location.pathname).toBe(`${DESK}/safety`);
+  it('never_ends_with_the_four_always_on_rules_and_the_fallback', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const never = screen.getByRole('region', { name: 'Never · always on, every Desk' });
+    await expect.element(never).toBeVisible();
+    const rows = [...never.element().querySelectorAll('.cd-rule-sentence__sentence')];
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Claude never says it's anything but an AI",
+      'Claude never shows private data to anyone but its verified owner',
+      'Claude never sends a code anywhere but the contact on record',
+      'Claude never moves money without your rule or a signed limit',
+    ]);
+    const fallback = screen.getByText('Anything not listed here, Claude asks you first.', { exact: true }).element();
+    expect(never.element().compareDocumentPosition(fallback) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('money_cap_shows_and_changes_through_a_draft', async () => {
+  it('the_money_cap_is_one_ask_sentence_whatever_other_rules_say', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
-    const payments = screen.getByRole('region', { name: 'Payments' });
-    const stripe = screen.getByRole('region', { name: 'Stripe' });
-    for (const group of [payments, stripe]) await expect.element(group.getByText(LIMIT_500, { exact: true })).toBeVisible();
-
-    // "Change" opens the field, focus in it, with what it is now.
-    await payments.getByRole('button', { name: 'Change' }).click();
-    const field = payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' });
-    await expect.element(field).toHaveFocus();
-    await expect.element(payments.getByText('Whole dollars, from 0 to 10,000. Now $500.', { exact: true })).toBeVisible();
-    // One field open at a time: Stripe's still reads.
-    await expect.element(stripe.getByText(LIMIT_500, { exact: true })).toBeVisible();
-
-    // Above the ceiling: said in the field, and nothing is sent.
-    await field.fill('10001');
-    await payments.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(payments.getByText('No single payment can be above $10,000.', { exact: true })).toBeVisible();
-    // The amount it is already: the field closes with no request.
-    await field.fill('500');
-    await userEvent.keyboard('{Enter}');
-    await expect.element(payments.getByText(LIMIT_500, { exact: true })).toBeVisible();
-    expect(requests('draftMoneyCap')).toEqual([]);
-
-    // The API's own refusal above the platform's ceiling says the same, in the field.
-    mockStore.inject({ route: 'draftMoneyCap', status: 422, body: { error: 'above_platform_ceiling' } });
-    await payments.getByRole('button', { name: 'Change' }).click();
-    await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('9000');
-    await payments.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(payments.getByText('No single payment can be above $10,000.', { exact: true })).toBeVisible();
-    expect(requests('draftMoneyCap').map((r) => r.body)).toEqual([{ auto_money_cap_cents: 900_000 }]);
-
-    // A new amount drafts it, and its review says it in words.
-    await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('5000');
-    await payments.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
-    expect(requests('draftMoneyCap').map((r) => r.body)).toEqual([{ auto_money_cap_cents: 900_000 }, { auto_money_cap_cents: 500_000 }]);
-    await expect.element(screen.getByText('New limit: no payment over $5,000 without asking you.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Was $500', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Your rules stay the same.', { exact: true })).toBeVisible();
-    expect(screen.getByText(CANCELS_LINKS, { exact: true }).elements()).toHaveLength(0);
-    // Under "Rules / Change your payment limit", the owner's choice over N-Conn-20's "Rules" alone.
-    const trail = screen.getByRole('navigation', { name: 'Breadcrumb' });
-    await expect.element(trail.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
-    expect(trail.element().textContent).toBe('Rules/Change your payment limit');
-    expect(desk().policy.auto_money_cap_cents).toBe(50_000);
+    await expect.element(screen.getByText(LIMIT_500, { exact: true })).toBeVisible();
+    expect(screen.getByText(LIMIT_500, { exact: true }).elements()).toHaveLength(1);
+    expect(screen.container.querySelector('.cd-money-limit')).toBeNull();
+    expect(screen.container.querySelector('[data-money-limit]')?.closest('section')?.textContent).toContain('Ask me first');
   });
 
-  it('money_limit_changes_only_at_confirm', async () => {
+  it('a_confirmed_money_cap_lands_on_its_single_sentence', async () => {
+    const { land } = await import('./landing.ts');
     const { screen } = await renderRoute(`${DESK}/rules`);
-    const lower = async () => {
-      const payments = screen.getByRole('region', { name: 'Payments' });
-      await payments.getByRole('button', { name: 'Change' }).click();
-      await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('100');
-      await payments.getByRole('button', { name: 'Review change' }).click();
-      await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
-    };
-
-    // A lower limit: drafted, and reviewed with the links it may cancel.
-    await lower();
-    expect(requests('draftMoneyCap').map((r) => r.body)).toEqual([{ auto_money_cap_cents: 10_000 }]);
-    await expect.element(screen.getByText('New limit: no payment over $100 without asking you.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Was $500', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText(CANCELS_LINKS, { exact: true })).toBeVisible();
-    // Payment link's own $300 comes down to the new limit in the draft, and the review shows it,
-    // with the API's sentence for the new limit in place of the reason that quoted $300; the
-    // agents' $20 deposit already fits, so it is the one change.
-    const lowered = reviewRows(screen);
-    expect(lowered.map((row) => row.title)).toEqual(['Payment link']);
-    expect(lowered[0]?.before).toContain('Allow');
-    expect(lowered[0]?.before).toContain('Payment links up to $300, checked by the reviewer.');
-    expect(lowered[0]?.after).toContain('Allow');
-    expect(lowered[0]?.after).toContain('Up to $100, your payment limit.');
-    expect(lowered[0]?.after).not.toContain('$300');
-    expect(screen.getByText('Your rules stay the same.', { exact: true }).elements()).toHaveLength(0);
-    expect(desk().policy.auto_money_cap_cents).toBe(50_000);
-    expect(desk().policy.cards.find((card) => card.card_id === 'rv-link')?.max_amount_cents).toBe(30_000);
-
-    // Keeping her rules keeps $500.
-    await screen.getByRole('button', { name: 'Keep my rules' }).click();
-    await expect.element(screen.getByRole('region', { name: 'Payments' }).getByText(LIMIT_500, { exact: true })).toBeVisible();
-    expect(requests('confirmRules')).toEqual([]);
-
-    // Again, confirmed: back on Rules, $100 in both groups, each saying it was updated.
-    await lower();
-    await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    expect(requests('confirmRules')).toHaveLength(1);
-    expect(desk().policy.auto_money_cap_cents).toBe(10_000);
-    const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
-    for (const name of ['Payments', 'Stripe']) await expect.element(screen.getByRole('region', { name }).getByText(`${limit100}Updated`, { exact: true })).toBeVisible();
-    // No rule beside it still takes more on its own.
-    await expectToolRow(screen.container, /^Payment link: .*, Allow$/);
-    expect(screen.container.querySelector('main')?.textContent).not.toContain('$300');
-
-    // At 0, every payment asks, and no "$0" anywhere.
-    const payments = screen.getByRole('region', { name: 'Payments' });
-    await payments.getByRole('button', { name: 'Change' }).click();
-    await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('0');
-    await payments.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(screen.getByText('New limit: every payment asks you first.', { exact: true })).toBeVisible();
-    // Each rule that took money on its own now asks first, in the review, and says why in the API's
-    // sentence for a $0 limit.
-    const asks = reviewRows(screen);
-    expect(asks.map((row) => row.title).sort()).toEqual(['Charge within a signed limit', 'Payment link']);
-    for (const row of asks) {
-      expect(row.after, row.title).toContain('Ask me first');
-      expect(row.after, row.title).toContain('Your payment limit is $0.');
-    }
-    await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    for (const name of ['Payments', 'Stripe']) {
-      await expect.element(screen.getByRole('region', { name }).getByText('Every payment asks you first.Updated', { exact: true })).toBeVisible();
-    }
-    await expectToolRow(screen.container, /^Payment link: .*, Ask me first$/);
-    await expectToolRow(screen.container, /^Charge within a signed limit: .*, Ask me first$/);
-    expect(screen.container.querySelector('main')?.textContent).not.toContain('$0');
+    await expect.element(screen.getByText(LIMIT_500, { exact: true })).toBeVisible();
+    desk().policy = { ...desk().policy, version: 8, auto_money_cap_cents: 10_000 };
+    land(RIVERA.deskId, { version: 8, rows: { tools: [], moneyLimit: true } });
+    await expect.element(screen.getByText('Claude asks you before any payment over $100, whatever the other rules say', { exact: true })).toBeVisible();
+    await expect.poll(() => pagePart('[data-money-limit] .cd-pill')?.textContent).toBe('Updated');
+    expect(screen.container.querySelectorAll('[data-money-limit]')).toHaveLength(1);
   });
 
   it.each(['Turner Plumbing', 'Acme Accounting'])('going_back_returns_to_the_place_on_rules_for_%s', async (business) => {
     renameBusiness(business);
-    const { screen, router } = await renderRoute(`${DESK}/rules`);
-    const payments = screen.getByRole('region', { name: 'Payments' });
-    const limit = () => payments.getByText(LIMIT_500, { exact: true }).element();
-    await expect.element(payments.getByText(LIMIT_500, { exact: true })).toBeVisible();
-    // The shell's main area, once the Desk has opened, which scrolls on its own.
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    await expect.element(screen.getByText(LIMIT_500, { exact: true })).toBeVisible();
     const main = screen.getByRole('main').element();
-    // Rules scrolled down to Payments' limit.
-    limit().scrollIntoView({ block: 'center' });
-    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
-    expect(inView(limit(), main)).toBe(true);
-
-    // A new limit's review opens at its top; "Keep my rules" goes back to Rules where it was, the
-    // limit still in view.
-    await payments.getByRole('button', { name: 'Change' }).click();
-    await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('5000');
-    await payments.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
-    expect(main.scrollTop).toBe(0);
-    await screen.getByRole('button', { name: 'Keep my rules' }).click();
-    await expect.element(payments.getByText(LIMIT_500, { exact: true })).toBeVisible();
-    expect(router.state.location.pathname).toBe(`${DESK}/rules`);
-    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
-    expect(inView(limit(), main)).toBe(true);
-
-    // From the end of Rules, a fresh visit to All rules still opens at its top, and Back from it
-    // returns to the end of Rules. The place is kept as the scroll is heard: wait for it before leaving.
     const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
     main.scrollTop = main.scrollHeight;
     await heard;
-    const end = main.scrollTop;
-    expect(end).toBeGreaterThan(0);
-    await screen.getByRole('link', { name: 'See all rules' }).last().click();
+    const place = main.scrollTop;
+    expect(place).toBeGreaterThan(0);
+    await router.navigate(`${DESK}/rules/all`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
     expect(main.scrollTop).toBe(0);
     await router.navigate(-1);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => main.scrollTop).toBe(end);
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
+    await expect.poll(() => main.scrollTop).toBe(place);
   });
 
   it.each(['before', 'after'] as const)('going_back_keeps_the_place_when_the_hold_question_comes_in_above_it_%s_the_shapes_show', async (when) => {
@@ -1032,7 +812,7 @@ describe('rules page', () => {
     const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     const main = screen.getByRole('main').element();
-    const limit = () => screen.getByRole('region', { name: 'Payments' }).getByText(LIMIT_500, { exact: true }).element();
+    const limit = () => screen.getByText(LIMIT_500, { exact: true }).element();
     // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as
     // the owner's own scrolling would be heard before they leave.
     const heard = new Promise((resolve) => main.addEventListener('scroll', resolve, { once: true }));
@@ -1041,7 +821,7 @@ describe('rules page', () => {
     const place = main.scrollTop;
     expect(place).toBeGreaterThan(0);
     const shows = limit().getBoundingClientRect().top;
-    expect(place).toBeLessThan(main.scrollHeight - main.clientHeight - 300);
+    expect(place).toBeLessThanOrEqual(main.scrollHeight - main.clientHeight);
 
     // Back from All rules: the question comes in with the page, above the place, at once or once
     // Needs you, held, comes after the shapes have shown. Rules reads Needs you as it opens, and a
@@ -1085,7 +865,7 @@ describe('rules page', () => {
       await vi.waitFor(() => expect(layer()?.getAttribute('data-state'), "Rules' shapes").toBe('shown'), { timeout: 2_000 });
       releaseSuggestions();
     }
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     const main = screen.getByRole('main').element() as HTMLElement;
     const menu = screen.getByRole('button', { name: 'Start from a preset' }).element() as HTMLElement;
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).element() as HTMLElement;
@@ -1096,8 +876,8 @@ describe('rules page', () => {
     expect(chips.map((chip) => chip.textContent)).toEqual([...FIXED_CHIPS, 'Why was this quote held?']);
     // Then each payment limit's "Change", in order, and nothing else in the connectors: their
     // headers and tools aren't links until their pages are built.
-    const changes = [...main.querySelectorAll<HTMLElement>('.cd-connector-section .cd-money-limit button')];
-    expect(changes).toHaveLength(2);
+    const changes: HTMLElement[] = [];
+    expect(main.querySelector('.cd-money-limit')).toBeNull();
     await expectOwnerBoard(screen.container, { current: 'Rules' });
     const headerLink = main.querySelector<HTMLElement>('.cd-rules__header .cd-text-link')!;
     const reached = await expectTabOrderFromTop([headerLink, menu, composer, ...chips, ...changes]);
@@ -1114,9 +894,8 @@ describe('rules page', () => {
     expect(top(row) - bottom(box)).toBe(10);
     // Then the Desk's own jobs (Turner's urgent callback) 20 px under them, and the connectors'
     // summary 20 px under those, at the page's own gap.
-    const jobs = main.querySelector('.cd-business-jobs') as HTMLElement;
-    expect(top(jobs) - bottom(row)).toBe(20);
-    expect(top(main.querySelector('.cd-connector-list__summary') as HTMLElement) - bottom(jobs)).toBe(20);
+    const groups = main.querySelector('.cd-rules__groups') as HTMLElement;
+    expect(top(groups) - bottom(row)).toBe(20);
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(menu.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     expect(top(menu) - top(title)).toBe(4);
@@ -1127,7 +906,7 @@ describe('rules page', () => {
     mockStore.world.addActiveRules(desk(), [EXTRA_RULES.agentCharges, EXTRA_RULES.danaBooking]);
     desk().suggestions.push(DANA_REFUNDS);
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expectToolRow(screen.container, /^Payment link: 2 rules · 1 shared, Allow$/);
+    await expectRule(screen.container, /Claude can send payment links/);
     await expectScreenBasics(screen.container, { owner: true });
 
     // With the panel open and a change drafted in it.
@@ -1141,12 +920,12 @@ describe('rules page', () => {
     await expect.element(all.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
     await expectScreenBasics(all.screen.container, { owner: true });
     const phone = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
-    await expect.element(phone.screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(phone.screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     // Under 640 px the header actions share a line under the title.
     const menu = phone.screen.getByRole('button', { name: 'Start from a preset' }).element();
     const title = phone.screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(Math.round(menu.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(16);
-    expect(phone.screen.getByText('What Claude can do on this Desk, where each tool comes from, and your rules for it.').element()).not.toBeVisible();
+    expect(phone.screen.getByText('What Claude can do, in your words. Each rule names the tools it covers.').element()).not.toBeVisible();
     expectNoHorizontalScroll();
     await expectScreenBasics(phone.screen.container, { owner: true });
 
@@ -1172,24 +951,24 @@ describe("Ask Claude's question about a hold", () => {
     const until = new Promise<void>((resolve) => { releaseSuggestions = resolve; });
     onTestFinished(() => releaseSuggestions());
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until, times: 10_000 });
-    const connectorTops = watchTop(() => pagePart('.cd-connector-list'));
+    const connectorTops = watchTop(() => pagePart('.cd-rules__groups'));
     let bodyDrawnAt = 0;
     const observer = new MutationObserver(() => {
-      if (bodyDrawnAt === 0 && pagePart('.cd-connector-list') !== null) bodyDrawnAt = performance.now();
+      if (bodyDrawnAt === 0 && pagePart('.cd-rules__groups') !== null) bodyDrawnAt = performance.now();
     });
     observer.observe(document.body, { childList: true, subtree: true });
     onTestFinished(() => observer.disconnect());
     const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100 });
     await expect.poll(() => rulesReadAt > 0 && requests('suggestions').length > 0 && reads.held() > 0).toBe(true);
-    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
+    expect(pagePart('.cd-rules__groups', screen.container)).toBeNull();
     // Two waits in a row would take at least 6 s; the ceiling leaves a busy runner room under that.
-    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 5_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true }), { timeout: 5_000 }).toBeVisible();
     const elapsed = bodyDrawnAt - rulesReadAt;
     expect(elapsed, 'one three-second cap, measured from the Rules response').toBeGreaterThanOrEqual(2_900);
     expect(elapsed).toBeLessThan(5_000);
     expect(pagePart('.cd-suggestion-chips', screen.container)).toBeNull();
     expect(pagePart('.cd-rules__suggestions', screen.container)).toBeNull();
-    expect(pagePart('.cd-always-on', screen.container)).not.toBeNull();
+    expect(pagePart('.cd-rules__group:last-child', screen.container)).not.toBeNull();
     await settled(screen.container);
     const before = connectorTops();
     expect(before).toHaveLength(1);
@@ -1216,10 +995,10 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.inject({ route: 'suggestions', status: 503, until, times: 10_000 });
     let failures = 0;
     onTestFinished(observeRequests(({ key, ok }) => { if (key === 'suggestions' && !ok) failures += 1; }));
-    const tops = watchTop(() => pagePart('.cd-connector-list'));
+    const tops = watchTop(() => pagePart('.cd-rules__groups'));
     const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'desktop', pollScale: 100, retryScale: 0 });
     await expect.poll(() => requests('suggestions').length).toBeGreaterThan(0);
-    await expect.element(screen.getByRole('list', { name: 'Connectors' }), { timeout: 5_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true }), { timeout: 5_000 }).toBeVisible();
     await settled(screen.container);
     const before = tops();
     expect(before).toHaveLength(1);
@@ -1237,7 +1016,7 @@ describe("Ask Claude's question about a hold", () => {
     const until = new Promise<void>((resolve) => { release = resolve; });
     onTestFinished(() => release());
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until });
-    const connectorTops = watchTop(() => pagePart('.cd-connector-list'));
+    const connectorTops = watchTop(() => pagePart('.cd-rules__groups'));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, viewport });
     await expect.poll(() => finished.has('needsYou')).toBe(true);
     await expect.poll(() => finished.has('rules')).toBe(true);
@@ -1245,7 +1024,7 @@ describe("Ask Claude's question about a hold", () => {
     const before = connectorTops();
     release();
     await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     await settled(screen.container);
     expect(before, 'connectors wait for suggested-rule cards above them').toEqual([]);
     expect(connectorTops(), 'the connector list lands at one top').toHaveLength(1);
@@ -1257,7 +1036,7 @@ describe("Ask Claude's question about a hold", () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { viewport: { width: 390, height: 844 }, pollScale: 100 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
     expect(pagePart('.cd-suggestion-chips', screen.container)).toBeNull();
   });
@@ -1266,7 +1045,7 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.inject({ route: 'suggestions', status: 503, times: 10_000 });
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules', exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Stripe' }), { timeout: 2_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true }), { timeout: 2_000 }).toBeVisible();
     expect(requests('suggestions').length).toBeGreaterThanOrEqual(2);
     expect(pagePart('.cd-rules__suggestions', screen.container)).toBeNull();
   });
@@ -1282,7 +1061,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
-    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
+    expect(pagePart('.cd-rules__groups', screen.container)).toBeNull();
   });
 
   it('a_rules_read_error_shows_while_needs_you_is_still_reading', async () => {
@@ -1294,7 +1073,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
     await expect.element(screen.getByText(OWNER_ERROR_COPY.unavailable, { exact: true }), { timeout: 2_000 }).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Try again' })).toBeVisible();
-    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
+    expect(pagePart('.cd-rules__groups', screen.container)).toBeNull();
   });
 
   it('another_business_keeps_the_hold_question_beside_a_failed_rules_read', async () => {
@@ -1303,7 +1082,7 @@ describe("Ask Claude's question about a hold", () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, retryScale: 0 });
     await expect.element(screen.getByRole('alert')).toBeVisible();
     await expect.element(screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(0);
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
   });
 
@@ -1318,14 +1097,14 @@ describe("Ask Claude's question about a hold", () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport: 'desktop' });
     await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
 
     // Observe every committed DOM state, so separate renders cannot pass merely by finishing fast.
     const mismatches: boolean[] = [];
     const observer = new MutationObserver(() => {
-      const body = pagePart('.cd-connector-list', screen.container) !== null;
+      const body = pagePart('.cd-rules__groups', screen.container) !== null;
       const chip = pagePart('.cd-suggestion-chips', screen.container) !== null;
       if (body !== chip) mismatches.push(true);
     });
@@ -1334,7 +1113,7 @@ describe("Ask Claude's question about a hold", () => {
     reads.release();
     await expect.poll(() => pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?');
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(1);
     await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
     expect(mismatches).toEqual([]);
     await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
@@ -1350,7 +1129,7 @@ describe("Ask Claude's question about a hold", () => {
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
     reads.release();
     await expect.poll(() => failures.failed()).toBe(2);
-    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
     await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
   });
@@ -1359,7 +1138,7 @@ describe("Ask Claude's question about a hold", () => {
     const reads = holdNeedsYou();
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100 });
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     const group = screen.getByRole('group', { name: 'Suggestions' });
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
     reads.release();
@@ -1375,12 +1154,12 @@ describe("Ask Claude's question about a hold", () => {
     onTestFinished(() => onlineManager.setOnline(true));
     onlineManager.setOnline(false);
     await router.navigate(`${DESK}/rules`);
-    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
 
     onlineManager.setOnline(true);
     await expect.poll(() => reads.held()).toBeGreaterThan(0);
-    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
     reads.release();
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
@@ -1410,7 +1189,7 @@ describe("Ask Claude's question about a hold", () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     onTestFinished(() => { vi.useRealTimers(); });
     await vi.advanceTimersByTimeAsync(3_000);
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(0);
 
     releaseRules();
     await rulesRead;
@@ -1418,11 +1197,11 @@ describe("Ask Claude's question about a hold", () => {
     await new Promise(requestAnimationFrame);
     await vi.advanceTimersByTimeAsync(2_999);
     await new Promise(requestAnimationFrame);
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(0);
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     await new Promise(requestAnimationFrame);
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(1);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(0);
 
@@ -1454,7 +1233,7 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.reset('rivera_quiet');
     renameBusiness('Acme Accounting');
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     await expect.poll(() => requests('needsYou').length).toBeGreaterThanOrEqual(2);
     await expect.element(screen.getByRole('group', { name: 'Suggestions' })).not.toBeInTheDocument();
     expect(pagePart('.cd-suggestion-chips', screen.container)).toBeNull();
@@ -1675,7 +1454,7 @@ describe("Turner's fixed suggestions", () => {
     await new Promise(requestAnimationFrame);
     await new Promise(requestAnimationFrame);
     const main = screen.getByRole('main').element();
-    screen.getByRole('region', { name: 'Payments' }).element().scrollIntoView({ block: 'start' });
+    screen.getByText(LIMIT_500, { exact: true }).element().scrollIntoView({ block: 'start' });
     await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     expect(inView(composer.element(), main)).toBe(false);
@@ -1758,10 +1537,10 @@ describe("Turner's fixed suggestions", () => {
     // While the rules are read, both are offered, in order, as before.
     await expect.element(group.getByRole('button', { name: FIXED_CHIPS[1], exact: true })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(0);
     // Turner's rules have neither change, so both stay once they are drawn.
     releaseRules();
-    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
   });
 
@@ -1844,12 +1623,12 @@ describe("Turner's fixed suggestions", () => {
     await expect.poll(() => finished.has('rules')).toBe(true);
     // The rules leave no suggestion of Turner's own, so the page waits for Needs you, as another business's does.
     await expect.element(group).not.toBeInTheDocument();
-    expect(pagePart('.cd-connector-list', screen.container)).toBeNull();
+    expect(pagePart('.cd-rules__groups', screen.container)).toBeNull();
     await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
 
     const drawnWithoutQuestion: boolean[] = [];
     const observer = new MutationObserver(() => {
-      const body = pagePart('.cd-connector-list', screen.container) !== null;
+      const body = pagePart('.cd-rules__groups', screen.container) !== null;
       const question = pagePart('.cd-suggestion-chips', screen.container)?.textContent?.includes('Why was this quote held?') === true;
       if (body && !question) drawnWithoutQuestion.push(true);
     });
@@ -1857,7 +1636,7 @@ describe("Turner's fixed suggestions", () => {
     onTestFinished(() => observer.disconnect());
     reads.release();
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
-    await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     expect(chipWords(screen.getByRole('group', { name: 'Suggestions' }))).toEqual(['Why was this quote held?']);
     expect(drawnWithoutQuestion, 'the body and its hold question land together').toEqual([]);
   });
@@ -1867,7 +1646,7 @@ describe("Turner's fixed suggestions", () => {
     const reads = holdNeedsYou();
     const rules = holdRules();
     const finished = finishedReads();
-    const connectorTops = watchTop(() => pagePart('.cd-connector-list'));
+    const connectorTops = watchTop(() => pagePart('.cd-rules__groups'));
     const rulesRead = new Promise<void>((resolve) => {
       onTestFinished(observeRequests((outcome) => {
         if (outcome.key === 'rules' && outcome.ok) resolve();
@@ -1887,11 +1666,11 @@ describe("Turner's fixed suggestions", () => {
     await vi.advanceTimersByTimeAsync(2_999);
     await new Promise(requestAnimationFrame);
     // Three seconds after the rules, less a millisecond: still waiting for Needs you.
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(0);
     expect(screen.getByText('Reading your rules', { exact: true }).elements()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     await new Promise(requestAnimationFrame);
-    expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
+    expect(screen.getByRole('region', { name: 'Allow', exact: true }).elements()).toHaveLength(1);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
 
     vi.useRealTimers();
@@ -1909,7 +1688,7 @@ describe("Turner's fixed suggestions", () => {
   it('with_both_changes_in_effect_back_returns_to_the_place_once_drawn', async () => {
     bothChangesInEffect();
     const { screen, router } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Allow', exact: true })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     const main = screen.getByRole('main').element();
     // The place is kept as the scroll is heard, which comes after the scroll itself: wait for it, as

@@ -2,46 +2,40 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
+import { ownerErrorCopy, request } from '../../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, RulesPreset, Suggestion } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import {
-  AlwaysOnList,
   Button,
   Card,
   Composer,
-  ConnectorList,
-  ConnectorSection,
+  LandedGlow,
   SkeletonScreen,
-  MoneyLimit,
   Notice,
   PRESET_WORDS,
   PageHeader,
   PresetMenu,
   SuggestionChips,
   TextLink,
+  UpdatedPill,
   useAskClaudeIsSheet,
   type NoticeTone,
 } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { CONNECTORS } from '../connectors/catalog.ts';
-import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
-import { TODAY_COPY } from '../today/copy.ts';
+import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { deskPath, RIVERA_SAMPLE_BUSINESS_NAME, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
-import { BusinessJobs } from './BusinessJobs.tsx';
-import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
-import { holdQuestion, hubSections, parseLimit } from './hub.ts';
+import { RulesGroups } from './RulesGroups.tsx';
+import { draftFromDiff, type RuleDraft } from './drafts.ts';
+import { holdQuestion, rulesGroups } from './hub.ts';
 import { reducesMotion, takeLanding, useLanding, type Landing } from './landing.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
-import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import { RulesSkeleton } from './RulesSkeleton.tsx';
-import { COMPOSER_HELPER, RULES_SUBTITLE, rulesChipsToOffer, rulesVersionLine } from './copy.ts';
+import { COMPOSER_HELPER, RULES_SUBTITLE, rulesChipsToOffer, RULES_FALLBACK } from './copy.ts';
 
 import './RulesPage.css';
 
@@ -99,14 +93,11 @@ function withLanding(landed: Landed, landing: Landing): Landed {
 }
 
 /**
- * The first row `landing` changed, in the page's order, within `page`: a business job's card or a
- * tool's row (each carries its landing as `data-landed`), or the payment limit's line. Null when
- * none is drawn.
+ * The first sentence a change landed on, in the grouped page's order, including a job's rule
+ * or the single money-cap sentence. Null until the page draws that version.
  */
 function firstLandedRow(page: Element, landing: Landing): HTMLElement | null {
   const rows = [...page.querySelectorAll<HTMLElement>(`[data-landed="${landing.id}"]`)];
-  const limit = landing.rows.moneyLimit ? page.querySelector<HTMLElement>('.cd-money-limit--updated') : null;
-  if (limit !== null) rows.push(limit);
   rows.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
   return rows[0] ?? null;
 }
@@ -166,13 +157,6 @@ function focusableRow(row: HTMLElement): HTMLElement {
 /** "Start from a preset", in Rules' header. */
 const presetButton = (page: HTMLElement) => usable(page.querySelector<HTMLElement>('.cd-preset-menu > button'));
 
-/** The payment limit's "Change" atop the connector group `group` (its id), in that group's section. */
-function limitChange(page: HTMLElement, group: string): HTMLElement | null {
-  const name = CONNECTORS.find((connector) => connector.view.id === group)?.view.name;
-  const section = [...page.querySelectorAll<HTMLElement>('section[aria-label]')].find((el) => el.getAttribute('aria-label') === name && usable(el) !== null);
-  return usable(section?.querySelector<HTMLElement>('.cd-money-limit__reading button'));
-}
-
 /** The suggested rule for `tool`'s "Draft this rule", until its rule is confirmed. */
 function suggestionButton(page: HTMLElement, tool: string, landed: boolean): HTMLElement | null {
   if (landed) return null;
@@ -180,23 +164,7 @@ function suggestionButton(page: HTMLElement, tool: string, landed: boolean): HTM
   return usable(card?.querySelector<HTMLElement>('button'));
 }
 
-/** The payment limit's field while it is open, in one group at a time. */
-interface LimitField {
-  group: string;
-  value: string;
-  error?: string;
-  pending: boolean;
-}
-
-/**
- * `rules` (N-Conn-17-Presets; N-Conn-22-Phone-Presets at 390 px): the Desk's outcomes grouped by
- * connector, each group and tool linking to its page under Connectors once those pages are built
- * (`connectorPageHref`), and drawn without a link until then; Ask Claude under the
- * header; the header's "See all rules" link before "Start from a preset", which drafts a preset
- * as one change; the payment limit atop
- * Payments and Stripe; the always-on rules, then "Open Safety", where every attempt is shown. Every
- * change opens its proved review first.
- */
+/** Rules first, grouped by outcome; changes still open their proved review. */
 export function RulesPage() {
   const { desk, reachPlace } = useOwnerDesk();
   useDocumentTitle(inApp(RULES_TITLE));
@@ -244,7 +212,6 @@ export function RulesPage() {
   const peopleFailure = useReadFailure(people, { pausedRoute: 'people' });
   const [presetPending, setPresetPending] = useState(false);
   const [presetSaid, setPresetSaid] = useState<Said | null>(null);
-  const [limit, setLimit] = useState<LimitField | null>(null);
 
   const active = rules.data?.active;
   // A change the owner confirmed (in Ask Claude, or on its own review page), waiting to land here.
@@ -380,29 +347,6 @@ export function RulesPage() {
     }
   };
 
-  const reviewLimit = async () => {
-    if (limit === null || limit.pending || active === undefined) return;
-    const parsed = parseLimit(limit.value);
-    if ('error' in parsed) {
-      setLimit({ ...limit, error: parsed.error });
-      return;
-    }
-    // The amount it is already: nothing to change.
-    if (parsed.cents === capOf(active)) {
-      setLimit(null);
-      return;
-    }
-    setLimit({ ...limit, error: undefined, pending: true });
-    try {
-      const draft = await request('draftMoneyCap', { params: { desk_id: deskId }, body: { auto_money_cap_cents: parsed.cents } });
-      const { group } = limit;
-      review(draft, active, (page) => limitChange(page, group), { title: 'Change your payment limit' });
-    } catch (err) {
-      const said = err instanceof ApiError && err.code === 'above_platform_ceiling' ? { tone: 'error' as const, line: ABOVE_CEILING } : draftFailure(err);
-      setLimit((now) => (now === null ? null : { ...now, pending: false, ...(said === null ? {} : { error: said.line }) }));
-    }
-  };
-
   // A Rules error belongs to its read, regardless of whether the rows above it are ready.
   let readError = null;
   if (rules.data === undefined && rules.isError) {
@@ -439,49 +383,16 @@ export function RulesPage() {
   } else if (waitingForOpening || rules.data === undefined || active === undefined) {
     body = null;
   } else {
-    const cap = capOf(active);
-    const sections = hubSections(rules.data, people.data ?? null);
+    const groups = rulesGroups(rules.data, people.data ?? null);
+    const listed = new Set(groups.flatMap((group) => group.rows.flatMap((row) => row.toolKeys)));
+    const fallbackAt = Math.max(0, ...[...landed.tools].filter(([tool]) => !listed.has(tool)).map(([, at]) => at));
     body = (
       <>
-        <BusinessJobs view={rules.data} people={people.data ?? null} landed={landed.tools} />
-        <ConnectorList summary={rulesVersionLine(active.version)}>
-          {sections.map((section) => {
-            const editing = limit !== null && limit.group === section.connector.id ? limit : null;
-            return (
-              <ConnectorSection
-                key={section.connector.id}
-                connector={section.connector}
-                href={connectorPageHref(deskId, section.href)}
-                tools={section.tools.map((tool) => {
-                  const at = landed.tools.get(tool.key);
-                  return { ...tool, href: connectorPageHref(deskId, tool.href), ...(at === undefined ? {} : { landed: at }) };
-                })}
-                linkComponent={RouterLink}
-                {...(section.moneyLimit
-                  ? {
-                      aboveTools: (
-                        <MoneyLimit
-                          line={moneyLimitLine(cap)}
-                          editing={editing !== null}
-                          value={editing?.value ?? ''}
-                          hint={moneyLimitHint(cap)}
-                          {...(editing?.error === undefined ? {} : { error: editing.error })}
-                          disabled={editing?.pending ?? false}
-                          updated={landed.limit !== null}
-                          onEdit={() => setLimit({ group: section.connector.id, value: '', pending: false })}
-                          onChange={(value) => setLimit((now) => (now === null ? null : { ...now, value, error: undefined }))}
-                          onReview={() => void reviewLimit()}
-                          onCancel={() => setLimit(null)}
-                        />
-                      ),
-                    }
-                  : {})}
-              />
-            );
-          })}
-        </ConnectorList>
-        <p className="cd-rules__all cd-type-meta">
-          <TextLink href={`${deskPath(deskId)}/rules/all`}>See all rules</TextLink>
+        <RulesGroups groups={groups} landed={landed.tools} landedLimit={landed.limit} />
+        <p className="cd-rules__fallback cd-type-meta" data-landed={fallbackAt || undefined}>
+          {fallbackAt === 0 ? null : <LandedGlow key={`glow-${fallbackAt}`} />}
+          {RULES_FALLBACK}
+          {fallbackAt === 0 ? null : <UpdatedPill key={`updated-${fallbackAt}`} />}
         </p>
       </>
     );
@@ -517,15 +428,6 @@ export function RulesPage() {
           <Notice tone="error" action={<Button variant="secondary" busy={peopleFailure.retrying} onClick={peopleFailure.retry}>Try again</Button>}>{peopleFailure.line}</Notice>
         )}
         {body}
-        {waitingForOpening ? null : (
-          // Always on, then where its last promise, that every attempt is shown, is kept.
-          <div className="cd-rules__always-on">
-            <AlwaysOnList />
-            <p className="cd-rules__safety cd-type-meta">
-              <TextLink href={`${deskPath(deskId)}/safety`}>{TODAY_COPY.openSafety}</TextLink>
-            </p>
-          </div>
-        )}
       </SkeletonScreen>
     </div>
   );

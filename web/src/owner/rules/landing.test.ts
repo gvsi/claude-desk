@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { land, landsHere, pendingLanding, resetLandings } from './landing.ts';
+import { land, landsHere, pendingLanding, resetLandings, takeLanding } from './landing.ts';
 
 const DESK = 'desk-1';
 
@@ -13,6 +13,17 @@ afterEach(() => {
 });
 
 describe('a pending landing', () => {
+  it('drawing_an_older_grouped_page_cannot_consume_a_newer_change', () => {
+    land(DESK, { version: 8, rows: { tools: ['native.capture_lead', 'native.request_callback'], moneyLimit: false } });
+    const drawn = pendingLanding(DESK)!;
+    land(DESK, { version: 9, rows: { tools: [], moneyLimit: true } });
+    takeLanding(drawn);
+    const latest = pendingLanding(DESK)!;
+    expect(latest.rows).toEqual({ tools: ['native.capture_lead', 'native.request_callback'], moneyLimit: true });
+    takeLanding(latest);
+    expect(pendingLanding(DESK)).toBeNull();
+  });
+
   it('two_changes_on_one_desk_land_together', () => {
     land(DESK, { version: 8, rows: { tools: ['payments.create_refund'], moneyLimit: false } });
     land(DESK, { version: 9, rows: { tools: ['native.release_document', 'payments.create_refund'], moneyLimit: true } });

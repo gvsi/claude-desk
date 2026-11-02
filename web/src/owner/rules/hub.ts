@@ -9,6 +9,7 @@ import { MONEY_EFFECTS, type PolicyVersion, type RuleCard, type ToolName } from 
 import type { AnyToolName, NeedsYouItem, PeopleOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   describeEffects,
+  OUTCOME_WORDS,
   ruleWordsLine,
   rulesForTool,
   type ConnectorView,
@@ -20,9 +21,96 @@ import { aboveMoneyCapCopy, formatCents } from '../../lib/format.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorOn, isCatalogTool, toolDisplayName, toolNoun, toolState, type BusinessTools, type ConnectorKey } from '../connectors/catalog.ts';
 import { heldOldestFirst } from '../useDesks.ts';
 import { coveredTools, reviewedTools } from './changeRows.ts';
-import type { RuleDraft } from './drafts.ts';
+import { capOf, type RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
 import { ABOVE_CEILING, PAYMENT_MAX_CENTS, ruleWords, targetWords } from './ruleWords.ts';
+import {
+  ALWAYS_ON_SENTENCES, canJoin, discountHoldSentence, holdMeta, holdSentence,
+  moneyCapMeta, moneyCapSentence, ruleMeta, ruleSentence, type RuleMeta, type SentencePart,
+} from './ruleSentence.ts';
+
+/** One sentence on Rules. Keep its source cards for landing a change and the details disclosure. */
+export interface RulesSentenceRow {
+  key: string;
+  cards: readonly RuleCard[];
+  /** Actual tool IDs, including the tools a shared effect rule covers, for landing a change. */
+  toolKeys: readonly string[];
+  parts: readonly SentencePart[];
+  meta: RuleMeta;
+  moneyLimit?: boolean;
+}
+
+export interface RulesGroup {
+  mode: RuleMode;
+  title: string;
+  rows: RulesSentenceRow[];
+}
+
+/** The signed board's reading order; cards on other tools retain their active-version order. */
+const RULE_ORDER = [
+  'native.quote', 'native.find_slots', 'native.book', 'native.capture_lead',
+  'native.request_callback', 'desk:urgent', 'native.release_document', 'payments.list_charges',
+  'native.payment_link', 'native.charge_mandate',
+] as const;
+const LEARNING_TOOLS = new Set(['native.fetch_website', 'native.read_memory', 'native.web_search']);
+
+/**
+ * Active rules, grouped by outcome rather than connector. Only the board's related tools join,
+ * and only when every condition agrees (`canJoin`). Reading this page never changes a card.
+ */
+export function rulesGroups(view: {
+  active: Pick<RulesView['active'], 'cards' | 'auto_money_cap_cents'>;
+  tools: readonly Pick<ToolRow, 'tool' | 'source' | 'business' | 'effects'>[];
+}, people: PeopleOut | null | undefined): RulesGroup[] {
+  const business = businessTools(view.tools);
+  const words = { business, people, tools: view.tools };
+  const toolKeys = (group: readonly RuleCard[]): string[] => [...new Set(group.flatMap((card) =>
+    card.applies_to.startsWith('effect:') ? coveredTools(card, view.active.cards, view.tools) : [card.applies_to],
+  ))];
+  const target = (card: RuleCard): string => business.get(card.applies_to)?.config.block === 'urgent' ? 'desk:urgent' : card.applies_to;
+  const rank = (card: RuleCard) => {
+    const index = (RULE_ORDER as readonly string[]).indexOf(target(card));
+    return index < 0 ? RULE_ORDER.length : index;
+  };
+  const cards = view.active.cards.filter((card) =>
+    card.is_default !== true && !LEARNING_TOOLS.has(card.applies_to) &&
+    !(card.applies_to === 'native.start_verification' && card.mode === 'auto'),
+  ).sort((a, b) => rank(a) - rank(b));
+  const families = [
+    ['native.find_slots', 'native.book'],
+    ['native.capture_lead', 'native.request_callback', 'desk:urgent'],
+    ['native.release_document', 'payments.list_charges'],
+  ];
+  const joined: RuleCard[][] = [];
+  for (const card of cards) {
+    const family = families.find((keys) => keys.includes(target(card)));
+    const row = family === undefined ? undefined : joined.find((group) =>
+      group.every((other) => family.includes(target(other)) && other.applies_to !== card.applies_to) && canJoin([...group, card]),
+    );
+    if (row === undefined) joined.push([card]);
+    else row.push(card);
+  }
+  const rows = (mode: RuleMode): RulesSentenceRow[] => joined.filter((group) => group[0]?.mode === mode).map((group) => ({
+    key: group.map((card) => card.card_id).join(':'), cards: group, toolKeys: toolKeys(group), parts: ruleSentence(group, words), meta: ruleMeta(group, words),
+  }));
+  const auto = cards.filter((card) => card.mode === 'auto');
+  const holds: RulesSentenceRow[] = auto.flatMap((card) => {
+    const parts = discountHoldSentence(card);
+    return parts === null ? [] : [{ key: `discount:${card.card_id}`, cards: [card], toolKeys: toolKeys([card]), parts, meta: ruleMeta(card, words) }];
+  });
+  const limited = auto.filter((card) => card.max_amount_cents != null);
+  const parts = holdSentence(limited);
+  const meta = holdMeta(limited, words);
+  if (parts !== null && meta !== null) holds.push({ key: 'holds', cards: limited, toolKeys: toolKeys(limited), parts, meta });
+  holds.push({ key: 'money-cap', cards: [], toolKeys: [], parts: moneyCapSentence(capOf(view.active)), meta: moneyCapMeta(words), moneyLimit: true });
+  return [
+    { mode: 'auto', title: OUTCOME_WORDS.auto, rows: rows('auto') },
+    { mode: 'ask', title: OUTCOME_WORDS.ask, rows: [...holds, ...rows('ask')] },
+    { mode: 'never', title: `${OUTCOME_WORDS.never} · always on, every Desk`, rows: [
+      ...rows('never'), ...ALWAYS_ON_SENTENCES.map((rule) => ({ ...rule, key: `always:${rule.key}`, cards: [], toolKeys: [] })),
+    ] },
+  ];
+}
 
 /** The rules a tool is read against: the active version's cards. */
 type ActiveCards = Pick<PolicyVersion, 'cards'>;

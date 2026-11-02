@@ -67,7 +67,7 @@ describe('ask claude', () => {
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await expect.element(composer).toBeVisible();
     // The loading layer also has these classes; wait for the page's own group.
-    const group = () => [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__header')].find((el) => !el.closest('.cd-skeleton-screen__layer')) ?? null;
+    const group = () => [...screen.container.querySelectorAll<HTMLElement>('.cd-rules__groups')].find((el) => !el.closest('.cd-skeleton-screen__layer')) ?? null;
     await expect.poll(() => group()).not.toBeNull();
     const top = () => (group() as HTMLElement).getBoundingClientRect().top;
     const closed = top();
@@ -104,17 +104,15 @@ describe('ask claude', () => {
     const { screen } = await renderRoute(RULES, { viewport: { width: 1512, height: 982 } });
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await expect.element(composer).toBeVisible();
-    const sections = () =>
-      [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section')].filter((section) =>
-        /^(Payments|Stripe)/.test(section.querySelector('.cd-connector-section__header')?.textContent?.trim() ?? ''),
-      );
+    const sections = () => [...screen.container.querySelectorAll<HTMLElement>('.cd-rules__row')]
+      .filter((row) => ['rv-link', 'rv-mandate'].includes(row.dataset.ruleKey ?? ''));
     await expect.poll(() => sections().length).toBe(2);
     // The words go in first, since typing brings the composer into view; then the rows are scrolled to.
     await composer.fill(ASK);
     (sections()[0] as HTMLElement).scrollIntoView({ block: 'start' });
     const main = screen.container.querySelector('main') as HTMLElement;
     expect(main.scrollTop).toBeGreaterThan(0);
-    const parts = () => sections().flatMap((section) => [...section.querySelectorAll<HTMLElement>('*')]);
+    const parts = () => sections().flatMap((section) => [...section.querySelectorAll<HTMLElement>('*')]).filter((part) => part.getBoundingClientRect().height > 0);
     const header = screen.container.querySelector('.cd-rules__header') as HTMLElement;
     // Where each part is from the top of the Payments rows, wherever the page is scrolled (closing
     // returns focus to the composer, which scrolls) and however many lines the header takes; the
@@ -135,7 +133,7 @@ describe('ask claude', () => {
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
     await expect.element(panel).toBeVisible();
-    expect(header.getBoundingClientRect().height - lines, "the subtitle's second line").toBe(20);
+    expect(header.getBoundingClientRect().height - lines, "the shorter subtitle fits beside the panel").toBe(0);
     expect(onScreen(), 'the rows stay where they are on screen').toBe(seen);
     expect(jumps(closed), 'opening').toEqual([]);
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });

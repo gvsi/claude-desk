@@ -1,7 +1,9 @@
 import type { RuleCard } from '../../api/contracts.ts';
 
 /** The Rules header and its loading shapes use the same signed subtitle. */
-export const RULES_SUBTITLE = 'What Claude can do on this Desk, where each tool comes from, and your rules for it.';
+export const RULES_SUBTITLE = 'What Claude can do, in your words. Each rule names the tools it covers.';
+
+export const RULES_FALLBACK = 'Anything not listed here, Claude asks you first.';
 
 /** All rules' line under its subtitle: who "Checked by the reviewer" means, and that it can only hold. */
 export const REVIEWER_LINE = 'The reviewer is a separate model that reads each request before it runs. It can only hold a request for your answer, never let one through.';

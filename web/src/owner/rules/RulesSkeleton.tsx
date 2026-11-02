@@ -1,15 +1,14 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
-import { ALWAYS_ON, Skeleton, SkeletonCard, outcomePhrase, type SkeletonText } from '../../ds/index.ts';
+import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
-import { CONNECTOR_PAGES_BUILT } from '../connectors/pages.ts';
-import { BUSINESS_WORDS } from '../connectors/businessWords.ts';
-import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, rulesVersionLine } from './copy.ts';
-import { moneyLimitLine } from './ruleWords.ts';
+import { COMPOSER_HELPER, RULES_CHIPS, RULES_SUBTITLE, RULES_FALLBACK } from './copy.ts';
+import { rulesGroups } from './hub.ts';
+import type { RuleCard } from '../../api/contracts.ts';
+import type { TextPart } from '../../lib/useTextLines.ts';
 
 import './RulesPage.css';
-import './BusinessJobs.css';
 
 /** Intrinsic width in the real CSS/font; drawn controls use public Skeleton.measure. */
 function useMeasuredWidth(
@@ -57,68 +56,28 @@ function useMeasuredWidth(
   return control ? width : undefined;
 }
 
-/** Known copy is measured, never drawn: wrapping follows this column and this browser's fonts. */
-function useLineWidths(box: RefObject<HTMLDivElement | null>, words: string, className: string, precise: boolean) {
-  const [widths, setWidths] = useState<number[]>();
-  useLayoutEffect(() => {
-    const element = box.current;
-    if (!precise || !element) return;
-    let live = true;
-    const measure = () => {
-      if (!live || !element.isConnected || element.closest('[data-state="leaving"]')) return;
-      const probe = document.createElement('p');
-      probe.className = className;
-      probe.inert = true;
-      probe.setAttribute('aria-hidden', 'true');
-      Object.assign(probe.style, { position: 'absolute', visibility: 'hidden', width: `${element.getBoundingClientRect().width}px`, margin: '0' });
-      probe.textContent = words;
-      element.append(probe);
-      try {
-        const range = document.createRange();
-        range.selectNodeContents(probe);
-        const next = [...range.getClientRects()].map(({ width }) => width);
-        setWidths((was) => JSON.stringify(was) === JSON.stringify(next) ? was : next);
-      } finally {
-        probe.remove();
-      }
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    document.fonts.addEventListener('loadingdone', measure);
-    void document.fonts.ready.then(measure);
-    return () => {
-      live = false;
-      observer.disconnect();
-      document.fonts.removeEventListener('loadingdone', measure);
-    };
-  }, [box, words, className, precise]);
-  return precise ? widths : undefined;
-}
-
 function Lines({
   words,
   className,
   text = 'body',
   anchor,
   fitted = false,
-  precise = false,
+  parts,
 }: {
   words: string;
   className: string;
   text?: SkeletonText;
   anchor?: string;
   fitted?: boolean;
-  precise?: boolean;
+  parts?: readonly TextPart[];
 }) {
   const box = useRef<HTMLDivElement>(null);
   const width = useMeasuredWidth(box, fitted ? { label: words, className, tagName: 'span' } : undefined);
-  const count = useTextLines(box, { parts: [words], className }, 1);
-  const widths = useLineWidths(box, words, className, precise);
+  const count = useTextLines(box, { parts: parts ?? [words], className }, 1);
   return (
     <div ref={box} className={className} style={fitted && width !== undefined ? { width: Math.ceil(width) } : undefined} data-skeleton-anchor={anchor}>
-      {Array.from({ length: widths?.length ?? count }, (_, i) => (
-        <Skeleton key={i} shape="line" text={text} width={widths?.[i] ?? (i ? '70%' : '100%')} />
+      {Array.from({ length: count }, (_, i) => (
+        <Skeleton key={i} shape="line" text={text} width={i ? '70%' : '100%'} />
       ))}
     </div>
   );
@@ -145,52 +104,6 @@ function Control({ label, className, anchor, suffix = false }: { label: string; 
   return (
     <div ref={box} className="cd-rules-skeleton__control" style={width === undefined ? undefined : { width: Math.ceil(width) }}>
       <Skeleton shape="block" measure={measure} height={height} anchor={anchor} />
-    </div>
-  );
-}
-
-/** The status label is inline flex, so its line box includes the surrounding text baseline. */
-function Outcome({ words }: { words: string }) {
-  const box = useRef<HTMLDivElement>(null);
-  const className = 'cd-connector-section__tool-outcome cd-type-meta';
-  const [size, setSize] = useState<{ width: number; height: number }>();
-  useLayoutEffect(() => {
-    const element = box.current;
-    if (!element) return;
-    let live = true;
-    const measure = () => {
-      if (!live || !element.isConnected) return;
-      const probe = document.createElement('div');
-      probe.className = className;
-      probe.inert = true;
-      probe.setAttribute('aria-hidden', 'true');
-      Object.assign(probe.style, {
-        position: 'absolute',
-        visibility: 'hidden',
-        width: 'max-content',
-      });
-      const label = document.createElement('span');
-      label.className = 'cd-status-label';
-      const dot = document.createElement('span');
-      dot.className = 'cd-status-dot';
-      label.append(dot, words);
-      probe.append(label);
-      element.append(probe);
-      const { width, height } = probe.getBoundingClientRect();
-      probe.remove();
-      setSize({ width, height });
-    };
-    measure();
-    document.fonts.addEventListener('loadingdone', measure);
-    void document.fonts.ready.then(measure);
-    return () => {
-      live = false;
-      document.fonts.removeEventListener('loadingdone', measure);
-    };
-  }, [words]);
-  return (
-    <div ref={box} className={className}>
-      <Skeleton shape="block" width={size?.width} height={size?.height} radius="full" />
     </div>
   );
 }
@@ -247,143 +160,67 @@ function Header() {
   );
 }
 
-/** A fresh Turner copy has one urgent callback job, with a read-only rule and fallback. */
-function Jobs() {
-  return (
-    <section className="cd-business-jobs">
-      <Lines precise words={BUSINESS_WORDS.jobs} className="cd-business-jobs__title cd-type-section" text="section" anchor="rules-jobs-title" />
-      <SkeletonCard padding={16} anchor="rules-job">
-        <div className="cd-tool-rules">
-          <div className="cd-tool-rules__tool">
-            <div className="cd-tool-rules__tool-text">
-              <div className="cd-tool-rules__tool-head">
-                <Lines precise fitted words="Emergency callback" className="cd-tool-rules__tool-name cd-type-section" text="section" anchor="rules-job-name" />
-              </div>
-              <Lines precise words="Urgent: A burst or leaking pipe, flooding, a sewage backup, or no water" className="cd-tool-rules__tool-description cd-type-meta" text="meta" anchor="rules-job-description" />
-            </div>
-          </div>
-          <ul className="cd-tool-rules__rules">
-            <li className="cd-tool-rules__rule">
-              <div className="cd-rule-row">
-                <div className="cd-rule-row__layout">
-                  <div className="cd-rule-row__text">
-                    <Lines precise words="Anyone can ask for an urgent callback, which alerts you at once." className="cd-rule-row__reason cd-type-body" anchor="rules-job-reason" />
-                    <Lines precise words="Anyone" className="cd-rule-row__words cd-type-meta" text="meta" anchor="rules-job-words" />
-                  </div>
-                  <div className="cd-outcome cd-type-meta" data-skeleton-anchor="rules-job-outcome">
-                    <div className="cd-status-label">
-                      <Skeleton shape="block" width="var(--size-dot)" height="var(--size-dot)" radius="full" />
-                      <Lines precise fitted words={outcomePhrase('auto')} className="cd-type-meta" text="meta" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </li>
-          </ul>
-          <div className="cd-tool-rules__fallback">
-            <Lines precise fitted words="Anything else here: ask me." className="cd-tool-rules__fallback-line cd-type-meta" text="meta" anchor="rules-job-fallback" />
-          </div>
-        </div>
-      </SkeletonCard>
-    </section>
-  );
-}
+/** Representative first-load rows, worded by the same model as the page, never policy data. */
+const sampleCard = (target: RuleCard['applies_to']): RuleCard => ({
+  ...rivera.ruleCards['rv-quote'], card_id: `shape:${target}`, applies_to: target,
+});
+const SAMPLE_GROUPS = rulesGroups({
+  active: {
+    auto_money_cap_cents: 50_000,
+    cards: [...Object.values(rivera.ruleCards), ...[
+      'native.find_slots', 'native.capture_lead', 'native.request_callback', 'desk.emergency-callback',
+    ].map(sampleCard)],
+  },
+  tools: [
+    { tool: 'native.payment_link', source: 'native', effects: ['charge'] },
+    { tool: 'native.charge_mandate', source: 'native', effects: ['charge'] },
+    { tool: 'payments.create_refund', source: 'mcp', effects: ['pay_out', 'private_data'] },
+    { tool: 'desk.emergency-callback', source: 'business', effects: ['change'], business: {
+      title: 'Emergency callback', description: '', config: { block: 'urgent', urgent_when: '' },
+    } },
+  ],
+}, null);
 
-/** A fresh copy has one job and no suggestions: then its connector groups and always-on rules. */
 function Body() {
   return (
     <>
-      <Jobs />
-      <div className="cd-connector-list">
-        <div className="cd-connector-list__body">
-          <Lines words={rulesVersionLine(7)} className="cd-connector-list__summary cd-type-meta" text="meta" />
-          <div className="cd-connector-list__items">
-            {rivera.connectors.sections.map(({ connector, tools }, i) => (
-              <SkeletonCard key={connector.id} padding={0}>
-                <div className="cd-connector-section">
-                  <div className="cd-connector-section__header" data-skeleton-anchor={`rules-connector-${i}`}>
-                    <Skeleton shape="block" className="cd-connector-icon cd-connector-icon--section" />
-                    <div className="cd-connector-section__identity">
-                      <Skeleton shape="line" text="section" width="60%" />
-                      <Lines words={connector.description} className="cd-connector-section__description cd-type-meta" text="meta" />
-                    </div>
-                    <Skeleton shape="line" text="meta" className="cd-connector-section__count" width={45} />
-                    {CONNECTOR_PAGES_BUILT ? <Skeleton shape="block" className="cd-connector-section__chevron" width={16} height={16} /> : null}
-                  </div>
-                  {connector.id === 'payments' || connector.id === 'stripe' ? (
-                    <div className="cd-connector-section__above">
-                      <div className="cd-money-limit">
-                        <div className="cd-money-limit__reading">
-                          <Lines
-                            words={moneyLimitLine(50_000)}
-                            className="cd-money-limit__line cd-type-body"
-                          />
-                          <Control label="Change" className="cd-button cd-button--secondary cd-type-control" />
+      <div className="cd-rules__groups">
+        <SkeletonCard anchor="rules-card">
+          {SAMPLE_GROUPS.map((group) => (
+            <div key={group.mode} className="cd-rules__group">
+              <div className="cd-rules__group-title cd-type-section" data-skeleton-anchor={`rules-group-${group.mode}`}>
+                <Skeleton shape="block" width="var(--size-dot)" height="var(--size-dot)" radius="full" />
+                <Lines words={group.title} fitted className="cd-type-section" text="section" />
+              </div>
+              <div className="cd-rules__rows">
+                {group.rows.map((row) => {
+                  const titles = typeof row.meta.tools === 'string' ? [row.meta.tools] : row.meta.tools.titles;
+                  const parts: TextPart[] = titles.flatMap((text, i) => [
+                    ...(i === 0 ? [] : [i === titles.length - 1 ? ' and ' : ', ']),
+                    { text, className: 'cd-user-name' },
+                  ]);
+                  parts.push(` · ${row.meta.who}`);
+                  return (
+                    <div key={row.key} className="cd-rules__row">
+                      <div className="cd-rule-sentence">
+                        <div className="cd-rule-sentence__layout">
+                          <div className="cd-rule-sentence__text">
+                            <Lines words={row.parts.map((part) => part.text).join('')}
+                              parts={row.parts.map((part) => part.key ? { text: part.text, className: 'cd-rule-sentence__key' } : part.text)}
+                              className="cd-rule-sentence__sentence cd-type-body" />
+                            <Lines words="" parts={parts} className="cd-rule-sentence__meta cd-type-meta" text="meta" />
+                          </div>
                         </div>
                       </div>
                     </div>
-                  ) : null}
-                  <div className="cd-connector-section__tools">
-                    {tools.map((tool, j) => (
-                      <div
-                        key={tool.key}
-                        className={`cd-connector-section__tool${CONNECTOR_PAGES_BUILT ? '' : ' cd-connector-section__tool--plain'}`}
-                        data-skeleton-anchor={`rules-tool-${i}-${j}`}
-                      >
-                        <Lines words={tool.name} className="cd-connector-section__tool-name cd-type-body" />
-                        <Lines words={tool.description} className="cd-connector-section__tool-description cd-type-meta" text="meta" />
-                        <Lines
-                          fitted
-                          words={
-                            tool.key === 'native.payment_link'
-                              ? 'Anyone · Up to $300 · Checked by the reviewer'
-                              : tool.key === 'native.charge_mandate'
-                                ? 'Signed agents · Up to $20'
-                                : tool.summary
-                          }
-                          className="cd-connector-section__tool-summary cd-rules-skeleton__summary cd-type-meta"
-                          text="meta"
-                        />
-                        <Outcome words={outcomePhrase(tool.mode)} />
-                        {CONNECTOR_PAGES_BUILT ? <Skeleton shape="block" className="cd-connector-section__chevron" width={16} height={16} /> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </SkeletonCard>
-            ))}
-          </div>
-        </div>
-      </div>
-      <div className="cd-rules__all cd-type-meta" data-skeleton-anchor="rules-all">
-        <Skeleton shape="line" text="meta" width={90} />
-      </div>
-      <div className="cd-rules__always-on">
-        <div className="cd-always-on">
-          <div className="cd-section-header">
-            <div className="cd-section-header__title">
-              <Skeleton shape="line" text="section" width={90} anchor="rules-always" />
-            </div>
-            <Lines
-              fitted
-              words="On every Desk, whatever is connected. They can't be turned off."
-              className="cd-section-header__caption cd-type-meta"
-              text="meta"
-            />
-          </div>
-          <div className="cd-always-on__list">
-            {ALWAYS_ON.map((words) => (
-              <div key={words} className="cd-always-on__item cd-type-body">
-                <Skeleton shape="block" width={14} height="1lh" className="cd-always-on__lock" />
-                <Lines words={words} className="cd-type-body cd-rules-skeleton__rule" />
+                  );
+                })}
               </div>
-            ))}
-          </div>
-        </div>
-        <div className="cd-rules__safety cd-type-meta">
-          <Skeleton shape="line" text="meta" width={80} />
-        </div>
+            </div>
+          ))}
+        </SkeletonCard>
       </div>
+      <Lines words={RULES_FALLBACK} className="cd-rules__fallback cd-type-meta" text="meta" anchor="rules-fallback" />
     </>
   );
 }
