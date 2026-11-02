@@ -287,10 +287,11 @@ def test_a_booking_refused_for_missing_details_is_asked_for_them_and_tried_once_
     the general "refused" rule must not tell Claude to give up on it."""
     text = conversation_system(RIVERA)[0]["text"]
     refused = next(line for line in text.splitlines() if line.startswith('- "refused":'))
-    assert refused.endswith(
-        "Never try it again reworded, split up or through another tool, except a booking whose message says it "
-        "needs a name and a phone number or email: ask for what's missing, then book once more, passing them as "
-        "its name and contact.")
+    assert refused.startswith(
+        '- "refused": for a booking whose message says it needs a name and a phone number or email, ask for '
+        "what's missing, then book once more, passing them as its name and contact. For any other refusal, say "
+        "kindly that it isn't something you can do here")
+    assert refused.endswith("Never try it again reworded, split up or through another tool.")
 
 
 def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking_details():
