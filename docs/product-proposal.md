@@ -59,7 +59,7 @@ Limits: we wrote the scenarios, real attackers adapt, 23 held-out tasks make a s
 
 **Who pays and why.** The owner, through their Claude plan; visitors and their agents never pay to ask. Owners already pay to have requests answered: [Ruby](https://www.ruby.com/pricing/)'s live receptionists start at $250 a month for 50 minutes. A Desk sells requests closed while the owner works.
 
-**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: `estimate:` $0.20 a conversation, until the measured cost in the table above replaces it, so 100 conversations cost all of [Pro](https://claude.com/pricing)'s $20 monthly price.
+**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: about $0.025 a Desk reply in the final eval pass, its checks included, so a ten-reply conversation would cost about $0.25, and about 80 of them use all of [Pro](https://claude.com/pricing)'s $20 monthly price.
 
 **Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
 
