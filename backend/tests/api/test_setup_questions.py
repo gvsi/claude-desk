@@ -2752,9 +2752,14 @@ def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
             "tomorrow, the same day, a weekday's name, the weekend or this or next week, or promise words such as "
             "free, guaranteed, discount, refund or confirmed. When the owner's words have one, write the closest "
             "wording without it (\"within a day\" for \"within 24 hours\", \"a deadline within a week\" for \"a "
-            "deadline in the next week\"), and add one sentence to reply saying which words you changed, that lines "
-            "customers read can't carry numbers, hours or dates, and that they can change it under What customers "
-            "will read. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+            "deadline in the next week\"), and add one sentence to reply saying which words you changed, why those "
+            "words can't stay, named for what they are (\"lines customers read can't name a day or a week such as "
+            "next week\", \"can't give a number of hours\", \"can't promise something free\"), never a blanket "
+            "list such as \"no numbers, hours or dates\", and that they can change it under What customers will "
+            "read. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
+    # Seen live: "since lines customers read can't carry numbers, hours or dates" for a change of "next week",
+    # which is none of those: the reply names the reason for the words that changed, never a blanket rule.
+    assert "can't carry numbers, hours or dates" not in SETUP_TURN_SYSTEM
     assert ("When a customer line changes the owner's words, reply also has the sentence the rule for those lines "
             "asks for.") in SETUP_TURN_SYSTEM
     assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "

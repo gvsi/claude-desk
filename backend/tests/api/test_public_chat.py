@@ -212,6 +212,9 @@ async def test_public_desk_passes_the_kernels_fields_through(app, browser, fake,
         "¿Cuánto cuesta destapar un desagüe?", "¿Puede venir alguien el martes?", "¿Trabajan en Alameda?"]
     assert PublicDesk.model_validate(response.json()) == expected
     assert response.json() == expected.model_dump(mode="json")                    # unchanged, field for field
+    # each ability's outcome for anyone, a closed key with the kernel's words for it, as the kernel sent them
+    assert [(block["outcome"], block["outcome_text"]) for block in response.json()["agent_card"]] == [
+        *[("allowed", "Permitido")] * 10]
     assert response.headers["cache-control"] == "no-store"
     assert "set-cookie" not in response.headers
     (call,) = fake.calls                                                            # no cookie read: one public call

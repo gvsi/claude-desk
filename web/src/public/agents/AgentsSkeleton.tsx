@@ -16,7 +16,7 @@ const CAN_DO: Readonly<Record<CopyLanguage, readonly string[]>> = {
     'Find open times',
     'Book a visit',
     'Get a payment link for a quote',
-    'Pay for a quote within the limit of a signed mandate',
+    'Pay for a quote within a signed limit',
     'Leave contact details',
     'Ask for a callback',
     'Verify a customer with a code sent to their contact on record',
@@ -28,7 +28,7 @@ const CAN_DO: Readonly<Record<CopyLanguage, readonly string[]>> = {
     'Buscar horarios libres',
     'Reservar una visita',
     'Pedir un enlace de pago para una cotización',
-    'Pagar una cotización dentro del límite de un mandato firmado',
+    'Pagar una cotización dentro de un límite firmado',
     'Dejar datos de contacto',
     'Pedir que te devuelvan la llamada',
     'Verificar a un cliente con un código enviado a su contacto registrado',
@@ -47,6 +47,28 @@ function ReferenceRow({ words, text }: { words: string; text: 'body' | 'meta' })
         <Skeleton key={i} shape="line" text={text} width={i === lines - 1 ? '70%' : '100%'} />
       ))}
     </div>
+  );
+}
+
+/**
+ * Shapes for "What agents can do here", in the real card's rows: each ability's words in the lines
+ * they take at the row's width, then its outcome's line under them, each row under a hairline.
+ */
+function CanDoCard({ rows }: { rows: readonly string[] }) {
+  return (
+    <SkeletonCard padding={16} anchor="can-do-card">
+      <Skeleton shape="line" text="section" width="65%" />
+      <div className="cd-agents-card__body">
+        <div className="cd-agents-page__abilities">
+          {rows.map((words, i) => (
+            <div key={i} className="cd-agents-page__ability">
+              <ReferenceRow words={words} text="body" />
+              <Skeleton shape="line" text="meta" width={72} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </SkeletonCard>
   );
 }
 
@@ -138,7 +160,7 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
               <TaskChipShapes language={language} />
             </div>
           </SkeletonCard>
-          <ReferenceCard rows={CAN_DO[language]} text="body" anchor="can-do-card" />
+          <CanDoCard rows={CAN_DO[language]} />
           <ReferenceCard
             rows={AGENTS_COPY[language].proveLines}
             text="meta"
