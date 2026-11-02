@@ -26,6 +26,7 @@
 | `labelledBy` | `string` | The `aria-labelledby`: the id of the element that names the card, in place of `label`. A `div` card named this way is a group too. |
 | `padding` | `0 \| 16 \| 20` | `20` by default (`space-20`); `16` is `space-16`; `0` leaves the padding to the rows. |
 | `holdsCards` | `boolean` | A frame that holds cards one level deep: the agents page's "Send an agent" card only. |
+| `tabIndex` | `0` | For a card that scrolls inside itself, such as Safety's open attempt beside the list: a keyboard reaches and scrolls it, and its border turns `line-focus` on keyboard focus. Left out, a card takes no focus. |
 | `children` | `ReactNode` | Required. |
 
 Fill `fill-card`, border 1 px `line-card`, radius `radius-card`. Text inside meets contrast on `fill-card` over `bg-app` (`CONTRAST_PAIRS`).

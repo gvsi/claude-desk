@@ -55,7 +55,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reads the prose and the cards, each as its kind's label and its text (`render.check_text`,
    "Payment link card: ..."; never the visitor's words), and flags a promise the cards
    don't hold (`soft.promise`) or prose that says or suggests the writer is a human
-   (`soft.denies_ai`). One try within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
+   (`soft.denies_ai`). It also reads, as untrusted owner data, the approved service names the
+   prose scan found repeated in the prose with a free word to lend (`free_names_used`): a free
+   word used within such a name alone is no promise. One try
+   within `SOFT_PROMISE_TIMEOUT_S` (8 s), with no recheck and no
    fallback (the owner's decision of 2026-10-31), inside the API's 12 s for the route: no
    verdict (a timeout, an error, a refusal, an unparsable answer) is `check_unavailable`
    (`soft.unavailable`), which gets one rewrite like the other prose kinds (the owner's ruling
@@ -68,8 +71,26 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    reply here, and once its window has passed nothing promises a call. That handoff is read
    without a session or handoff lock; an agent request holds its nonce row `FOR UPDATE`, and
    each check one pooled connection, across the try. A reply that passes with the handoff's
-   card is checked again in step 7. When configured, TypeSafe Jev evaluates the same prose, labelled
-   cards and fixed next steps concurrently, within three seconds of Sonnet's eight-second window.
+   card is checked again in step 7. The session's request receipts are cards of it too, after the
+   reply's own, though the reply doesn't show them again and cites no fact for them
+   (`request_receipts`, never another session's), each as "Request receipt card: ", what was
+   asked for in the reply's language, named from the request's tool (`render.RECEIPT_SUBJECTS`, a
+   business tool's by its block; a tool named in neither has no receipt, nor has one the owner
+   has replaced since the request), then the decision's status line: each held request awaiting
+   the owner ("Quote request: Waiting for Mike Turner to approve"), and each request that has left
+   `held` since
+   Claude's latest reply in the session that passed, in ledger order ("Quote request: Closed: your
+   booking replaced this request", when the visitor's booking closed a held discount). Only the
+   owner's approval runs a held request, so one that ran reads that approval before what it did
+   ("Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"), as the chat
+   showed them. A receipt backs what it says and nothing
+   more: never another request, a follow-up, an outcome, a time or an approval it doesn't state.
+   They are read without a lock, in a savepoint, and a read that fails adds none. A receipt only
+   restates a status the chat already shows and updates, so unlike the handoff's card it isn't
+   checked again in step 7: a change while the model reads leaves the reply true to what
+   the chat showed moments before, an accepted race. When configured,
+   TypeSafe Jev evaluates the same prose, labelled cards and fixed next steps concurrently, within
+   three seconds of Sonnet's eight-second window.
    Its top score at or above 0.95 adds `soft.jev`; its failure leaves Sonnet's verdict standing.
    No key means no Jev call. Both verdicts are ledgered; Jev scores are decimal strings, not
    ledger floats.
@@ -116,7 +137,7 @@ import logging
 import re
 import unicodedata
 from bisect import bisect_left, bisect_right
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -132,10 +153,12 @@ from desk.public_person import future_person_direction
 from desk.public_contact import bare_host, valid_public_contact
 from desk.public_contact import contact_endpoints as public_contact_endpoints
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
-                            ReplyVerdict, ToolProfile, Violation)
-from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person
+                            ReplyVerdict, ToolProfile, Violation, is_business_tool)
+from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person, Tool
+from desk.db.models import Action as ActionRow
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
+from desk.db.models import LedgerEntry as LedgerRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
@@ -401,28 +424,56 @@ def _real_spelling(text: str) -> tuple[str, list[int]]:
     return "".join(chars), origin
 
 
-def _free_name_reach(text: str, names: Iterable[str]) -> list[int] | None:
-    """`_named_reach` for the names of a Desk's enabled business tools, each found in `text` as
-    `_real_spelling` reads both; None when no name is there. A name made only of free words is
-    never looked for: it would be every free word (the owner's decision of 2026-10-31)."""
-    keys = [key for key, _ in (_real_spelling(shown(name).strip()) for name in names)
+def _free_name_keys(names: Iterable[str]) -> list[tuple[str, str]]:
+    """Each of the names of a Desk's enabled business tools that the scan looks for, with its key,
+    the name as `_real_spelling` reads it. A name made only of free words is never looked for: it
+    would be every free word (the owner's decision of 2026-10-31)."""
+    return [(name, key) for name, key in ((name, _real_spelling(shown(name).strip())[0]) for name in names)
             if not all(word in FREE_WORDS for word in re.findall(r"\w+", key))]
+
+
+def _free_name_repeats(text: str, names: Iterable[str]) -> Iterator[tuple[str, int, int]]:
+    """Each repeat in `text` of one of `names` (`_free_name_keys`), as `_real_spelling` reads both,
+    that starts at a word's start: the name, and the repeat's start and end in `text`."""
+    keys = _free_name_keys(names)
     if not keys:
-        return None
+        return
     folded, origin = _real_spelling(text)
-    reach = [0] * (len(text) + 1)
-    for name in keys:
-        start = folded.find(name)
+    for name, key in keys:
+        start = folded.find(key)
         while start != -1:
             if start == 0 or not folded[start - 1].isalnum():   # a repeat starts at a word's start
-                low, high = origin[start], origin[start + len(name) - 1] + 1
-                reach[low] = max(reach[low], high)
-            start = folded.find(name, start + 1)
-    if not any(reach):
+                yield name, origin[start], origin[start + len(key) - 1] + 1
+            start = folded.find(key, start + 1)
+
+
+def _free_name_reach(text: str, names: Iterable[str]) -> list[int] | None:
+    """`_named_reach` for the names of a Desk's enabled business tools, each found in `text` as
+    `_free_name_repeats` finds it; None when no name is there."""
+    reach: list[int] | None = None
+    for _, low, high in _free_name_repeats(text, names):
+        if reach is None:
+            reach = [0] * (len(text) + 1)
+        reach[low] = max(reach[low], high)
+    if reach is None:
         return None
     for i in range(1, len(reach)):
         reach[i] = max(reach[i], reach[i - 1])
     return reach
+
+
+def free_names_used(text: str, names: Iterable[str]) -> list[str]:
+    """The names of `names` (`scan_prose`'s `approved_free_names`) that `text` repeats with a free
+    word inside: each holding a free word, not made of free words alone, and repeated in `text` at
+    a word's start as the scan finds it (`_free_name_repeats`); each once, in `names`' order. That's
+    a superset of the names whose free word the scan let through, which also needs the word to be a
+    lexicon match ("feel free" isn't one). The soft-promise check reads these alone, so a reply
+    that repeats no such name shows it none."""
+    names = list(names)
+    lending = [name for name, key in _free_name_keys(names)
+               if any(word in FREE_WORDS for word in re.findall(r"\w+", key))]
+    found = {name for name, _, _ in _free_name_repeats(text, lending)}
+    return [name for name in dict.fromkeys(names) if name in found]
 
 
 def _span(text: str) -> str:
@@ -1063,7 +1114,8 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
 async def _desk_info(ctx: KernelCtx, desk_id: str) -> DeskInfo:
     business = (await ctx.db.scalars(ctx.repo.scoped(
         select(Business).join(Desk, Desk.business_id == Business.business_id).where(Desk.desk_id == desk_id)))).one()
-    return DeskInfo(owner_display_name=business.owner_display_name, timezone=business.timezone)
+    return DeskInfo(owner_display_name=business.owner_display_name, business_name=business.name,
+                    timezone=business.timezone)
 
 
 async def desk_names(ctx: KernelCtx, desk_id: str) -> list[str]:
@@ -1088,8 +1140,8 @@ def call_back_offer(language: render.Language) -> RenderedBlock:
 
 
 def status_line(language: render.Language) -> RenderedBlock:
-    """The status line: "Please check the request status in this chat." in the reply's language, as
-    prose the kernel writes (the API's signed `STATUS_LINES["check_status"]`)."""
+    """The status line: "Your request is waiting for approval; you can see where it stands in this chat." in the reply's
+    language, as prose the kernel writes (the API's signed `STATUS_LINES["check_status"]`)."""
     return RenderedBlock(kind="prose", text=render.status("check_status", language))
 
 
@@ -1248,9 +1300,10 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
     cards, refused, rendered_claims = await check_clauses(
         ctx, session_row, desk_id, desk, draft.clauses, language, canaries)
     names = await desk_names(ctx, desk_id)
+    approved_names = await context.business_free_names(ctx, desk_id)
     passed = {"booking_card": any(card.template == "booking_confirmed" for card in cards),
               "callback_card": any(card.template == "callback_confirmed" for card in cards),
-              "approved_free_names": await context.business_free_names(ctx, desk_id)}
+              "approved_free_names": approved_names}
     reading = markdown_reading(prose)
     # A passing list's typed markers are no number (the owner's decision of 2026-11-01): the raw scan
     # reads the prose with them blanked, and otherwise the draft's prose as ever.
@@ -1274,7 +1327,9 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
                                                                                              cards_only=True):
             backing.append(handoff(language, desk))    # the owner has the conversation: the card says so, unshown
             handoff_backed = True
-        found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing)
+        found, usage, soft_checks = await soft_promises(ctx, session_row, language, prose, backing,
+                                                        approved_names=approved_names,
+                                                        receipts=await request_receipts(ctx, session_row, language))
         violations += found
     if violations:
         blocks = blocked_blocks(cards, violations, language, desk, call_back=await call_back_offered(
@@ -1289,12 +1344,17 @@ async def check_draft(ctx: KernelCtx, session_row: SessionRow, draft: ReplyDraft
 
 
 async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: render.Language, prose: str,
-                        cards: Sequence[RenderedBlock]) -> tuple[list[Violation], CallUsage | None, dict]:
+                        cards: Sequence[RenderedBlock], *,
+                        approved_names: Sequence[str] = (),
+                        receipts: Sequence[str] = ()) -> tuple[list[Violation], CallUsage | None, dict]:
     """Step 5: the soft-promise check on prose the scan passed and the cards that back it (those
     rendered for it, and an open handoff's card), each shown to Sonnet and Jev alike as its kind's
-    label and its text (`render.check_text`), with the session's fixed next steps from its
-    resolved tools. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`, with no recheck and
-    no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
+    label and its text (`render.check_text`), then the session's request receipts as they read
+    them (`receipts`, from `request_receipts`), with the session's fixed next steps from its
+    resolved tools. Sonnet also reads, as labelled owner data, the approved service names whose
+    repeat lends a free word in the prose (`free_names_used`, of `approved_names`, the scan's);
+    Jev's calibrated input is unchanged. One Sonnet try within `decisions.SOFT_PROMISE_TIMEOUT_S`,
+    with no recheck and no fallback (the owner's decision of 2026-10-31). A `soft_promise` violation per flag set
     (`soft.promise`, `soft.denies_ai`), each spanning the prose's start; no verdict (a timeout, an
     error, a refusal, an unparsable answer) is `check_unavailable` (`soft.unavailable`). Optional
     Jev runs beside it, bounded on its own, and adds `soft.jev` (a `soft_promise`), also spanning
@@ -1302,8 +1362,9 @@ async def soft_promises(ctx: KernelCtx, session_row: SessionRow, language: rende
     (`finalize` adds
     `soft.handoff_closed` when the open handoff's card it passed on is gone by its end.)"""
     tools = await session_tools(ctx, session_row)
-    data = SoftPromiseInput(language=language, prose=prose, cards=[render.check_text(card) for card in cards],
-                            next_steps=next_steps(tools))
+    data = SoftPromiseInput(language=language, prose=prose,
+                            cards=[*(render.check_text(card) for card in cards), *receipts],
+                            next_steps=next_steps(tools), approved_names=free_names_used(prose, approved_names))
     if ctx.settings.typesafe_api_key:
         # Reveal waits for both: Jev has an independent three-second bound, Sonnet six.
         (verdict, usage), jev_result = await asyncio.gather(
@@ -1443,7 +1504,7 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
-    owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
+    owner = (await _desk_info(ctx, session_row.desk_id)).owner
     if visitor_plain_key is None:
         visitor_plain_key = ("reply_handed_off" if not shown or any(block.template == "handoff" for block in blocks)
                              else "reply_checked")
@@ -1525,6 +1586,84 @@ async def awaits_the_owner(ctx: KernelCtx, session_row: SessionRow) -> bool:
     except SQLAlchemyError as error:
         log_error(logger, error, "held_decisions_unread")
         return False
+
+
+async def _last_passed_reply(ctx: KernelCtx, session_row: SessionRow, *, after: int) -> int | None:
+    """The ledger sequence of Claude's latest reply in the session that passed the check (its `reply`
+    entry: author `claude`, `ok`), when one came after `after`, else None. Read without a lock, from the
+    Desk's newest entry back to `after` at most."""
+    event = LedgerRow.event
+    return (await ctx.db.execute(ctx.repo.scoped(select(LedgerRow.seq).where(
+        LedgerRow.desk_id == session_row.desk_id, LedgerRow.seq > after, event["kind"].astext == "reply",
+        event["session_id"].astext == session_row.session_id, event["summary"]["author"].astext == "claude",
+        event["summary"]["ok"].astext == "true").order_by(LedgerRow.seq.desc()).limit(1)))).scalar_one_or_none()
+
+
+async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str, str | None]]:
+    """The session's request receipts, oldest request first, each as what was asked for (its key in
+    `render.RECEIPT_SUBJECTS`), its decision's status line (`visitor_plain`) and, for one that ran, the
+    owner who approved it (only an owner's approval runs a held request), read without a lock:
+    each held request awaiting the owner, as `_awaiting_holds` reads them (held and not expired), and
+    each request that has left `held` (answered, cancelled, timed out, run or settled) after Claude's
+    latest reply in the session that passed the check, by ledger order (its decision's `ledger_seq`,
+    `_last_passed_reply`). A hold past its expiry that no read has expired yet is neither, and so is a
+    request whose tool names no subject (`_receipt_asked`)."""
+    rows = (await ctx.db.execute(ctx.repo.scoped(select(
+        DecisionRow.tool, DecisionRow.action_id, DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at,
+        DecisionRow.ledger_seq).where(
+        DecisionRow.session_id == session_row.session_id, DecisionRow.outcome == "hold")
+        .order_by(DecisionRow.created_at, DecisionRow.decision_id)))).all()
+    left = [row.ledger_seq for row in rows if row.state != "held"]
+    passed = await _last_passed_reply(ctx, session_row, after=min(left)) if left else None
+    now = ctx.clock.now()
+    shown = [row for row in rows
+             if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
+    asked = await _receipt_asked(ctx, session_row, shown)
+    owner = ((await _desk_info(ctx, session_row.desk_id)).owner
+             if any(row.state == "executed" for row in shown) else None)
+    return [(key, row.visitor_plain, owner if row.state == "executed" else None)
+            for row, key in zip(shown, asked, strict=True) if key is not None]
+
+
+async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, rows: Sequence) -> list[str | None]:
+    """What each request of `rows` asked for, as its key in `render.RECEIPT_SUBJECTS`, or None: a native or
+    payments tool by itself, and a business tool by its block (`block:<name>`) when the Desk's tool row
+    still holds the profile the request was decided with (its action's `profile_sha256`), both read without
+    a lock. A tool named in neither, a business tool with no such row, and one the owner has replaced since
+    (an intake made a typed booking would rename the request) have none."""
+    named = render.RECEIPT_SUBJECTS["en"]
+    business = [row for row in rows if is_business_tool(row.tool) and row.action_id is not None]
+    blocks: dict[str, str] = {}
+    if business:
+        actions = sorted({row.action_id for row in business})
+        decided = dict((await ctx.db.execute(ctx.repo.scoped(select(ActionRow.action_id, ActionRow.profile_sha256)
+                                                              .where(ActionRow.action_id.in_(actions))))).all())
+        current = {tool: (profile, sha) for tool, profile, sha in (await ctx.db.execute(ctx.repo.scoped(select(
+            Tool.tool, Tool.profile, Tool.profile_sha256).where(
+            Tool.desk_id == session_row.desk_id, Tool.tool.in_(sorted({row.tool for row in business})))))).all()}
+        for row in business:
+            profile, sha = current.get(row.tool, (None, None))
+            if (profile is not None and profile.business is not None and sha is not None
+                    and sha == decided.get(row.action_id)
+                    and f"block:{profile.business.config.block}" in named):
+                blocks[row.action_id] = f"block:{profile.business.config.block}"
+    return [row.tool if row.tool in named else blocks.get(row.action_id) if is_business_tool(row.tool) else None
+            for row in rows]
+
+
+async def request_receipts(ctx: KernelCtx, session_row: SessionRow, language: render.Language) -> list[str]:
+    """The session's request receipts as the soft checks read them (`render.receipt_check_text`), what was
+    asked for in the reply's `language`, never another session's: backing the
+    reply doesn't show again and cites no fact for, as an open handoff's card is. A read that fails adds
+    none, in a savepoint of its own, so the transaction goes on: the receipts only widen what backs a
+    reply, so not knowing fails toward the stricter check."""
+    try:
+        async with ctx.db.begin_nested():
+            found = await _request_receipts(ctx, session_row)
+    except SQLAlchemyError as error:
+        log_error(logger, error, "request_receipts_unread")
+        return []
+    return [render.receipt_check_text(asked, line, language, approved_by=owner) for asked, line, owner in found]
 
 
 async def _waiting(ctx: KernelCtx, kind: str, assurance: str, person_id: str | None) -> str:

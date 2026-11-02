@@ -22,7 +22,7 @@ from desk.db.models import ModelCall
 
 MODEL_CALLS = ModelCall.__table__
 ROUTES = frozenset({"conversation", "setup", "card_draft", "situations", "rules_chat", "visiting_agent", "triage",
-                    "translation"})
+                    "translation", "demo_visitor"})
 
 # USD per million tokens: input, cache read, 5-minute cache write, output ("Model cost and latency budget").
 PRICES_PER_MTOK: dict[str, tuple[Fraction, Fraction, Fraction, Fraction]] = {

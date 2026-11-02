@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { Pill } from '../Pill/Pill.tsx';
 import { RecordedTag } from '../RecordedTag/RecordedTag.tsx';
 
 import './PersonRow.css';
@@ -50,6 +51,8 @@ export interface LeadRowProps {
   recorded?: boolean;
   /** Where the lead opens, when it does. With it the whole row is one link. */
   href?: string;
+  /** Left in a demo visitor's chat, an AI the owner started to play a customer: a "Demo visitor" pill after the name. */
+  demoVisitor?: boolean;
 }
 
 /**
@@ -58,13 +61,23 @@ export interface LeadRowProps {
  * under the time, or on a line of its own under the note when the row is narrow. Put each in a
  * list item.
  */
-export function LeadRow({ name, time, note, recorded = false, href }: LeadRowProps) {
+export function LeadRow({ name, time, note, recorded = false, href, demoVisitor = false }: LeadRowProps) {
+  const named = (
+    <span className="cd-person-row__name cd-lead-row__name cd-type-control" data-copy="user">
+      {name}
+    </span>
+  );
   return (
     <Row href={href} className="cd-person-row cd-lead-row">
       <span className="cd-lead-row__grid">
-        <span className="cd-person-row__name cd-lead-row__name cd-type-control" data-copy="user">
-          {name}
-        </span>
+        {demoVisitor ? (
+          <span className="cd-lead-row__who">
+            {named}
+            <Pill>Demo visitor</Pill>
+          </span>
+        ) : (
+          named
+        )}
         <span className="cd-lead-row__time cd-type-caption">{time}</span>
         <span className="cd-person-row__detail cd-lead-row__note cd-type-caption" data-copy="user">
           {note}

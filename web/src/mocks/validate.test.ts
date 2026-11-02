@@ -89,6 +89,10 @@ describe('mock payloads', () => {
       "ProofCheck/ must have required property 'counterexample_raw'",
     ]);
     expect(validateContract('EvWriting', { type: 'writing', text: 'hi' })).not.toEqual([]);
+    // A field the contracts mark as left out while it holds its default may be absent, and keeps its type when sent.
+    expect(validateContract('EvTurnEnd', { type: 'turn_end' })).toEqual([]);
+    expect(validateContract('EvTurnEnd', { type: 'turn_end', generation: 2 })).toEqual([]);
+    expect(validateContract('EvTurnEnd', { type: 'turn_end', generation: 'two' })).not.toEqual([]);
     expect(validateContract('Decision', { ...mockStore.world.decisions.values().next().value?.decision, expires_at: 'soon' })).not.toEqual([]);
     expect(validateContract('NoSuchModel', {})).not.toEqual([]);
     expect(Object.keys(SAMPLES).sort()).toEqual(SCRIPT.map((rule) => rule.name).sort());

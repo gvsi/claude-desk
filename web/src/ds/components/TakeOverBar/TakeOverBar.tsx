@@ -21,6 +21,11 @@ export interface TakeOverBarProps {
    * conversation): while Claude answers, this bar keeps only its line about whispers.
    */
   takeOverAbove?: boolean;
+  /**
+   * Whether paused mode offers Take over (default true). False when nobody is left on the other side
+   * to take over from, such as a demo visitor that has ended: a paused bar offers only Resume Claude.
+   */
+  offerTakeOver?: boolean;
   onTakeOver: () => void;
   onHandBack: () => void;
   onResume: () => void;
@@ -51,8 +56,8 @@ function VisitorName({ children }: { children: string }) {
  * Who is answering a conversation, and the owner's controls for it, above the composer: Take over
  * while Claude answers (or, with `takeOverAbove`, only the line about whispers, as the screen draws
  * Take over in the conversation's bar), Hand back to Claude while the owner is in the chat, and
- * Resume Claude or Take over once the breaker paused it. Held approval cards stay answerable in
- * every mode.
+ * Resume Claude or Take over once the breaker paused it (only Resume Claude when
+ * `offerTakeOver` is false). Held approval cards stay answerable in every mode.
  */
 export function TakeOverBar({
   mode,
@@ -60,6 +65,7 @@ export function TakeOverBar({
   ownerName,
   agent = false,
   takeOverAbove = false,
+  offerTakeOver = true,
   onTakeOver,
   onHandBack,
   onResume,
@@ -134,7 +140,7 @@ export function TakeOverBar({
       buttons = (
         <>
           {button('primary', 'Resume Claude', onResume)}
-          {button('secondary', 'Take over', onTakeOver)}
+          {offerTakeOver ? button('secondary', 'Take over', onTakeOver) : null}
         </>
       );
       break;

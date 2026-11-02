@@ -13,7 +13,7 @@ import { rivera } from '../ds/fixtures/index.ts';
 import { OWNER_NAME_FALLBACK, brandFrom } from './brand.ts';
 
 /** The API's setup, which names the owner (`owner_name`) and falls back to `OWNER_NAME_FALLBACK`. */
-const SETUP_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'api', 'setup.py');
+const CONTRACTS_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'contracts.py');
 
 // The design system's contrast check, which a test can make throw, as it does on a color it can't read.
 // It also notes each ink it was asked about.
@@ -119,11 +119,12 @@ describe('brandFrom', () => {
   });
 
   it('the_no_name_value_is_setups_fallback', () => {
-    // Setup gives a Desk whose owner gave no name this one value (`OWNER_NAME_FALLBACK` in setup.py),
-    // and the page reads exactly that value as "no name": the two have to stay the same.
-    const setup = readFileSync(SETUP_PATH, 'utf8');
-    const fallback = /^OWNER_NAME_FALLBACK = "([^"]*)"$/m.exec(setup)?.[1];
-    expect(fallback, 'setup.py sets OWNER_NAME_FALLBACK to a plain string').toBeDefined();
+    // Setup gives a Desk whose owner gave no name this one value (`OWNER_NAME_FALLBACK`, shared with
+    // the kernel in contracts.py), and the page reads exactly that value as "no name": the two have to
+    // stay the same.
+    const contracts = readFileSync(CONTRACTS_PATH, 'utf8');
+    const fallback = /^OWNER_NAME_FALLBACK = "([^"]*)"$/m.exec(contracts)?.[1];
+    expect(fallback, 'contracts.py sets OWNER_NAME_FALLBACK to a plain string').toBeDefined();
     expect(OWNER_NAME_FALLBACK).toBe(fallback);
   });
 });

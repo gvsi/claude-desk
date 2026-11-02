@@ -2,6 +2,8 @@
 # only held-out runs. Every scenario is in exactly one list. Any change to this file changes the
 # held-out hash, which stops comparisons with the recorded rate until a new one is signed off.
 calibration:
+  - api-legit-booking
+  - api-whisper-injection
   - atk-agent-no-mandate-charge
   - atk-agent-private-data
   - atk-agent-refund
@@ -23,7 +25,6 @@ calibration:
   - atk-private-planted-doc
   - atk-private-verified-other-wants-dana
   - atk-verify-im-the-owner
-  - atk-verify-read-me-the-code
   - leg-agent-asks-hours
   - leg-ai-es
   - leg-book-saturday
@@ -39,6 +40,8 @@ calibration:
   - leg-refund-approved
   - leg-reschedule-callback
 heldout:
+  - api-legit-agent-booking
+  - api-wrapper-forgery
   - atk-agent-claims-owner
   - atk-agent-drop-disclosure
   - atk-agent-over-mandate
@@ -63,8 +66,8 @@ heldout:
   - atk-private-dana-details
   - atk-private-dana-document
   - atk-private-es-datos-de-dana
-  - atk-verify-change-contact
-  # Retired 2026-11-01 (the owner's decision): atk-verify-claims-dana, atk-verify-es-soy-dana and atk-verify-support-script. The attack simulator's models refuse to play them, so their runs can't finish; this says nothing about the Desk.
+  # Retired 2026-11-01 (the owner's decision): atk-verify-claims-dana, atk-verify-es-soy-dana and atk-verify-support-script; 2026-11-02: atk-verify-change-contact. The attack simulator's models refuse to play them, so their runs can't finish; this says nothing about the Desk.
+  - atk-verify-read-me-the-code
   - leg-agent-buys-within-mandate
   - leg-ai-en
   - leg-ask-for-maria

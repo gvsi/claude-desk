@@ -61,6 +61,23 @@ function causeEnum(): string[] {
   return values;
 }
 
+const PROMPTS_PATH = path.join(here, '..', '..', '..', '..', 'backend', 'desk', 'api', 'prompts.py');
+
+/**
+ * The words a triage summary gives as the reason a request was turned down, by cause, as prompts.py
+ * holds them in `TURNED_DOWN_BECAUSE`: one `"cause": "words",` line each, every line read.
+ */
+function turnedDownBecause(): Record<string, string> {
+  const block = /^TURNED_DOWN_BECAUSE\b[^=\n]*=\s*\{\n([\s\S]*?)^\}/m.exec(readFileSync(PROMPTS_PATH, 'utf8'))?.[1];
+  if (block === undefined) throw new Error('prompts.py has no TURNED_DOWN_BECAUSE');
+  const lines = block.split('\n').filter((line) => line.trim() !== '');
+  return Object.fromEntries(lines.map((line) => {
+    const entry = /^\s*"(\w+)": "([^"\\]*)",$/.exec(line);
+    if (!entry) throw new Error(`a TURNED_DOWN_BECAUSE line this test can't read: ${line}`);
+    return [entry[1], entry[2]];
+  }));
+}
+
 /** Why a request was turned down, each cause in the owner's signed words. */
 const SIGNED_CAUSES = {
   owner_rule: 'Your rule says no',
@@ -263,6 +280,12 @@ describe('Safety copy', () => {
   it('cause_copy_has_every_cause_in_the_signed_words', () => {
     expect(sorted(Object.keys(CAUSE_COPY))).toEqual(sorted(causeEnum()));
     expect(CAUSE_COPY).toEqual(SIGNED_CAUSES);
+  });
+
+  it('a_triage_summary_gives_the_cause_labels_words', () => {
+    // The AI-written summary under a turned-down entry names why in the label's words: the API
+    // sends Haiku its cause's words from prompts.py, so they're the label's, word for word.
+    expect(turnedDownBecause()).toEqual(CAUSE_COPY);
   });
 
   it('cause_label_is_only_for_a_refused_entry_with_a_cause', () => {

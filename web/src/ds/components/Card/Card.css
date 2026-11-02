@@ -12,6 +12,13 @@
   overflow-wrap: anywhere;
 }
 
+/* A card that scrolls inside itself takes keyboard focus: its own border turns line-focus, with no
+   edge or ring of its own. */
+.cd-card:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: none;
+}
+
 .cd-card--padding-20 {
   padding: var(--space-20);
 }

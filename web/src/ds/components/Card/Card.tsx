@@ -31,6 +31,11 @@ export interface CardProps {
    * those still throws, and a frame throws anywhere but the top level: inside a card or a frame.
    */
   holdsCards?: boolean;
+  /**
+   * `0` for a card that scrolls inside itself, so a keyboard can reach and scroll it, such as
+   * Safety's open attempt beside the list. Its border then shows keyboard focus.
+   */
+  tabIndex?: 0;
   children: ReactNode;
 }
 
@@ -39,7 +44,7 @@ export interface CardProps {
  * in development a nested Card throws, so the mistake shows up in its story. The one exception is a
  * card that `holdsCards`: the cards directly in it are allowed.
  */
-export function Card({ as: Tag = 'div', label, labelledBy, padding = 20, holdsCards = false, children }: CardProps) {
+export function Card({ as: Tag = 'div', label, labelledBy, padding = 20, holdsCards = false, tabIndex, children }: CardProps) {
   const inside = useContext(InsideCard);
   if (import.meta.env.DEV) {
     if (holdsCards && inside !== 'none') {
@@ -56,6 +61,7 @@ export function Card({ as: Tag = 'div', label, labelledBy, padding = 20, holdsCa
       role={Tag === 'div' && (label !== undefined || labelledBy !== undefined) ? 'group' : undefined}
       aria-label={label}
       aria-labelledby={labelledBy}
+      tabIndex={tabIndex}
     >
       <InsideCard.Provider value={holdsCards ? 'frame' : 'card'}>{children}</InsideCard.Provider>
     </Tag>

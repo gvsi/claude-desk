@@ -68,6 +68,7 @@ export const Verified: Story = {
       'Hash',
       'Signature',
       'Signing key',
+      'What was recorded',
     ]);
     await expect(values.get('Entry')).toHaveTextContent(String(verified.seq));
     // created_at is shown as given: nothing here formats a date.
@@ -84,10 +85,11 @@ export const Verified: Story = {
     // A key id short enough to read is shown whole.
     await expect(values.get('Signing key')?.textContent).toBe(verified.key_id);
     await expect(values.get('Signing key')).toHaveAttribute('title', verified.key_id);
-    // What was recorded waits, closed, under its label: the raw record isn't drawn until it's asked for.
-    const recorded = canvas.getByRole('button', { name: 'What was recorded' });
-    await expect(recorded).toHaveAttribute('aria-expanded', 'false');
-    await expect(trace.querySelector('pre')).toBeNull();
+    await expect(values.get('What was recorded')?.textContent).toBe(JSON.stringify(verified.event.summary, null, 2));
+    // The record shows at once, as the kernel signed it, as indented JSON in mono.
+    const record = trace.querySelector('pre');
+    if (!record) throw new Error('the record is drawn with the trace');
+    expectComputed(record, { fontFamily: /JetBrains Mono/, fontSize: '12.5px', lineHeight: '18px' });
 
     // The parts keep their spacing: the record and the chain line stand apart from the words above.
     expectComputed(trace.querySelector('dl') as Element, { marginTop: '12px' });
@@ -108,7 +110,6 @@ export const Verified: Story = {
       trace.querySelector('.cd-full-trace__title'),
       plain,
       ...trace.querySelectorAll('dt'),
-      recorded,
       trace.querySelector('.cd-full-trace__chain'),
     ];
     for (const word of words) {
@@ -117,6 +118,8 @@ export const Verified: Story = {
     }
 
     // trace_closes_on_escape: from inside the trace, Escape closes it; so does the close button.
+    // The trace itself takes focus only when a screen moves it there: Tab goes to its close button.
+    await expect(trace).toHaveAttribute('tabindex', '-1');
     const close = canvas.getByRole('button', { name: 'Close the full trace' });
     await userEvent.tab();
     await expect(close).toHaveFocus();
@@ -124,28 +127,17 @@ export const Verified: Story = {
     await expect(args.onClose).toHaveBeenCalledTimes(1);
     await userEvent.click(close);
     await expect(args.onClose).toHaveBeenCalledTimes(2);
-
-    // Opened, the record is the summary as the kernel signed it, as indented JSON, in mono.
-    await userEvent.click(recorded);
-    await expect(recorded).toHaveAttribute('aria-expanded', 'true');
-    const record = trace.querySelector('pre');
-    if (!record) throw new Error('the record is drawn once opened');
-    await expect(record.textContent).toBe(JSON.stringify(verified.event.summary, null, 2));
-    expectComputed(record, { fontFamily: /JetBrains Mono/, fontSize: '12.5px', lineHeight: '18px' });
-    await userEvent.click(recorded);
-    await expect(trace.querySelector('pre')).toBeNull();
   },
 };
 
 export const Broken: Story = {
   args: { entry: broken, chain: { chain_ok: rivera.ledger.broken.chain_ok, first_bad_seq: rivera.ledger.broken.first_bad_seq } },
-  play: async ({ canvas, canvasElement, userEvent }) => {
+  play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByText('Chain broken at entry 2')).toBeVisible();
     await expect(canvas.queryByText(/Chain verified/)).toBeNull();
     const dot = canvasElement.querySelector('.cd-full-trace__chain .cd-status-dot');
     await expect(dot).toHaveClass('cd-status-dot--refused');
     // The trace shows the record as it is now, edited summary and all.
-    await userEvent.click(canvas.getByRole('button', { name: 'What was recorded' }));
     const summary = canvasElement.querySelector('pre');
     await expect(summary?.textContent).toBe(JSON.stringify(broken.event.summary, null, 2));
     await expect(summary?.textContent).toContain('"outcome": "allow"');
@@ -165,5 +157,27 @@ export const DevKey: Story = {
     await expect(canvas.queryByText(/Chain verified|Chain broken/)).toBeNull();
     const dot = canvasElement.querySelector('.cd-full-trace__chain .cd-status-dot');
     await expect(dot).toHaveClass('cd-status-dot--info');
+  },
+};
+
+export const InTheTabOrder: Story = {
+  args: { tabIndex: 0 },
+  parameters: {
+    canvasNote:
+      'Beside Safety’s every-entry list the trace scrolls inside itself, so Tab reaches it, ahead of its close button, and its own border shows the focus.',
+  },
+  play: async ({ canvas, userEvent }) => {
+    const trace = canvas.getByRole('region', { name: 'Full trace of entry 2' });
+    await userEvent.tab();
+    await expect(trace).toHaveFocus();
+    // line-focus as the browser computes it, read off a probe.
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--line-focus)';
+    trace.append(probe);
+    const lineFocus = getComputedStyle(probe).color;
+    probe.remove();
+    expectComputed(trace, { borderTopColor: lineFocus, boxShadow: 'none', outlineStyle: 'none' });
+    await userEvent.tab();
+    await expect(canvas.getByRole('button', { name: 'Close the full trace' })).toHaveFocus();
   },
 };
