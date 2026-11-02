@@ -297,6 +297,17 @@ describe('Demo visitor', () => {
     expect(requests('demoVisitorRun').some((r) => r.path.endsWith(`/demo_visitor/${first.run_id}`))).toBe(true);
   });
 
+  it('a_demo_chat_whose_reads_name_no_run_reads_as_ended', async () => {
+    // A chat marked before its mark named its run: its own run can't be read, so it has ended for the page,
+    // which reads no other run in its place.
+    const { session_id: sessionId } = await startOne('unnamed');
+    demoChats()[0]!.demoVisitorRun = null;
+    const { screen } = await renderRoute(`${LIST}/${sessionId}`);
+    await expect.element(demoNote(screen)).toHaveTextContent(FINISHED);
+    expect(demoNote(screen).getByRole('button').elements()).toHaveLength(0);
+    expect(requests('demoVisitor')).toHaveLength(0);
+  });
+
   it('an_older_conversation_keeps_its_own_ending', async () => {
     // The first demo visitor is stopped; a second one runs on the Desk now.
     const first = await startOne('first');

@@ -178,7 +178,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   // A demo visitor's chat, by its transcript or the list's row: its note reads its run.
   const demo = chat.data?.demo_visitor === true || summary?.demo_visitor === true;
   const namedRun = chat.data?.demo_visitor_run_id ?? summary?.demo_visitor_run_id ?? null;
-  const demoRun = useDemoVisitorRun(deskId, sessionId, demo, namedRun, demoVisitorRun);
+  const demoRun = useDemoVisitorRun(deskId, demo, namedRun, demoVisitorRun);
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
   // nothing new while a message is on its way, so they never replace words typed after them.

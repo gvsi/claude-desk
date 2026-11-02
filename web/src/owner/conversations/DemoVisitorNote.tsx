@@ -4,27 +4,19 @@
  * no button.
  *
  * The note reads the conversation's own run by its ID, so an older conversation keeps its own ending
- * after a newer run starts on the Desk. The ID comes from the conversation's own reads, which name the
- * run that opened the chat; else from the start that opened the page; else from the Desk's newest run,
- * when that run is this chat's (only one runs at a time in a copy, so a chat whose run isn't the
- * newest has ended), for a chat marked before its run was named; and once learned it is kept while
- * the app runs. Runs live in the API's memory for an hour: a run it no longer keeps, or a chat whose
- * run can't be found, has ended, and is said to have finished.
+ * after a newer run starts on the Desk: the ID the conversation's own reads name (the run that opened
+ * the chat), else the run the start that opened the page answered. Runs live in the API's memory for
+ * an hour: a run it no longer keeps, or a demo chat whose reads name no run (marked before its run was
+ * named), has ended, and is said to have finished.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { DemoVisitorRun } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import { Button, Notice } from '../../ds/index.ts';
 import { DEMO_VISITOR_NOTE } from './copy.ts';
-
-/** The run ID the app has learned for a demo visitor's chat, kept in the query client while the app runs. */
-const runIdKey = (sessionId: string) => ['demoVisitorRunOf', sessionId] as const;
-
-/** The Desk's newest demo visitor run. */
-export const newestDemoVisitorKey = (deskId: string) => ['demoVisitor', deskId] as const;
 
 /** One demo visitor run, by its ID. */
 export const demoVisitorRunKey = (deskId: string, runId: string) => ['demoVisitorRun', deskId, runId] as const;
@@ -48,42 +40,20 @@ export function endedLine(ended: DemoVisitorRun['ended']): string {
  * conversation's reads name, once they have; `startedRun` the run the page that opened the chat
  * started there, if it did.
  */
-export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boolean, namedRun: string | null, startedRun: string | null): DemoVisitorPhase {
-  const queryClient = useQueryClient();
-  const [kept, setRunId] = useState<string | null>(() => startedRun ?? queryClient.getQueryData<string>(runIdKey(sessionId)) ?? null);
-  const runId = namedRun ?? kept;
-
-  const newest = useQuery({
-    queryKey: newestDemoVisitorKey(deskId),
-    queryFn: () => request('demoVisitor', { params: { desk_id: deskId } }),
-    enabled: demo && runId === null,
-  });
-  // Only a read made since this chat opened says whose the newest run is: one kept from an earlier
-  // visit may be an older run's.
-  const newestRead = newest.isFetchedAfterMount ? newest : null;
-  const newestIsThisChat = newestRead?.data !== undefined && newestRead.data.session_id === sessionId;
-  const learned = runId ?? (newestIsThisChat ? newestRead!.data!.run_id : null);
-  useEffect(() => {
-    if (learned === null) return;
-    if (kept !== learned) setRunId(learned);
-    queryClient.setQueryData(runIdKey(sessionId), learned);
-  }, [learned, kept, queryClient, sessionId]);
-
+export function useDemoVisitorRun(deskId: string, demo: boolean, namedRun: string | null, startedRun: string | null): DemoVisitorPhase {
+  const runId = namedRun ?? startedRun;
   const run = useQuery({
-    queryKey: demoVisitorRunKey(deskId, learned ?? ''),
-    queryFn: () => request('demoVisitorRun', { params: { desk_id: deskId, run_id: learned ?? '' } }),
-    enabled: demo && learned !== null,
+    queryKey: demoVisitorRunKey(deskId, runId ?? ''),
+    queryFn: () => request('demoVisitorRun', { params: { desk_id: deskId, run_id: runId ?? '' } }),
+    enabled: demo && runId !== null,
     // Read again while it runs; not once it has ended, or once the API no longer keeps it.
     refetchInterval: (query) =>
       !notFound(query.state.error) && (query.state.data === undefined || query.state.data.state === 'running') ? pollMs('conversation') : false,
   });
 
   if (!demo) return { phase: 'unknown' };
-  if (learned === null) {
-    // The Desk has no run kept, or its newest is another chat's: this chat's run has ended.
-    const ended = newestRead !== null && (notFound(newestRead.error) || (newestRead.data !== undefined && !newestIsThisChat));
-    return ended ? { phase: 'ended', ended: null } : { phase: 'unknown' };
-  }
+  // A demo chat whose reads name no run: its own run can't be read, so it has ended.
+  if (runId === null) return { phase: 'ended', ended: null };
   // No longer kept (the API restarted, or its hour passed): it has ended, whatever an earlier read
   // said. It was stopped only when a read this tab made says the owner stopped it.
   if (notFound(run.error)) return { phase: 'ended', ended: run.data?.ended === 'stopped_by_owner' ? 'stopped_by_owner' : null };
