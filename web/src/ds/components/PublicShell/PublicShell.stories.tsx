@@ -467,7 +467,7 @@ export const WithAgentLinks: Story = {
   },
 };
 
-// The open status in the header: the kernel's words (`PublicDesk.open_status`), shown as written.
+// The open status in About or the narrow header: the kernel's words (`PublicDesk.open_status`), shown as written.
 
 /*
  * Each status whole, as the kernel serves it in `PublicDesk.open_status` for a business in
@@ -543,7 +543,7 @@ function partOf(header: HTMLElement, selector: string): HTMLElement {
 }
 
 /**
- * The header's open status reading `text`: the kernel's words as written, in meta type and the
+ * The shell's open status reading `text`: the kernel's words as written, in meta type and the
  * name's ink, with an `aria-hidden` dot on the middle of their first line.
  */
 async function openStatusIn(header: HTMLElement, text: string): Promise<{ status: HTMLElement; line: HTMLElement; dot: HTMLElement }> {

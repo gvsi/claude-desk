@@ -179,7 +179,7 @@ export const Board: Story = {
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'City office fonts');
     const bar = await expectVisionBar(canvasElement, VISION_BACK_HREF);
 
-    // The city's public page right under the bar: its header, its name, the Permit Center and its open status.
+    // The city's public page right under the bar: its header, name and Permit Center, with the open status in About.
     const header = canvas.getByRole('banner');
     await expect(header.getBoundingClientRect().top).toBe(bar.getBoundingClientRect().bottom);
     expectComputed(header, { height: '76px', backgroundColor: 'rgb(45, 61, 76)', borderBottomColor: 'rgb(111, 139, 163)' });

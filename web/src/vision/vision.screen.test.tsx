@@ -476,7 +476,7 @@ describe('Vision pages against their boards', () => {
     expect(document.title).toBe('Meridian Bay Permits');
 
     // The city's public page right under the bar: its header in the city's slate with its lighter
-    // rule, its name, the Permit Center and its open status.
+    // rule, its name and the Permit Center. The open status sits in About.
     const header = screen.getByRole('banner').element();
     expect(top(header)).toBe(bottom(bar));
     expectComputed(header, { height: '76px', backgroundColor: 'rgb(45, 61, 76)', borderBottomColor: 'rgb(111, 139, 163)' });

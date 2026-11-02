@@ -4741,7 +4741,7 @@ async function expectOpenStatus(screen: RenderResult, text: string, dot: 'open' 
   }
 }
 
-/** Turner's public Desk as the kernel would serve it with `status` in its header. */
+/** Turner's public Desk as the kernel would serve it with `status` for the shell to place. */
 function deskWith(language: 'en' | 'es', status: OpenStatus | null): PublicDesk {
   return { ...rivera.publicDesk[language], open_status: status };
 }

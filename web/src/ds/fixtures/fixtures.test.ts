@@ -390,7 +390,7 @@ describe('fixtures', () => {
   test('public_desks_are_what_the_kernel_serves', () => {
     // Each business's public Desk: its brand colors as plain #rrggbb, which the public page lets
     // through; its charter as the kernel's charter cards, each reading its template's fact; and,
-    // where the Desk has hours, an open status the header can show whole.
+    // where the Desk has hours, an open status the shell can show whole.
     const CHARTER_FACTS: Partial<Record<ClauseTemplate, RegExp>> = {
       hours: /^charter:hours$/,
       policy: /^charter:policy:/,
@@ -414,7 +414,7 @@ describe('fixtures', () => {
         expect(block.fact_id, `${where}: ${block.template}`).toMatch(fact ?? /^$/);
       }
     }
-    // The city office's Desk has hours, so its header shows the kernel's open status.
+    // The city office's Desk has hours, so its shell shows the kernel's open status.
     const status = meridian.publicDesk.en.open_status;
     expect(status?.open).toBe(true);
     expect(status?.text).toBe('Open now, until 4:30 pm');
