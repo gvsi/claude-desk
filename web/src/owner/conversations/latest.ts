@@ -38,9 +38,30 @@ function doneIn(items: readonly OwnerTranscriptItem[], index: number, message: E
 }
 
 /**
- * What happened last in the chat: the task its newest message reports done, else the kernel's
- * line for its newest receipt or message. Where the owner joined or left carries no line of the
- * kernel's, so it is passed over.
+ * The kernel's line for the action that ran just before Claude's checked reply, in its turn, or
+ * null: the receipt's own words for what was done ("Quoted from Mike Turner's price list"), so the
+ * line names the action rather than the reply's check. Only the status nearest the reply counts, so
+ * a hold or refusal after the action isn't hidden behind it. A draft the check stopped and Claude
+ * rewrote stays in the turn, so the scan steps over it. A reply that hands the chat to the owner
+ * names no action: the handoff is what happened last. The owner's and the Desk's own messages are
+ * theirs, not an action's.
+ */
+function actionBefore(items: readonly OwnerTranscriptItem[], index: number, message: EvMessage): string | null {
+  if (message.author !== 'claude') return null;
+  if (message.handoff || message.blocks.some((block) => block.kind === 'card' && block.template === 'handoff')) return null;
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const item = items[i];
+    if (item?.kind === 'stopped_draft') continue;
+    if (item?.kind !== 'status' || item.event === null || !('state' in item.event)) return null;
+    return item.event.state === 'executed' ? item.event.visitor_plain : null;
+  }
+  return null;
+}
+
+/**
+ * What happened last in the chat: the task its newest message reports done, else the action that
+ * ran just before its newest checked reply, else the kernel's line for its newest receipt or
+ * message. Where the owner joined or left carries no line of the kernel's, so it is passed over.
  */
 export function latestOf(items: readonly OwnerTranscriptItem[]): string | null {
   const ordered = [...items].sort((a, b) => a.n - b.n);
@@ -49,7 +70,7 @@ export function latestOf(items: readonly OwnerTranscriptItem[]): string | null {
     if (item === undefined) continue;
     const { event, owner_plain: ownerPlain } = item;
     if (event === null || !('visitor_plain' in event)) continue;
-    if (event.type === 'message') return doneIn(ordered, i, event) ?? event.visitor_plain;
+    if (event.type === 'message') return doneIn(ordered, i, event) ?? actionBefore(ordered, i, event) ?? event.visitor_plain;
     return event.state === 'refused_at_execution' && ownerPlain != null ? ownerPlain : event.visitor_plain;
   }
   return null;

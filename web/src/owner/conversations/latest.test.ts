@@ -1,6 +1,7 @@
 /**
  * The line beside a conversation's title: the task that got done when the newest thing in the chat
- * is the checked card of an action that ran, else the kernel's line for it, as before.
+ * is the checked card of an action that ran; else, for a checked reply after an action that ran in
+ * its turn, the kernel's line for that action; else the kernel's line for the newest thing.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -11,6 +12,10 @@ import { latestOf } from './latest.ts';
 
 const { blocks } = rivera;
 const REPLY_CHECKED = "Reply checked against Mike Turner's rules";
+/** The kernel's lines for actions that ran, as their receipts give them. */
+const QUOTED = "Quoted from Mike Turner's price list";
+const TIMES_READ = "Times read from Mike Turner's calendar";
+const LINK_MADE = 'Payment link made for this quote';
 
 /** One item of the chat, before it has its place. */
 type Part = Omit<OwnerTranscriptItem, 'n' | 'created_at'>;
@@ -73,6 +78,44 @@ describe('latestOf', () => {
     expect(latestOf(paid)).toBe('Deposit paid');
   });
 
+  it('a_reply_after_an_action_that_ran_names_the_action', () => {
+    // The kernel's own line for what ran, as its receipt gives it, not the check of the reply.
+    const quoted = chat(words('visitor_text', 'How much to clear a drain?'), status('executed', { plain: QUOTED }), reply([blocks.prose.details.en, blocks.quote.en]));
+    expect(latestOf(quoted)).toBe(QUOTED);
+    const times = chat(words('agent_text', 'Which times are open this week?'), status('executed', { plain: TIMES_READ }), reply([blocks.booking_options.en]));
+    expect(latestOf(times)).toBe(TIMES_READ);
+    // In the kernel's own language for the chat.
+    const cotizado = 'Cotizado con la lista de precios de Mike Turner';
+    expect(latestOf(chat(words('visitor_text', '¿Cuánto cuesta?'), status('executed', { plain: cotizado }), reply([blocks.quote.en], { language: 'es' })))).toBe(cotizado);
+    // A reply with no card after an action that ran names it too: the action is what happened.
+    expect(latestOf(chat(words('visitor_text', 'Any times Tuesday?'), status('executed', { plain: TIMES_READ }), reply([blocks.prose.details.en])))).toBe(TIMES_READ);
+    // Two actions in one turn: the one that ran last, just before the reply.
+    expect(latestOf(chat(words('visitor_text', 'Quote it and send a link.'), status('executed', { plain: QUOTED }), status('executed', { plain: LINK_MADE }), reply([blocks.quote.en])))).toBe(LINK_MADE);
+    // The check stopped the first draft and Claude rewrote it: still the action's line.
+    const stopped: Part = { kind: 'stopped_draft', text: null, event: null };
+    expect(latestOf(chat(words('visitor_text', 'How much?'), status('executed', { plain: QUOTED }), stopped, reply([blocks.quote.en])))).toBe(QUOTED);
+    // A booking that ran keeps its own words beside its booked card, and its line without one.
+    const booked = "Booked on Mike Turner's calendar";
+    expect(latestOf(chat(words('visitor_text', 'Tuesday at 2.'), status('executed', { plain: booked }), reply([blocks.booking_confirmed.en])))).toBe('Visit booked');
+    expect(latestOf(chat(words('visitor_text', 'Tuesday at 2.'), status('executed', { plain: booked }), reply([blocks.prose.details.en])))).toBe(booked);
+  });
+
+  it('only_an_action_that_ran_last_in_the_turn_names_the_reply', () => {
+    // A hold, refusal or anything else not executed just before the reply: the kernel's line for the reply, as before.
+    for (const state of ['held', 'refused', 'denied', 'approved', 'allowed', 'failed', 'unknown', 'expired', 'cancelled'] as const) {
+      expect(latestOf(chat(words('visitor_text', 'How much?'), status(state), reply([blocks.quote.en]))), state).toBe(REPLY_CHECKED);
+    }
+    // A later hold in the same turn isn't hidden behind the action before it.
+    expect(latestOf(chat(words('visitor_text', 'Quote it with 15% off.'), status('executed', { plain: QUOTED }), status('held'), reply([blocks.quote.en])))).toBe(REPLY_CHECKED);
+    // What ran in an earlier turn isn't this reply's.
+    expect(latestOf(chat(status('executed', { plain: QUOTED }), reply([blocks.quote.en]), words('visitor_text', 'Thanks!'), reply([blocks.prose.details.en])))).toBe(REPLY_CHECKED);
+    // A reply that hands the chat to the owner is what happened last, whatever ran before it.
+    expect(latestOf(chat(words('visitor_text', 'How much?'), status('executed', { plain: QUOTED }), reply([blocks.handoff.en], { visitor_plain: 'Handed to Mike Turner' })))).toBe('Handed to Mike Turner');
+    expect(latestOf(chat(words('visitor_text', 'How much?'), status('executed', { plain: QUOTED }), reply([blocks.quote.en], { handoff: true, visitor_plain: 'Handed to a person' })))).toBe('Handed to a person');
+    // The owner's own words after an action are the owner's, not the action's.
+    expect(latestOf(chat(status('executed', { plain: QUOTED }), reply([blocks.owner_said.en], { author: 'owner', visitor_plain: 'Mike Turner wrote this' })))).toBe('Mike Turner wrote this');
+  });
+
   it('a_task_done_stays_done_when_the_check_stopped_the_first_draft', () => {
     // The check stopped Claude's first draft of the turn's reply, and Claude rewrote it: the draft
     // the owner keeps sits between what ran and the checked reply, in the same turn.
@@ -123,7 +166,7 @@ describe('latestOf', () => {
     const booking = [words('visitor_text', 'Tuesday at 2 works.'), status('executed'), reply([blocks.prose.details.en, blocks.booking_confirmed.en])];
     // What happened after the booking is what happened last: a plain reply, a quote, a status with no reply yet, the owner's own words.
     expect(latestOf(chat(...booking, words('visitor_text', 'Thanks!'), reply([blocks.prose.details.en])))).toBe(REPLY_CHECKED);
-    expect(latestOf(chat(...booking, words('visitor_text', 'And a drain clearing?'), status('executed'), reply([blocks.quote.en])))).toBe(REPLY_CHECKED);
+    expect(latestOf(chat(...booking, words('visitor_text', 'And a drain clearing?'), status('executed', { plain: QUOTED }), reply([blocks.quote.en])))).toBe(QUOTED);
     expect(latestOf(chat(...booking, words('visitor_text', 'Any later times?'), status('executed', { plain: 'Checked the open times' })))).toBe('Checked the open times');
     expect(latestOf(chat(...booking, reply([blocks.owner_said.en], { author: 'owner', visitor_plain: 'Mike Turner wrote this' })))).toBe('Mike Turner wrote this');
     // A refusal at execution with no owner's line keeps the kernel's.
