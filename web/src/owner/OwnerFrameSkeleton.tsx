@@ -32,7 +32,7 @@ function pageShapes(
   if (page === 'safety' && safetyRoute && new URLSearchParams(search).get('view') !== 'entries') return <SafetySkeleton withHeader />;
   if (page === 'people' && exact) return <PeopleSkeleton withHeader />;
   if (page === 'profile' && exact) return <ProfileSkeleton />;
-  if (page === 'knowledge' && exact) return <KnowledgeSkeleton showSampleQuestions={showSampleContent} />;
+  if (page === 'knowledge' && exact) return <KnowledgeSkeleton />;
   if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} recordedHistory={showSampleContent} />;
   // One conversation open beside the list: `/conversations/:id`.
   const [conversation = '', ...after] = rest;
@@ -42,7 +42,8 @@ function pageShapes(
 
 /**
  * Exact routes only: later tasks add their pages here, while detail pages keep an empty area.
- * `setup` is the Desk's unfinished setup once the copy's Desks say so, which Today draws first.
+ * `setup` is the Desk's unfinished setup as the copy's Desks say, or, until they are read, as this
+ * browser last saw it (`todaySetupMemory.ts`), which Today draws first.
  */
 export function pageSkeletonFor(
   pathname: string,
@@ -60,7 +61,8 @@ export function pageSkeletonFor(
 
 /**
  * The owner's frame at the current address, with the same gutters and footer as the landed frame.
- * `setup`: the Desk's unfinished setup, once the copy's Desks are read and say it isn't live.
+ * `setup`: the Desk's unfinished setup as the copy's Desks say, or, until they are read, as this
+ * browser last saw it (`todaySetupMemory.ts`).
  */
 export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setup?: SkeletonSetup }) {
   const { search } = useLocation();

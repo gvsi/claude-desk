@@ -38,7 +38,7 @@ export const Board: Story = {
 
     // The held row says what is waiting with the held item's own rule.
     await expect(
-      canvas.getByText(`A request is waiting for your answer. Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`),
+      canvas.getByText(`A request is waiting for your answer: ${rivera.ruleCards['rv-quote'].reason}`),
     ).toBeVisible();
 
     // The right column is "Last 7 days"; recorded history is named there and at Since last night.
@@ -77,7 +77,7 @@ export const Board: Story = {
     const sidebar = canvas.getByRole('complementary', { name: 'Claude Desk' });
     const nav = within(sidebar).getByRole('navigation', { name: 'Main' });
     await expectTabOrder(userEvent, [
-      within(bar).getByRole('button', { name: 'Start over' }),
+      within(bar).getByRole('button', { name: 'Reset demo' }),
       within(sidebar).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
       within(sidebar).getByRole('switch', { name: 'Claude acts for you' }),

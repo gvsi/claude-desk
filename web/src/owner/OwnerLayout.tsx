@@ -41,6 +41,7 @@ import {
 import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { skeletonSetupOf } from './today/TodaySkeleton.tsx';
+import { rememberedSetup, rememberSetups } from './today/todaySetupMemory.ts';
 import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
 import { connectorPageHref } from './connectors/pages.ts';
 import { useUnreadNotifications } from './notifications/useNotifications.ts';
@@ -165,7 +166,7 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
 }
 
 /**
- * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Start over,
+ * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Reset demo,
  * the sidebar (the business, which opens the business switcher; the Desk picker; the pages; the
  * About this prototype links; the Answering switch; the owner), the page, and one concept footer
  * under it. A Desk outside the copy is not found.
@@ -200,8 +201,16 @@ function DeskGate({ deskId }: { deskId: string }) {
   const shown = found ?? held;
   const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
-  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card.
-  const setupShape = shown === null ? undefined : skeletonSetupOf(shown.desk);
+  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card. Until they
+  // are read (a reload), the shape this browser last saw for the Desk stands in, so the loading page
+  // draws the card from its first frame instead of dropping everything under it when the Desks arrive.
+  const [remembered] = useState(() => rememberedSetup(deskId));
+  const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk);
+  // Each settled read of the Desks rewrites the record: their unfinished Desks only.
+  const settledDesks = desks.data !== undefined && !desks.isFetching ? desks.data : null;
+  useEffect(() => {
+    if (settledDesks !== null) rememberSetups(settledDesks);
+  }, [settledDesks]);
 
   const titleId = useId();
   const failed = desks.isError && !desks.isFetching;
@@ -344,7 +353,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       await queryClient.cancelQueries({ queryKey: DESKS_KEY });
       queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (current) => withAnswering(current, deskId, on));
     },
-    // This can run after the frame has gone (Start over opened a new copy while the change was out),
+    // This can run after the frame has gone (Reset demo opened a new copy while the change was out),
     // so it only ever puts back this Desk's switch, in the Desks as they are now, and leaves a list
     // without this Desk alone.
     onError: async (err, on) => {
@@ -367,7 +376,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
         return;
       }
-      // A copy without this Desk (a new one, from Start over) has nothing of this change to show.
+      // A copy without this Desk (a new one, from Reset demo) has nothing of this change to show.
       const now = findDesk(read, deskId)?.desk.answering;
       if (now !== undefined && now !== on) setNotice(answeringSaveFailed(now));
     },
@@ -487,9 +496,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       ) : null}
       {confirming ? (
         <Dialog
-          title="Start over with a fresh copy?"
+          title="Reset demo?"
           body="You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind."
-          confirmLabel="Start over"
+          confirmLabel="Reset demo"
           cancelLabel="Keep this copy"
           pending={startOver.isPending}
           onConfirm={() => startOver.mutate()}

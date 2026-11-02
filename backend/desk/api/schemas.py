@@ -431,7 +431,9 @@ RefusalCause = Literal[
 class ConversationSummary(BaseModel):
     """A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
     anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
-    preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+    preview. `person_id` is the person on record a visitor's session was verified as, which that person's page lists
+    the conversation by; null for an unverified visitor, an agent and the owner's preview, even a verified one.
+    `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
     whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
     never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
     written yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose
@@ -455,6 +457,7 @@ class ConversationSummary(BaseModel):
     kind: ActorKind
     display_name: str | None
     verified: bool
+    person_id: str | None
     mode: SessionMode
     last_activity: AwareDatetime
     outcome_counts: dict[DecisionState, int]
@@ -606,7 +609,13 @@ class Attempt(BaseModel):
     `ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a
     closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
     and the session's verified state;
-    the web holds its words. It is null for held requests, stopped drafts and unmapped refusals."""
+    the web holds its words. It is null for held requests, stopped drafts and unmapped refusals.
+    `from_the_visitor` is what the visitor (or visiting agent) wrote in the turn that made a refused request, read as
+    Needs you reads a held request's: at most two of their lines since Claude's last reply before the refusal's
+    receipt in the chat, each a one-line glimpse of at most 200 characters, joined with " · "; if that window is
+    empty, the newest line before the receipt. It is their own untrusted words, for the owner alone. It is null for
+    held requests and stopped drafts, and for a refusal whose receipt isn't in the chat: an entry can be days old, so
+    the chat's latest lines would quote something else."""
 
     ref_id: str
     kind: Literal["refused", "held", "reply_blocked"]
@@ -617,11 +626,18 @@ class Attempt(BaseModel):
     triage: Triage | None
     ledger_seq: int
     cause: RefusalCause | None
+    from_the_visitor: str | None
 
     @model_validator(mode="after")
     def _cause_requires_refusal(self) -> "Attempt":
         if self.cause is not None and self.kind != "refused":
             raise ValueError("Only refused requests can have a cause")
+        return self
+
+    @model_validator(mode="after")
+    def _quote_requires_refusal(self) -> "Attempt":
+        if self.from_the_visitor is not None and self.kind != "refused":
+            raise ValueError("Only refused requests quote the visitor")
         return self
 
 

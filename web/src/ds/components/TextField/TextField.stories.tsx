@@ -111,11 +111,10 @@ export const Password: Story = {
     await expect(field).toHaveAttribute('autocomplete', 'current-password');
     await expect(field).not.toHaveAttribute('aria-describedby');
 
-    // Focus by keyboard too shows the caret and the outline one step stronger (line-field-focus, the
-    // tertiary ink), never a ring.
+    // Focus by keyboard shows the caret and the 2 px line-focus edge, never an outer ring.
     await userEvent.tab();
     await expect(field).toHaveFocus();
-    expectComputed(field, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.6)', boxShadow: 'none' });
+    expectComputed(field, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.64)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
     await userEvent.keyboard('demo');
     await expect(args.onChange).toHaveBeenLastCalledWith('demo');
   },
@@ -187,7 +186,7 @@ export const ReadOnly: Story = {
   },
   parameters: {
     canvasNote:
-      'Held fields use the muted fill of N-Explore-ReadOnly-B (owner, 2026-10-31, option B): a line-control outline on fill-secondary, with readable, selectable text. Setup’s description is held while a start whose answer was lost is tried again with its words as they were (plan 04, Task 12).',
+      'Held fields use the muted fill of N-Explore-ReadOnly-B (owner, 2026-10-31, option B): a line-field outline on fill-secondary, with readable, selectable text. Setup’s description is held while a start whose answer was lost is tried again with its words as they were (plan 04, Task 12).',
   },
   play: async ({ args, canvas, userEvent }) => {
     const multiline = canvas.getByRole('textbox', { name: 'Your business' }) as HTMLTextAreaElement;
@@ -196,7 +195,7 @@ export const ReadOnly: Story = {
       await expect(field).toHaveAttribute('readonly');
       await expect(field).not.toBeDisabled();
       expectComputed(field, {
-        borderTopColor: 'rgba(250, 249, 245, 0.22)',
+        borderTopColor: 'rgba(250, 249, 245, 0.36)',
         backgroundColor: 'rgba(250, 249, 245, 0.1)',
         color: 'rgba(250, 249, 245, 0.92)',
         opacity: '1',
@@ -216,15 +215,14 @@ export const ReadOnly: Story = {
       await expect([field.selectionStart, field.selectionEnd]).toEqual([0, value.length]);
     }
 
-    // Both stay in the tab order. A held field has no caret, so keyboard focus draws the warm
-    // `line-focus` edge (the secondary ink) 1 px inside it, as on any other borderless control; its
-    // border doesn't change, and nothing rings it.
+    // Both stay in the tab order. Held fields share the 2 px line-focus edge: their border
+    // and a 1 px inset shadow, without an outer ring.
     multiline.focus();
     await userEvent.tab();
     await expect(singleLine).toHaveFocus();
-    expectComputed(singleLine, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
+    expectComputed(singleLine, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.64)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
     await userEvent.tab({ shift: true });
     await expect(multiline).toHaveFocus();
-    expectComputed(multiline, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
+    expectComputed(multiline, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.64)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
   },
 };
