@@ -90,7 +90,7 @@ async function expectMariaInTheChat(root: HTMLElement, user: { tab: () => Promis
   const line = one(head, '.cd-public-shell__disclosure');
   await expect(line.textContent).toBe(OWNER_IN_CHAT);
   await expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual([OWNER, OWNER]);
-  expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   await expect(within(root).queryByRole('button', { name: `Ask for ${OWNER}` })).toBeNull();
   await expect(head.querySelectorAll('button')).toHaveLength(0);
 

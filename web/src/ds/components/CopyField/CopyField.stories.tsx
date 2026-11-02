@@ -80,7 +80,7 @@ export const Key: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     const field = canvas.getByRole('group', { name: 'Private key' });
     const label = within(field).getByText('Private key');
-    expectComputed(label, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(label, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     const value = canvasElement.querySelector<HTMLElement>('code')!;
     expectComputed(value, { backgroundColor: 'rgba(250, 249, 245, 0.1)', paddingTop: '12px', paddingLeft: '14px', borderTopLeftRadius: '8px' });
     // The box is 44 px: one 20 px line, 12 px above and below; 6 px under its label.
@@ -90,7 +90,7 @@ export const Key: Story = {
     const button = canvas.getByRole('button', { name: 'Copy key' });
     await expect(Math.round(button.getBoundingClientRect().top - value.getBoundingClientRect().bottom)).toBe(10);
     const note = within(field).getByText(args.note!);
-    expectComputed(note, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(note, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     await expect(Math.round(note.getBoundingClientRect().left - button.getBoundingClientRect().right)).toBe(12);
     await userEvent.click(button);
     await expect(args.onCopy).toHaveBeenCalledOnce();

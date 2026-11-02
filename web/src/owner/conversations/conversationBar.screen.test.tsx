@@ -231,8 +231,8 @@ describe('the open conversation bar', () => {
     expect(rect(bar).right - rect(takeOver).right).toBe(gutter);
 
     // The name in section type, Latest in meta type and secondary ink, the dot in tertiary ink.
-    expect(getComputedStyle(name).fontSize).toBe('15px');
-    expect([getComputedStyle(latest).fontSize, getComputedStyle(latest).color]).toEqual(['13px', tokenColor('--text-secondary')]);
+    expect(getComputedStyle(name).fontSize).toBe('16px');
+    expect([getComputedStyle(latest).fontSize, getComputedStyle(latest).color]).toEqual(['14px', tokenColor('--text-secondary')]);
     expect(getComputedStyle(dot).color).toBe(tokenColor('--text-tertiary'));
     expectCutShort(latest);
     expect(takeOver.classList.contains('cd-button--secondary')).toBe(true);

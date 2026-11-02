@@ -56,11 +56,11 @@ export const Situations: Story = {
     }
     expectComputed(first, { paddingTop: '14px', paddingBottom: '14px' });
     const title = within(first).getByText(SITUATIONS[0]!.title);
-    expectComputed(title, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
-    expectComputed(within(first).getByText('A visitor, not verified'), { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(title, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
+    expectComputed(within(first).getByText('A visitor, not verified'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     const outcome = first.querySelector<HTMLElement>('.cd-situation-row__outcome')!;
-    expectComputed(outcome, { fontSize: '13px', lineHeight: '18px', color: PRIMARY });
-    expectComputed(within(first).getByText('Books weekday visits in your hours.'), { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(outcome, { fontSize: '14px', lineHeight: '19px', color: PRIMARY });
+    expectComputed(within(first).getByText('Books weekday visits in your hours.'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     await expect(first.getBoundingClientRect().height).toBe(68);
     const right = first.querySelector<HTMLElement>('.cd-situation-row__result')!;
     await expect(right.getBoundingClientRect().width).toBe(300);
@@ -72,7 +72,7 @@ export const Situations: Story = {
     const flags = rows.map((row) => row.querySelector('.cd-situation-row__flag')?.textContent ?? null);
     await expect(flags).toEqual([null, null, null, 'Not what we planned', null]);
     const flag = rows[3]!.querySelector<HTMLElement>('.cd-situation-row__flag')!;
-    expectComputed(flag, { fontSize: '12px', lineHeight: '17px', color: PRIMARY, borderLeftWidth: '2px', borderLeftColor: 'rgb(218, 190, 74)', paddingLeft: '8px' });
+    expectComputed(flag, { fontSize: '13px', lineHeight: '18px', color: PRIMARY, borderLeftWidth: '2px', borderLeftColor: 'rgb(218, 190, 74)', paddingLeft: '8px' });
   },
 };
 

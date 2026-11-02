@@ -1132,7 +1132,7 @@ describe('Today', () => {
     const el = line.element();
     expect(el.tagName).toBe('P');
     expect(el).toHaveClass('cd-type-summary');
-    expectComputed(el, { fontSize: '18px', lineHeight: '27px', marginTop: '0px', marginBottom: '0px' });
+    expectComputed(el, { fontSize: '20px', lineHeight: '30px', marginTop: '0px', marginBottom: '0px' });
     expect(getComputedStyle(el).fontFamily).toContain('Source Serif 4');
     const first = since.getByRole('listitem').first().element();
     expect(el.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

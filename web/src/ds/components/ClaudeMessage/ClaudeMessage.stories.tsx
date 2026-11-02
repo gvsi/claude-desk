@@ -52,8 +52,8 @@ export const ProseOnly: Story = {
     const prose = canvas.getByText(bookingAsk.text);
     expectComputed(prose, {
       fontFamily: /Source Serif 4/,
-      fontSize: '15px',
-      lineHeight: '23px',
+      fontSize: '17px',
+      lineHeight: '26px',
       fontWeight: '360',
       color: 'rgba(250, 249, 245, 0.92)',
       backgroundColor: 'rgba(0, 0, 0, 0)',
@@ -134,7 +134,7 @@ export const Markdown: Story = {
     // Claude's prose renders as Markdown in the reply type: bold as bold, the list as a list, and
     // none of the marks left over.
     const prose = canvasElement.querySelector('.cd-claude-message__prose') as HTMLElement;
-    expectComputed(prose, { fontFamily: /Source Serif 4/, fontSize: '15px', lineHeight: '23px', fontWeight: '360' });
+    expectComputed(prose, { fontFamily: /Source Serif 4/, fontSize: '17px', lineHeight: '26px', fontWeight: '360' });
     await expect([...prose.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Drain clearing', 'Water heaters']);
     await expect([...prose.querySelectorAll('li')].map((el) => el.textContent)).toEqual(MARKDOWN_ITEMS);
     await expect(prose.querySelectorAll('p')).toHaveLength(2);

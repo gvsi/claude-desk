@@ -55,7 +55,7 @@ export const Teammate: Story = {
     const canHeading = canvas.getByText(/can open$/);
     const cantHeading = canvas.getByText('Can’t open');
     for (const heading of [canHeading, cantHeading]) {
-      expectComputed(heading, { fontSize: '14px', lineHeight: '20px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
+      expectComputed(heading, { fontSize: '16px', lineHeight: '22px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
     }
     await expect(Math.round(cantHeading.getBoundingClientRect().top - can.getBoundingClientRect().bottom)).toBe(16);
 
@@ -69,7 +69,7 @@ export const Teammate: Story = {
         borderTopColor: 'rgba(250, 249, 245, 0.22)',
         borderTopLeftRadius: '999px',
         backgroundColor: 'rgba(0, 0, 0, 0)',
-        fontSize: '13px',
+        fontSize: '14px',
         color: 'rgba(250, 249, 245, 0.92)',
       });
     }

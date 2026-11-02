@@ -5,7 +5,7 @@ import { expectComputed } from '../../test/expectComputed.ts';
 import { RecordedTag } from './RecordedTag.tsx';
 
 /** Caption type in secondary ink, the tag's one look wherever it sits. */
-const CAPTION_SECONDARY = { fontSize: '12px', lineHeight: '17px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' };
+const CAPTION_SECONDARY = { fontSize: '13px', lineHeight: '18px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' };
 
 /** The tag's icon: Lucide's history at 14 px, hidden from screen readers. */
 async function expectHistoryIcon(tag: HTMLElement) {

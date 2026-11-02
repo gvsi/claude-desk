@@ -63,7 +63,7 @@ export const Owner: Story = {
     await expect(input.tagName).toBe('TEXTAREA');
     await expect(input).toHaveAttribute('placeholder', 'Ask Claude about your Desk, or change a rule');
     await expect(input).toHaveAccessibleDescription('Rule changes are shown to you before they apply.');
-    expectComputed(input, { fontFamily: /Hanken Grotesk/, fontSize: '15px', lineHeight: '21px', fontWeight: '380' });
+    expectComputed(input, { fontFamily: /Hanken Grotesk/, fontSize: '16px', lineHeight: '22px', fontWeight: '380' });
     const box = boxOf(input);
     expectComposerSurface(box);
 
@@ -184,7 +184,7 @@ export const InertSend: Story = {
     // vision_inert_line_on_first_press: the first press fills it with the one line, in a secondary
     // caption 8 px under the composer's box.
     await expect(status).toHaveTextContent(VISION_INERT_LINE);
-    expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(status, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     const box = input.closest('.cd-composer__box') as HTMLElement;
     await expect(Math.round(status.getBoundingClientRect().top - box.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.click(send);
@@ -299,7 +299,7 @@ export const Failed: Story = {
     await expect(canvas.queryByRole('textbox')).toBeNull();
     const kept = canvas.getByText(KEPT_ANSWER);
     await expect(kept).toHaveAttribute('data-copy', 'user');
-    expectComputed(kept, { fontFamily: /Hanken Grotesk/, fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(kept, { fontFamily: /Hanken Grotesk/, fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.92)' });
     const tryAgain = canvas.getByRole('button', { name: 'Try again' });
     await expect(canvas.getAllByRole('button')).toEqual([tryAgain]);
     expectComputed(tryAgain, { height: '32px', backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' });
@@ -506,7 +506,7 @@ export const NearLimit: Story = {
     await userEvent.keyboard(' to look');
     await expect(counter()).toHaveTextContent(`${near.length} / ${NEAR_LIMIT_MAX}`);
     await expect(input).toHaveAccessibleDescription(`${near.length} / ${NEAR_LIMIT_MAX}`);
-    expectComputed(counter() as HTMLElement, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(counter() as HTMLElement, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
 
     // The limit caps the text: what is typed past it is dropped.
     const full = `${near} at the sink`;

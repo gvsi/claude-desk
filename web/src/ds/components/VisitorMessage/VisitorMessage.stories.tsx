@@ -29,8 +29,8 @@ export const Default: Story = {
     // A faint bubble in the message type, on the right, never wider than 85% of its column.
     expectComputed(bubble, {
       fontFamily: /Hanken Grotesk/,
-      fontSize: '15px',
-      lineHeight: '21px',
+      fontSize: '16px',
+      lineHeight: '22px',
       backgroundColor: 'rgba(250, 249, 245, 0.06)',
       borderTopLeftRadius: '12px',
       paddingTop: '8px',
@@ -60,7 +60,7 @@ export const WithTranslation: Story = {
     await expect(line).toHaveTextContent(/^Translated by Claude: Can I talk to Mike\? The shutoff valve is dripping too\.$/);
     // The translate icon is decorative; the words say what the line is.
     await expect(line.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(line, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     // The translation carries the visitor's words, so it is user text; the label is not.
     await expect(canvas.getByText('Can I talk to Mike? The shutoff valve is dripping too.')).toHaveAttribute('data-copy', 'user');
   },

@@ -62,9 +62,9 @@ export const Plumber: Story = {
     const when = first.querySelector<HTMLElement>('.cd-alert-list__when')!;
     const what = first.querySelector<HTMLElement>('.cd-alert-list__what')!;
     const how = first.querySelector<HTMLElement>('.cd-alert-list__how')!;
-    expectComputed(when, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
-    expectComputed(what, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
-    expectComputed(how, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(when, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
+    expectComputed(what, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
+    expectComputed(how, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     await expect(Math.round(what.getBoundingClientRect().top - when.getBoundingClientRect().bottom)).toBe(2);
     const box = first.getBoundingClientRect();
     const howBox = how.getBoundingClientRect();

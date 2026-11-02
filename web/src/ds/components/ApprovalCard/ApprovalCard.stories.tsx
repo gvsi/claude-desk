@@ -25,7 +25,7 @@ const MENU = { backgroundColor: 'rgb(42, 41, 39)', borderTopWidth: '1px', border
 /** Deny's items say what they refuse in red words; Allow's are plain; each item's line is quieter. */
 const RED_WORDS = { color: 'rgb(235, 163, 174)' };
 const PLAIN_WORDS = { color: 'rgba(250, 249, 245, 0.92)' };
-const QUIET_LINE = { color: 'rgba(250, 249, 245, 0.64)', fontSize: '12px' };
+const QUIET_LINE = { color: 'rgba(250, 249, 245, 0.64)', fontSize: '13px' };
 const ANSWERS_BOARD =
   'The answers follow the signed-off answer board N-Answers-TwoButtons, option 2 (menu buttons), which replaces the four secondary answers on this board.';
 
@@ -541,7 +541,7 @@ export const TwoPlainButtons: Story = {
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--held');
     await expect(canvas.getByText('Web chat, 2 min ago')).toBeVisible();
     // The kernel's reason for the hold is in serif; the rule that held it follows.
-    expectComputed(canvas.getByText(held.reason_plain), { fontFamily: /Source Serif 4/, fontSize: '18px', lineHeight: '27px' });
+    expectComputed(canvas.getByText(held.reason_plain), { fontFamily: /Source Serif 4/, fontSize: '20px', lineHeight: '30px' });
     await expect(card).toHaveTextContent(`Held by your rule: ${rivera.ruleCards['rv-quote'].reason}`);
     await expect(card).toHaveTextContent('From the visitor: “How much to clear a clogged drain? Can I get 15% off if I pay cash?”');
 
@@ -593,7 +593,7 @@ export const InertAnswers: Story = {
     // secondary caption 8 px under the answers' row.
     const line = canvas.getByText(VISION_INERT_LINE);
     await expect(line).toHaveAttribute('role', 'status');
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     const row = canvasElement.querySelector<HTMLElement>('.cd-approval-card__row')!;
     await expect(Math.round(line.getBoundingClientRect().top - row.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.tab();

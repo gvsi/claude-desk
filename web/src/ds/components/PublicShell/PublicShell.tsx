@@ -124,8 +124,12 @@ export interface PublicShellProps {
 }
 
 /** A name someone chose, exempt from the copy check's voice rules. */
-function Name({ children }: { children: string }) {
-  return <span data-copy="user">{children}</span>;
+function Name({ children, className }: { children: string; className?: string }) {
+  return (
+    <span data-copy="user" className={className}>
+      {children}
+    </span>
+  );
 }
 
 /** Shared with the wordless shape's browser measurement. */
@@ -689,7 +693,7 @@ export function PublicShell({
     if (follow && shellRef.current) focusAfterAsk(shellRef.current);
   }, [ownerInChat, askDisabled]);
   const name = <Name>{brand.name}</Name>;
-  const owner = ownerName === null ? null : <Name>{ownerName}</Name>;
+  const owner = ownerName === null ? null : <Name className="cd-public-shell__owner">{ownerName}</Name>;
 
   // Standalone, the shell is the page: a banner, the main region and a complementary column.
   // Embedded in an owner screen, the same parts as plain blocks and a named region.

@@ -62,9 +62,9 @@ export const List760: Story = {
     const dana = people[1] as HTMLElement;
     await expect(dana).toHaveAccessibleName('Dana Whitfield Contact on record: d•••@example.com');
     await expect(userText(dana).map((el) => el.textContent)).toEqual(['Dana Whitfield']);
-    expectComputed(userText(dana)[0]!, { fontSize: '14px', lineHeight: '20px', fontWeight: '420', color: PRIMARY });
+    expectComputed(userText(dana)[0]!, { fontSize: '16px', lineHeight: '22px', fontWeight: '420', color: PRIMARY });
     const contact = within(dana).getByText('Contact on record: d•••@example.com');
-    expectComputed(contact, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+    expectComputed(contact, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
     // Padded 6 px by 10 px, 2 px between its lines: 51 px tall, as on the board.
     expectComputed(dana, { paddingTop: '6px', paddingLeft: '10px', borderTopLeftRadius: '8px' });
     await expect(dana.getBoundingClientRect().height).toBe(51);
@@ -78,7 +78,7 @@ export const List760: Story = {
     for (const row of leads) {
       const time = row.querySelector<HTMLElement>('.cd-lead-row__time')!;
       const name = userText(row)[0]!;
-      expectComputed(time, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+      expectComputed(time, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
       await expect(Math.round(time.getBoundingClientRect().right)).toBe(Math.round(row.getBoundingClientRect().right) - 10);
       // On the name's baseline: both are aligned by it, so the 17 px caption sits inside the name's
       // 20 px line, a little lower (2 px with the brand fonts, 3 px with the fallback ones).

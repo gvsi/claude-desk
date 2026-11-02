@@ -198,7 +198,7 @@ async function expectClaudeDots(status: HTMLElement, label: string) {
   await expect(dots).toHaveAttribute('aria-hidden', 'true');
   await expect(dots.textContent).toBe('');
   await expect(dots.children).toHaveLength(3);
-  expectComputed(status, { fontFamily: /Source Serif 4/, fontSize: '15px', lineHeight: '23px', animationName: 'none' });
+  expectComputed(status, { fontFamily: /Source Serif 4/, fontSize: '17px', lineHeight: '26px', animationName: 'none' });
   await expect(dots.getBoundingClientRect().height).toBe(Number.parseFloat(getComputedStyle(status).lineHeight));
   await expect(dots.getBoundingClientRect().left).toBe(status.getBoundingClientRect().left);
 }
@@ -208,7 +208,7 @@ export const VisitorTyping: Story = {
   play: async ({ canvas, canvasElement }) => {
     const status = canvas.getByRole('status');
     await expectOnlyLabel(canvasElement, status, 'Dana is typing');
-    expectComputed(status, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px' });
+    expectComputed(status, { fontFamily: /Hanken Grotesk/, fontSize: '14px', lineHeight: '19px' });
     if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       expectComputed(status, { animationName: 'cd-writing-pulse', animationDuration: '1.6s' });
     }
@@ -386,7 +386,7 @@ async function expectPersonTyping(root: HTMLElement, label: string, name: string
   // The words after the name are for screen readers only; the name is what shows.
   const hidden = parts.status.querySelector<HTMLElement>('.cd-sr-only');
   await expect(hidden?.textContent?.trim()).toBe(label.slice(name.length).trim());
-  expectComputed(parts.status, { fontSize: '13px', lineHeight: '18px' });
+  expectComputed(parts.status, { fontSize: '14px', lineHeight: '19px' });
   // The dots: hidden, three 6 px dots in one message line, no fill or padding around them.
   await expect(parts.dots).toHaveAttribute('aria-hidden', 'true');
   await expect(parts.dots.textContent).toBe('');

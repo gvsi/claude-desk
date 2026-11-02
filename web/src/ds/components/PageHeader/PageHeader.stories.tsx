@@ -61,7 +61,7 @@ export const WithAction: Story = {
     await expect(title).not.toHaveAttribute('tabindex');
 
     const subtitle = canvas.getByText('Every attempt to get around your rules, and what stopped it.');
-    expectComputed(subtitle, { fontFamily: /Hanken Grotesk/, fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(subtitle, { fontFamily: /Hanken Grotesk/, fontSize: '15px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(subtitle.getBoundingClientRect().top).toBeGreaterThanOrEqual(title.getBoundingClientRect().bottom);
 
     // The action sits at the right end of the title's line.
@@ -173,7 +173,7 @@ export const WithNote: Story = {
     const subtitle = canvas.getByText(allRulesHeader.subtitle);
     const note = canvas.getByText(allRulesHeader.note);
     // Meta type in the subtitle's secondary color, 12 px under it (the text's 4 px gap and its own 8 px).
-    expectComputed(note, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px', color: getComputedStyle(subtitle).color, marginTop: '8px' });
+    expectComputed(note, { fontFamily: /Hanken Grotesk/, fontSize: '14px', lineHeight: '19px', color: getComputedStyle(subtitle).color, marginTop: '8px' });
     await expect(Math.round(note.getBoundingClientRect().top - subtitle.getBoundingClientRect().bottom)).toBe(12);
     // At a reading measure: no wider than 68 of its own characters.
     await expect(note.getBoundingClientRect().width).toBeLessThanOrEqual(parseFloat(getComputedStyle(note).maxWidth) + 0.5);

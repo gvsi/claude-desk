@@ -83,7 +83,7 @@ export const Board: Story = {
       borderTopLeftRadius: '12px',
       backgroundColor: 'rgba(250, 249, 245, 0.03)',
     });
-    expectComputed(within(builtIn).getByRole('heading', { level: 2 }), { fontSize: '14px', lineHeight: '20px', fontWeight: '420', color: PRIMARY });
+    expectComputed(within(builtIn).getByRole('heading', { level: 2 }), { fontSize: '16px', lineHeight: '22px', fontWeight: '420', color: PRIMARY });
     await expect(Math.round(yours.getBoundingClientRect().top - builtIn.getBoundingClientRect().bottom)).toBe(20);
 
     // Each row: its name over its line, and at the right where it stands or what to do.
@@ -108,12 +108,12 @@ export const Board: Story = {
     const tile = quotes.querySelector<HTMLElement>('.cd-connector-icon')!;
     await expect(tile.getBoundingClientRect().width).toBe(36);
     await expect(Math.round(quotes.querySelector('.cd-connector-summary')!.getBoundingClientRect().left - tile.getBoundingClientRect().right)).toBe(14);
-    expectComputed(within(quotes).getByText('Quotes'), { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
-    expectComputed(within(quotes).getByText('Prices jobs from your price list.'), { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(within(quotes).getByText('Quotes'), { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
+    expectComputed(within(quotes).getByText('Prices jobs from your price list.'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
 
     // setup_tools_status_in_words: "On" beside a handled dot in primary ink; "Always on" in secondary.
     const on = quotes.querySelector<HTMLElement>('.cd-setup-tools__end')!;
-    expectComputed(on, { fontSize: '13px', lineHeight: '18px', color: PRIMARY, columnGap: '6px' });
+    expectComputed(on, { fontSize: '14px', lineHeight: '19px', color: PRIMARY, columnGap: '6px' });
     await expect(on.querySelector('.cd-status-dot--handled')).toHaveAttribute('aria-hidden', 'true');
     const always = rows[3]!.querySelector<HTMLElement>('.cd-setup-tools__end')!;
     expectComputed(always, { color: SECONDARY });
@@ -140,7 +140,7 @@ export const Board: Story = {
     const badge = stripe.querySelector<HTMLElement>('.cd-pill')!;
     await expect(Math.round(badge.getBoundingClientRect().left - name.getBoundingClientRect().right)).toBe(8);
     const count = within(stripe).getByText('2 tools');
-    expectComputed(count, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(count, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     const connect = within(stripe).getByRole('button', { name: 'Connect Stripe' });
     await expect(Math.round(connect.getBoundingClientRect().left - count.getBoundingClientRect().right)).toBe(14);
     await userEvent.click(connect);
@@ -183,7 +183,7 @@ async function reviewsStripe({ canvas, userEvent }: Parameters<NonNullable<Story
   const status = within(stripe).getByText('Needs review');
   await expect(status).toHaveClass('cd-setup-tools__job-status');
   await expect(status.querySelector('.cd-status-dot')).toHaveClass('cd-status-dot--held');
-  expectComputed(status, { fontSize: '13px', lineHeight: '18px', color: SECONDARY, columnGap: '6px' });
+  expectComputed(status, { fontSize: '14px', lineHeight: '19px', color: SECONDARY, columnGap: '6px' });
   const review = within(stripe).getByRole('button', { name: 'Review Stripe' });
   await expect(within(review).getByText('Review')).toHaveAttribute('aria-hidden', 'true');
   await expect(Math.round(status.getBoundingClientRect().left - count.getBoundingClientRect().right)).toBe(14);

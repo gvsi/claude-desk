@@ -37,7 +37,7 @@ export const OwnerJoined: Story = {
     const line = canvas.getByRole('status');
     await expectLineReads(line, 'Mike Turner joined the chat');
     await expect(line.textContent).not.toMatch(CLOCK);
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     // Centered between two hairlines, which screen readers skip.
     const rules = canvasElement.querySelectorAll('.cd-system-line__rule');
     await expect(rules).toHaveLength(2);

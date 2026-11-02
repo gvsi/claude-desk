@@ -151,9 +151,9 @@
   min-width: 0;
 }
 
-/* The dot sits on the middle of the first line: (18 px line - 6 px dot) / 2. */
+/* The dot sits on the middle of the first line: (19 px line - 6 px dot) / 2. */
 .cd-public-shell__open-status > .cd-status-dot {
-  margin-top: var(--space-6);
+  margin-top: 6.5px;
 }
 
 /* Over the header's field the dot takes the field's own colors, so it keeps 3:1 there in either
@@ -251,6 +251,13 @@
   margin: 0;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* The owner's name stays on one line in the disclosure ("Ask for Mike Turner anytime"), moving whole
+   to the next line rather than splitting; a name longer than the line still wraps inside its box. */
+.cd-public-shell__owner {
+  display: inline-block;
+  max-width: 100%;
 }
 
 .cd-public-shell__chat-head > .cd-button {

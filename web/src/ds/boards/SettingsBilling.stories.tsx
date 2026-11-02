@@ -39,14 +39,14 @@ async function expectBilling(root: HTMLElement, phone = false) {
   await expect(parts.slice(1).map((part, i) => gap(parts[i]!, part))).toEqual([24, 24, 24, 24]);
   await expect(page.getByText('Nothing is billed in this prototype. The usage and invoices below are samples.')).toBeVisible();
   for (const heading of page.getAllByRole('heading')) {
-    expectComputed(heading, { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+    expectComputed(heading, { fontSize: '16px', lineHeight: '21px', fontWeight: '520' });
     await expect(heading.tagName).toBe('H2');
   }
   for (const line of content.querySelectorAll('.cd-type-body')) {
-    expectComputed(line, { fontFamily: /^"Hanken Grotesk"/, fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(line, { fontFamily: /^"Hanken Grotesk"/, fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.92)' });
   }
   for (const line of content.querySelectorAll('.cd-type-meta')) {
-    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   }
   for (const section of content.querySelectorAll('.cd-billing__section')) {
     await expect(gap(one(section, '.cd-section-header'), one(section, '.cd-card'))).toBe(12);

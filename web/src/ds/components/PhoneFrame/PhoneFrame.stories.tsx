@@ -46,7 +46,7 @@ export const OwnerToday: Story = {
       overflowY: 'hidden',
     });
     const caption = within(figure).getByText('Today, for the owner');
-    expectComputed(caption, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(caption, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(caption.getBoundingClientRect().top - screen.getBoundingClientRect().bottom)).toBe(12);
 
     // phone_tab_bar_has_five_tabs: Today, Chats, Rules, Safety and More, at the screen's foot.
@@ -78,7 +78,7 @@ export const OwnerToday: Story = {
       const icon = tab.querySelector('svg')!;
       await expect(icon).toHaveAttribute('aria-hidden', 'true');
       await expect(icon.getBoundingClientRect().width).toBe(20);
-      expectComputed(tab.querySelector('span')!, { fontSize: '12px', lineHeight: '17px' });
+      expectComputed(tab.querySelector('span')!, { fontSize: '13px', lineHeight: '18px' });
     }
     // The five tabs share the bar: spaced around its width, in a row.
     const tops = tabs.map((tab) => Math.round(tab.getBoundingClientRect().top));

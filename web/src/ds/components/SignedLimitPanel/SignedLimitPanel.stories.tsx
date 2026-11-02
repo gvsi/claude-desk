@@ -85,14 +85,14 @@ export const SendAnAgent: Story = {
     await expect(Math.round(panel.getBoundingClientRect().height)).toBe(63);
     const parts = [...panel.querySelectorAll<HTMLElement>('dl > div')];
     for (const part of parts) {
-      expectComputed(part.querySelector('dt') as HTMLElement, { fontSize: '12px', lineHeight: '17px', color: SECONDARY, marginLeft: '0px' });
-      expectComputed(part.querySelector('dd') as HTMLElement, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY, marginLeft: '0px' });
+      expectComputed(part.querySelector('dt') as HTMLElement, { fontSize: '13px', lineHeight: '18px', color: SECONDARY, marginLeft: '0px' });
+      expectComputed(part.querySelector('dd') as HTMLElement, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY, marginLeft: '0px' });
     }
     for (const [index, part] of parts.slice(1).entries()) {
       await expect(Math.round(part.getBoundingClientRect().left - (parts[index] as HTMLElement).getBoundingClientRect().right)).toBe(16);
     }
     // Who signed it, in secondary caption type at the right, centered on the panel.
-    expectComputed(source, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+    expectComputed(source, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
     const panelBox = panel.getBoundingClientRect();
     const sourceBox = source.getBoundingClientRect();
     await expect(Math.round(panelBox.right - sourceBox.right)).toBe(17);
@@ -133,8 +133,8 @@ export const Used: Story = {
       ['For', 'One hour'],
     ]);
     const used = [...panel.querySelectorAll<HTMLElement>('dl > div')][2] as HTMLElement;
-    expectComputed(used.querySelector('dt') as HTMLElement, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
-    expectComputed(used.querySelector('dd') as HTMLElement, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
+    expectComputed(used.querySelector('dt') as HTMLElement, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(used.querySelector('dd') as HTMLElement, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
     await expect(Math.round(panel.getBoundingClientRect().height)).toBe(63);
     await expect(within(panel).getByText(LIMIT.en.source)).toBeVisible();
   },

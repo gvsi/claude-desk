@@ -57,16 +57,16 @@ export const Reply: Story = {
     const md = canvasElement.querySelector('.cd-md') as HTMLElement;
     await expect([...md.children].map((child) => child.tagName.toLowerCase())).toEqual(['p', 'h3', 'p', 'ul', 'p', 'ol', 'div', 'p']);
     // The reply type, as Claude's other words: serif 15/23 at weight 360.
-    expectComputed(md.querySelector('p') as Element, { fontFamily: /Source Serif 4/, fontSize: '15px', lineHeight: '23px', fontWeight: '360' });
+    expectComputed(md.querySelector('p') as Element, { fontFamily: /Source Serif 4/, fontSize: '17px', lineHeight: '26px', fontWeight: '360' });
     // A heading stays at the reply's size, so a chat reply never gets a page-size title.
-    expectComputed(md.querySelector('h3') as Element, { fontFamily: /Source Serif 4/, fontSize: '15px', lineHeight: '23px', fontWeight: '600', marginTop: '16px' });
+    expectComputed(md.querySelector('h3') as Element, { fontFamily: /Source Serif 4/, fontSize: '17px', lineHeight: '26px', fontWeight: '600', marginTop: '16px' });
     expectComputed(md.querySelector('strong') as Element, { fontWeight: '600' });
     expectComputed(md.querySelector('ul') as Element, { paddingLeft: '22px', marginTop: '4px' });
     expectComputed(md.querySelector('li + li') as Element, { marginTop: '4px' });
     // The table sits in a hairline card; its header row on the muted ground.
     expectComputed(md.querySelector('.cd-md__table') as Element, { borderTopWidth: '1px', borderTopLeftRadius: '12px', overflowX: 'auto', marginTop: '10px' });
     for (const cell of md.querySelectorAll('thead tr > *')) {
-      expectComputed(cell, { fontWeight: '600', fontSize: '14px', lineHeight: '20px', backgroundColor: 'rgb(46, 44, 38)' });
+      expectComputed(cell, { fontWeight: '600', fontSize: '16px', lineHeight: '23px', backgroundColor: 'rgb(46, 44, 38)' });
     }
     expectComputed(md.querySelector('tbody td') as Element, { fontWeight: '360', paddingTop: '8px', paddingLeft: '12px' });
     // The link shows its text only, in the accent, and opens in a new tab.

@@ -84,7 +84,7 @@ export const Reading: Story = {
     expectComputed(limit, { paddingTop: '0px', paddingBottom: '0px', borderTopWidth: '0px' });
     await expect(group.getBoundingClientRect().height).toBe(57);
     const words = canvas.getByText(line);
-    expectComputed(words, { fontSize: '14px', lineHeight: '20px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(words, { fontSize: '16px', lineHeight: '22px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
     const change = canvas.getByRole('button', { name: 'Change' });
     // change_is_described_by_its_limit: "Change" says which limit it changes.
     await expect(change).toHaveAccessibleDescription(line);
@@ -183,7 +183,7 @@ export const Prominent: Story = {
   },
   play: async ({ canvas }) => {
     // prominent_line_leads: the line at 520 in the primary ink.
-    expectComputed(canvas.getByText(line), { fontWeight: '520', fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(canvas.getByText(line), { fontWeight: '520', fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     // read_only_limit_has_no_change: with no `onEdit`, the limit is only read, and nothing is there to press.
     await expect(canvas.queryAllByRole('button')).toEqual([]);
     await expect(canvas.queryByRole('textbox')).toBeNull();

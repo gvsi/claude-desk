@@ -86,7 +86,7 @@ export const Board: Story = {
     await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Conversations' }), SPEC.pageTitle);
     // The open conversation's name, in the section style the board sets it in.
-    expectComputed(canvas.getByRole('heading', { level: 2, name: DANA }), { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+    expectComputed(canvas.getByRole('heading', { level: 2, name: DANA }), { fontSize: '16px', lineHeight: '21px', fontWeight: '520' });
 
     // The list column at the sidebar's seam, the open conversation marked in it.
     const list = canvas.getByRole('navigation', { name: 'Conversations' });

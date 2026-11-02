@@ -45,15 +45,15 @@ export const CustomerHistory: Story = {
 
     // The label in a secondary caption beside a 14 px icon, hidden from screen readers.
     const label = canvas.getByText('Customer history');
-    expectComputed(label.parentElement!, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' });
+    expectComputed(label.parentElement!, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' });
     const icon = card.querySelector('svg')!;
     await expect(icon).toHaveAttribute('aria-hidden', 'true');
     await expect(icon.getBoundingClientRect().width).toBe(14);
     // The fact 6 px under the label, 14 px weight 520 in primary ink; each line 2 px under it in secondary meta.
     const title = canvas.getByText('Ana Ruiz, customer since 2023');
-    expectComputed(title, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)', marginTop: '6px' });
+    expectComputed(title, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)', marginTop: '6px' });
     for (const text of ['Water heater replaced, March 2024; under warranty until 2030', 'Kitchen drain cleared, September 12; camera inspection declined']) {
-      expectComputed(canvas.getByText(text), { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
+      expectComputed(canvas.getByText(text), { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
     }
     // A fact card is read, not used: no link and no button.
     await expect(canvas.queryByRole('link')).toBeNull();

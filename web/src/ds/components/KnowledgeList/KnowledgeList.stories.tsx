@@ -80,8 +80,8 @@ export const WhatIKnowNow: Story = {
       expectComputed(row, index === 0 ? { borderTopWidth: '0px' } : { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
       const title = row.querySelector('.cd-knowledge-list__title') as HTMLElement;
       const detail = row.querySelector('.cd-knowledge-list__detail') as HTMLElement;
-      expectComputed(title, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
-      expectComputed(detail, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+      expectComputed(title, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: PRIMARY });
+      expectComputed(detail, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
       await expect(Math.round(detail.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(2);
       // Who can see it is a pill at the row's right, centered on it.
       const pill = row.querySelector('.cd-pill') as HTMLElement;

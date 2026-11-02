@@ -50,8 +50,8 @@ export const Rivera: Story = {
       const row = rows[index] as HTMLElement;
       const nameLine = within(row).getByText(name);
       const howLine = within(row).getByText(how);
-      expectComputed(nameLine, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
-      expectComputed(howLine, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
+      expectComputed(nameLine, { fontSize: '16px', lineHeight: '22px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+      expectComputed(howLine, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
       // Each row padded 14 px 16 px; a hairline above every row but the first.
       expectComputed(row, {
         paddingTop: '14px',
@@ -66,7 +66,7 @@ export const Rivera: Story = {
     // The public link is on: a sage dot beside "On". Every other channel is "Coming later", in a Pill.
     const [link, ...later] = rows as [HTMLElement, ...HTMLElement[]];
     const on = within(link).getByText('On');
-    expectComputed(on, { fontSize: '13px', columnGap: '8px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(on, { fontSize: '14px', columnGap: '8px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(link.querySelector('.cd-status-dot--handled')).toHaveAttribute('aria-hidden', 'true');
     await expect(within(link).queryByText('Coming later')).toBeNull();
     for (const row of later) {

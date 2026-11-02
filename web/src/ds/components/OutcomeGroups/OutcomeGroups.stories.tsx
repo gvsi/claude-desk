@@ -64,8 +64,8 @@ export const SetupRules: Story = {
     ]);
     const quotes = rows[0] as HTMLElement;
     const who = within(quotes).getByText('Anyone');
-    expectComputed(who, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(within(quotes).getByText(/^Quotes from/), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(who, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(quotes).getByText(/^Quotes from/), { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(who.getBoundingClientRect().right).toBeCloseTo(quotes.getBoundingClientRect().right, 0);
     await expect(within(canvas.getByRole('region', { name: 'Never does' })).getByText('Refunds')).toBeVisible();
 

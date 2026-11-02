@@ -109,7 +109,7 @@ export const Board: Story = {
 
     // The day's line, then the footer at the foot.
     const today = within(main).getByText(TEAM_TODAY);
-    expectComputed(today, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(today, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expectFooter(canvasElement);
     const footer = one(canvasElement, '[data-ds="concept-footer"]');
     await expect(Math.round(footer.getBoundingClientRect().top - today.getBoundingClientRect().bottom)).toBe(16);

@@ -335,7 +335,7 @@ describe('Vision pages', () => {
         // On the visitor's phone, 8 px under the composer, in a caption's type, as the story draws it.
         const box = composer.element().closest('.cd-composer__box') as HTMLElement;
         expect(round(top(line.element()) - bottom(box))).toBe(8);
-        expectComputed(line.element(), { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+        expectComputed(line.element(), { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
       }
       expect(some(log.element() as HTMLElement, '.cd-visitor-message__bubble'), path).toHaveLength(bubbles);
       expect(mockStore.requests, path).toEqual([]);
@@ -679,7 +679,7 @@ describe('Vision pages against their boards', () => {
     const today = main(screen)
       .getByText('Today: 12 team conversations, 9 answered from job records, 3 documents shared, 1 payroll request declined.', { exact: true })
       .element();
-    expectComputed(today, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(today, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expectFooter(root);
     const footer = one(root, '[data-ds="concept-footer"]');
     expect(round(top(footer) - bottom(today))).toBe(16);

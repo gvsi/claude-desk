@@ -71,7 +71,7 @@ export const AddSomething: Story = {
     await expect(Math.round(addFile.getBoundingClientRect().left - addNote.getBoundingClientRect().right)).toBe(8);
     await expect(addFile).toHaveAccessibleDescription(FILES_LINE);
     const filesLine = canvas.getByText(FILES_LINE);
-    expectComputed(filesLine, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+    expectComputed(filesLine, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
     await expect(Math.round(filesLine.getBoundingClientRect().top - addNote.getBoundingClientRect().bottom)).toBe(12);
 
     // No pill of its own: the screen says the page is a mock, beside its title.
@@ -171,7 +171,7 @@ export const AddedWithANote: Story = {
     const label = within(toggle).getByText('Customers can see this');
     const noteStart = note.getBoundingClientRect().left + Number.parseFloat(getComputedStyle(note).paddingLeft);
     await expect(Math.round(noteStart)).toBe(Math.round(label.getBoundingClientRect().left));
-    expectComputed(note, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    expectComputed(note, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     // Read out when it comes: it sits in a polite live region that is there from the start.
     await expect(note.closest('[aria-live="polite"]')).not.toBeNull();
   },

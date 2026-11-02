@@ -115,7 +115,7 @@ export const Phone: Story = {
     await expect(line.textContent).toBe('Step 3 of 4: Review tools');
     await expect(line).toHaveAttribute('aria-hidden', 'true');
     await expect(line).toBeVisible();
-    expectComputed(line, { color: 'rgba(250, 249, 245, 0.64)', fontSize: '13px', lineHeight: '18px' });
+    expectComputed(line, { color: 'rgba(250, 249, 245, 0.64)', fontSize: '14px', lineHeight: '19px' });
     expectComputed(line.querySelector('.cd-steps__compact-name') as HTMLElement, { color: 'rgba(250, 249, 245, 0.92)' });
   },
 };

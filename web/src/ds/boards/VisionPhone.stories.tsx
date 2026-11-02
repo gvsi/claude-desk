@@ -114,7 +114,7 @@ export const Board: Story = {
     // The first press says why nothing was sent: one quiet line, announced, 8 px under the composer.
     const line = within(visitor).getByText(VISION_INERT_LINE);
     await expect(line).toHaveAttribute('role', 'status');
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     const box = composer.closest('.cd-composer__box') as HTMLElement;
     await expect(Math.round(line.getBoundingClientRect().top - box.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.click(composer);

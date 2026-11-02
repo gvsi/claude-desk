@@ -68,8 +68,8 @@ export const General: Story = {
     }
     // The label in meta type, secondary; the value 2 px under it in body type, primary, from the same edge.
     const [label, value] = [terms[0]!, values[0]!];
-    expectComputed(label, { fontSize: '13px', lineHeight: '18px', color: SECONDARY, marginTop: '0px', marginLeft: '0px' });
-    expectComputed(value, { fontSize: '14px', lineHeight: '20px', color: PRIMARY, marginLeft: '0px' });
+    expectComputed(label, { fontSize: '14px', lineHeight: '19px', color: SECONDARY, marginTop: '0px', marginLeft: '0px' });
+    expectComputed(value, { fontSize: '16px', lineHeight: '22px', color: PRIMARY, marginLeft: '0px' });
     await expect(Math.round(value.getBoundingClientRect().top - label.getBoundingClientRect().bottom)).toBe(2);
     await expect(Math.round(value.getBoundingClientRect().left)).toBe(Math.round(label.getBoundingClientRect().left));
     await expect(Math.round(card.getBoundingClientRect().height)).toBe(326);

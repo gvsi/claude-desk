@@ -11,11 +11,11 @@
   overflow-wrap: anywhere;
 }
 
-/* Centers the 6 px dot on the caption's 17 px first line. */
+/* Centers the 6 px dot on the caption's 18 px first line. */
 .cd-margin-line__dot {
   display: flex;
   flex: none;
-  padding-top: 5px;
+  padding-top: var(--space-6);
 }
 
 .cd-margin-line__text {

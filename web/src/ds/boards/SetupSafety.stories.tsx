@@ -69,7 +69,7 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1150]);
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Safety check' }), SPEC.pageTitle);
-    expectComputed(canvas.getByText('6 of 6 stopped'), { fontFamily: /^"Source Serif 4"/, fontSize: '18px' });
+    expectComputed(canvas.getByText('6 of 6 stopped'), { fontFamily: /^"Source Serif 4"/, fontSize: '20px' });
 
     const list = canvas.getByRole('list', { name: 'Tricks tried' });
     const box = list.getBoundingClientRect();

@@ -28,8 +28,8 @@ export const Default: Story = {
 
     // Caption type in secondary ink, underlined in line-control, 3 px under the words.
     expectComputed(link, {
-      fontSize: '12px',
-      lineHeight: '17px',
+      fontSize: '13px',
+      lineHeight: '18px',
       fontWeight: '380',
       color: 'rgba(250, 249, 245, 0.64)',
       textDecorationLine: 'underline',

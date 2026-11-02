@@ -106,9 +106,9 @@ export const WithCode: Story = {
     const panel = canvas.getByRole('region', { name: 'Demo inbox' });
     expectComputed(panel, { backgroundColor: 'rgb(34, 34, 32)', paddingTop: '24px', paddingLeft: '16px', paddingRight: '16px' });
     const title = within(panel).getByRole('heading', { level: 2, name: 'Demo inbox' });
-    expectComputed(title, { fontSize: '15px', lineHeight: '20px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(title, { fontSize: '16px', lineHeight: '21px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
     const subtitle = within(panel).getByText('Stands in for a phone or email inbox. Nothing is really sent.');
-    expectComputed(subtitle, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(subtitle, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom).toBe(10);
 
     // list_role_survives_unstyled_markers: the entries' list keeps role="list", which Safari drops
@@ -129,12 +129,12 @@ export const WithCode: Story = {
       backgroundColor: 'rgba(250, 249, 245, 0.03)',
     });
     const to = within(item).getByText('To •••• 0142');
-    expectComputed(to, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(to, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     const kind = within(item).getByText('Verification code');
-    expectComputed(kind, { fontSize: '13px', lineHeight: '18px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(kind, { fontSize: '14px', lineHeight: '19px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(kind.getBoundingClientRect().top - to.getBoundingClientRect().bottom).toBe(4);
     const body = within(item).getByText(entryOf(CODE_ID).body);
-    expectComputed(body, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(body, { fontSize: '16px', lineHeight: '22px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(body.getBoundingClientRect().top - kind.getBoundingClientRect().bottom).toBe(2);
 
     // inbox_announces_new_entries: the entries sit in a polite live region inside the panel, so a
@@ -212,7 +212,7 @@ export const OwnerAlerts: Story = {
     // monospace; codes and alerts read in the interface's type.
     const [code, alert, checkpoint] = items.map((item) => item.querySelector('.cd-demo-inbox__body') as HTMLElement);
     expectComputed(checkpoint as HTMLElement, { fontFamily: /JetBrains Mono/, fontSize: '12.5px', lineHeight: '18px' });
-    for (const body of [code, alert]) expectComputed(body as HTMLElement, { fontFamily: /Hanken Grotesk/, fontSize: '14px' });
+    for (const body of [code, alert]) expectComputed(body as HTMLElement, { fontFamily: /Hanken Grotesk/, fontSize: '15px' });
   },
 };
 
@@ -434,7 +434,7 @@ export const Empty: Story = {
     // Nothing yet: one line that says what will show up here, and no list.
     const panel = canvas.getByRole('region', { name: 'Demo inbox' });
     const empty = within(panel).getByText(EMPTY_LINE);
-    expectComputed(empty, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(empty, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(within(panel).queryByRole('list')).toBeNull();
 
     // inbox_announces_new_entries: the polite region is there before anything arrives, and what

@@ -107,9 +107,9 @@
   font-weight: 520;
 }
 
-/* Centers the 6 px dot on the caption's 17 px first line. */
+/* Centers the 6 px dot on the caption's 18 px first line. */
 .cd-approval-card__status > .cd-status-dot {
-  margin-top: 5px;
+  margin-top: var(--space-6);
 }
 
 /* Focus lands here only when the answers it replaced had it; it is not a control, so it draws nothing. */

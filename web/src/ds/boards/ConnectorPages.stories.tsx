@@ -300,7 +300,7 @@ export const Refund: Story = {
     for (const outcome of ['Waiting for your answer', 'Stopped', 'You allowed it']) await expect(within(page.main).getByText(outcome)).toBeVisible();
     // As the board sets them: why in caption type, under what was asked.
     for (const why of page.main.querySelectorAll<HTMLElement>('.cd-recent-requests__why')) {
-      expectComputed(why, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+      expectComputed(why, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     }
     // focus_order_is_logical: the trail, the rule's outcome and Add a rule, the composer and its chips, then the requests.
     await expectTabOrder(

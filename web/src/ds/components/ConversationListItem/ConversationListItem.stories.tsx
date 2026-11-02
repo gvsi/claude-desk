@@ -48,12 +48,12 @@ export const Live: Story = {
     // The name is someone's own, in control type; the time and status in caption type, secondary.
     const name = canvas.getByText('Dana Whitfield');
     await expect(name).toHaveAttribute('data-copy', 'user');
-    expectComputed(name, { fontSize: '14px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(canvas.getByText('12:04 pm'), { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)', fontVariantNumeric: 'tabular-nums' });
+    expectComputed(name, { fontSize: '15px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(canvas.getByText('12:04 pm'), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)', fontVariantNumeric: 'tabular-nums' });
 
     // Status is words beside a dot, never the dot alone.
     const status = canvas.getByText('Verified customer');
-    expectComputed(status, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(status, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     const dot = status.parentElement?.querySelector('.cd-status-dot');
     await expect(dot).toHaveClass('cd-status-dot--handled');
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
@@ -153,7 +153,7 @@ export const Recorded: Story = {
     const tag = canvas.getByText('Recorded');
     await expect(tag).toHaveTextContent(/^Recorded$/);
     await expect(tag.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(tag, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap' });
+    expectComputed(tag, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap' });
 
     // On the status line, after the words, pushed to its end: level with the time above it.
     const status = canvas.getByText('Visitor who asked for the number in plain digits');
@@ -189,7 +189,7 @@ export const Quoted: Story = {
     const quote = canvas.getByText('“Tuesday at 2 works.”');
     await expect(quote).toHaveAttribute('data-copy', 'user');
     await expect(quote).toHaveClass('cd-type-meta');
-    expectComputed(quote, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
+    expectComputed(quote, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
 
     // Under the first line, 2 px down from it and at its left edge; the row grows to hold it.
     const top = link.querySelector('.cd-conversation-item__top')?.getBoundingClientRect();
@@ -249,7 +249,7 @@ export const AgentLine: Story = {
     await expect(line).toHaveClass('cd-conversation-item__quote');
     await expect(line).toHaveClass('cd-type-meta');
     await expect(line).not.toHaveAttribute('data-copy');
-    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontStyle: 'normal' });
+    expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px', whiteSpace: 'nowrap', textOverflow: 'ellipsis', fontStyle: 'normal' });
 
     // Under the first line and above the status, as the quote sits; the row grows to hold both.
     const top = link.querySelector('.cd-conversation-item__top')?.getBoundingClientRect();
@@ -309,7 +309,7 @@ export const PreviewWithStatus: Story = {
     const link = canvas.getByRole('link', { name: 'Visitor 10:58 am “Can I get 15% off if I pay cash?” Needs you Recorded' });
     const preview = canvas.getByText('“Can I get 15% off if I pay cash?”');
     const status = canvas.getByText('Needs you').parentElement!;
-    expectComputed(preview, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' });
+    expectComputed(preview, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap', textOverflow: 'ellipsis' });
     await expect(status.getBoundingClientRect().top).toBe(preview.getBoundingClientRect().bottom);
     await expect(canvas.getByText('Recorded').parentElement).toBe(status);
     await expect(Math.round(link.getBoundingClientRect().height)).toBe(69);

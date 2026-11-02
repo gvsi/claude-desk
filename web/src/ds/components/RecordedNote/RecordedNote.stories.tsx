@@ -42,7 +42,7 @@ export const Default: Story = {
 
     // Caption type in secondary ink; the 14 px history icon, hidden from screen readers, 2 px
     // down so it sits on the first line, 6 px before the words.
-    expectComputed(note, { fontSize: '12px', lineHeight: '17px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' });
+    expectComputed(note, { fontSize: '13px', lineHeight: '18px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' });
     await expect(icon).toHaveAttribute('aria-hidden', 'true');
     await expect(icon.getBoundingClientRect().height).toBe(14);
     expectComputed(icon, { marginTop: '2px' });

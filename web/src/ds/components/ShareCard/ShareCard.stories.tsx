@@ -51,8 +51,8 @@ export const Printable: Story = {
     await expect(within(card).getByText('desk.example/rivera')).toBeVisible();
     const disclosure = card.querySelector('figcaption')!;
     await expect(disclosure).toHaveTextContent(/^Answered by Claude, an AI\. Ask for Mike Turner any time\.$/);
-    expectComputed(disclosure, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', textAlign: 'center' });
-    expectComputed(within(card).getByText('Turner Plumbing'), { fontSize: '15px', lineHeight: '20px', fontWeight: '520', textAlign: 'center' });
+    expectComputed(disclosure, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)', textAlign: 'center' });
+    expectComputed(within(card).getByText('Turner Plumbing'), { fontSize: '16px', lineHeight: '21px', fontWeight: '520', textAlign: 'center' });
     expectComputed(card, { paddingTop: '20px', paddingLeft: '20px', borderTopLeftRadius: '12px', backgroundColor: 'rgba(250, 249, 245, 0.03)' });
     // The QR code is the screen's, on a 152 px sand tile 12 px under the name, centered, filling the
     // 128 px inside it (N-Live-REV-QR-B).

@@ -271,7 +271,7 @@ describe('Conversations', () => {
     expect(preview!.dataset.copy).toBe('user');
     expect(getComputedStyle(preview!).whiteSpace).toBe('nowrap');
     expect(getComputedStyle(preview!).textOverflow).toBe('ellipsis');
-    expect(getComputedStyle(preview!).fontSize).toBe('13px');
+    expect(getComputedStyle(preview!).fontSize).toBe('14px');
     expect(getComputedStyle(preview!).color).toBe(tokenColor('--text-secondary'));
     expect(preview!.scrollWidth).toBeGreaterThan(preview!.clientWidth);
     expect(preview!.getBoundingClientRect().height).toBe(18);
@@ -294,7 +294,7 @@ describe('Conversations', () => {
       const day = group.querySelector<HTMLElement>('.cd-conversations__day')!;
       const style = getComputedStyle(day);
       const rule = getComputedStyle(day, '::after');
-      expect(style.fontSize).toBe('12px');
+      expect(style.fontSize).toBe('13px');
       expect(style.fontWeight).toBe('520');
       expect(style.color).toBe(tokenColor('--text-tertiary'));
       expect(style.gap).toBe('8px');
@@ -361,7 +361,7 @@ describe('Conversations', () => {
       expect(line.dataset.copy).toBeUndefined();
       expect(line.className).toBe(visitor.className);
       const style = getComputedStyle(line);
-      expect(style.fontSize).toBe('13px');
+      expect(style.fontSize).toBe('14px');
       expect(style.fontStyle).toBe('normal');
       expect(style.color).toBe(tokenColor('--text-secondary'));
       expect(style.whiteSpace).toBe('nowrap');

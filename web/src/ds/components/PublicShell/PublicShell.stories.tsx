@@ -426,7 +426,7 @@ export const InertAsk: Story = {
     // caption on a row of its own in the pinned head, 8 px under the title and Ask, above the
     // head's hairline, the column's width.
     await expect(status).toHaveTextContent(VISION_INERT_LINE);
-    expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(status, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(status.getBoundingClientRect().top - rowBottom())).toBe(8);
     await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(head.getBoundingClientRect().bottom);
     await expect(Math.round(status.getBoundingClientRect().width)).toBe(Math.round(head.getBoundingClientRect().width));
@@ -556,8 +556,8 @@ async function openStatusIn(header: HTMLElement, text: string): Promise<{ status
   if (!status || !dot) throw new Error(`no open status with a dot around "${text}"`);
   await expect(dot).toHaveAttribute('aria-hidden', 'true');
   expectComputed(line, {
-    fontSize: '13px',
-    lineHeight: '18px',
+    fontSize: '14px',
+    lineHeight: '19px',
     color: getComputedStyle(partOf(header, '.cd-public-shell__brand-name')).color,
   });
   // The words keep 4.5:1 over the field, the dot 3:1.
@@ -587,8 +587,8 @@ async function expectClosed(header: HTMLElement, status: HTMLElement, line: HTML
   const helpLine = lineReading(status, help);
   await expect(helpLine).not.toHaveAttribute('data-copy');
   expectComputed(helpLine, {
-    fontSize: '12px',
-    lineHeight: '17px',
+    fontSize: '13px',
+    lineHeight: '18px',
     color: getComputedStyle(partOf(header, '.cd-public-shell__tagline')).color,
   });
   await expect(contrastRatio(getComputedStyle(helpLine).color, groundOf(helpLine))).toBeGreaterThanOrEqual(4.5);
@@ -896,7 +896,7 @@ async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Prom
   if (!head) throw new Error('no chat head');
   const line = lineReading(head, OWNER_IN_CHAT[language]);
   await expect(line).toHaveClass('cd-public-shell__disclosure', 'cd-type-meta');
-  expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   await expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual([ownerName, ownerName]);
   await expect(root).not.toHaveTextContent(DISCLOSURE[language]);
   await expect(head.querySelectorAll('button')).toHaveLength(0);
