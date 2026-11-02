@@ -24,18 +24,26 @@ export interface ConversationListItemProps {
    * line, above any status line or Recorded tag.
    */
   quote?: string;
+  /**
+   * The app's own line in the quote's place, without quotes: what an agent did, "Paid $20 up
+   * front.". The quote wins when both are given.
+   */
+  line?: string;
   /** Live now keeps its two-line layout: a status or Recorded tag takes the quote's place. */
   quoteWithStatus?: boolean;
 }
 
 /**
  * One conversation in a list: who it is with and when on the first line, its status as a dot and
- * words below its optional visitor preview, with the Recorded tag at the status line's end when
- * the conversation was replayed. The whole row is one link to the conversation. Put each in a list item.
+ * words below its optional preview (a visitor's quote, or the app's line for an agent), with the
+ * Recorded tag at the status line's end when the conversation was replayed. The whole row is one
+ * link to the conversation. Put each in a list item.
  */
-export function ConversationListItem({ name, time, status, href, current = false, recorded = false, quote, quoteWithStatus = true }: ConversationListItemProps) {
+export function ConversationListItem({ name, time, status, href, current = false, recorded = false, quote, line, quoteWithStatus = true }: ConversationListItemProps) {
   const statusLine = status !== undefined || recorded;
-  const quoted = (quoteWithStatus || !statusLine) && quote !== undefined && quote.trim() !== '';
+  const previewed = quoteWithStatus || !statusLine;
+  const quoted = previewed && quote !== undefined && quote.trim() !== '';
+  const lined = previewed && !quoted && line !== undefined && line.trim() !== '';
   return (
     <a href={href} className="cd-conversation-item" aria-current={current || undefined}>
       <span className="cd-conversation-item__top">
@@ -48,6 +56,8 @@ export function ConversationListItem({ name, time, status, href, current = false
         <span className="cd-conversation-item__quote cd-type-meta" data-copy="user">
           {`“${quote}”`}
         </span>
+      ) : lined ? (
+        <span className="cd-conversation-item__quote cd-type-meta">{line}</span>
       ) : null}
       {statusLine ? (
         <span className="cd-conversation-item__status cd-type-caption">

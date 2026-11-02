@@ -293,6 +293,83 @@ describe('Conversations', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each([[1440, 900], [390, 844]])('agent_rows_say_what_the_agent_did_at_%sx%s', async (width, height) => {
+    const summaries = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const base = summaries[0]!;
+    const now = Date.now();
+    const at = (ago: number) => new Date(now - ago).toISOString();
+    const facts = { latest_outcome: null, latest_outcome_starts_at: null, latest_outcome_cents: null, latest_outcome_cause: null };
+    const agent: ConversationSummary = {
+      ...base, ...facts, kind: 'agent', display_name: "Alex Kim's assistant", verified: false, mode: 'ai', owner_preview: false,
+      latest_visitor_text: 'These are the agent’s own words.', outcome_counts: {}, replayed: false,
+    };
+    const rows: ConversationSummary[] = [
+      { ...agent, session_id: 'agent-booked', last_activity: at(0), latest_outcome: 'visit_booked', latest_outcome_starts_at: '2026-11-02T18:00:00Z' },
+      { ...agent, session_id: 'agent-paid', last_activity: at(1000), latest_outcome: 'deposit_paid', latest_outcome_cents: 2000 },
+      { ...agent, session_id: 'agent-limit', last_activity: at(2000), latest_outcome: 'turned_down', latest_outcome_cause: 'agent_limit' },
+      { ...agent, session_id: 'agent-refused', last_activity: at(3000), latest_outcome: 'turned_down', latest_outcome_cause: 'owner_rule' },
+      { ...agent, session_id: 'agent-quiet', last_activity: at(4000) },
+      { ...agent, session_id: 'agent-booking-missing', last_activity: at(4100), latest_outcome: 'visit_booked' },
+      { ...agent, session_id: 'agent-payment-missing', last_activity: at(4200), latest_outcome: 'deposit_paid' },
+      { ...base, ...facts, session_id: 'visitor', kind: 'visitor', display_name: null, verified: false, owner_preview: false, replayed: false,
+        latest_visitor_text: 'Tuesday at 2 works.', outcome_counts: {}, last_activity: at(5000) },
+    ];
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: /^Alex Kim's assistant/ }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const row = (id: string) => document.querySelector<HTMLAnchorElement>(`.cd-conversations__items a[href="${conversation(id)}"]`)!;
+    const lineOf = (id: string) => row(id).querySelector<HTMLElement>('.cd-conversation-item__quote');
+
+    // What each agent did, from its outcome and the facts behind it, on the business's clock.
+    expect(lineOf('agent-booked')?.textContent).toBe('Booked Mon, Nov 2, 10:00 am.');
+    const bookedLine = lineOf('agent-booked')!;
+    expect(bookedLine.scrollWidth).toBeLessThanOrEqual(bookedLine.clientWidth);
+    expect(lineOf('agent-paid')?.textContent).toBe('Paid $20 up front.');
+    expect(lineOf('agent-limit')?.textContent).toBe('Asked to pay more than its limit, and was turned down.');
+    expect(lineOf('agent-refused')?.textContent).toBe('A request was turned down.');
+    // An agent without an outcome or its required fact has no line, even if it wrote a message.
+    for (const id of ['agent-quiet', 'agent-booking-missing', 'agent-payment-missing']) {
+      expect(lineOf(id)).toBeNull();
+    }
+
+    // The app's words, unquoted, drawn where and as a visitor's quote is, above the status line.
+    const visitor = lineOf('visitor')!;
+    expect(visitor.textContent).toBe('“Tuesday at 2 works.”');
+    expect(visitor.dataset.copy).toBe('user');
+    for (const id of ['agent-booked', 'agent-paid', 'agent-limit', 'agent-refused']) {
+      const line = lineOf(id)!;
+      await expect.element(line).toBeVisible();
+      expect(line.dataset.copy).toBeUndefined();
+      expect(line.className).toBe(visitor.className);
+      const style = getComputedStyle(line);
+      expect(style.fontSize).toBe('13px');
+      expect(style.fontStyle).toBe('normal');
+      expect(style.color).toBe(tokenColor('--text-secondary'));
+      expect(style.whiteSpace).toBe('nowrap');
+      expect(style.textOverflow).toBe('ellipsis');
+      expect(line.getBoundingClientRect().height).toBe(18);
+      expect(line.getBoundingClientRect().left).toBe(visitor.getBoundingClientRect().left);
+      const status = row(id).querySelector('.cd-conversation-item__status')!;
+      expect(status.textContent).toContain('Agent');
+      expect(status.getBoundingClientRect().top).toBeGreaterThanOrEqual(line.getBoundingClientRect().bottom);
+      expect(row(id).scrollWidth).toBeLessThanOrEqual(row(id).clientWidth);
+    }
+    expectNoHorizontalScroll();
+  });
+
+  it('agent_rows_from_its_runs_say_what_it_did', async () => {
+    const booked = await bookTheEarliestVisit();
+    const paid = await bookTheEarliestVisit('quote_and_deposit');
+    const refused = await bookTheEarliestVisit('push_the_limit');
+    const { screen } = await renderRoute(LIST);
+    const lineOf = (id: string) => document.querySelector(`a[href="${conversation(id)}"] .cd-conversation-item__quote`)?.textContent;
+    await expect.poll(() => lineOf(booked)).toBe('Booked Tue, Nov 3, 2:00 pm.');
+    expect(lineOf(paid)).toBe('Paid $20 up front.');
+    expect(lineOf(refused)).toBe('Asked to pay more than its limit, and was turned down.');
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it.each([[1440, 900], [1800, 1009], [390, 844]])('open_conversation_centres_its_reading_column_at_%sx%s', async (width, height) => {
     const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width, height } });
     const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });
