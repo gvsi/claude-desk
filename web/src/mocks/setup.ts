@@ -40,7 +40,7 @@ import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { formatHours } from '../lib/format.ts';
 import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
-import { appendBusinessTools } from './businessTools.ts';
+import { replaceBusinessTools } from './businessTools.ts';
 import { playReply, type PlayedRead } from './ownerStreams.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
@@ -961,7 +961,7 @@ function enterTools(world: MockWorld, interview: Interview): void {
   interview.state.question = null;
   moveTo(interview, 'tools');
   const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
-  if (interview.consultant) appendBusinessTools(world.desk(interview.state.desk_id), jobs);
+  if (interview.consultant) replaceBusinessTools(world.desk(interview.state.desk_id), jobs);
   for (const { card } of interview.state.messages) {
     if (card) connectAcceptedProposal(world, interview, card);
   }

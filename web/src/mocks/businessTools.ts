@@ -96,8 +96,9 @@ export function seedBusinessTools(desk: DeskRecord, rows: readonly ToolRow[] = c
   desk.tools = [...desk.tools.filter((row) => !names.has(row.tool)), ...seeded];
 }
 
-/** Append accepted setup jobs without replacing any tools already on the Desk. */
-export function appendBusinessTools(desk: DeskRecord | undefined, jobs: readonly JobProposal[]): void {
+/** Replace setup's business tools with the accepted jobs, keeping the Desk's other tool sources. */
+export function replaceBusinessTools(desk: DeskRecord | undefined, jobs: readonly JobProposal[]): void {
   if (!desk) throw new Error('the setup Desk must exist');
+  desk.tools = desk.tools.filter(({ source }) => source !== 'business');
   seedBusinessTools(desk, businessToolRows(jobs, desk.tools.map(({ tool }) => tool)));
 }

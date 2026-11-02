@@ -136,20 +136,28 @@ describe('setup consultant run and decisions', () => {
     expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.');
   });
 
-  it('appends_accepted_jobs_in_order_without_replacing_a_taken_tool_name', async () => {
+  it('replaces_accepted_setup_jobs_after_closing_the_questions_three_times', async () => {
     let state = await cpaAt('schedule');
     const desk = mockStore.world.desk(state.desk_id)!;
-    seedBusinessTools(desk, businessToolRows([state.messages.at(-1)!.card!.job!]));
-    const toolsBefore = structuredClone(desk.tools);
+    const job = state.messages.at(-1)!.card!.job!;
+    seedBusinessTools(desk, businessToolRows([job, { ...job, title: 'Old setup job' }]));
     state = await setupState('setupSuggestions', state.interview_id, {});
+    // Suggestions may connect accepted apps; later closings must keep those tools as they are.
+    const toolsBefore = structuredClone(desk.tools.filter(({ source }) => source !== 'business'));
+    for (const ending of ['answer', 'suggestions']) {
+      state = await setupState('setupReopen', state.interview_id, { text: 'Closed Fridays.', idempotency_key: `replace-jobs-${ending}` });
+      state = ending === 'answer'
+        ? await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Take a message after hours.' })
+        : await setupState('setupSuggestions', state.interview_id, {});
+      expect(state.step).toBe('tools');
+    }
     const response = await mockStore.dispatch('setupTools', { params: { id: state.interview_id } });
     if ('network' in response || response.status !== 200) throw new Error('setup tools must answer 200');
     expect((response.body as SetupTools).tools.filter(({ source }) => source === 'business').map(({ tool, business, status }) => [tool, business?.title, status])).toEqual([
       ['desk.book-a-free-intro-call', 'Book a free intro call', 'needs_review'],
-      ['desk.book-a-free-intro-call-2', 'Book a free intro call', 'needs_review'],
       ['desk.ask-new-clients-three-questions', 'Ask new clients three questions', 'needs_review'],
     ]);
-    expect(desk.tools.slice(0, toolsBefore.length)).toEqual(toolsBefore);
+    expect(desk.tools.filter(({ source }) => source !== 'business')).toEqual(toolsBefore);
   });
 
   it('both_finish_paths_leave_a_non_consultant_desks_tools_unchanged', async () => {
