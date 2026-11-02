@@ -2554,6 +2554,7 @@ def _record_plan(interview: Interview, source, reply: Entry) -> list[ProposalCar
                 if again.connector is not None:
                     again.connector.connected = False
                 _supersede(interview, kept.proposal_id, again.proposal_id)
+                reply.dropped.append(kept.proposal_id)        # so settling the copy is the owner's no (`settle_plan`)
                 reply.planned.append(again)
                 available.append(again)
     return available
@@ -2858,16 +2859,26 @@ def _unpriced_payment(job: JobProposal | None) -> bool:
 
 
 def settle_plan(interview: Interview) -> None:
-    """Settle the remaining plan and emit each never-shown card once, without I/O."""
+    """Settle the remaining plan and emit each never-shown card once, without I/O. A card shown again because the plan
+    dropped what the owner had accepted (`_record_plan`) settles as declined: the owner asked to drop it, so Claude's
+    suggestions never take it back."""
     # Changed cards and their superseded_by links stay intact; only proposed replacements can settle.
     pending = interview.pending_card
+    dropped = interview.dropped
+    asked_to_drop = {card.superseded_by for entry in interview.transcript
+                     for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]
+                     if card.proposal_id in dropped and card.superseded_by is not None}
+
+    def settled(card: ProposalCard) -> str:
+        return "declined" if _unpriced_payment(card.job) or card.proposal_id in asked_to_drop else "accepted"
+
     for card in interview.unshown:
-        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
+        card.state = settled(card)
         _show_card(interview, card)
     if pending is not None:
         card = next(entry.card for entry in reversed(interview.transcript)
                     if entry.card is not None and entry.card.proposal_id == pending)
-        card.state = "declined" if _unpriced_payment(card.job) else "accepted"
+        card.state = settled(card)
     # Stored interviews may contain earlier acceptances that bypassed the amount check. Code voids such a yes, so it is
     # no longer the owner's decision: the setup plan says the job was left out for want of an amount (`_setup_plan`).
     # Which yeses code voids is read from each card's latest shown copy, as `_setup_plan` reads it, so an older copy

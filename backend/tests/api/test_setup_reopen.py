@@ -706,3 +706,24 @@ async def test_replacing_one_job_keeps_another_of_its_kind(app, browser, kernel_
     assert landed["step"] == "tools"
     current = await setup._read(engine, owner, state["interview_id"])
     assert [job.title for job in setup.accepted_jobs(current)] == [warranty.title, PHOTOS.title]
+
+
+async def test_your_suggestions_never_accept_a_job_the_owner_asked_to_drop(
+        app, browser, kernel_http, model, engine, fake):
+    # The owner asked to drop the repair requests job, and its card waits for their decision. "Use your suggestions"
+    # settles that card as their no, never as Claude's suggestion to keep it.
+    owner, state, jobs = await with_jobs(app, browser, kernel_http, model, engine)
+    writes = len(fake.called(TOOLS))
+    model.add(turn("Okay, no more repair requests.", drop=[JOB_IDS[0]], next={"kind": "done"}))
+    changed = await reopen(owner, state, "Remove the repair intake job.", cards=True)
+    assert changed.status_code == 200, changed.text
+    again = changed.json()["pending_card"]
+    model.add(next_step("what_you_do", next={"kind": "done"}, plan="Your Desk flags urgent help."))
+    closed = await owner.browser.post(f"/api/owner/setup/{state['interview_id']}/suggestions?cards=1", json={})
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["step"] == "tools"
+    assert all(each["state"] == "declined" for each in cards_of(closed.json(), again))
+    current = await setup._read(engine, owner, state["interview_id"])
+    assert [job.title for job in setup.accepted_jobs(current)] == [jobs[1].title, jobs[3].title]
+    (write,) = fake.called(TOOLS)[writes:]
+    assert [tool["title"] for tool in write.body["tools"]] == [jobs[1].title]
