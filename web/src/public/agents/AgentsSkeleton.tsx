@@ -9,7 +9,7 @@ import './AgentCardPage.css';
  * On wider screens every row is one line.
  */
 const CAN_DO_ROWS: Readonly<Record<CopyLanguage, readonly number[]>> = {
-  en: [1, 1, 1, 1, 2, 1, 1, 2, 1, 1],
+  en: [1, 1, 1, 1, 1, 1, 1, 2, 1, 1],
   es: [1, 1, 1, 1, 2, 1, 1, 2, 2, 1],
 };
 
