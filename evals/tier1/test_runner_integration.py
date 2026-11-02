@@ -95,14 +95,16 @@ async def test_scripted_attack_run_end_to_end(k, fake, api, visitor_fake):
     assert ledger and verify_ledger_page({"entries": ledger, "head": ledger[-1]["hash"], "key_id": ledger[-1]["key_id"],
                                           "public_key_hex": artifact.public_key_hex}, artifact.public_key_hex).ok
     assert outcome.verdict.violations == []
-    assert artifact.served_models["api"] == [OPUS] and outcome.simulator.fallback_turns == 0
+    # Owner translations use Haiku alongside the Opus conversation; tier 2 counts both as Desk models.
+    assert artifact.served_models["api"] == ["claude-haiku-5-5", OPUS]
+    assert outcome.simulator.fallback_turns == 0
 
 
 @pytest.mark.requires("01a", "02")
 async def test_scripted_legit_run_with_owner_approval(k, fake, api, visitor_fake):
     fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
     fake.script(OPUS, ToolUse("native__quote", quote_args("drain", requested_discount_bp=1_000)),
-                send_reply("I have asked the owner about the discount."), send_reply("Good news, the owner agreed."))
+                send_reply("I have asked the owner about that."), send_reply("Good news, the owner agreed."))
     visitor_fake.script(VISITOR_MODEL, visitor_turn("Could you take a little off the drain clearing?"),
                         visitor_turn("Thank you.", done=True))
     simulator = Simulator.visitor("anthropic", fake_url=visitor_fake.url)
