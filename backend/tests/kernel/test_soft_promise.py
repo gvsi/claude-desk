@@ -1009,7 +1009,8 @@ async def test_an_honest_acknowledgement_of_a_hold_passes_on_its_receipt(app, cl
     assert [(block.kind, block.text) for block in verdict.blocks] == [("prose", prose)]
 
 
-async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(app, client, reviewer, monkeypatch):
+async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(app, client, reviewer, monkeypatch,
+                                                                                frozen_clock):
     """A status line alone ("Waiting for Mike Turner to approve") would back a claim about any request, so the
     check reads what was asked for before it, from the request's tool (`render.RECEIPT_SUBJECTS`): a held
     quote is a "Quote request", a held booking a "Booking request". A tool the table doesn't name adds no
@@ -1020,6 +1021,7 @@ async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(
 
     copy, visitor = await visitor_of(app, client)
     await held_quote(client, visitor)
+    frozen_clock.advance(60)                                     # the oldest request comes first
     await add_slot(app, copy, "S-20261030-2200")
     held_booking = await book(client, visitor, "S-20261030-2200")            # outside the cards' hours: it holds
     assert held_booking.state == "held"
