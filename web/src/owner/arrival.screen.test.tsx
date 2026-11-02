@@ -905,11 +905,11 @@ describe('OwnerLayout', () => {
       'Today',
       'Conversations',
       'Customers',
-      'Knowledge',
       'Rules',
       'Safety',
       'Profile',
       'Share',
+      'Knowledge',
       'Settings',
     ]);
     const base = `/app/${RIVERA.deskId}`;

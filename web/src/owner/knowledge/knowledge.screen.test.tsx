@@ -106,7 +106,7 @@ describe('knowledge', () => {
     await expect.element(nav).toBeVisible();
     expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(9);
     expect([...nav.element().querySelectorAll('.cd-sidebar__label')].map((row) => row.textContent)).toEqual([
-      'Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings',
+      'Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings',
     ]);
     const link = nav.getByRole('link', { name: 'Knowledge', exact: true });
     await expect.element(link).toHaveAttribute('href', path);

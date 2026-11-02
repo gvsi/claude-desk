@@ -101,10 +101,10 @@ it('connectors_row_only_with_its_href', () => {
   const withConnectors = columns[1] as HTMLElement;
   const labels = (column: HTMLElement) => [...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent);
   // Without its href there is no Connectors row, and no link without a destination.
-  expect(labels(without)).toEqual(['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings']);
+  expect(labels(without)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings']);
   expect([...without.querySelectorAll('.cd-sidebar__nav > a')].every((link) => link.getAttribute('href'))).toBe(true);
   // With it, the tenth row, sixth.
-  expect(labels(withConnectors)).toEqual(['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Settings']);
+  expect(labels(withConnectors)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings']);
   // The labels the rows draw are the ones exported for pages to name themselves by; people's row is the consumer's.
   const { today, conversations, knowledge, rules, connectors, safety, profile, share, settings } = NAV_LABELS;
   expect(labels(withConnectors)).toEqual([today, conversations, 'Customers', knowledge, rules, connectors, safety, profile, share, settings]);
@@ -142,7 +142,7 @@ it('only_connectors_may_be_left_out', () => {
   act(() => root.render(<Sidebar {...PROPS} hrefs={withoutSafety as SidebarHrefs} />));
 
   const labels = [...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent);
-  expect(labels).toEqual(['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings']);
+  expect(labels).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings']);
 
   act(() => root.unmount());
   column.remove();

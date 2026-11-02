@@ -77,10 +77,10 @@ const sidebar = (
 );
 
 /** The nine pages, including Knowledge, without Connectors. */
-const PAGES = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings'];
+const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
-/** The ten pages with Knowledge after Customers and Connectors after Rules. */
-const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Settings'];
+/** The ten pages with Connectors after Rules and Knowledge just above Settings. */
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
 /** The words of each page row in a nav, in order (a row's count is read separately). */
 function pageNames(nav: HTMLElement): string[] {
