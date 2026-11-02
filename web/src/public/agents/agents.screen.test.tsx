@@ -506,7 +506,7 @@ describe('agents page', () => {
   });
 
   it.each([true, false])('question_task_finishes_with_payments_%s', async (payments) => {
-    const desk = mockStore.world.desks[0];
+    const desk = mockStore.world.desks[0]!;
     if (!payments) {
       for (const tool of desk.tools) {
         if (tool.tool === 'native.payment_link' || tool.tool === 'native.charge_mandate') tool.status = 'disabled';
