@@ -96,7 +96,7 @@ const meta = {
     canvas: 'N-Safety-Run1',
     canvasNote: [
       'The attempts list and the opened attempt are page layout the web app (plan 04) owns, composed from PageHeader, ChainStatus, SegmentedControl, Chip, AttemptRow, CheckpointMeter, Card, StatusLabel and TextLink. The kinds are one radio group, one tab stop, with the arrow keys.',
-      'Signed at sign-off: “All” first and chosen; older attempts carry their date with the time, “Oct 26, 9:52 am”, where the board shows the date alone; entries are “Recorded by your Desk as it happened”, where it was signed as “Recorded by the checkpoint”. The times are the screen’s strings.',
+      'Signed at sign-off: “All” first and chosen; older attempts carry their date with the time, “Oct 26, 9:52 am”, where the board shows the date alone; entries are “Recorded by your Desk”, where it was signed as “Recorded by the checkpoint”. The times are the screen’s strings.',
       'Full trace, closed here as on the board, opens under Every entry (N-Safety-Record-Run1).',
       'The board’s open questions are canvas notes.',
     ].join(' '),

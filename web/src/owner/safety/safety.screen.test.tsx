@@ -149,6 +149,11 @@ function region(screen: RenderResult, name: string) {
 }
 
 const REPLAYED = 'Recorded history, replayed into your copy';
+/**
+ * Where an entry the kernel wrote came from: who recorded it, and nothing about when, since a
+ * replayed sample entry is written into the copy long after what it records.
+ */
+const KERNEL_ORIGIN = 'Recorded by your Desk';
 
 const REFUND_REASON = 'Someone in the public chat said they were Mike and asked me to refund a charge to their own card. Refunds go only to the customer who paid, so I didn’t.';
 
@@ -731,7 +736,7 @@ describe('Safety', () => {
   });
 
   it('every_entry_shows_its_origin', async () => {
-    const CHECKED = 'Recorded by your Desk as it happened';
+    const CHECKED = KERNEL_ORIGIN;
     const REPORTED = 'Reported by the chat and recorded as reported, without a check';
     const reported = entry(4, '2026-10-20T16:53:00.000000Z', { kind: 'rate_limit', origin: 'api', session_id: 'ses-2', summary: { limit: 'turns' } });
     injectLedger(ledgerPage([...threeEntries(), reported]));
@@ -1006,6 +1011,10 @@ describe('Safety', () => {
     await expect.element(viewOption(screen, 'Every entry')).toHaveAttribute('aria-checked', 'true');
     const row = recordRow(screen, 2);
     await expect.element(row.getByText(REPLAYED, { exact: true })).toBeVisible();
+    // The kernel wrote the replayed entry when the copy was made, so its origin says who recorded
+    // it and claims nothing about when.
+    await expect.element(row.getByText(KERNEL_ORIGIN, { exact: true })).toBeVisible();
+    expect(row.element().textContent).not.toMatch(/as it happened/);
     await expect.element(row.getByText('Oct 18, 9:52 am', { exact: true })).toBeVisible();
     expect(row.getByText('Oct 20, 9:51 am').elements()).toHaveLength(0);
     // A live entry says nothing about replay.
@@ -1026,6 +1035,8 @@ describe('Safety', () => {
     await viewOption(screen, 'Stopped').click();
     const open = detail(screen);
     await expect.element(open.getByText(REPLAYED, { exact: true })).toBeVisible();
+    await expect.element(open.getByText(KERNEL_ORIGIN, { exact: true })).toBeVisible();
+    expect(open.element().textContent).not.toMatch(/as it happened/);
     await expect.element(open.getByText('Oct 18, 9:52 am', { exact: true })).toBeVisible();
     expect(open.getByText('Oct 20, 9:51 am').elements()).toHaveLength(0);
   });

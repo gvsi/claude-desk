@@ -37,12 +37,13 @@ export const LEDGER_KIND_COPY = {
 
 /**
  * Where an entry came from, the same words on every row and detail, naming no part: the Desk's
- * kernel wrote it as it happened, or the chat (the API) reported it and the kernel recorded the
- * report unchecked. A kernel entry isn't called checked, since some are events ("Chat started").
- * The full trace keeps its own technical line (`FullTrace`'s `traceLine.ts`).
+ * kernel wrote it, or the chat (the API) reported it and the kernel recorded the report unchecked.
+ * A kernel entry isn't called checked, since some are events ("Chat started"), and says nothing
+ * about when, since the sample week's replayed entries are written when a copy is made. The full
+ * trace keeps its own technical line (`FullTrace`'s `traceLine.ts`).
  */
 export const ORIGIN_COPY = {
-  kernel: 'Recorded by your Desk as it happened',
+  kernel: 'Recorded by your Desk',
   api: 'Reported by the chat and recorded as reported, without a check',
 } as const satisfies Record<LedgerEvent['origin'], string>;
 
@@ -128,7 +129,7 @@ export const CATEGORY_LABELS: readonly string[] = Object.values(CATEGORY_COPY);
 /** An entry replayed from the recorded history into this copy. */
 export const REPLAYED_LABEL = 'Recorded history, replayed into your copy';
 
-/** Where an entry came from, in `ORIGIN_COPY`'s words. Anything but the kernel reads as reported, never as recorded as it happened. */
+/** Where an entry came from, in `ORIGIN_COPY`'s words. Anything but the kernel reads as reported, never as recorded by the Desk. */
 export function originCopy(origin: string): string {
   return origin === 'kernel' ? ORIGIN_COPY.kernel : ORIGIN_COPY.api;
 }

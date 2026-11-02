@@ -28,7 +28,7 @@ function RecordRow({ entry, timezone, open, onOpen }: RecordRowProps) {
   const kind = entryCopy(entry.event);
   const who = originCopy(entry.event.origin);
   const when = formatWhen(entryTime(entry), timezone, new Date());
-  // Read as one line, the words shown in order: "Entry 48, Action checked, Recorded by your Desk as it happened, Today, 9:52 am".
+  // Read as one line, the words shown in order: "Entry 48, Action checked, Recorded by your Desk, Today, 9:52 am".
   const name = [`Entry ${entry.seq}`, kind, ...(replayed ? [REPLAYED_LABEL] : []), who, when].join(', ');
   return (
     <button type="button" className="cd-record__row" aria-label={name} aria-expanded={open} onClick={(event) => onOpen(event.currentTarget)}>

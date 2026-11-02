@@ -147,17 +147,18 @@ describe('Safety copy', () => {
   });
 
   it('origin_and_subtitle_name_no_part', () => {
-    // Where an entry came from says what happened, never which part wrote it, and a kernel entry
-    // isn't called checked, since some are events ("Chat started"), not checks.
+    // Where an entry came from says who recorded it, never which part wrote it. A kernel entry isn't
+    // called checked, since some are events ("Chat started"), and claims nothing about when, since
+    // the sample week's replayed entries are written when a copy is made.
     expect(ORIGIN_COPY).toEqual({
-      kernel: 'Recorded by your Desk as it happened',
+      kernel: 'Recorded by your Desk',
       api: 'Reported by the chat and recorded as reported, without a check',
     });
     expect(originCopy('kernel')).toBe(ORIGIN_COPY.kernel);
-    // Anything but the kernel reads as reported, never as recorded as it happened.
+    // Anything but the kernel reads as reported, never as recorded by the Desk.
     for (const origin of ['api', 'other', '']) expect(originCopy(origin), origin).toBe(ORIGIN_COPY.api);
     expect(SAFETY_SUBTITLE).toBe('Requests your Desk turned down, replies it stopped before they were shown, and the signed record of every entry.');
-    for (const words of [...Object.values(ORIGIN_COPY), SAFETY_SUBTITLE]) expect(words, words).not.toMatch(/checkpoint|chat service/);
+    for (const words of [...Object.values(ORIGIN_COPY), SAFETY_SUBTITLE]) expect(words, words).not.toMatch(/checkpoint|chat service|as it happened/);
   });
 
   it('handoff_entries_say_which_they_are', () => {
