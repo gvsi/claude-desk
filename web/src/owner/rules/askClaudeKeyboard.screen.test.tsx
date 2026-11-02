@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { userEvent, type Locator } from 'vitest/browser';
 
+import { coarsePointer } from '../../ds/test/touch.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 
@@ -71,6 +72,32 @@ async function closeByKeyboard(panel: Locator, closing: Closing): Promise<void> 
 }
 
 describe('ask claude opened from a suggestion by keyboard', () => {
+  it.each(['desktop', 'phone'] as const)('keeping_rules_returns_focus_to_the_panel_composer_on_%s', async (viewport) => {
+    const { screen } = await renderRoute(RULES, { viewport });
+    await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole(viewport === 'phone' ? 'dialog' : 'complementary', { name: 'Ask Claude' });
+    const keep = panel.getByRole('button', { name: 'Keep my rules' });
+    await expect.element(keep).toBeEnabled();
+    await tabTo(keep.element(), { back: true });
+    await userEvent.keyboard('{Enter}');
+    await expect.element(panel.getByText('Nothing changed. Your rules stay as they are.')).toBeVisible();
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+  });
+
+  it('keeping_rules_by_touch_hands_focus_on_without_opening_the_keyboard', async () => {
+    await coarsePointer();
+    const { screen } = await renderRoute(RULES, { viewport: 'phone' });
+    await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('dialog', { name: 'Ask Claude' });
+    const keep = panel.getByRole('button', { name: 'Keep my rules' });
+    await expect.element(keep).toBeEnabled();
+    await keep.click();
+    await expect.element(panel.getByText('Nothing changed. Your rules stay as they are.')).toBeVisible();
+    await expect.element(panel.getByRole('button', { name: 'Close' })).toHaveFocus();
+  });
+
   it.each(CASES)('closing_with_%s_gives_focus_back_to_the_suggestion %s', async (closing, place) => {
     const { chip, panel } = await openFromSuggestionByKeyboard(place, 'Quote water heater installs up to $600');
     await closeByKeyboard(panel, closing);

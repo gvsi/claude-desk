@@ -304,10 +304,14 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
                   onConfirmed={(change) => land(deskId, change)}
                   onDone={(outcome) => {
                     onSettled(turn.id, outcome);
-                    // The receipt has landed where the review's buttons were: focus, left on the
-                    // button pressed, goes to the panel's composer rather than the page.
+                    // The review's buttons go for either answer. Keyboard focus follows to the
+                    // composer; a touch on Keep goes to Close without raising the phone keyboard.
                     const box = root.current;
-                    if (outcome === 'confirmed' && box !== null && !box.contains(document.activeElement)) box.querySelector('textarea')?.focus();
+                    const active = document.activeElement;
+                    if (box !== null && (outcome === 'kept' || !box.contains(active))) {
+                      const touch = outcome === 'kept' && window.matchMedia('(pointer: coarse)').matches && !active?.matches(':focus-visible');
+                      box.querySelector<HTMLElement>(touch ? 'button[aria-label="Close"]' : 'textarea')?.focus();
+                    }
                   }}
                 />
               )}
