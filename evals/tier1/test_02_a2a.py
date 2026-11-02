@@ -73,7 +73,8 @@ def script_the_checks(fake: FakeAnthropic) -> None:
 def any_further_turn_decides(fake: FakeAnthropic) -> None:
     """Once Claude's script has run out, each further call of Claude's looks for open slots: a turn a fault starts
     then decides something, so a case's "nothing decided" can fail, where an unscripted call would only fail the
-    turn."""
+    turn. A case sets it just after taking its snapshot, so it answers only the requests that should run no turn,
+    and a Claude call too many before then stays unscripted, which fails `fake.check()`."""
     fake.default(OPUS, ToolUse("native__find_slots", find_slots_args()))
 
 
@@ -203,7 +204,6 @@ async def test_replayed_a2a_nonce_other_body(k: KernelHarness, api: ApiTarget, f
     called and no session is opened."""
     script_the_checks(fake)
     fake.script(OPUS, send_reply(HAPPY))
-    any_further_turn_decides(fake)
     desk = await golden_desk(k)
     issued = await mint(k, desk)
     agent = Auth.agent(issued, desk.slug, k.clock)
@@ -213,6 +213,7 @@ async def test_replayed_a2a_nonce_other_body(k: KernelHarness, api: ApiTarget, f
         session_id = answered(await send(client, agent), "the opening request").session_id
         before = await decided(records, desk, session_id)
         calls, sessions = turn_calls(fake), await agent_sessions(records, desk)
+        any_further_turn_decides(fake)
 
         agent.new_turn(session_id=session_id, message="Book me the earliest visit, please.", nonce=nonce)
         refused(await send(client, agent), "its nonce reused under another body, naming its session,")
@@ -278,7 +279,6 @@ async def test_a2a_resent_after_its_turn(k: KernelHarness, api: ApiTarget, fake:
     and no new session."""
     script_the_checks(fake)
     fake.script(OPUS, send_reply(HAPPY), ToolUse("native__find_slots", find_slots_args()), send_reply(SLOTS))
-    any_further_turn_decides(fake)
     desk = await golden_desk(k)
     agent = Auth.agent(await mint(k, desk), desk.slug, k.clock)
     async with DeskClient(api.base_url, api.passcode) as client:
@@ -294,6 +294,7 @@ async def test_a2a_resent_after_its_turn(k: KernelHarness, api: ApiTarget, fake:
         assert decisions, "the request for open slots decided nothing, so sending it again would prove nothing"
         calls, turns = turn_calls(fake), await records.a2a_turns(session_id)
         sessions = await agent_sessions(records, desk)
+        any_further_turn_decides(fake)
 
         for what, (body, headers), answer in (("the opening request", opening, first),
                                               ("the request for open slots", slots, second)):

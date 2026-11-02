@@ -7,9 +7,10 @@ and the kernel's agent rules behind it (the master plan's "Agent sessions": a si
 against the key it names, a nonce bound per key to one session and one body, an answer stored by
 key, session and nonce), whose Claude is a real `FakeAnthropic` on loopback. Each case passes over
 the faithful stand-in, and fails once the stand-in has a fault the case exists to catch, with the
-failure its oracle names. They also pin the cases' helpers: the translation stand-in, the calls
-`turn_calls` counts and the rows `session_rows` compares. Nothing here calls the network or a live
-model.
+failure its oracle names. A Claude call too many in a turn before a case's snapshot passes the
+case's own checks, so they show the fake model server's check failing on it. They also pin the cases'
+helpers: the translation stand-in, the calls `turn_calls` counts and the rows `session_rows`
+compares. Nothing here calls the network or a live model.
 """
 
 import asyncio
@@ -50,6 +51,7 @@ FAULTS = (
     "refuses_late",               # a refused nonce or session is refused only after the message is stored and Claude ran
     "nonce_by_text",              # nonces and stored answers are keyed by the nonce's text alone, for every key
     "rerun_resent",               # a request sent again runs a new turn instead of getting its stored answer
+    "surplus_call",               # one turn calls Claude once more after its reply, and drops the answer
 )
 MAX_CALLS = 4   # Claude's calls in one stand-in turn before it gives up on a reply
 
@@ -70,12 +72,14 @@ class StandInDesk:
     use, per key, to one session and one body hash: the same request again gets its stored answer,
     and any other reuse is 401. An opening request opens a session bound to its key, and a request
     naming a session bound to another key is 401. A turn calls the fake model server until Claude's
-    `send_reply`; each other tool call is a decision. What it keeps is what `StandInRecords` reads."""
+    `send_reply`; each other tool call is a decision. With `surplus_call`, its `surplus_turn`th turn
+    calls once more after the reply. What it keeps is what `StandInRecords` reads."""
 
-    def __init__(self, fake: FakeAnthropic, fault: str | None = None):
+    def __init__(self, fake: FakeAnthropic, fault: str | None = None, surplus_turn: int = 1):
         if fault is not None and fault not in FAULTS:
             raise ValueError(f"unknown fault {fault!r}; the faults are {list(FAULTS)}")
-        self.fake, self.fault = fake, fault
+        self.fake, self.fault, self.surplus_turn = fake, fault, surplus_turn
+        self.turns = 0
         self.keys: dict[str, Ed25519PublicKey] = {}
         self.sessions: dict[str, str] = {}                                  # session id -> the key it is bound to
         self.nonces: dict[tuple[str | None, str], tuple[str, str]] = {}     # (key, nonce) -> (session id, body hash)
@@ -163,20 +167,27 @@ class StandInDesk:
 
     async def turn(self, session_id: str, message: str) -> list[RenderedBlock]:
         """Claude's turn on the fake model server: its replies until `send_reply`, each other tool call a decision."""
+        self.turns += 1
         async with httpx.AsyncClient(base_url=self.fake.url, timeout=10, trust_env=False) as http:
             for _ in range(MAX_CALLS):
-                answer = await http.post("/v1/messages", json={
-                    "model": a2a.OPUS, "max_tokens": 64, "messages": [{"role": "user", "content": message}]})
+                answer = await ask_claude(http, message)
                 if answer.status_code != 200:
                     raise TurnFailed
                 uses = [block for block in answer.json()["content"] if block.get("type") == "tool_use"]
                 if not uses:
                     raise TurnFailed
                 if uses[0]["name"] == "send_reply":
+                    if self.fault == "surplus_call" and self.turns == self.surplus_turn:
+                        await ask_claude(http, message)   # one call too many, whatever it answers dropped
                     return [RenderedBlock(kind="prose", text=uses[0]["input"]["prose"])]
                 self.decisions.append({"decision_id": f"decision-{len(self.decisions) + 1}", "session_id": session_id,
                                        "tool": uses[0]["name"].replace("__", ".")})
         raise TurnFailed
+
+
+async def ask_claude(http: httpx.AsyncClient, message: str) -> httpx.Response:
+    return await http.post("/v1/messages", json={
+        "model": a2a.OPUS, "max_tokens": 64, "messages": [{"role": "user", "content": message}]})
 
 
 class StandInRecords:
@@ -223,10 +234,10 @@ class StandInKernel:
 
 
 @asynccontextmanager
-async def world(fault: str | None = None):
+async def world(fault: str | None = None, surplus_turn: int = 1):
     """A case's fixtures over the stand-in: `k`, `api`, `fake` and `records`."""
     fake = FakeAnthropic().start()
-    desk = StandInDesk(fake, fault)
+    desk = StandInDesk(fake, fault, surplus_turn)
     server = LoopbackServer(desk.app, name="stand-in A2A endpoint")
     try:
         await asyncio.to_thread(server.start)
@@ -259,10 +270,17 @@ CAUGHT = [
     ("a2a_resent_after_its_turn", "rerun_resent", "the opening request sent again answered 500, not its stored answer"),
 ]
 
+# Each case whose Claude goes on answering once its script has run out (`any_further_turn_decides`), with its
+# last turn before its snapshot: a stand-in with `surplus_call` ends that turn with one Claude call too many.
+SURPLUS = [
+    ("replayed_a2a_nonce_other_body", 1),   # the opening request's turn
+    ("a2a_resent_after_its_turn", 2),       # the turn that looked for open slots
+]
+
 
 def test_every_case_and_fault_is_exercised():
     assert {name for name, _, _ in CAUGHT} == set(CASES)
-    assert {fault for _, fault, _ in CAUGHT} == set(FAULTS)
+    assert {fault for _, fault, _ in CAUGHT} | {"surplus_call"} == set(FAULTS)   # SURPLUS runs surplus_call
 
 
 @pytest.mark.parametrize("name", CASES)
@@ -278,6 +296,18 @@ async def test_each_case_fails_on_the_fault_it_exists_to_catch(name: str, fault:
         with pytest.raises(AssertionError) as caught:
             await CASES[name](k, api, fake, records)
     assert str(caught.value).startswith(failure), str(caught.value)
+
+
+@pytest.mark.parametrize(("name", "turn"), SURPLUS, ids=[name for name, _ in SURPLUS])
+async def test_a_surplus_claude_call_before_the_snapshot_fails_the_fake_model_servers_check(name: str, turn: int):
+    """A Claude call too many in a turn before the case's snapshot passes the case's own checks, which compare only
+    what came after it, so the fake model server's check is what fails on it: Claude's default answer, set only
+    once the case has taken its snapshot, leaves the call unscripted."""
+    async with world("surplus_call", surplus_turn=turn) as (k, api, fake, records):
+        await CASES[name](k, api, fake, records)
+    with pytest.raises(AssertionError) as caught:
+        fake.check()
+    assert str(caught.value) == f"1 unscripted model calls reached the fake model server ({a2a.OPUS})"
 
 
 class RowsOf:
