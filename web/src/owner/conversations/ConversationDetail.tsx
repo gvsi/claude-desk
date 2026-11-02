@@ -364,16 +364,18 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
               Signed
             </Pill>
           ) : null}
-          {state.assurance === 'demo_code' ? <span className="cd-conversation__quiet cd-type-caption">Simulated verification</span> : null}
         </div>
-        {latest !== null ? (
-          <>
-            <span className="cd-conversation__dot cd-type-meta" aria-hidden="true">
-              ·
-            </span>
-            <p className="cd-conversation__latest cd-type-meta">Latest: {latest}</p>
-          </>
-        ) : null}
+        <div className="cd-conversation__context">
+          {state.assurance === 'demo_code' ? <span className="cd-conversation__quiet cd-type-caption">Simulated verification</span> : null}
+          {latest !== null ? (
+            <>
+              <span className="cd-conversation__dot cd-type-meta" aria-hidden="true">
+                ·
+              </span>
+              <p className="cd-conversation__latest cd-type-meta">Latest: {latest}</p>
+            </>
+          ) : null}
+        </div>
         {takeOverHere ? (
           <Button variant="secondary" buttonRef={holdTakeOver} busy={takeOverSent} waiting={controls.changing && !takeOverSent} onClick={takeOver}>
             Take over

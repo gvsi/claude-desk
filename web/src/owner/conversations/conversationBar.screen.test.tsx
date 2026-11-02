@@ -273,6 +273,32 @@ describe('the open conversation bar', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it.each(SIZES)('shows_the_verified_name_and_simulation_caption_in_full_at_%sx%s', async (width, height) => {
+    const held = mockStore.world.addHeldRefund();
+    const chat = mockStore.world.sessions.get(held.session_id)!;
+    expect(chat.state.assurance).toBe('demo_code');
+    lengthen(chat);
+    const { screen } = await renderRoute(conversation(chat.state.session_id), { viewport: { width, height } });
+    const bar = await opened(screen, DANA);
+    const name = screen.getByRole('heading', { level: 2, name: DANA }).element();
+    const quiet = bar.querySelector<HTMLElement>('.cd-conversation__quiet')!;
+    const latest = bar.querySelector<HTMLElement>('.cd-conversation__latest')!;
+    expect(name.scrollWidth).toBeLessThanOrEqual(name.clientWidth);
+    expect(quiet.textContent).toBe('Simulated verification');
+    expect(quiet.scrollWidth).toBeLessThanOrEqual(quiet.clientWidth);
+    if (width < 1024) {
+      expectCutShort(latest);
+      expect(rect(bar).height).toBe(69);
+      expect(rect(quiet).top).toBeGreaterThanOrEqual(rect(name).bottom);
+      expect(Math.abs(middle(quiet) - middle(latest))).toBeLessThanOrEqual(1);
+      const dot = bar.querySelector<HTMLElement>('.cd-conversation__dot')!;
+      expect(dot.textContent).toBe('·');
+      expect(rect(dot).left).toBeGreaterThanOrEqual(rect(quiet).right);
+      expect(rect(latest).left).toBeGreaterThanOrEqual(rect(dot).right);
+    }
+    expectNoHorizontalScroll();
+  });
+
   it.each(SIZES)('leaves_the_opening_lines_at_the_top_of_the_transcript_at_%sx%s', async (width, height) => {
     named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width, height } });

@@ -320,8 +320,7 @@
   background: var(--bg-app);
 }
 
-/* The name, its pills and "Simulated verification", on one line: each word cut short only once
-   "Latest" has no room left. */
+/* The name and its pills stay together; the caption keeps its full width beside them on a laptop. */
 .cd-conversation__who {
   display: flex;
   flex: 0 1 auto;
@@ -331,6 +330,7 @@
 }
 
 .cd-conversation__who > .cd-pill,
+.cd-conversation__quiet,
 .cd-conversation__dot {
   flex: none;
 }
@@ -354,6 +354,10 @@
   color: var(--text-tertiary);
 }
 
+.cd-conversation__context {
+  display: contents;
+}
+
 /* "Latest: …" takes what the line leaves, cut short to fit it, with Take over at the bar's right. */
 .cd-conversation__latest {
   flex: 1 1 0;
@@ -371,8 +375,8 @@
 }
 
 /* Under 1024 px, under the way back, two lines 8 px inside the bar: the name and its pills with
-   Take over at the right, on a line as tall as Take over whether it is there or not, then "Latest"
-   across the bar's whole width. The dot goes, as Latest has its own line. */
+   Take over at the right, on a line as tall as Take over whether it is there or not, then the
+   simulation caption and "Latest" across the bar's whole width. Only a caption keeps the dot. */
 @media (max-width: 1023.98px) {
   .cd-conversation__bar {
     display: grid;
@@ -394,8 +398,20 @@
     grid-column: 1 / -1;
   }
 
+  .cd-conversation__context {
+    display: flex;
+    grid-column: 1 / -1;
+    align-items: center;
+    gap: var(--space-8);
+    min-width: 0;
+  }
+
   .cd-conversation__dot {
     display: none;
+  }
+
+  .cd-conversation__quiet + .cd-conversation__dot {
+    display: block;
   }
 }
 
