@@ -12,7 +12,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 
-import type { EvMessage, StatusEvent } from '../../api/contracts.ts';
+import type { EvMessage, RenderedBlock, StatusEvent } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
 import type { OwnerTranscriptItem, TranscriptItem } from '../../api/views.ts';
 import {
@@ -29,6 +29,8 @@ import {
 } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
 import { groupRows, opensAReply, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
+import { paymentLinkMemory } from '../../public/paymentLinks.ts';
+import { usePaymentLinks } from '../../public/usePaymentLinks.ts';
 import { ledgerQuery } from '../safety/queries.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { useOwnerReceipt } from './ownerReceipt.ts';
@@ -210,6 +212,7 @@ function ReceiptLine({ source, done, cards, shownBefore, onOpenTrace }: ReceiptL
 
 interface RowViewProps {
   row: OwnerRow;
+  paymentBlock: (block: RenderedBlock) => RenderedBlock;
   /** The row arrived while the chat was open: Claude's reply is revealed, as the visitor sees it. */
   live: boolean;
   /** The held requests whose cards are drawn right after this row. */
@@ -222,7 +225,7 @@ interface RowViewProps {
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
-function RowView({ row, live, cards, shown, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
+function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
   const { item } = row;
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
   const margin = row.receipts.map((source, index) => (
@@ -251,7 +254,7 @@ function RowView({ row, live, cards, shown, agentName, ownerName, timezone, onOp
         item.ev.author === 'owner' ? (
           <PersonMessage name="You" initials={initialsOf(ownerName)} blocks={item.ev.blocks} language={item.ev.language} />
         ) : (
-          <ClaudeMessage blocks={item.ev.blocks} language={item.ev.language} ownerName={ownerName} reveal={live} />
+          <ClaudeMessage blocks={item.ev.blocks.map(paymentBlock)} language={item.ev.language} ownerName={ownerName} reveal={live} />
         );
       break;
   }
@@ -281,6 +284,9 @@ export function OwnerTranscript({
   readSinceOpened,
 }: OwnerTranscriptProps) {
   const groups = useMemo(() => rowsOf(items), [items]);
+  const messages = useMemo(() => groups.rows.flatMap(({ item }) => item.kind === 'message' ? [item.ev] : []), [groups]);
+  const [paymentLinks] = useState(paymentLinkMemory);
+  const paymentBlock = usePaymentLinks(messages, paymentLinks);
   const arrived = useArrivals(groups.rows, recorded, readSinceOpened);
   const shown = useShownReceipts(groups);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
@@ -377,6 +383,7 @@ export function OwnerTranscript({
       <Fragment key={`${row.item.kind}-${row.item.n}`}>
         <RowView
           row={row}
+          paymentBlock={paymentBlock}
           live={arrived(row)}
           cards={cards}
           shown={shown}

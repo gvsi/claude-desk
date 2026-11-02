@@ -7,7 +7,7 @@
  *
  * Reused by setup's preview (`embedded`), which sits inside an owner screen.
  */
-import { Component, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Component, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 
 import type { RenderedBlock, SessionState } from '../api/contracts.ts';
 import {
@@ -739,7 +739,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // The chat's own path, without the owner's `?preview=`: the visitor cookie the preview's chat
   // runs on is the one `/d/<slug>` resumes. Setup's preview sits inside an owner screen, so its
   // links note no chat to go back to.
-  const paymentBlock = usePaymentLinks(chat.state.rows, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
+  const messages = useMemo(() => chat.state.rows.flatMap(({ item }) => (item.kind === 'message' ? [item.ev] : [])), [chat.state.rows]);
+  const paymentBlock = usePaymentLinks(messages, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // After useNewestInView, so it looks once the newest message is in its place.
   const waiting = useWaitingRequests(endRef, composerRef, !opening && desk !== null);
