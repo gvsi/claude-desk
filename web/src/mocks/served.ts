@@ -418,7 +418,7 @@ export class Server {
     if (turn.timer === null) this.tick(sessionId);
   }
 
-  /** The same scripted turn for a visitor's send or work waiting when Claude resumes. */
+  /** The scripted turn answering a visitor's line: one just sent, or one still waiting at the hand-back. */
   runVisitorTurn(session: SessionRecord, text: string): void {
     this.runTurn(session, () => scriptedTurn(text, hasAllTools(this.world, session), this.world.ownerOf(session), session.person), session.language, text);
   }
