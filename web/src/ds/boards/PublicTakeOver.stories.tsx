@@ -8,7 +8,7 @@ import { Transcript } from '../components/Transcript/Transcript.tsx';
 import type { TranscriptTurn } from '../fixtures/index.ts';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
-import { FollowTheChat } from '../test/followTheChat.tsx';
+import { FollowTheChat, expectRoomUnderTheEnd } from '../test/followTheChat.tsx';
 import { OPEN_NOW, TurnRows, brandOf } from './parts.tsx';
 import { SPEC, expectConversationType, expectFooter, expectReceiptsUnderMessages, expectTabOrder, one } from './spec.ts';
 
@@ -58,7 +58,7 @@ const meta = {
       'Take-over option A, signed on 2026-10-30: while Mike is in the chat, the chat head says so and that Claude, an AI, is paused until he hands it back, on the disclosure’s line, and Ask for Mike isn’t shown.',
       'Checked against both renders on 2026-11-02 (issue #230): the story matches them to the pixel, apart from the names, the content and the decisions signed after the boards, below.',
       'The boards keep the business and owner names they were drawn with, before the demo owner was renamed, as history; the story has the fixture’s, Turner Plumbing and Mike Turner, so on a phone the head’s line breaks at another word.',
-      'The conversation is the Turner fixture’s: Dana asks for Mike, the kernel’s handoff card with its receipt, then the take-over’s events (Mike joins, and his words under his name), with its end kept above the composer as the page keeps it, its last row 24 px over the composer area.',
+      'The conversation is the Turner fixture’s: Dana asks for Mike, the kernel’s handoff card with its receipt, then the take-over’s events (Mike joins, and his words under his name), with its end kept above the composer as the page keeps it: on a phone, where the chat scrolls, its last row ends 24 px over the composer area.',
       'The board opens with an earlier exchange about the water heater, which isn’t in the fixture, so the story starts at Dana asking for Mike; Mike’s words are the fixture’s, without the board’s greeting.',
       'The about column shows the charter’s cards, and the header the kernel’s open status; on a phone the about column opens the chat’s scroll region, above the conversation, where the phone board has none.',
       'The author’s name in the footer is a text link, signed after the boards (#697), where they draw it as plain text.',
@@ -137,13 +137,8 @@ export const Phone: Story = {
   parameters: { canvas: 'N-R2-TakeOver-A-390-EN' },
   play: async ({ canvasElement, userEvent }) => {
     await expectMariaInTheChat(canvasElement, userEvent, [390, 844]);
-    // The chat scrolls here, so its end is kept as the page keeps it: the last row 24 px above the
-    // composer area, the room the public chat leaves under the conversation.
-    const rows = canvasElement.querySelectorAll<HTMLElement>('.cd-public-shell__conversation .cd-transcript-row');
-    const last = rows[rows.length - 1];
-    if (!last) throw new Error('no rows in the conversation');
-    const area = one(canvasElement, '.cd-public-shell__composer');
-    await expect(Math.round(area.getBoundingClientRect().top - last.getBoundingClientRect().bottom)).toBe(24);
+    // The chat scrolls here, so its end is kept as the page keeps it.
+    await expectRoomUnderTheEnd(canvasElement);
     // Nothing reaches past the phone's edge: the head's line wraps inside it.
     for (const el of canvasElement.querySelectorAll('.cd-public-shell *')) {
       await expect(el.getBoundingClientRect().right).toBeLessThanOrEqual(390.5);
