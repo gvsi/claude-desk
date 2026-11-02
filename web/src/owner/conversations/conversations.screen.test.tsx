@@ -83,6 +83,18 @@ function log(screen: RenderResult) {
   return screen.getByRole('log');
 }
 
+/**
+ * The scroll region around the conversation's transcript. When the first read is slow enough for
+ * the pane's skeleton to show, its shapes fade over the conversation for a moment after it lands,
+ * and their own region of this class comes first in the page until they go; so take the one that
+ * holds the log.
+ */
+function transcriptRegion(screen: RenderResult): Element {
+  const region = log(screen).element().closest('.cd-conversation__scroll');
+  if (!region) throw new Error('the transcript scrolls in its own region');
+  return region;
+}
+
 /** Makes `chat` longer than the window: `count` more messages from the visitor. Returns the last. */
 function lengthen(chat: SessionRecord, count = 30): string {
   let last = '';
@@ -377,6 +389,7 @@ describe('Conversations', () => {
     const chat = log(screen);
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
     await expect.element(chat.getByText(first ?? '', { exact: true })).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
     const pane = document.querySelector<HTMLElement>('.cd-conversations__open');
     if (!pane) throw new Error('the conversation opens in its pane');
     const style = getComputedStyle(pane);
@@ -399,7 +412,7 @@ describe('Conversations', () => {
     }
     fills(transcript, 'transcript');
     fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
-    const scroll = document.querySelector('.cd-conversation__scroll')!.getBoundingClientRect();
+    const scroll = transcriptRegion(screen).getBoundingClientRect();
     expect(Math.abs(scroll.right - paneRect.right), 'scroll bar stays at the pane edge').toBeLessThanOrEqual(1);
     expect(inner.left - scroll.left, 'focus rings have side clearance').toBeGreaterThanOrEqual(16);
     // Her bubble ends at the transcript's right edge, at most 85% of its width.
@@ -425,12 +438,12 @@ describe('Conversations', () => {
     expectNoHorizontalScroll();
   });
 
-  async function firstCallbackLeavesHerPlace(place: 'scroll' | 'focus') {
+  it.each(['scroll', 'focus'] as const)('a_first_callback_on_a_later_poll_leaves_her_%s_in_place', async (place) => {
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     // The long chat overflows its region first: until it has, the region's end reads as its latest
     // and a place 300 px down can't be set.
     await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
@@ -453,22 +466,22 @@ describe('Conversations', () => {
     expect(card.element().getBoundingClientRect().bottom).toBeLessThan(region.getBoundingClientRect().top);
     expect(region.scrollTop).toBe(placeAt);
     if (place === 'focus') expect(document.activeElement).toBe(focused);
-  }
+  });
 
-  // Both cases are skipped while they fail on CI when other tests run before them in the shard (the
-  // transcript region never overflows there); they pass alone. Restore them with their fix: #722.
-  it.skip('a_first_callback_on_a_later_poll_leaves_her_scroll_in_place', () => firstCallbackLeavesHerPlace('scroll'));
-  it.skip('a_first_callback_on_a_later_poll_leaves_her_focus_in_place', () => firstCallbackLeavesHerPlace('focus'));
-
-  // Skipped with the two above: the same opening check that the transcript overflows fails on CI's first shard (#722).
-  it.skip('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals', async () => {
+  it.each(['immediate', 'held'] as const)('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals_after_%s_first_read', async (firstRead) => {
     // The chat opens once Needs you's first read is in, since it draws the requests held in it, so a
     // callback comes late on a later read: she is still where the chat opened, at its latest.
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
+    const read = firstRead === 'held' ? holdReads(ROUTES.conversation.path.replace('{session_id}', DANA_LIVE)) : null;
     const { screen } = await renderRoute(conversation(DANA_LIVE));
+    if (read) {
+      // Force the slow opening: the skeleton will fade over the real transcript after release.
+      await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+      read.release();
+    }
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
     // As above, the long chat overflows its region first; until then its end reads as its latest at 0.
     await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
@@ -511,7 +524,7 @@ describe('Conversations', () => {
     await row.click();
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
     expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
     expect(region.scrollHeight).toBeGreaterThan(region.clientHeight);
@@ -895,17 +908,23 @@ describe('Conversations', () => {
     // it again in a pill, as the list leaves out its status line. The signed pill stays.
     const booked = await bookTheEarliestVisit();
     session(booked).displayName = null;
+    const firstRead = holdReads(ROUTES.conversation.path.replace('{session_id}', booked));
     const { screen } = await renderRoute(conversation(booked));
+    await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+    firstRead.release();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Agent', exact: true })).toBeVisible();
-    const head = screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    const head = screen.getByRole('heading', { level: 2, name: 'Agent', exact: true }).element().closest('.cd-conversation__head')!;
     expect([...head.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Signed']);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Named, the pill says what the name doesn't.
     session(booked).displayName = rivera.conversations.alexAgent.name;
+    const namedRead = holdReads(ROUTES.conversation.path.replace('{session_id}', booked));
     const withName = await renderRoute(conversation(booked));
+    await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+    namedRead.release();
     await expect.element(withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
-    const namedHead = withName.screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    const namedHead = withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name, exact: true }).element().closest('.cd-conversation__head')!;
     expect([...namedHead.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Agent', 'Signed']);
   });
 
