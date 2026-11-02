@@ -20,8 +20,8 @@ function tokenOf(block: RenderedBlock): string | undefined {
  * The visitor's chat and the owner's transcript both read it, so a link paid or cancelled loses
  * "Open payment page" in each alike.
  * With `chatPath` (the chat's own `/d/<slug>`, when the chat is the page), each payment link card
- * the chat shows notes its token, as a digest, against that path in this browser, so the paid
- * checkout can link back here (`payChats.ts`).
+ * the chat shows notes its token, as a digest, against that path in this browser, so the closed
+ * checkout can link back to it (`payChats.ts`).
  */
 export function usePaymentLinks(
   messages: readonly LinkMessage[],

@@ -1,23 +1,26 @@
 /**
- * `carrySetup`, on a query client of its own: setup's interview written into the copy's Desks only
- * ever moves a Desk's setup forward, so an older interview state never undoes what the API said.
+ * Desk list cancellation and `carrySetup`, on a query client of their own: cancelled HTTP reads
+ * stop, and setup's cached interview only moves forward, never undoing what the API said.
  */
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { http, HttpResponse } from 'msw';
+import { setupServer } from 'msw/node';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { ROUTES } from '../api/routes.ts';
 import type { BusinessOut, DeskSetup, DeskSummary } from '../api/views.ts';
 import { rivera } from '../ds/fixtures/index.ts';
-import { DESKS_KEY, RIVERA_SAMPLE_BUSINESS_NAME, carrySetup } from './useDesks.ts';
+import { DESKS_KEY, RIVERA_SAMPLE_BUSINESS_NAME, carrySetup, desksQuery } from './useDesks.ts';
 
 const DESK = 'desk-okafor';
 const INTERVIEW = 'setup-okafor';
 
 function desk(setup: DeskSetup | null): DeskSummary {
-  return { desk_id: DESK, slug: 'okafor-plumbing', name: 'Main line', business_name: 'Okafor Plumbing', hours: [], answering: false, setup };
+  return { desk_id: DESK, slug: 'okafor-plumbing', name: 'Main line', business_name: 'Okafor Plumbing', hours: [], answering: false, setup, business_type: 'trade' };
 }
 
 const stops: (() => void)[] = [];
@@ -53,6 +56,64 @@ function readAs(setup: DeskSetup | null): { queryClient: QueryClient; reads: () 
 function named(queryClient: QueryClient): DeskSetup | null | undefined {
   return queryClient.getQueryData<BusinessOut[]>(DESKS_KEY)?.[0]?.desks[0]?.setup;
 }
+
+it('cancelling_a_desks_read_aborts_its_http_request_without_a_query_error', async () => {
+  let received: Request | undefined;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const server = setupServer(http.get(`http://localhost${ROUTES.desks.path}`, async ({ request }) => {
+    received = request;
+    await held;
+    return HttpResponse.json([]);
+  }));
+  server.listen();
+  const send = globalThis.fetch;
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => send(
+    typeof input === 'string' ? new URL(input, 'http://localhost') : input, init,
+  ));
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  stops.push(() => { release(); queryClient.clear(); vi.unstubAllGlobals(); server.close(); });
+  const reading = queryClient.fetchQuery(desksQuery()).catch((error: unknown) => error);
+  await vi.waitFor(() => expect(received).toBeDefined());
+  expect(received!.signal.aborted).toBe(false);
+
+  await queryClient.cancelQueries({ queryKey: DESKS_KEY });
+
+  expect(received!.signal.aborted).toBe(true);
+  expect(queryClient.getQueryState(DESKS_KEY)).toMatchObject({ status: 'pending', fetchStatus: 'idle', error: null });
+  await reading;
+});
+
+it('unsubscribing_the_last_desks_observer_aborts_and_rolls_back_without_an_error', async () => {
+  let received: Request | undefined;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const server = setupServer(http.get(`http://localhost${ROUTES.desks.path}`, async ({ request }) => {
+    received = request;
+    await held;
+    return HttpResponse.json([]);
+  }));
+  server.listen();
+  const send = globalThis.fetch;
+  vi.stubGlobal('fetch', (input: string | URL | Request, init?: RequestInit) => send(
+    typeof input === 'string' ? new URL(input, 'http://localhost') : input, init,
+  ));
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  stops.push(() => { release(); queryClient.clear(); vi.unstubAllGlobals(); server.close(); });
+  queryClient.setQueryData(DESKS_KEY, [], { updatedAt: 123 });
+  const observer = new QueryObserver(queryClient, desksQuery());
+  const unsubscribe = observer.subscribe(() => undefined);
+  stops.push(unsubscribe);
+  await vi.waitFor(() => expect(received).toBeDefined());
+  expect(received!.signal.aborted).toBe(false);
+
+  unsubscribe();
+
+  expect(received!.signal.aborted).toBe(true);
+  expect(queryClient.getQueryState(DESKS_KEY)).toMatchObject({
+    status: 'success', fetchStatus: 'idle', error: null, data: [], dataUpdatedAt: 123,
+  });
+});
 
 it('the_sample_business_name_matches_the_backend_seed_and_fixture', () => {
   const seedPy = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'backend', 'desk', 'kernel_service', 'seed.py'), 'utf8');

@@ -1,7 +1,7 @@
 /**
  * Settings in a real browser against the mock API: its sections, with no connectors (they have
  * their own tab); General's details from the copy's Desks, its Answering switch (the sidebar's,
- * the same control) and deleting a Desk; Notifications and Billing as vision; each as its signed
+ * the same control) and deleting a Desk; Alerts and Billing as vision; each as its signed
  * board draws it, on a laptop and on a phone.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
@@ -13,6 +13,7 @@ import { ROUTES } from '../../api/routes.ts';
 import { SPEC, expectFooterAtFoot, one } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { worker } from '../../mocks/browser.ts';
+import { businessOut } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
@@ -23,7 +24,7 @@ const DESK = `/app/${RIVERA.deskId}`;
 const SETTINGS = `${DESK}/settings`;
 const PROFILE = `${DESK}/profile`;
 const GENERAL = `${SETTINGS}/general`;
-const NOTIFICATIONS = `${SETTINGS}/notifications`;
+const ALERTS = `${SETTINGS}/alerts`;
 const BILLING = `${SETTINGS}/billing`;
 
 /** What Answering on means, under General's switch (owner decision, 2026-10-30: the short line everywhere). */
@@ -47,18 +48,18 @@ const REFUSED: readonly (readonly [status: number, line: string])[] = [
   [429, "That's a lot of requests at once. Wait a moment, then try again."],
 ];
 
-/** Notifications' lead, under its vision note. */
-const NOTIFICATIONS_LEAD = 'Held requests and paused chats reach your Demo inbox right away. Other alerts wait for your briefing.';
+/** Alerts' lead, under its vision note. */
+const ALERTS_LEAD = 'Held requests and paused chats arrive in Notifications right away. Other alerts wait for your briefing.';
 
 /** The alerts set for a plumber, as the board writes them: when, which, and how they arrive. */
 const PLUMBER = [
-  ['Right away', 'Held requests, paused chats and emergencies', 'Demo inbox'],
+  ['Right away', 'Held requests, paused chats and emergencies', 'Notifications'],
   ['In your briefing', 'New leads, bookings and payments', 'Each morning at 7:00 am'],
   ['Not at all', 'Messages Claude answered on its own'],
 ];
 
 /** The sections Settings ships with, in order. Channels joins when its page does. */
-const SECTIONS = ['General', 'Notifications', 'Billing'];
+const SECTIONS = ['General', 'Alerts', 'Billing'];
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -103,7 +104,7 @@ describe('Settings', () => {
 
     // Each section at its own address, marked as the current one, with its own page drawn.
     for (const [name, path, region] of [
-      ['Notifications', NOTIFICATIONS, 'Set for a plumber'],
+      ['Alerts', ALERTS, 'Set for a plumber'],
       ['Billing', BILLING, 'Plan'],
       ['General', GENERAL, 'Claude acts for you'],
     ] as const) {
@@ -229,7 +230,7 @@ describe('Settings', () => {
     await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
     expect(root.dataset.theme).toBe('light');
 
-    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    await subNav(screen).getByRole('link', { name: 'Alerts' }).click();
     await expect.element(main(screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
     await subNav(screen).getByRole('link', { name: 'General' }).click();
     await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
@@ -296,6 +297,68 @@ describe('Settings', () => {
     expect(decided).toEqual([]);
   });
 
+  it('delete_desk_title_names_the_business_and_desk', async () => {
+    const { screen } = await renderRoute(GENERAL);
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    const title = "Delete Main line for Turner Plumbing?";
+    const dialog = screen.getByRole('dialog');
+    await expect.element(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible();
+    await expect.element(dialog).toHaveAccessibleName(title);
+    await expect.element(dialog).toHaveAccessibleDescription(DELETE_LINE);
+    expect(dialog.element().textContent).toBe(`${title}${DELETE_LINE}Keep itDelete Desk`);
+    expect(requests('deleteDesk')).toEqual([]);
+  });
+
+  it('delete_desk_title_uses_the_selected_business_with_the_same_desk_name', async () => {
+    const business = businessOut(mockStore.world);
+    worker.use(http.get(ROUTES.desks.path, () => HttpResponse.json([
+      { ...business, desks: business.desks.map((desk) => ({ ...desk, desk_id: 'demo-main-line' })) },
+      { ...business, business_id: 'biz-ross', name: 'Ross', desks: business.desks.map((desk) => ({ ...desk, business_name: 'Ross' })) },
+    ])));
+    const { screen } = await renderRoute(GENERAL);
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    const title = 'Delete Main line for Ross?';
+    const dialog = screen.getByRole('dialog', { name: title, exact: true });
+    await expect.element(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible();
+    expect(dialog.element().textContent).toBe(`${title}${DELETE_LINE}Keep itDelete Desk`);
+  });
+
+  it('delete_desk_title_keeps_untrusted_names_as_text', async () => {
+    const business = businessOut(mockStore.world);
+    worker.use(http.get(ROUTES.desks.path, () => HttpResponse.json([{
+      ...business,
+      name: '<b>Ross & sons</b>',
+      desks: business.desks.map((desk) => ({ ...desk, name: '<i>Main line</i>' })),
+    }])));
+    const { screen } = await renderRoute(GENERAL);
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    const title = "Delete <i>Main line</i> for <b>Ross & sons</b>?";
+    const dialog = screen.getByRole('dialog', { name: title, exact: true });
+    await expect.element(dialog.getByRole('heading', { name: title, exact: true })).toBeVisible();
+    expect(dialog.element().textContent).toBe(`${title}${DELETE_LINE}Keep itDelete Desk`);
+    expect(dialog.element().querySelector('b, i')).toBeNull();
+  });
+
+  it('delete_desk_title_isolates_each_name', async () => {
+    const business = businessOut(mockStore.world);
+    const businessName = 'Turner \u202ePlumbing';
+    worker.use(http.get(ROUTES.desks.path, () => HttpResponse.json([{
+      ...business,
+      name: businessName,
+    }])));
+    const { screen } = await renderRoute(GENERAL);
+    await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
+    const title = `Delete Main line for ${businessName}?`;
+    const dialog = screen.getByRole('dialog');
+    const heading = dialog.getByRole('heading', { name: title, exact: true });
+    await expect.element(heading).toBeVisible();
+    await expect.element(dialog).toHaveAccessibleName(title);
+    expect(Array.from(heading.element().querySelectorAll('[data-copy="user"]'), (name) => [name.tagName, name.textContent])).toEqual([
+      ['BDI', 'Main line'],
+      ['BDI', businessName],
+    ]);
+  });
+
   it('delete_desk_confirms', async () => {
     const { screen, router } = await renderRoute(GENERAL, { seed: 'rivera_two_desks' });
     const section = main(screen).getByRole('region', { name: 'Delete this Desk' });
@@ -304,7 +367,7 @@ describe('Settings', () => {
 
     // It asks first, with "Keep it" focused; Escape keeps the Desk, and focus goes back.
     await remove.click();
-    const dialog = screen.getByRole('dialog', { name: 'Delete Main line?' });
+    const dialog = screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" });
     await expect.element(dialog).toHaveAccessibleDescription(DELETE_LINE);
     await expect.element(dialog.getByRole('button', { name: 'Keep it' })).toHaveFocus();
     await userEvent.keyboard('{Escape}');
@@ -313,14 +376,14 @@ describe('Settings', () => {
 
     // "Keep it" too.
     await remove.click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Keep it' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Keep it' }).click();
     await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
     expect(requests('deleteDesk')).toEqual([]);
 
     // A delete the server failed says so and changes nothing: still on Settings, the Desk still there.
     mockStore.inject({ route: 'deleteDesk', status: 500 });
     await remove.click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.element(section.getByRole('alert')).toHaveTextContent(UNAVAILABLE);
     await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(GENERAL);
@@ -333,7 +396,7 @@ describe('Settings', () => {
       mockStore.inject({ route: 'deleteDesk', status });
       const reads = requests('desks').length;
       await remove.click();
-      await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+      await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
       await expect.element(section.getByRole('alert')).toHaveTextContent(line);
       await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
       expect(requests('desks')).toHaveLength(reads);
@@ -344,7 +407,7 @@ describe('Settings', () => {
     // Confirmed: one delete, answered 204, then the other Desk's Today, with no "not found" on the way.
     const sawNotFound = watchFor("This page doesn't exist");
     await remove.click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     expect(requests('deleteDesk').map((r) => r.path)).toEqual([0, 1, 2, 3].map(() => `/api/owner/desks/${RIVERA.deskId}`));
     expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
@@ -359,7 +422,7 @@ describe('Settings', () => {
     const lostSawNotFound = watchFor("This page doesn't exist");
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
     await main(lost.screen).getByRole('button', { name: 'Delete this Desk' }).click();
-    await lost.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await lost.screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => lost.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     await expect.element(lost.screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(lost.screen.getByText(UNAVAILABLE).elements()).toEqual([]);
@@ -373,7 +436,7 @@ describe('Settings', () => {
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
     mockStore.inject({ route: 'desks', status: 'network' });
     await main(unsure.screen).getByRole('button', { name: 'Delete this Desk' }).click();
-    await unsure.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await unsure.screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     const unconfirmed = main(unsure.screen).getByRole('region', { name: 'Delete this Desk' }).getByRole('alert');
     // The line, then its one action: read the copy again. Focus moves to it from the Delete button it replaced.
     await expect.element(unconfirmed).toHaveTextContent(`${UNCONFIRMED}Reload`);
@@ -411,7 +474,7 @@ describe('Settings', () => {
     mockStore.inject({ route: 'deleteDesk', status: 'network' });
     mockStore.inject({ route: 'desks', status: 'network' });
     await keptSection.getByRole('button', { name: 'Delete this Desk' }).click();
-    await kept.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await kept.screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.element(keptSection.getByRole('alert').getByRole('button', { name: 'Reload' })).toHaveFocus();
     await userEvent.keyboard('{Enter}');
     await expect.element(keptSection.getByRole('button', { name: 'Delete this Desk' })).toHaveFocus();
@@ -426,7 +489,7 @@ describe('Settings', () => {
     await expect.element(main(elsewhere.screen).getByRole('button', { name: 'Delete this Desk' })).toBeVisible();
     expect(await mockStore.dispatch('deleteDesk', { params: { desk_id: RIVERA.deskId } })).toMatchObject({ status: 204 });
     await main(elsewhere.screen).getByRole('button', { name: 'Delete this Desk' }).click();
-    await elsewhere.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await elsewhere.screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => elsewhere.router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     expect(elsewhere.screen.getByRole('alert').elements()).toEqual([]);
 
@@ -439,7 +502,7 @@ describe('Settings', () => {
     mockStore.inject({ route: 'deleteDesk', status: 404 });
     const readsBefore404 = requests('desks').length;
     await unservedSection.getByRole('button', { name: 'Delete this Desk' }).click();
-    await unserved.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await unserved.screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.element(unservedSection.getByRole('alert')).toHaveTextContent(UNAVAILABLE);
     expect(requests('desks').length).toBeGreaterThan(readsBefore404);
     expect(unserved.router.state.location.pathname).toBe(GENERAL);
@@ -449,7 +512,7 @@ describe('Settings', () => {
     // The business's last Desk: deleting it opens setup, to make another.
     const last = await renderRoute(GENERAL, { seed: 'rivera' });
     await main(last.screen).getByRole('button', { name: 'Delete this Desk' }).click();
-    await last.screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await last.screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => last.router.state.location.pathname).toBe('/app/setup');
     expect(requests('deleteDesk')).toHaveLength(1);
   });
@@ -471,7 +534,7 @@ describe('Settings', () => {
     // so the owner moves on without waiting for the early read.
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
     await page.getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => requests('desks').length).toBeGreaterThan(reads);
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
@@ -496,7 +559,7 @@ describe('Settings', () => {
     if (!chat) throw new Error("Dana's refund has a chat");
     const token = mockStore.world.issueLink(chat, { title: 'Deposit', amountCents: 2000, language: 'en' });
     await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
 
     // Its chat is closed to whatever an owner tab still open on it sends, as the kernel closes a
@@ -562,22 +625,22 @@ describe('Settings against its boards', () => {
     // Its dialog is the general one (owner decision, 2026-10-30): no refused dot, Delete Desk the
     // neutral primary beside "Keep it".
     await remove.click();
-    const dialog = screen.getByRole('dialog', { name: 'Delete Main line?' });
+    const dialog = screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" });
     await expect.element(dialog).toBeVisible();
     expect(dialog.element().querySelector('.cd-status-dot')).toBeNull();
     expectComputed(dialog.getByRole('button', { name: 'Delete Desk' }).element(), SPEC.primary);
     await userEvent.keyboard('{Escape}');
     await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
 
-    // Notifications as N-Run2-Settings-Notifications draws it: the vision note, the lead 20 px
-    // under it, then the alerts set for a plumber 20 px under that, read-only.
-    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    // Alerts as REV-NOTIF-Aset draws it: the vision note, the lead 20 px under it, then the alerts
+    // set for a plumber 20 px under that, read-only.
+    await subNav(screen).getByRole('link', { name: 'Alerts' }).click();
     const alerts = main(screen).getByRole('region', { name: 'Set for a plumber' });
     await expect.element(alerts).toBeVisible();
     await expectOwnerBoard(screen.container, { current: 'Settings', fill: true });
-    content = await expectSettingsColumns(screen, 'Notifications');
-    const vision = expectVisionNote(content, 'In this prototype, alerts reach your Demo inbox.');
-    const lead = main(screen).getByText(NOTIFICATIONS_LEAD, { exact: true }).element();
+    content = await expectSettingsColumns(screen, 'Alerts');
+    const vision = expectVisionNote(content, 'In this prototype, alerts arrive in Notifications.');
+    const lead = main(screen).getByText(ALERTS_LEAD, { exact: true }).element();
     expectComputed(lead, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
     expect(round(top(lead) - bottom(vision))).toBe(20);
     expect(round(top(alerts.element()) - bottom(lead))).toBe(20);
@@ -650,7 +713,7 @@ describe('Settings against its boards', () => {
     await expect.element(main(screen).getByRole('region', { name: 'Claude acts for you' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     for (const [name, region] of [
-      ['Notifications', 'Set for a plumber'],
+      ['Alerts', 'Set for a plumber'],
       ['Billing', 'Plan'],
     ] as const) {
       await subNav(screen).getByRole('link', { name }).click();
@@ -661,10 +724,10 @@ describe('Settings against its boards', () => {
     // The delete dialog, and a delete that failed.
     await subNav(screen).getByRole('link', { name: 'General' }).click();
     await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
-    await expect.element(screen.getByRole('dialog', { name: 'Delete Main line?' })).toBeVisible();
+    await expect.element(screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     mockStore.inject({ route: 'deleteDesk', status: 500 });
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.element(main(screen).getByRole('alert')).toHaveTextContent(UNAVAILABLE);
     await expectScreenBasics(screen.container, { owner: true });
 
@@ -672,12 +735,12 @@ describe('Settings against its boards', () => {
     mockStore.inject({ route: 'deleteDesk', status: 'network', afterCommit: true });
     mockStore.inject({ route: 'desks', status: 'network' });
     await main(screen).getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.element(main(screen).getByRole('alert')).toHaveTextContent(`${UNCONFIRMED}Reload`);
     await expectScreenBasics(screen.container, { owner: true });
 
     // On a phone too, with nothing scrolling sideways.
-    const phone = await renderRoute(NOTIFICATIONS, { viewport: 'phone', seed: 'rivera' });
+    const phone = await renderRoute(ALERTS, { viewport: 'phone', seed: 'rivera' });
     await expect.element(main(phone.screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
     await expectScreenBasics(phone.screen.container, { owner: true });
     expectNoHorizontalScroll();

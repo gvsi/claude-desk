@@ -24,7 +24,7 @@ const hrefs = {
   share: '#share',
   knowledge: '#knowledge',
   settings: '#settings',
-} satisfies Record<NavKey, string>;
+} satisfies Record<Exclude<NavKey, 'notifications'>, string>;
 
 /**
  * The sidebar as the owner layout holds it: the Claude acts for you switch and the Desk picker show what the
@@ -281,6 +281,38 @@ export const OnConnectors: Story = {
     // The rows keep the board's spacing: 36 px tall, 2 px apart, so a row every 38 px.
     const tops = rows.map((row) => row.link.getBoundingClientRect().top);
     await expect(tops.slice(1).map((top, index) => Math.round(top - (tops[index] ?? 0)))).toEqual([38, 38, 38, 38, 38, 38, 38, 38, 38]);
+  },
+};
+
+/** The owner app's sidebar since REV-NOTIF: Notifications under Safety, with its bell and the unread count. */
+export const WithNotifications: Story = {
+  args: {
+    current: 'notifications',
+    desks: [MAIN_LINE],
+    hrefs: { ...hrefs, notifications: '#notifications' },
+    counts: { conversations: { n: 1, label: '1 live conversation' }, notifications: { n: 1, label: '1 unread' } },
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'REV-NOTIF (in review, 2026-11-02) puts Notifications under Safety with Lucide’s bell and a count of the unread ones; the owner’s Demo inbox became this page. Nearest reference board: N-Today-Run1.',
+  },
+  play: async ({ canvasElement }) => {
+    // Notifications is the seventh of eleven rows, under Safety, and the current page.
+    const rows = navRows(canvasElement);
+    await expect(rows.map((row) => row.text)).toEqual([
+      'Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Notifications', 'Profile', 'Share', 'Knowledge', 'Settings',
+    ]);
+    const notifications = rows[6]?.link as HTMLElement;
+    await expect(notifications).toHaveAttribute('href', '#notifications');
+    await expect(notifications).toHaveAttribute('aria-current', 'page');
+    expectComputed(notifications, { height: '36px', backgroundColor: 'rgb(60, 57, 47)', borderRadius: '8px' });
+    await expect(within(notifications).getByRole('img', { name: '1 unread' })).toHaveTextContent('1');
+    const icon = notifications.querySelector('svg');
+    await expect(icon).toHaveAttribute('aria-hidden', 'true');
+    await expect(icon).toHaveAttribute('width', '20');
+    const tops = rows.map((row) => row.link.getBoundingClientRect().top);
+    await expect(tops.slice(1).map((top, index) => Math.round(top - (tops[index] ?? 0)))).toEqual([38, 38, 38, 38, 38, 38, 38, 38, 38, 38]);
   },
 };
 

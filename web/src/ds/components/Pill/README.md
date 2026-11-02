@@ -15,7 +15,7 @@
 
 ## A vision note
 
-A page the prototype only sketches (Settings › Notifications and Billing) opens with a vision note, as N-Run2-Settings-Notifications and N-Run2-Settings-Billing draw it: the `Pill` "Vision", then `space-12` after it, one line in `meta`, `text-secondary`, saying what the prototype does instead ("In this prototype, alerts reach your Demo inbox.", "Nothing is billed in this prototype."), the two centered on one row. The screen lays the row out; the Pill is the only component in it.
+A page the prototype only sketches (Settings › Alerts and Billing) opens with a vision note, as N-Run2-Settings-Notifications and N-Run2-Settings-Billing draw it: the `Pill` "Vision", then `space-12` after it, one line in `meta`, `text-secondary`, saying what the prototype does instead ("In this prototype, alerts arrive in Notifications.", "Nothing is billed in this prototype."), the two centered on one row. The screen lays the row out; the Pill is the only component in it.
 
 ## Props
 

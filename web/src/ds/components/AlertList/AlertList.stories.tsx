@@ -5,9 +5,9 @@ import { expectComputed } from '../../test/expectComputed.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { AlertList, type AlertListItem } from './AlertList.tsx';
 
-/** The alerts set for a plumber, as N-Run2-Settings-Notifications writes them. */
+/** The alerts set for a plumber, as REV-NOTIF-Aset writes them on N-Run2-Settings-Notifications' card. */
 const PLUMBER: AlertListItem[] = [
-  { when: 'Right away', what: 'Held requests, paused chats and emergencies', how: 'Demo inbox' },
+  { when: 'Right away', what: 'Held requests, paused chats and emergencies', how: 'Notifications' },
   { when: 'In your briefing', what: 'New leads, bookings and payments', how: 'Each morning at 7:00 am' },
   { when: 'Not at all', what: 'Messages Claude answered on its own' },
 ];
@@ -33,7 +33,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Plumber: Story = {
-  parameters: { canvasNote: 'Notifications’ card at the content column’s 720 px, under the page’s own heading, which the board draws over it.' },
+  parameters: { canvasNote: 'Alerts’ card at the content column’s 720 px, under the page’s own heading, which the board draws over it.' },
   play: async ({ canvas, canvasElement }) => {
     // list_semantics_kept: a list named by its label, one item per alert setting, its role kept with its markers gone.
     await expect(expectListsKeepTheirRole(canvasElement)).toBe(1);
@@ -42,7 +42,7 @@ export const Plumber: Story = {
     await expect(rows.map((row) => row.querySelector('.cd-alert-list__when')?.textContent)).toEqual(['Right away', 'In your briefing', 'Not at all']);
     await expect(rows.map((row) => row.querySelector('.cd-alert-list__what')?.textContent)).toEqual(PLUMBER.map((item) => item.what));
     // How each reaches the owner at the right; nothing for alerts that don't.
-    await expect(rows.map((row) => row.querySelector('.cd-alert-list__how')?.textContent ?? null)).toEqual(['Demo inbox', 'Each morning at 7:00 am', null]);
+    await expect(rows.map((row) => row.querySelector('.cd-alert-list__how')?.textContent ?? null)).toEqual(['Notifications', 'Each morning at 7:00 am', null]);
     // Read-only: nothing here can be pressed or changed.
     await expect(canvasElement.querySelectorAll('button, a, input, select, textarea')).toHaveLength(0);
 
@@ -87,7 +87,7 @@ export const Phone: Story = {
   parameters: {
     layout: 'fullscreen',
     canvas: 'none',
-    canvasNote: 'No board draws Notifications on a phone, so this follows N-Run2-Settings-Notifications: in a 358 px card, how an alert reaches the owner goes under what it is when the two don’t fit on a line.',
+    canvasNote: 'No board draws Alerts on a phone, so this follows N-Run2-Settings-Notifications: in a 358 px card, how an alert reaches the owner goes under what it is when the two don’t fit on a line.',
   },
   play: async ({ canvas }) => {
     await expect(window.innerWidth).toBe(390);

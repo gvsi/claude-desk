@@ -1,9 +1,10 @@
 import { useId, type ReactNode, type Ref } from 'react';
 
 import type { BriefingItem, Today } from '../../api/views.ts';
-import { Button, Card, EmptyState, Notice, SectionHeader, TextLink } from '../../ds/index.ts';
+import { Card, EmptyState, SectionHeader, TextLink } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { ReadFailed } from '../ReadFailed.tsx';
 import { useToday } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { BriefingRow, isShown } from './BriefingRow.tsx';
@@ -83,6 +84,8 @@ function nightLine(briefing: Today['briefing']): string | null {
 /**
  * Today's "Since last night", always shown: its one line, one row of each kind, and "See all {n}"
  * when the night has more than those rows, or a quiet night. Read with Today and polled with it.
+ * While the latest read has failed, the card says so first, with "Try again", over the night read
+ * before, as "Last 7 days" does; a quiet night isn't said then, since the page couldn't check it.
  */
 export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   const { desk } = useOwnerDesk();
@@ -97,27 +100,20 @@ export function SinceLastNight({ sectionRef }: SinceLastNightProps) {
   let body;
   if (briefing === undefined) {
     body = failure !== null ? (
-      <Notice
-        tone="error"
-        action={
-          <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-            Try again
-          </Button>
-        }
-      >
-        {failure.line}
-      </Notice>
+      <ReadFailed failure={failure} />
     ) : (
       <p className="cd-today__loading cd-type-meta" role="status">
         Reading what happened since last night
       </p>
     );
   } else if (briefing.total === 0) {
-    body = <QuietNight since={briefing.since} />;
+    // A quiet night is a zero, so it waits for a read that works.
+    body = failure !== null ? <ReadFailed failure={failure} /> : <QuietNight since={briefing.since} />;
   } else {
     const line = nightLine(briefing);
     body = (
       <>
+        <ReadFailed failure={failure} />
         {line !== null ? <p className="cd-since__line cd-type-summary">{line}</p> : null}
         {rows.length > 0 ? <BriefingRows items={rows} /> : null}
         {briefing.total > rows.length ? (

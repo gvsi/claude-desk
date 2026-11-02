@@ -1,6 +1,6 @@
 /**
  * The owner's reads that every owner screen shares: the copy's businesses and Desks (`desks`),
- * a Desk's Today and its held requests, polled, and the copy's Demo inbox, which Today shows. Query
+ * a Desk's Today and its held requests, polled, and the copy's notifications, which the sidebar counts. Query
  * keys start with the route key, so a screen invalidates every Desk's read of a route by that key
  * alone.
  */
@@ -26,7 +26,18 @@ export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 
 // The reads, which go out whenever they are asked for (a read ahead, a `fetchQuery`); only the hooks wait out `FRESH_MS`.
-export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
+// Leaving setup can cancel its read, so the next page may send it again.
+export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: ({ signal }) => request('desks', { signal }) });
+
+/** A server read to confirm an uncertain save; a cancelled read's cached value confirms nothing. */
+export async function confirmDesks(queryClient: QueryClient): Promise<BusinessOut[] | null> {
+  // Cancellation rolls back to this invalidated state, so the next reader still asks the server.
+  await queryClient.invalidateQueries({ queryKey: DESKS_KEY, refetchType: 'none' });
+  const before = queryClient.getQueryState(DESKS_KEY)?.dataUpdatedAt;
+  const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+  return queryClient.getQueryState(DESKS_KEY)?.dataUpdatedAt !== before ? read : null;
+}
+
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 export const needsYouQuery = (deskId: string) =>
@@ -187,7 +198,7 @@ export function forgetReadAhead(queryClient: QueryClient, deskId: string): void 
 
 /**
  * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
- * you; the copy's Demo inbox is the demo bar's, read as the frame opens), so its sections open together rather than one by one, each
+ * you; the copy's notifications are the sidebar's, read as the frame opens), so its sections open together rather than one by one, each
  * pushing the next down, when the owner comes from another Desk or another page. A first visit's page and a
  * reload's loading page read them first (`readTodayAhead`, `useTodayReadAhead`). Reads already in,
  * or failed, open it at once; else its skeleton continues until both reads settle, even past
@@ -208,7 +219,7 @@ export function useTodayOpening(deskId: string): boolean {
   return !open;
 }
 
-/** The copy changed (a new copy, a Desk added or deleted): read the businesses, the copy and its Demo inbox again. */
+/** The copy changed (a new copy, a Desk added or deleted): read the businesses, the copy and its notifications again. */
 export async function invalidateCopy(queryClient: QueryClient): Promise<void> {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: DESKS_KEY }),
