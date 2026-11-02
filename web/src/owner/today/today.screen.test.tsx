@@ -3478,14 +3478,20 @@ describe("Today's Demo inbox", () => {
     await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
     expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
 
+    const todayRead = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
     await link.click();
     await expect.element(sheet).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
-    // Main line's Today draws the card once its own reads land. Wait for the card with
-    // expect.element, whose retries are cheap: card.element() on a page without the card prints the
-    // whole page into its error, and a vi.waitFor around it does that every 50 ms, which keeps the
-    // browser too busy to draw the page it waits for.
+    // The inbox read Main line's Needs you, but not its Today. Hold that read so this always
+    // exercises the loading state after navigation, even when the mock answers quickly.
+    await expect.poll(todayRead.held).toBeGreaterThan(0);
+    expectTodayOpening();
+    expect(card.elements()).toHaveLength(0);
+    todayRead.release();
+    // Wait for Today's own reads to land before checking its card and focus. Looking up a
+    // missing card with element() on every retry serializes the page while it is still loading.
+    await expect.poll(() => document.querySelector('.cd-today-opening [aria-busy="true"]'), { timeout: 5_000 }).toBeNull();
     await expect.element(card).toBeInTheDocument();
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
