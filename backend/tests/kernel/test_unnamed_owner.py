@@ -10,6 +10,9 @@ The cards are rendered from code-built facts here; the status lines, receipts an
 run on Turner Plumbing copies as `POST /copies` seeds them, with the owner's name set to the fallback.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
 from desk.contracts import OWNER_NAME_FALLBACK, BusinessToolDef, Claim, Clause, Fact, Label
@@ -49,6 +52,29 @@ def test_the_handoff_card_names_the_business():
     assert card_text("handoff", "en") == "Let me check with Turner Plumbing.\nTurner Plumbing will reply here."
     assert card_text("handoff", "es") == ("Déjame consultarlo con Turner Plumbing.\n"
                                           "Turner Plumbing te responderá aquí.")
+
+
+def test_the_handoff_card_keeps_one_full_stop_after_a_name_that_ends_in_one():
+    # Owner names hold only letters, but a business name may end in "Inc." or "Co.": the sentence ends on its stop.
+    incorporated = DeskInfo(owner_display_name=OWNER_NAME_FALLBACK, business_name="Turner Plumbing, Inc.", timezone=TZ)
+    text = {lang: render.render_clause(Clause(template="handoff"), None, lang, incorporated).text for lang in ("en", "es")}
+    assert text == {"en": "Let me check with Turner Plumbing, Inc.\nTurner Plumbing, Inc. will reply here.",
+                    "es": "Déjame consultarlo con Turner Plumbing, Inc.\nTurner Plumbing, Inc. te responderá aquí."}
+
+
+def test_the_shown_name_is_the_owners_own_or_the_fallback_without_a_business_name():
+    assert render.shown_owner("Mike Turner", "Turner Plumbing") == "Mike Turner"
+    assert render.shown_owner(OWNER_NAME_FALLBACK, "Turner Plumbing") == "Turner Plumbing"
+    assert render.shown_owner(OWNER_NAME_FALLBACK, "") == OWNER_NAME_FALLBACK
+
+
+def test_no_kernel_line_takes_the_stored_owner_name_unresolved():
+    # Every status line and receipt names the owner through `render.shown_owner` (cards through `DeskInfo.owner`):
+    # a caller passing the stored name as it is would bring "Owner" back on a Desk whose owner gave none.
+    root = Path(render.__file__).resolve().parent.parent
+    raw = re.compile(r"owner=(?!(?:render\.)?shown_owner\()[^,)]*owner_display_name")
+    assert [f"{path.relative_to(root)}:{number}" for path in sorted(root.rglob("*.py"))
+            for number, line in enumerate(path.read_text().splitlines(), 1) if raw.search(line)] == []
 
 
 def test_the_callback_card_names_the_business():

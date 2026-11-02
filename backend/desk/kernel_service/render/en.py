@@ -55,7 +55,7 @@ OWNER_STATUS: dict[str, str] = {
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a
 # visitor or another agent sees instead of the generic "executed" line. Like the status lines they
-# name the owner and nothing else, so they never carry an amount, a time or a date.
+# name the owner (or the business when the owner gave none) and no request data: no amount, time or date.
 EXECUTED: dict[str, str] = {
     "purpose_payment": "{title}: payment link made",
     "urgent": "{title}: urgent request sent to {owner}",
@@ -160,9 +160,11 @@ def quote(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def handoff(fact: Fact | None, desk: DeskInfo) -> Card:
-    """`Let me check with {owner}.` / `{owner} will reply here.`"""
+    """`Let me check with {owner}.` / `{owner} will reply here.`, the first ending on the name's own full stop
+    when it has one (a business name such as "Turner Plumbing, Inc.")."""
     owner = desk.owner
-    return Card(title=f"Let me check with {owner}.", lines=(f"{owner} will reply here.",))
+    stop = "" if owner.endswith(".") else "."
+    return Card(title=f"Let me check with {owner}{stop}", lines=(f"{owner} will reply here.",))
 
 
 def booking_options(fact: Fact | None, desk: DeskInfo) -> Card:

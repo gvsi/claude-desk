@@ -130,9 +130,11 @@ def quote(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def handoff(fact: Fact | None, desk: DeskInfo) -> Card:
-    """`Déjame consultarlo con {owner}.` / `{owner} te responderá aquí.`"""
+    """`Déjame consultarlo con {owner}.` / `{owner} te responderá aquí.`, the first ending on the name's own full
+    stop when it has one (a business name such as "Turner Plumbing, Inc.")."""
     owner = desk.owner
-    return Card(title=f"Déjame consultarlo con {owner}.", lines=(f"{owner} te responderá aquí.",))
+    stop = "" if owner.endswith(".") else "."
+    return Card(title=f"Déjame consultarlo con {owner}{stop}", lines=(f"{owner} te responderá aquí.",))
 
 
 def booking_options(fact: Fact | None, desk: DeskInfo) -> Card:

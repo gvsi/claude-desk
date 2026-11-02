@@ -851,6 +851,14 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado",
                      "offer_callback": "¿Quiere que solicite una llamada?",
                      "check_status": "Su solicitud está esperando aprobación; puede consultar su estado en este chat."}}
+
+
+def handoff_title(language: str, owner: str) -> str:
+    """The handoff card's title, ending on the name's own full stop when it has one, as the kernel's renderers do."""
+    title = REPLY_TEXT[language]["handoff"].format(owner=owner)
+    return title[:-1] if owner.endswith(".") else title
+
+
 # A session's tools offer a call back when they offer this next step (`native.request_callback`, or a business tool
 # of block `urgent`), as the kernel's `reply_check.offers_call_back` reads them.
 CALL_BACK_STEP = NEXT_STEPS["native.request_callback"]
@@ -3481,7 +3489,8 @@ class FakeKernelState:
             if clause.fact_id is not None:
                 return refuse("unknown_fact", "names_no_fact")
             key = "handoff" if template == "handoff" else "verify"
-            text = REPLY_TEXT[language][key].format(owner=desk.shown_owner)
+            text = (handoff_title(language, desk.shown_owner) if key == "handoff"
+                    else REPLY_TEXT[language][key].format(owner=desk.shown_owner))
             return RenderedBlock(kind="card", template=template, text=text, title=text)
         fact = desk.facts.get(clause.fact_id or "")
         if fact is None:
@@ -3554,7 +3563,7 @@ class FakeKernelState:
             blocks = []
         elif not ok:
             kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
-            text = REPLY_TEXT[language]["handoff"].format(owner=desk.shown_owner)
+            text = handoff_title(language, desk.shown_owner)
             handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
             prose_only = all(violation.kind in PROSE_ONLY for violation in violations)
             if prose_only and final and author == "claude" and self._status_line_fits(session, blocks, violations):
