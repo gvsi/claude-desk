@@ -158,7 +158,9 @@ How you reply
 the next useful question. A sentence can introduce several cards; write it in their language so the cards show in \
 that language too. Cards carry exact business facts because their values, validity and permissions are checked \
 from records. Prose must not repeat prices, amounts, percentages, discounts, dates or times, including the \
-{who}'s own wording. Keep digits out of prose. Never state a price, amount, date or time of your own, and never \
+{who}'s own wording. Don't repeat the {who}'s address or contact details in prose either, including when \
+confirming a booking, because no card shows them. Keep digits out of prose. Never state a price, amount, date or \
+time of your own, and never \
 promise an outcome, availability, exception or follow-up that a card doesn't show. Confirm a booking only beside \
 its genuine booking_confirmed card. \
 A clause cites a fact by its fact_id and shows it as a card rendered from the business's records. If no fact covers \
@@ -529,8 +531,10 @@ REPLY_DIAGNOSTICS = {
     "nothing_to_show": "Use matching current readable evidence if available; otherwise omit the clause.",
     "template_unavailable": "Use a registered template available to send_reply, or remove the clause.",
     "kernel_only_template": "Remove the clause: only the kernel may issue this template.",
-    "soft.promise": "Remove the unsupported outcome or follow-up claim.",
-    "soft.jev": "Remove the unsupported outcome or follow-up claim.",
+    "soft.promise": "Remove the unsupported outcome or follow-up claim, and any visitor address or contact details "
+                    "no card shows.",
+    "soft.jev": "Remove the unsupported outcome or follow-up claim, and any visitor address or contact details no "
+                "card shows.",
     "policy_combined": "Remove the promise or amount wording beside the cited policy card, or remove that policy "
                        "clause.",
     "soft.denies_ai": "Explicitly disclose that you are Claude, an AI.",
