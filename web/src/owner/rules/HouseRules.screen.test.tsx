@@ -319,3 +319,18 @@ it.each(['desktop', 'phone'] as const)('at %s, with every Details open, no input
   await expectScreenBasics(screen.container, { owner: true });
   expectNoHorizontalScroll();
 });
+
+it.each(['desktop', 'phone'] as const)("at %s, a tool's effects show only in its Details, never as badges on its row", async (viewport) => {
+  const { screen } = await renderRoute(`${DESK}/rules/all`, { viewport });
+  const refund = screen.getByRole('region', { name: 'Refund', exact: true });
+  await expect.element(refund.getByText('Claude asks you before any refund', { exact: true })).toBeVisible();
+  // No tool or rule row carries an effect badge ("Money", "Private data", "Can't be undone").
+  expect(screen.container.querySelector('.cd-effect-tags')).toBeNull();
+  for (const words of ['Money', 'Private data', "Can't be undone"]) expect(screen.getByText(words, { exact: true }).elements()).toHaveLength(0);
+  // Its Details' Effects row says them all.
+  const toggle = refund.element().querySelector<HTMLElement>('.cd-house-rules__tool-header > button')!;
+  await userEvent.click(toggle);
+  await expect.element(toggle).toHaveAttribute('aria-expanded', 'true');
+  expect(fieldsOf(panelOf(toggle)).find(([label]) => label === 'Effects')).toEqual(['Effects', "Moves money out · Touches private data · Can't be undone"]);
+  expectNoHorizontalScroll();
+});

@@ -13,7 +13,6 @@ import {
   Card,
   ConnectorIcon,
   ConnectorName,
-  EffectTags,
   LoadingLine,
   Notice,
   PageHeader,
@@ -75,8 +74,8 @@ function ToolRule({ parts, mode, shared, repeated, card, audience, details }: {
 }
 
 /**
- * A tool: its title with its effects and its line, then its Details (REV-RULES-D), whose panel
- * opens between the tool and its rules.
+ * A tool: its title and its line, then its Details (REV-RULES-D), whose panel opens between the
+ * tool and its rules. Its effects show only there, in the panel's Effects row.
  */
 function ToolHeader({ row, title, href, description, connector }: {
   row: ToolRow; title: string; href: string | undefined; description: string; connector: ConnectorView | null;
@@ -90,7 +89,6 @@ function ToolHeader({ row, title, href, description, connector }: {
             <div className="cd-house-rules__tool-title cd-type-body">
               {href === undefined ? <span id={titleId} className="cd-house-rules__tool-name cd-user-name" data-copy="user">{title}</span>
                 : <RouterLink className="cd-house-rules__tool-name cd-user-name" data-copy="user" href={href}><span id={titleId}>{title}</span></RouterLink>}
-              <EffectTags effects={row.effects} reversible={row.reversible} />
             </div>
             {description === '' ? null : <p className="cd-house-rules__tool-description cd-type-meta">{description}</p>}
           </div>
