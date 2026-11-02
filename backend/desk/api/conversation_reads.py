@@ -27,10 +27,11 @@ from desk.api.store import MESSAGES, SAID_KINDS, Ids
 from desk.db.models import ConversationRead
 
 READS = ConversationRead.__table__
-# A new demo copy leaves its newest visitor conversations this many unread, and marks every other seeded conversation
-# read: the owner's first look then shows both kinds, and the unread count names chats worth opening rather than the
-# whole recorded night. The newest are the live seeded hold, which needs the owner, and the night's latest visitor.
-SEEDED_UNREAD = 2
+# A new demo copy leaves two conversations unread and marks every other seeded conversation read: its newest visitor
+# conversation (the live seeded hold, which needs the owner) and its newest agent conversation. The owner's first look
+# then shows a waiting chat of each kind beside read ones, and the unread count names chats worth opening rather than
+# the whole recorded night.
+SEEDED_UNREAD_KINDS = ("visitor_text", "agent_text")
 
 
 async def mark_read(conn: AsyncConnection, ids: Ids, through: int) -> None:
@@ -71,17 +72,20 @@ async def unread(ctx: OwnerCtx, desk_ids: Sequence[str]) -> dict[str, set[str]]:
 
 
 async def seed_reads(conn: AsyncConnection, copy_id: str) -> int:
-    """Mark a new copy's seeded conversations read through their newest row, all but its `SEEDED_UNREAD` newest visitor
-    conversations (by their newest row's time, then session ID, so the pick is the same every time); an agent's
-    conversation is marked read however recent. Returns how many it marked."""
+    """Mark a new copy's seeded conversations read through their newest row, all but its newest visitor conversation
+    and its newest agent conversation (`SEEDED_UNREAD_KINDS`; newest by their newest row's time, then session ID, so
+    the pick is the same every time). Returns how many it marked."""
     rows = (await conn.execute(
         select(MESSAGES.c.desk_id, MESSAGES.c.session_id, func.max(MESSAGES.c.n).label("newest"),
                func.max(MESSAGES.c.created_at).label("last"),
-               func.bool_or(MESSAGES.c.kind == "visitor_text").label("visitor"))
+               *(func.bool_or(MESSAGES.c.kind == kind).label(kind) for kind in SEEDED_UNREAD_KINDS))
         .where(MESSAGES.c.copy_id == copy_id, MESSAGES.c.desk_id.is_not(None), MESSAGES.c.session_id.is_not(None))
         .group_by(MESSAGES.c.desk_id, MESSAGES.c.session_id))).all()
-    visitors = sorted((row for row in rows if row.visitor), key=lambda row: (row.last, row.session_id), reverse=True)
-    left = {row.session_id for row in visitors[:SEEDED_UNREAD]}
+    left = set()
+    for kind in SEEDED_UNREAD_KINDS:
+        said = [row for row in rows if getattr(row, kind)]
+        if said:
+            left.add(max(said, key=lambda row: (row.last, row.session_id)).session_id)
     marks = [{"copy_id": copy_id, "desk_id": row.desk_id, "session_id": row.session_id, "read_through_n": row.newest}
              for row in rows if row.session_id not in left]
     if marks:
