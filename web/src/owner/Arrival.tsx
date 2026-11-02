@@ -54,6 +54,10 @@ export function Arrival() {
   // The copy this browser has is opening: Today is read ahead behind the preview, which assistive
   // technology doesn't see, so a status says so.
   const [opening, setOpening] = useState(false);
+  // When the new copy opened, as this page read it the moment the copy answered: the preview is drawn
+  // again from it, so the Today the dialog leaves onto has the times and days the preview showed.
+  // Until then the preview is dated from when the page was drawn.
+  const [openedAt, setOpenedAt] = useState<number | null>(null);
   // One `me` per visit, kept across a development remount, so the page asks once.
   const asked = useRef<Promise<CopyOut> | null>(null);
   // Settles when the owner comes back to this page before it has gone, for what waited for them.
@@ -122,16 +126,21 @@ export function Arrival() {
   }, [navigate, onThisPage, queryClient]);
 
   /**
-   * The new copy's first Today, which takes the dialog away. The dialog stays up, busy over the
-   * preview, until Today is read ahead; then it leaves, and Today opens once it has closed, already
-   * drawn. While the owner is away from this page it waits, and the reads are left to the page they
-   * went to, which already shows them: dropping its Desks would leave it watching a read nothing
-   * updates. Back before this page has gone, it carries on where it stopped.
+   * The new copy's first Today, which takes the dialog away, called as the copy answers. The preview
+   * is drawn again from that moment, the closest this page can read to when the copy opened. The
+   * dialog stays up, busy over the preview, until Today is read ahead; then it leaves, and Today
+   * opens once it has closed, already drawn. While the owner is away from this page it waits, and
+   * the reads are left to the page they went to, which already shows them: dropping its Desks would
+   * leave it watching a read nothing updates. Back before this page has gone, it carries on where it
+   * stopped, with the preview still dated from when the copy answered.
    */
   const openCopy = async (copy: CopyOut): Promise<boolean> => {
+    // Read before any wait for the owner, so a copy made while they were away is dated from then.
+    const answeredAt = Date.now();
     await onThisPage();
     const first = copy.desks[0];
     if (!first) return false;
+    setOpenedAt(answeredAt);
     await dropTheOldInbox(queryClient);
     await invalidateCopy(queryClient);
     await onThisPage();
@@ -172,7 +181,7 @@ export function Arrival() {
 
   return (
     <>
-      <TodayPreview />
+      <TodayPreview openedAt={openedAt} />
       {/* There from the start, so the line is announced when it comes. */}
       <p className="cd-sr-only" role="status">
         {opening ? 'Opening your Desk' : null}
