@@ -146,11 +146,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const [search] = useSearchParams();
   const setup = useQuery({ ...setupQuery(setupId), staleTime: Infinity, refetchOnWindowFocus: false });
   const deskId = setup.data?.desk_id ?? null;
-  // The business's name: the API names it from the owner's words, on the new Desk. Until the Desks are
-  // read it's on its way (undefined), so the bar holds its line.
+  // The business's name: the API names it from the owner's words, on the new Desk, so in an interview it's
+  // always coming. Until a Desks read lists this Desk (a reload, or a list read before the Desk was made)
+  // it's on its way (undefined), and the bar holds its line.
   const desks = useQuery({ ...desksQuery(), enabled: deskId !== null });
   const desk = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk ?? null);
-  const business = desks.data === undefined && !desks.isError ? undefined : (desk?.business_name ?? null);
+  const business = desk?.business_name;
 
   /**
    * The step the API has confirmed the interview at: the step it was read at, then what the API's

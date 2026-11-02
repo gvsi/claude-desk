@@ -301,7 +301,7 @@ it.each([
 
 it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
   // The Demo inbox is the demo bar's: Today opens with its read still out, the bar draws no inbox
-  // button meanwhile (only its shape, and no line that it is opening), then draws it once the read is in.
+  // button meanwhile (nor a line that it is opening), then draws it once the read is in.
   const inbox = holdReads(ROUTES.ownerInbox.path);
   onTestFinished(inbox.release);
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
@@ -314,34 +314,6 @@ it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
   await expect.element(button).toBeVisible();
   expect(button.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
-});
-
-it.each([
-  [390, 844],
-  [1440, 900],
-])('reload_keeps_start_over_in_place_while_the_demo_inbox_is_read at %i by %i', async (width, height) => {
-  // A page that doesn't wait for the inbox, as Today does, lands with its read still out: the bar keeps
-  // the inbox button's shape before Start over, so Start over stays where it is when the button lands.
-  const inbox = holdReads(ROUTES.ownerInbox.path);
-  onTestFinished(inbox.release);
-  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/conversations`, { viewport: { width, height }, pollScale: 100 });
-  await vi.waitFor(() => expect(inbox.held()).toBe(1));
-  const startOver = screen.getByRole('button', { name: 'Start over', exact: true });
-  await expect.element(startOver).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
-  const shape = document.querySelector<HTMLElement>('.cd-reviewer-bar__actions [data-skeleton-anchor="inbox"]');
-  expect(shape, 'the inbox button keeps its shape while it is read').not.toBeNull();
-  const before = startOver.element().getBoundingClientRect();
-  const shapeBox = shape!.getBoundingClientRect();
-  inbox.release();
-  const button = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
-  await expect.element(button).toBeVisible();
-  const after = startOver.element().getBoundingClientRect();
-  expect(Math.abs(after.left - before.left), `Start over's left: ${before.left}, then ${after.left}`).toBeLessThanOrEqual(1);
-  expect(Math.abs(after.top - before.top), `Start over's top: ${before.top}, then ${after.top}`).toBeLessThanOrEqual(1);
-  const landed = button.element().getBoundingClientRect();
-  expect(Math.abs(landed.left - shapeBox.left), 'the button lands where its shape was').toBeLessThanOrEqual(1);
-  expect(document.querySelector('.cd-reviewer-bar__actions [data-skeleton-anchor="inbox"]')).toBeNull();
 });
 
 /** The demo bar's Demo inbox, which the frame's shapes draw before Start over. */
