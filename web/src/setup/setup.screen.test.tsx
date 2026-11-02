@@ -4418,9 +4418,11 @@ describe('consultant setup', () => {
       const bounds = area.getBoundingClientRect();
       return row.top >= bounds.top && row.bottom <= bounds.bottom;
     }).toBe(true);
-    const composer = screen.getByRole('textbox', { name: 'Your answer' }).element().getBoundingClientRect();
-    expect(composer.top).toBeGreaterThan(0);
-    expect(composer.bottom).toBeLessThanOrEqual(window.innerHeight);
+    // The message box is hidden while the question docks; the panel and the row under it stay in view.
+    expect(screen.getByRole('textbox', { name: 'Your answer' }).elements()).toHaveLength(0);
+    expect(panel.element().getBoundingClientRect().top).toBeGreaterThan(0);
+    const below = screen.getByRole('button', { name: 'Use your suggestions', exact: true }).element().getBoundingClientRect();
+    expect(below.bottom).toBeLessThanOrEqual(window.innerHeight);
     expectNoHorizontalScroll();
   });
 
@@ -4438,7 +4440,9 @@ describe('consultant setup', () => {
     const bounds = list.getBoundingClientRect();
     expect(panel.getByRole('button', { name: 'Dismiss', exact: true }).element().getBoundingClientRect().top).toBeGreaterThanOrEqual(bounds.top);
     expect(panel.element().querySelector('.cd-setup-q3__row')!.getBoundingClientRect().left).toBeGreaterThanOrEqual(bounds.left + 4);
-    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true }).element();
+    // The message box is hidden while the question docks; the row under the panel stays in view.
+    expect(screen.getByRole('textbox', { name: 'Your answer', exact: true }).elements()).toHaveLength(0);
+    const box = screen.getByRole('button', { name: 'Use your suggestions', exact: true }).element();
     const inView = (element: Element) => {
       const rect = element.getBoundingClientRect();
       return rect.top >= 0 && rect.bottom <= window.innerHeight;
@@ -4538,7 +4542,7 @@ describe('consultant setup', () => {
     expect(requests('setupAnswer')).toHaveLength(0);
   });
 
-  it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_and_composer_in_the_%s_dock', async (viewport) => {
+  it.each(['desktop', 'phone'] as const)('keeps_the_question_panel_in_the_%s_dock_with_the_composer_hidden_until_dismissed', async (viewport) => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
     const panel = screen.getByRole('region', { name: 'Who do you work with most?', exact: true });
@@ -4550,7 +4554,7 @@ describe('consultant setup', () => {
     expect([questionStyle.fontSize, questionStyle.lineHeight]).toEqual(['17px', '25px']);
     const key = panel.element().querySelector('kbd')!.getBoundingClientRect();
     expect([key.width, key.height]).toEqual([22, 22]);
-    expect(panel.element().getBoundingClientRect().bottom).toBeLessThan(box.element().getBoundingClientRect().top);
+    expect(box.elements()).toHaveLength(0);
     const dock = screen.container.querySelector('.cd-setup-dock')!.getBoundingClientRect();
     expect(dock.bottom).toBeLessThanOrEqual(window.innerHeight);
     expect(document.documentElement.scrollHeight).toBeLessThanOrEqual(window.innerHeight);
@@ -4671,15 +4675,16 @@ describe('consultant setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const panel = screen.getByRole('region', { name: question.text, exact: true });
     const box = screen.getByRole('textbox', { name: 'Your answer' });
-    await box.click();
-    await userEvent.keyboard('123');
-    await expect.element(box).toHaveValue('123');
-    expect(requests('setupAnswer')).toHaveLength(0);
     await expect.element(panel).toBeVisible();
+    // The message box is hidden while the question docks, and Esc brings it back with focus.
+    expect(box.elements()).toHaveLength(0);
     await userEvent.keyboard('{Escape}');
     expect(panel.elements()).toHaveLength(0);
     await expect.element(box).toHaveFocus();
+    // Its digits are words, never a choice's number.
+    await userEvent.keyboard('123');
     await expect.element(box).toHaveValue('123');
+    expect(requests('setupAnswer')).toHaveLength(0);
     await expect.element(screen.getByRole('log').getByText(question.text, { exact: true })).toBeVisible();
     await box.fill('Both, about evenly');
     await userEvent.keyboard('{Enter}');
@@ -4809,9 +4814,9 @@ describe('consultant setup', () => {
     expect(requests('setupAnswer')).toHaveLength(0);
   });
 
-  it('typing_with_nothing_focused_leaves_the_question_alone', async () => {
-    // Only a highlighted choice hands its keys to "Something else…": with focus on the page, typing
-    // moves nothing into the question and sends nothing.
+  it('typing_with_nothing_focused_goes_to_something_else_and_sends_nothing', async () => {
+    // The message box is hidden while the question docks, so words typed with focus on the page go to
+    // "Something else…", as from a highlighted choice, and nothing is sent until Enter.
     const state = await consultantAt();
     const question = state.messages.findLast((message) => message.choices?.length)!;
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -4819,10 +4824,10 @@ describe('consultant setup', () => {
     await expect.element(panel).toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
     expect(document.activeElement).toBe(document.body);
-    await userEvent.keyboard('s');
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(document.activeElement).toBe(document.body);
-    await expect.element(panel.getByRole('textbox', { name: 'Something else…', exact: true })).toHaveValue('');
+    await userEvent.keyboard('So far mostly');
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveFocus();
+    await expect.element(other).toHaveValue('So far mostly');
     expect(requests('setupAnswer')).toHaveLength(0);
   });
 

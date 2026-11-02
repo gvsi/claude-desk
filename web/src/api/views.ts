@@ -605,6 +605,11 @@ export interface SetupMessage {
   role: 'claude' | 'owner' | 'tool_label';
   text: string;
   choices: Choice[];
+  /**
+   * The owner may pick more than one of this question's choices (`SetupAnswerBody.picks`); only on
+   * a Claude question with choices. Older responses omit it (false).
+   */
+  several?: boolean;
   card: ProposalCard | null;
   /**
    * A card the owner decided themselves, by a click or a typed answer; false for one setup settled
@@ -923,12 +928,14 @@ export interface StartSetupBody {
 /**
  * A setup answer and the question it answers (`SetupState.question` when it was asked): the API
  * refuses it with 409 `conflict` once the interview has moved past that question, so an answer
- * sent twice never answers the next one (plan 02b Task 6, as amended).
+ * sent twice never answers the next one (plan 02b Task 6, as amended). A question's answer can
+ * instead pick from its choices (`picks`, each a choice's exact text, at most 4, more than one only
+ * when the question has `several`), with any typed words in `text`; the API writes the owner's
+ * message from them (`pickedAnswer`).
  */
-export type SetupAnswerBody = { text: string } & (
-  | { question: SetupQuestion; card?: never }
-  | { question: null; card: string }
-);
+export type SetupAnswerBody =
+  | ({ text: string; picks?: never } & ({ question: SetupQuestion; card?: never } | { question: null; card: string }))
+  | { question: SetupQuestion; card?: never; picks: [string, ...string[]]; text?: string };
 
 /** Changes always accept: title 1..60, job autonomy, payment-only integer cents 0..1_000_000. */
 export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?: number; autonomy?: 'auto' | 'ask' };
