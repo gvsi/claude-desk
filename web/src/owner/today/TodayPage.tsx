@@ -20,7 +20,7 @@ import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
-import { SinceLastNight } from './SinceLastNight.tsx';
+import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
 import { TodaySkeleton } from './TodaySkeleton.tsx';
 
@@ -40,6 +40,10 @@ type LinkCopy = 'idle' | 'copied' | 'failed';
 type PendingFocus =
   | { kind: 'dismiss'; next: string | undefined }
   | { kind: 'done'; handoffId: string; readAt: number; failedAt: number };
+
+// As Rules remembers the control that opened a review, retain the briefing's opener only for
+// the Desk and history entry that opened it. A new briefing replaces the previous one.
+let briefingOpener: { deskId: string; key: string } | null = null;
 
 const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   copied: 'Your Desk link is copied.',
@@ -134,6 +138,15 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const needsYouSection = useRef<HTMLElement>(null);
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
+  const [returning] = useState(() => briefingOpener?.deskId === deskId && briefingOpener.key === location.key ? briefingOpener : null);
+  const refocused = useRef(false);
+  useLayoutEffect(() => {
+    if (opening || returning === null || refocused.current || sinceLastNight.current === null) return;
+    refocused.current = true;
+    if (briefingOpener === returning) briefingOpener = null;
+    const target = sinceLastNight.current.querySelector<HTMLElement>('.cd-since__all a') ?? sinceLastNight.current;
+    target.focus({ preventScroll: true });
+  }, [opening, returning]);
   useEffect(() => {
     if (!opening && location.hash === '#needs-you') needsYouSection.current?.focus();
   }, [opening, location.key, location.hash]);
@@ -245,7 +258,14 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     <>
       {opening ? <h1 className="cd-sr-only">Today</h1> : null}
       <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton />} className="cd-today-opening">
-        <div className="cd-today" onClick={followInAppLinks(navigate)}>
+        <div className="cd-today" onClick={followInAppLinks(navigate)} onClickCapture={(event) => {
+          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+          if (!(link instanceof HTMLAnchorElement) || link.target !== '' || link.getAttribute('href') !== briefingPath(deskId)) return;
+          event.preventDefault();
+          briefingOpener = { deskId, key: location.key };
+          void navigate(briefingPath(deskId), { state: { fromToday: true } });
+        }}>
           <div className="cd-today__band">
             <div className="cd-today__greeting">
               <Greeting
