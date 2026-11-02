@@ -373,7 +373,9 @@ describe('the open conversation bar', () => {
     // Taken over: the bar has no Take over, the owner's composer takes the whisper's place, and focus
     // moves from the button that went to the first line of the owner's controls.
     await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
-    await expect.element(screen.getByText("You're in this chat", { exact: true })).toHaveFocus();
+    // The foot's own line: the chat's row in the list says the same once the list reads the change.
+    const controls = page.elementLocator(landed('.cd-conversation__controls'));
+    await expect.element(controls.getByText("You're in this chat", { exact: true })).toHaveFocus();
     expect(requests('takeover').map((r) => r.body)).toEqual([{ generation }, { generation }]);
     expect(bar.querySelector('button')).toBeNull();
     expect(screen.getByRole('alert').elements()).toHaveLength(0);
@@ -457,7 +459,9 @@ describe('the open conversation bar', () => {
     const taken = await mockStore.dispatch('takeover', { params: { session_id: DANA_LIVE }, body: { generation: chat.state.generation } });
     expect('network' in taken ? 0 : taken.status).toBe(200);
     await expect.element(takeOver).not.toBeInTheDocument();
-    await expect.element(screen.getByText("You're in this chat", { exact: true })).toBeVisible();
+    // The foot's own line: the chat's row in the list says the same once the list reads the change.
+    const controls = page.elementLocator(landed('.cd-conversation__controls'));
+    await expect.element(controls.getByText("You're in this chat", { exact: true })).toBeVisible();
     // Take over went without focus on it, so focus stays where she was.
     expect(document.activeElement).toBe(receipt.element());
   });
