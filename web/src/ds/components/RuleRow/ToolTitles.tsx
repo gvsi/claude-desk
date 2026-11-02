@@ -12,7 +12,8 @@ export interface ToolTitles {
 /**
  * The titles as one list, in the words `listWords` joins them with ("Quote", "Quote and Refund",
  * "Quote, Book a visit and Refund"): the commas and "and" are the screen's, and each title is its
- * own `data-copy="user"` span.
+ * own `data-copy="user"` span, set off as user text (`.cd-user-name`: text-primary at weight 520,
+ * isolated for text direction). The list starts its line, as a set-off name does.
  */
 export function ToolTitleList({ titles }: ToolTitles) {
   return (
@@ -20,7 +21,9 @@ export function ToolTitleList({ titles }: ToolTitles) {
       {titles.map((title, index) => (
         <Fragment key={index}>
           {index === 0 ? null : index === titles.length - 1 ? ' and ' : ', '}
-          <span data-copy="user">{title}</span>
+          <span className="cd-user-name" data-copy="user">
+            {title}
+          </span>
         </Fragment>
       ))}
     </>

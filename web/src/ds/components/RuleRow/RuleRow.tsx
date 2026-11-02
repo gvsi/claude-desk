@@ -26,8 +26,8 @@ export interface RuleRowProps {
   /**
    * A rule on an effect group (`effect:charge`), shown under every tool it governs: `lead` is the
    * screen's words for its group ("Applies to every tool that charges money") and `titles` the
-   * tools it covers, each its own user-text item, so the line reads "Shared rule. {lead}: {titles}."
-   * or, covering none, "Shared rule. {lead}.". Changing it from any of those tools changes the one rule.
+   * tools it covers, each its own user-text item set off on a line of its own under the words, so it
+   * reads "Shared rule. {lead}:" over "{titles}", or, covering none, "Shared rule. {lead}.". Changing it from any of those tools changes the one rule.
    */
   shared?: { lead: string } & ToolTitles;
   /** Makes the outcome a menu; the pick goes to the screen, which shows the drafted change first. */
@@ -69,11 +69,13 @@ export function RuleRow({ rule, words, limit, shared, onChangeOutcome, fade = fa
                 Shared rule. {shared.lead}
                 {shared.titles.length > 0 ? (
                   <>
-                    {': '}
+                    :
+                    <br />
                     <ToolTitleList titles={shared.titles} />
                   </>
-                ) : null}
-                .
+                ) : (
+                  '.'
+                )}
               </span>
             </p>
           ) : null}
