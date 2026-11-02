@@ -2732,6 +2732,9 @@ def test_setup_public_line_examples_hold_against_the_kernel_check():
     # rates, frequencies and how long something lasts are no time frames for a customer line
     ("I charge $150 an hour, rent is $1,500 a month, we service pools once a week.", []),
     ("Appointments last about an hour; visits last 90 minutes.", []),
+    ("Appointments last a few hours, or last for 90 minutes, and audits last one business day.", []),
+    ("Give us a couple of days to reply, or a few days at busy times.", ["a couple of days", "a few days"]),
+    ("A notice received in the last two days is urgent.", ["two days"]),
     ("We do tax returns for families and small firms.", []),
 ])
 def test_owner_time_frames_are_read_from_the_answer(text, frames):

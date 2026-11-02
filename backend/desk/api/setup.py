@@ -2286,7 +2286,7 @@ def _code_next(interview: Interview, answering: QuestionKey | None = None) -> Qu
 # change and points to What customers will read (`SETUP_TURN_SYSTEM`). Code checks only that each one is kept or
 # named, never what the kernel would accept.
 _COUNT_EN = (r"(?:\d+(?:\s*(?:to|or)\s*\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|"
-             r"twenty|thirty|forty\s?eight|seventy\s?two|few|several)")
+             r"twenty|thirty|forty\s?eight|seventy\s?two|a\s+few|a\s+couple(?:\s+of)?|few|several)")
 _UNIT_EN = r"(?:(?:business|working|work|calendar)\s+)?(?:minute|hour|day|week|month)s?"
 _COUNT_ES = (r"(?:\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|quince|veinte|treinta|"
              r"cuarenta\s+y\s+ocho|setenta\s+y\s+dos|unos\s+pocos|unas\s+pocas|pocos|pocas|unos|unas)")
@@ -2298,7 +2298,7 @@ OWNER_TIME_FRAME = re.compile(
     rf"(?<!\w)(?:{_COUNT_EN}\s+{_UNIT_EN}"
     r"|\d+\s*(?:hrs?|h|mins?)"
     # "a" or "an" counts only after a deadline's or a threshold's words: "$150 an hour" and "once a week" are none
-    rf"|(?:within|in|under|after|inside(?:\s+of)?|at\s+least)\s+(?:an?|a\s+few|a\s+couple(?:\s+of)?)\s+{_UNIT_EN}"
+    rf"|(?:within|in|under|after|inside(?:\s+of)?|at\s+least)\s+an?\s+{_UNIT_EN}"
     r"|an?\s+(?:minute|hour|day|week|month)(?:'s|s)?\s+(?:notice|ahead|in\s+advance|beforehand)"
     r"|(?:the\s+)?(?:next|same|following)\s+(?:(?:business|working)\s+)?(?:day|week|month|morning)"
     r"|within\s+the\s+(?:hour|day|week|month)"
@@ -2318,7 +2318,8 @@ _NOT_TIME_FRAMES = re.compile(
     r"|\d+\s*h(?:\s+(?:a|al|to|until|till|hasta))?\s+\d+\s*h"
     rf"|{_WEEKDAY_EN}\s+(?:to|through|thru|until|till)\s+{_WEEKDAY_EN}"
     rf"|(?:de|del)\s+{_WEEKDAY_ES}\s+(?:a|al|hasta(?:\s+el)?)\s+{_WEEKDAY_ES}"
-    r"|(?<!the\s)(?<!past\s)last(?:s|ing)?\s+(?:about\s+|around\s+|up\s+to\s+)?\S+\s+"
+    r"|(?<!the\s)(?<!past\s)last(?:s|ing)?\s+(?:for\s+)?(?:about\s+|around\s+|up\s+to\s+)?"
+    r"(?:a\s+few|a\s+couple(?:\s+of)?|\S+)\s+(?:(?:business|working)\s+)?"
     r"(?:minute|min|hour|hr|day|week|month)s?)(?!\w)")
 TIME_FRAME_LINES = ("summary", "pricing", "intake", "urgent", "after_hours")
 # A reply names a change only beside the pointer the rule for customer lines asks for, never by saying the words back.
