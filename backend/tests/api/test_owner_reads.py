@@ -732,7 +732,7 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
     not earlier exchanges or what they wrote after, so the owner answers it with their words for it. Each
     hold in a chat quotes its own, and one made before the visitor wrote anything quotes nothing. A handoff in the
     same chat quotes the chat's latest lines, and a hold whose status isn't in the chat (one held before the API
-    showed it) falls back to them too."""
+    showed it) falls back to them too. An empty turn window quotes just the newest line before the status."""
     owner = await new_owner(app, browser, fake, kernel_http)
     asker = await guest(kernel_http, fake, owner)
 
@@ -800,9 +800,73 @@ async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser,
         discount.decision_id: "Can I get 15% off if I pay cash?",
         bigger.decision_id: "What about 20% off then?",
         older.decision_id: "Do you work in Alameda? · Thanks, and what about Berkeley?",
-        unasked.decision_id: None,
+        unasked.decision_id: "An earlier exchange",
         agent_hold.decision_id: "I'm asking for Alex Kim. · Can Alex get 10% off?"}
     assert list(handed.values()) == ["Can you come Tuesday? · Please call me back"]
+
+
+@pytest.mark.parametrize("author", ["desk", "owner"])
+async def test_needs_you_keeps_visitor_words_across_non_claude_deliveries(app, browser, fake, kernel_http, engine,
+                                                                       db, ro_schema, author):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="It is the downstairs drain.")
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off?")
+    await write(engine, db, asker.ids, "delivered", author=author, text="Your payment link was cancelled.",
+                blocks=[{"kind": "prose", "text": "Your payment link was cancelled."}])
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "It is the downstairs drain. · Can I get 15% off?"
+
+
+@pytest.mark.parametrize("kind", ["visitor_text", "agent_text"])
+async def test_needs_you_quotes_one_line_when_a_reply_overtakes_the_request(app, browser, fake, kernel_http,
+                                                                         engine, db, ro_schema, kind):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, kind, text="How much to clear a drain?")
+    await write(engine, db, asker.ids, kind, text="Can I get 15% off?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the drain clearing quote.",
+                blocks=[{"kind": "prose", "text": "Here is the drain clearing quote."}])
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+    await write(engine, db, asker.ids, kind, text="A later request must not be quoted.")
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "Can I get 15% off?"
+
+
+async def test_needs_you_quotes_two_lines_before_the_first_claude_reply(app, browser, fake, kernel_http, engine,
+                                                                     db, ro_schema):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="It is the downstairs drain.")
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off?")
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "It is the downstairs drain. · Can I get 15% off?"
 
 
 async def test_needs_you_quotes_two_visitor_lines_in_the_requests_turn(app, browser, fake, kernel_http, engine, db,

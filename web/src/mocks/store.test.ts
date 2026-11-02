@@ -470,6 +470,52 @@ describe('the scripted Desk', () => {
     ]);
   });
 
+  it.each(['desk', 'owner'] as const)('a_%s_delivery_keeps_the_held_requests_visitor_words', async (author) => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    world.visitorText(session, 'It is the downstairs drain.');
+    world.visitorText(session, 'Can I get 15% off?');
+    world.emit(session, { ...ctx.reply([proseBlock('Your payment link was cancelled.')]), author });
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('It is the downstairs drain. · Can I get 15% off?');
+  });
+
+  it.each(['visitor', 'agent'] as const)('a_late_reply_keeps_one_line_from_the_%s_before_the_hold', async (kind) => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!, kind === 'agent' ? { agent: "Alex Kim's assistant" } : {});
+    const say = (text: string) => kind === 'agent' ? world.agentText(session, text) : world.visitorText(session, text);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    say('How much to clear a drain?');
+    say('Can I get 15% off?');
+    world.emit(session, ctx.reply([proseBlock('Here is the drain clearing quote.')]));
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+    say('A later request must not be quoted.');
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('Can I get 15% off?');
+  });
+
+  it('a_first_turn_hold_quotes_both_visitor_lines', async () => {
+    const world = mockStore.world;
+    const session = world.addSession(world.desk(deskId)!);
+    const ctx = world.context(session, 'en', 'Can I get 15% off?');
+    world.visitorText(session, 'It is the downstairs drain.');
+    world.visitorText(session, 'Can I get 15% off?');
+    const decision = ctx.decide(DECISIONS.heldQuote);
+    world.emit(session, ctx.status('held', decision));
+
+    const needsYou = (await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[];
+    expect(needsYou.find((item) => item.decision?.decision_id === decision.decision_id)?.from_the_visitor)
+      .toBe('It is the downstairs drain. · Can I get 15% off?');
+  });
+
   it('owner_alert_names_the_held_request', async () => {
     // Mike's Demo inbox alert for a hold names that held request; the code sent to a visitor names none.
     const before = mockStore.world.inbox.length;
