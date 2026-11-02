@@ -293,6 +293,19 @@ async def test_sample_payment_is_terminal_and_never_calls_the_provider(week_on, 
     assert (await reports_of(app, created, frozen_clock.now())).paid_cents == 2_000
 
 
+async def test_the_owners_conversations_list_shows_each_sample_outcome(week_on, app, client, frozen_clock):
+    """Through the owner's own Conversations read (`owner_reads.conversations`, `visitor_outcomes`): each sample
+    conversation previews its visitor's words, is marked replayed and shows the outcome it was written to show."""
+    created = await create_copy(client, replay_night=True)
+    _, _, conversations, _, _ = await today_of(app, created, frozen_clock.now())
+    shown = {summary.latest_visitor_text: summary for summary in conversations}
+    expected = ("quoted", None, "turned_down", "visit_booked", "document_sent", "deposit_paid", "called_back",
+                "owner_declined", "lead_captured", "turned_down")
+    for sample, outcome in zip(seed.RIVERA_SAMPLE_WEEK, expected, strict=True):
+        summary = shown[sample.said]
+        assert (summary.latest_outcome, summary.replayed) == (outcome, True), sample.said
+
+
 async def test_each_sample_session_ends_with_its_conversations_outcome(week_on, app, client):
     created = await create_copy(client, replay_night=True)
     page = await ledger_page(client, created)
