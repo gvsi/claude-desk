@@ -3,7 +3,8 @@
  * pauses while the tab is hidden), how often typing pings go out on either side of a chat, and how
  * often the agents page reads the built-in agent's run. The Demo inbox runs its own interval
  * instead, so it stops the moment its sheet closes; like React Query's, it pauses while the tab is
- * hidden. Tests speed every interval up with `setPollScale`.
+ * hidden. An answer whose action is still under way is read again on its own schedule
+ * (`ANSWER_REREAD_MS`). Tests speed every interval up with `setPollScale`.
  */
 export const POLL_MS = {
   needsYou: 3_000,
@@ -38,6 +39,20 @@ export const AGENT_RUN_POLL_MS = 1_000;
 /** The agent run's read interval, scaled like the polls. */
 export function agentRunPollMs(): number {
   return Math.max(1, Math.round(AGENT_RUN_POLL_MS * scale));
+}
+
+/**
+ * The waits before each read of a held request whose answer settled while its action was still
+ * under way (`useAnswer`), in ms: six reads, 1, 3, 7, 15, 30 and 60 seconds after the answer. An
+ * action usually runs within the answer's own request, so the first read comes soon and the gaps
+ * then double. Each read also has the kernel ask after a run whose outcome isn't known, and settle
+ * one that nothing is finishing once it is 30 seconds old; the last read, a minute in, comes after that.
+ */
+export const ANSWER_REREAD_MS = [1_000, 2_000, 4_000, 8_000, 15_000, 30_000] as const;
+
+/** The waits before an answer's re-reads, scaled like the polls. */
+export function answerRereadMs(): number[] {
+  return ANSWER_REREAD_MS.map((ms) => Math.max(1, Math.round(ms * scale)));
 }
 
 /** How long to wait before sending again after an answer's `retry_after` of `seconds`, scaled like the polls. */

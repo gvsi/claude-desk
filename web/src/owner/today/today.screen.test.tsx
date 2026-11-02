@@ -15,7 +15,7 @@ import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { newIdempotencyKey, observeRequests, OWNER_ERROR_COPY } from '../../api/http.ts';
 import { ROUTES } from '../../api/routes.ts';
 import type { BriefingItem, BriefingList, BusinessOut, ConversationSummary, NeedsYouItem, RefusalCause, SetupState, ThisWeek, Today } from '../../api/views.ts';
-import { pollMs } from '../../app/poll.ts';
+import { ANSWER_REREAD_MS, answerRereadMs, pollMs } from '../../app/poll.ts';
 import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
@@ -1665,6 +1665,141 @@ describe('Today', () => {
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
     expect(requests('answer')).toHaveLength(2);
     expect(card.getByRole('alert').elements()).toHaveLength(0);
+  });
+
+  describe('an answer still under way', () => {
+    const ALLOWED = 'You allowed this.';
+    const DONE = "You allowed this. It's done.";
+    /** The owner's read of a decision, as the app sends it. */
+    const decisionPath = (decisionId: string) => ROUTES.decision.path.replace('{decision_id}', encodeURIComponent(decisionId));
+    /** The whole re-read schedule at the test's pace: every read an answer can make has been made by then. */
+    const wholeSchedule = () => answerRereadMs().reduce((total, ms) => total + ms, 0);
+
+    it('a_repeat_answer_that_finds_it_allowed_reads_on_until_it_is_done', async () => {
+      // The first answer goes through, but the reply to it is lost on the way back. Asked again, the
+      // API says it was allowed and its action is still running: the card reads the request again
+      // until it's done.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      mockStore.inject({ route: 'answer', status: 'network', afterCommit: true });
+      const card = heldCard(screen, SEEDED_REASON);
+      const allow = card.getByRole('button', { name: 'Allow this time' });
+      await allow.click();
+      await expect.element(card.getByText(UNCERTAIN, { exact: true })).toBeVisible();
+
+      const allowed = { ...held, state: 'approved', answers: [] };
+      let finish = () => {};
+      const running = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      mockStore.inject({ route: 'answer', status: 409, body: { error: 'already_resolved', decision: allowed } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'executed', answers: [] }, until: running });
+      await allow.click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      // Read once, still allowed and running; read again, and the card waits on that read.
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBe(2);
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      finish();
+      await expect.element(card.getByText(DONE, { exact: true })).toBeVisible();
+      expect(card.getByText(ALLOWED, { exact: true }).elements()).toHaveLength(0);
+      expect(card.getByText(UNCERTAIN, { exact: true }).elements()).toHaveLength(0);
+      expect(card.getByRole('alert').elements()).toHaveLength(0);
+      expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id), decisionPath(held.decision_id)]);
+      expect(requests('answer')).toHaveLength(2);
+    });
+
+    it('an_answer_allowed_and_not_yet_run_ends_on_how_the_run_ended', async () => {
+      // The answer comes back allowed and not yet run. The run is then refused, and the card says why
+      // in the kernel's words; that read is final, so it's the last.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      const refused = 'Not shared: their session ended before your answer';
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: { ...held, state: 'approved', answers: [] }, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'refused_at_execution', answers: [], owner_plain: refused } });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+
+      await expect.element(card.getByText(refused, { exact: true })).toBeVisible();
+      expect(card.getByText(ALLOWED, { exact: true }).elements()).toHaveLength(0);
+      await pause(wholeSchedule());
+      expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
+      await expect.element(card.getByText(refused, { exact: true })).toBeVisible();
+      expect(card.getByRole('alert').elements()).toHaveLength(0);
+    });
+
+    it('an_answer_that_stays_allowed_is_read_only_so_often', async () => {
+      // The run never reports back. Its first read fails on the API's side and the next is lost on the
+      // way: each is one of the tries, and neither shows an error, since the answer went through. The
+      // card reads the request a fixed number of times, then stops on the last line it read.
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 503 });
+      mockStore.inject({ route: 'decision', status: 'network' });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+
+      await expect.poll(() => requests('decision').length, { timeout: 10_000 }).toBe(ANSWER_REREAD_MS.length);
+      await pause(2 * Math.max(...answerRereadMs()));
+      expect(requests('decision')).toHaveLength(ANSWER_REREAD_MS.length);
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      expect(card.getByRole('alert').elements()).toHaveLength(0);
+      expect(region(screen, 'Needs you').getByRole('alert').elements()).toHaveLength(0);
+      expect(card.getByText(UNCERTAIN, { exact: true }).elements()).toHaveLength(0);
+    });
+
+    it('only_an_answer_still_under_way_is_read_again', async () => {
+      // Two requests answered: one allowed with its run not yet confirmed, the other denied, final as
+      // its answer says. Only the first is read again, until it's done.
+      mockStore.world.addHeldRefund();
+      const { screen } = await renderRoute(TODAY);
+      const held = seededHold();
+      const card = heldCard(screen, SEEDED_REASON);
+      const refund = heldCard(screen, REFUND_REASON);
+      await expect.element(refund.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: { ...held, state: 'unknown', answers: [] }, execution_state: 'unknown', card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: { ...held, state: 'executed', answers: [] } });
+
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await refund.getByRole('button', { name: 'Deny', exact: true }).click();
+      await screen.getByRole('menuitem', { name: 'This time' }).click();
+      await expect.element(refund.getByText('You denied this.', { exact: true })).toBeVisible();
+      await expect.element(card.getByText(DONE, { exact: true })).toBeVisible();
+
+      await pause(wholeSchedule());
+      expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
+      await expect.element(refund.getByText('You denied this.', { exact: true })).toBeVisible();
+    });
+
+    it.each(['dismissed', 'left'] as const)('an_answer_still_under_way_is_read_no_more_once_%s', async (how) => {
+      // The run never reports back, and the owner dismisses its card, or leaves Today: no read follows.
+      const { screen, router } = await renderRoute(TODAY);
+      const held = seededHold();
+      const allowed = { ...held, state: 'approved', answers: [] };
+      mockStore.inject({ route: 'answer', status: 200, afterCommit: true, body: { decision: allowed, execution_state: null, card_diff: null } });
+      mockStore.inject({ route: 'decision', status: 200, body: allowed, times: 100 });
+      const card = heldCard(screen, SEEDED_REASON);
+      await card.getByRole('button', { name: 'Allow this time' }).click();
+      await expect.element(card.getByText(ALLOWED, { exact: true })).toBeVisible();
+      await expect.poll(() => requests('decision').length, { timeout: 5_000 }).toBeGreaterThanOrEqual(1);
+
+      if (how === 'dismissed') {
+        await region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' }).click();
+        await expect.element(card).not.toBeInTheDocument();
+      } else {
+        await router.navigate(CONVERSATIONS);
+        await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
+      }
+      const reads = requests('decision').length;
+      await pause(wholeSchedule());
+      expect(requests('decision')).toHaveLength(reads);
+      expect(reads).toBeLessThan(ANSWER_REREAD_MS.length);
+    });
   });
 
   it('answer_lands_in_its_slot', async () => {
