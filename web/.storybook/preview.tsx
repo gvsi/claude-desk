@@ -7,7 +7,36 @@ import { webFontsLoaded } from '../src/ds/test/fonts.ts';
 import '../src/ds/tokens.css';
 import '../src/ds/base.css';
 
+/**
+ * The theme a story draws in: dark unless its `theme` global asks for light (the toolbar, or
+ * `&globals=theme:light` in its address), set on the story's document as the app's first script
+ * sets a chosen theme, so a story looks the same whatever its viewer's system prefers.
+ */
+function themeOf(globals: Record<string, unknown>): 'dark' | 'light' {
+  return globals.theme === 'light' ? 'light' : 'dark';
+}
+
 const preview: Preview = {
+  decorators: [
+    (Story, { globals }) => {
+      document.documentElement.dataset.theme = themeOf(globals);
+      return <Story />;
+    },
+  ],
+  globalTypes: {
+    theme: {
+      description: 'The theme stories draw in',
+      toolbar: {
+        title: 'Theme',
+        icon: 'mirror',
+        items: [
+          { value: 'dark', title: 'Dark' },
+          { value: 'light', title: 'Light' },
+        ],
+        dynamicTitle: true,
+      },
+    },
+  },
   // Before every story renders: the web fonts are in, so no play measures text drawn in a fallback.
   beforeEach: async () => {
     await webFontsLoaded();
@@ -39,6 +68,7 @@ const preview: Preview = {
   },
   initialGlobals: {
     viewport: { value: 'canvas', isRotated: false },
+    theme: 'dark',
   },
 };
 

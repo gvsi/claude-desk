@@ -156,6 +156,17 @@
   margin-top: var(--space-6);
 }
 
+/* Over the header's field the dot takes the field's own colors, so it keeps 3:1 there in either
+   theme. On the owner's colour that is the on-brand open dot, or a closed ring in the paper
+   secondary ink, and on the panel the theme's own. */
+.cd-public-shell__open-status > .cd-status-dot--handled {
+  background: var(--brand-status-handled);
+}
+
+.cd-public-shell__open-status > .cd-status-dot--info {
+  border-color: var(--brand-ink-secondary);
+}
+
 .cd-public-shell__open-status-lines {
   display: flex;
   flex-direction: column;

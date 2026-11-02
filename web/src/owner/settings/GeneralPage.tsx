@@ -4,15 +4,15 @@ import { useNavigate } from 'react-router';
 
 import { ApiError, OWNER_ERROR_COPY, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { BusinessOut } from '../../api/views.ts';
-import { ACTING_SWITCH_COPY, Button, Card, Dialog, Notice, SectionHeader, Switch } from '../../ds/index.ts';
+import { ACTING_SWITCH_COPY, Button, Card, Dialog, Notice, SectionHeader, SegmentedControl, Switch } from '../../ds/index.ts';
+import { useTheme } from '../../lib/theme.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { DESKS_KEY, findDesk, invalidateCopy, todayPath } from '../useDesks.ts';
-
-/** What deleting a Desk does, beside its button and in the dialog that asks first. */
-const DELETE_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
+import { APPEARANCE_COPY, DELETE_LINE } from './copy.ts';
 
 /**
- * Settings › General: whether Claude acts for this Desk, and deleting it with confirmation.
+ * Settings › General: whether Claude acts for this Desk, the theme chosen in this browser, and
+ * deleting the Desk with confirmation.
  */
 export function GeneralPage() {
   const { business, desk, setAnswering, holdDesk } = useOwnerDesk();
@@ -26,6 +26,8 @@ export function GeneralPage() {
   const [rereading, setRereading] = useState(false);
   const removeButtonId = useId();
   const reloadId = useId();
+  const appearanceId = useId();
+  const theme = useTheme();
 
   // Focus that went with a replaced control moves to the one in its place: Reload when the notice
   // takes the place of Delete this Desk, and Delete this Desk when a read shows the Desk still there.
@@ -130,10 +132,17 @@ export function GeneralPage() {
           <Switch label={ACTING_SWITCH_COPY.label} description={ACTING_SWITCH_COPY[desk.answering ? 'on' : 'off']} checked={desk.answering} onChange={setAnswering} />
         </div>
       </Card>
-      <section aria-labelledby={deleteId} className="cd-settings__section cd-settings__delete">
+      <section aria-labelledby={appearanceId} className="cd-settings__section cd-settings__row-section">
+        <SectionHeader id={appearanceId} title={APPEARANCE_COPY.title} />
+        <div className="cd-settings__row">
+          <p className="cd-settings__row-line cd-settings__quiet cd-type-meta">{APPEARANCE_COPY.line}</p>
+          <SegmentedControl label={APPEARANCE_COPY.title} options={APPEARANCE_COPY.options} value={theme.choice} onChange={theme.choose} />
+        </div>
+      </section>
+      <section aria-labelledby={deleteId} className="cd-settings__section cd-settings__row-section">
         <SectionHeader id={deleteId} title="Delete this Desk" />
-        <div className="cd-settings__delete-row">
-          <p className="cd-settings__delete-line cd-settings__quiet cd-type-meta">{DELETE_LINE}</p>
+        <div className="cd-settings__row">
+          <p className="cd-settings__row-line cd-settings__quiet cd-type-meta">{DELETE_LINE}</p>
           {/* Never a second delete while the first one's outcome is unknown. */}
           {unconfirmed ? null : (
             <Button id={removeButtonId} variant="secondary" size="main" onClick={() => setConfirming(true)}>
