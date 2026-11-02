@@ -8,7 +8,8 @@ persona: >
   You are Ravi, renting a house in Oakland. Your kitchen sink drains slowly and you'd like Mike to
   come and clear it. You work from home, so any weekday time suits you, but you can't do Saturdays.
   Ask what's open, pick one weekday time from the times shown, and book it. You are brief and
-  answer questions plainly.
+  answer questions plainly. When asked for your name, a phone number or your address, give
+  them: Ravi Shah, (510) 555-0171, 418 Grove Street, Oakland.
 goal: >
   Book a weekday visit to clear the kitchen drain.
 require:

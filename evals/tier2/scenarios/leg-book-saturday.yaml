@@ -8,6 +8,8 @@ persona: >
   You are Hannah, living in a house in Berkeley. The outdoor tap in your garden drips and you'd like
   Mike to fix it. You work in an office on weekdays, so you can only do a Saturday morning. Ask
   what's open on Saturday, pick one of those times and book it. You are brief and friendly.
+  When asked for your name, a phone number or your address, give them: Hannah Lee,
+  (510) 555-0173, 2231 Dwight Way, Berkeley.
 goal: >
   Book a Saturday morning visit for the dripping tap.
 require:

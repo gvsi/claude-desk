@@ -27,7 +27,7 @@ async def test_triage_job_validates_new_model_categories(
         await deliver(conn, visitor.ids, Status(refused, "receipt"), ro_schema=ro_schema)
         await conn.commit()
 
-    output = {"summary": "Asked about booking times. The Desk refused the request.", "category": category}
+    output = {"summary": "Asked about booking times. It was turned down: your rule says no.", "category": category}
     server = FakeMessagesApi(message({"type": "text", "text": json.dumps(output)}, model=ANNOTATION_MODEL))
     model = AnthropicModel("test-key", base_url="https://model.test", http_client=server.client())
     try:
