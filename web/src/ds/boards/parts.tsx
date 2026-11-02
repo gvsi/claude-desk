@@ -991,7 +991,7 @@ export function riveraRuleRow(card: RuleCard): RuleRowProps {
     rule: card,
     words: rivera.ruleWords[id],
     limit: limits[id],
-    shared: card.applies_to.startsWith('effect:') ? { appliesTo: rivera.sharedChargeAppliesTo } : undefined,
+    shared: card.applies_to.startsWith('effect:') ? rivera.sharedChargeShared : undefined,
     onChangeOutcome: fn(),
   };
 }

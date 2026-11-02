@@ -116,7 +116,9 @@ export const Payments: Story = {
     ] as const) {
       const rows = within(card).getAllByRole('listitem');
       await expect(rows.map((row) => row.querySelector('.cd-rule-row__reason')?.textContent)).toEqual([rivera.sharedChargeCard.reason, own]);
-      await expect(within(rows[0] as HTMLElement).getByText(`Shared rule. ${rivera.sharedChargeAppliesTo}`)).toBeVisible();
+      const sharedLine = (rows[0] as HTMLElement).querySelector('.cd-rule-row__shared');
+      await expect(sharedLine).toHaveTextContent(`Shared rule. ${rivera.sharedChargeAppliesTo}`);
+      await expect(sharedLine).toBeVisible();
     }
     await expect(within(link).getByRole('button', { name: /^Automatic up to \$300; over \$300, ask me first\. Change the outcome of: / })).toBeVisible();
     // The turn-off panel: its heading, its line and the button that asks first.
