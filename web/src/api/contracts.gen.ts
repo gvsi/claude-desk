@@ -470,6 +470,7 @@ export interface ReplayedEvent {
   text: string | null;
   verdict: ReplyVerdict | null;
   decision: Decision | null;
+  author?: "claude" | "desk";
 }
 export interface ReplyVerdict {
   ok: boolean;
