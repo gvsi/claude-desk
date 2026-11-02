@@ -173,14 +173,18 @@ class Sleeps:
         self.clock.advance(seconds)
         self.timers.append(seconds)
 
-    async def waiting(self) -> float:
-        """The length of the timer the runner waits on, once it waits on one."""
-        await asyncio.wait_for(self._armed.wait(), 5)
-        return self._pending[0]
+    async def waiting(self, seconds: float | None = None) -> float:
+        """Wait for a timer, optionally a particular phase's timer instead of an active-work deadline."""
+        async def ready():
+            while self._pending is None or (seconds is not None and self._pending[0] != seconds):
+                await asyncio.sleep(0.01)
+            return self._pending[0]
 
-    async def elapse(self) -> float:
+        return await asyncio.wait_for(ready(), 5)
+
+    async def elapse(self, expected: float | None = None) -> float:
         """Let the timer the runner waits on pass; its length."""
-        seconds = await self.waiting()
+        seconds = await self.waiting(expected)
         self._pending[1].set_result(None)
         await asyncio.sleep(0)
         return seconds
@@ -463,11 +467,11 @@ async def test_keeps_going_with_the_owner_after_a_takeover(app, browser, fake, v
     await change_mode(owner, fake, session_id, "takeover")
     release.set()
     # Its message goes to the owner, who now has the chat: no Claude turn, and it waits for the owner's words.
-    assert await sleeps.waiting() == NUDGE_AFTER_S
+    assert await sleeps.waiting(NUDGE_AFTER_S) == NUDGE_AFTER_S
     await owner_writes(owner, session_id, "Hi Riley, Mike here. Yes, 10% is fine for a returning customer.")
     # It answers the owner, a person, by name; then, the owner quiet for a while, it nudges once and hears back.
     await until(lambda: rows_count(engine, session_id, 3))
-    assert await sleeps.elapse() == NUDGE_AFTER_S
+    assert await sleeps.elapse(NUDGE_AFTER_S) == NUDGE_AFTER_S
     await until(lambda: rows_count(engine, session_id, 4))
     await owner_writes(owner, session_id, "You're welcome!")
     await visitors.drain()
@@ -504,7 +508,7 @@ async def test_carries_on_with_claude_after_a_handback(app, browser, fake, visit
     await asyncio.wait_for(asking.entered.wait(), 5)
     await change_mode(owner, fake, session_id, "takeover")
     release.set()
-    assert await sleeps.waiting() == NUDGE_AFTER_S                  # waiting on the owner
+    assert await sleeps.waiting(NUDGE_AFTER_S) == NUDGE_AFTER_S                  # waiting on the owner
     await change_mode(owner, fake, session_id, "handback")
     await visitors.drain()
 
@@ -573,8 +577,8 @@ async def test_nudges_the_quiet_owner_once_then_ends_owner_silent(app, browser, 
     await asyncio.wait_for(opening.entered.wait(), 5)
     await change_mode(owner, fake, started.session_id, "takeover")
     release.set()
-    assert await sleeps.elapse() == NUDGE_AFTER_S
-    assert await sleeps.elapse() == OWNER_SILENT_S - NUDGE_AFTER_S
+    assert await sleeps.elapse(NUDGE_AFTER_S) == NUDGE_AFTER_S
+    assert await sleeps.elapse(OWNER_SILENT_S - NUDGE_AFTER_S) == OWNER_SILENT_S - NUDGE_AFTER_S
     await visitors.drain()
 
     run = visitors.run(started.run_id, copy.copy_id)
@@ -655,6 +659,67 @@ async def test_ends_chat_ended_when_its_stream_closes(app, fake, visitors, loopb
     assert len(visitor_model.requests) == 1
 
 
+@pytest.mark.parametrize("phase", ["model", "reading", "typing", "post"])
+@pytest.mark.parametrize("ending", ["stream", "deadline"])
+async def test_terminal_conditions_cancel_active_work(
+        app, fake, visitors, loopback, visitor_model, desk_model, copy, sleeps, monkeypatch, phase, ending):
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    pauses = 0
+    sleeping = Sleeps.__call__
+    request = loopback.handle_async_request
+
+    async def block():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def thinking(request_):
+        await block()
+        return step("Never send this.")
+
+    async def pause(self, seconds):
+        nonlocal pauses
+        if seconds <= PAUSE_MAX_S:
+            pauses += 1
+            if (phase == "reading" and pauses == 1) or (phase == "typing" and pauses == 2):
+                await block()
+        await sleeping(self, seconds)
+
+    async def posting(request_):
+        if phase == "post" and request_.url.path.endswith("/messages"):
+            await block()
+        return await request(request_)
+
+    monkeypatch.setattr(Sleeps, "__call__", pause)
+    monkeypatch.setattr(loopback, "handle_async_request", posting)
+    visitor_model.add(thinking if phase == "model" else step("Never send this."))
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(entered.wait(), 5)
+    async with contextlib.AsyncExitStack() as stack:
+        if ending == "stream":
+            cookie = ("cookie", loopback.sent[1].headers["cookie"])
+            path = f"/api/public/desks/{fake.desks[copy.desk_ids[0]].slug}/events"
+            for _ in range(3):
+                await stack.enter_async_context(Stream(app, path, headers=[cookie]))
+        else:
+            try:
+                assert await asyncio.wait_for(sleeps.elapse(), 1) <= RUN_LIMIT.total_seconds()
+            except TimeoutError:
+                pytest.fail("No deadline timer monitors the active operation")
+        try:
+            await asyncio.wait_for(cancelled.wait(), 1)
+        except TimeoutError:
+            pytest.fail("Terminal condition left the active operation running")
+        await asyncio.wait_for(visitors.drain(), 5)
+        run = visitors.run(started.run_id, copy.copy_id)
+        assert (run.state, run.ended) == (("stopped", "chat_ended") if ending == "stream" else ("done", "limit"))
+        assert run.messages_sent == 0
+        assert len(visitor_model.requests) == 1 and not desk_model.requests
+    assert app.state.runtime.stream_slots.open_counts() == ({}, {})
+
+
 async def test_ends_at_ten_messages(app, fake, visitors, visitor_model, desk_model, engine, copy):
     visitor_model.add(*(step(f"Could you tell me more, part {n}?") for n in range(1, 12)))      # never done
     desk_model.add(*(say("Happy to help with that.") for _ in range(10)))
@@ -681,9 +746,11 @@ async def test_ends_at_twelve_model_calls(app, fake, visitors, visitor_model, de
 async def test_ends_after_fifteen_minutes(app, fake, visitors, visitor_model, desk_model, copy, sleeps):
     release = asyncio.Event()
     visitor_model.add(step("Hi, can you fix a leaking sink?"), step("never asked"))
-    desk_model.add(gated(say("We can help with that."), release))           # Claude takes its time
+    answering = gated(say("We can help with that."), release)
+    desk_model.add(answering)                                              # Claude takes its time
     started = await start(visitors, fake, copy)
-    waited = await sleeps.elapse()                                          # the rest of its fifteen minutes
+    await asyncio.wait_for(answering.entered.wait(), 5)
+    waited = await sleeps.elapse(RUN_LIMIT.total_seconds() - sum(sleeps.pauses))                                          # the rest of its fifteen minutes
     await visitors.drain()
     run = visitors.run(started.run_id, copy.copy_id)
     assert (run.state, run.ended, run.messages_sent) == ("done", "limit", 1)

@@ -321,9 +321,41 @@ class _Chat:
     sleep: Sleep
     deadline: datetime
 
+    def check(self) -> None:
+        """Terminal stream events and the deadline win over any completed operation."""
+        if self.feed.failed:
+            raise RunFailed("the event stream sent a frame that isn't an event")
+        if self.feed.ended or any(getattr(seen.event, "code", None) == "session" for seen in self.feed.events):
+            raise _Ended("chat_ended")
+        if self.clock() >= self.deadline:
+            raise _Ended("limit")
+
+    async def terminal(self) -> None:
+        """Watch the stream and remaining lifetime while another operation is in flight."""
+        while True:
+            self.check()
+            await _first(self.feed, self.sleep((self.deadline - self.clock()).total_seconds()))
+
+    async def active[T](self, operation: Awaitable[T]) -> T:
+        """Cancel active work as soon as the stream or the run ends, and join every helper task."""
+        work = asyncio.ensure_future(operation)
+        terminal = asyncio.create_task(self.terminal())
+        try:
+            self.check()
+            await asyncio.wait({work, terminal}, return_when=asyncio.FIRST_COMPLETED)
+            if terminal.done():
+                await terminal
+            self.check()
+            return await work
+        finally:
+            work.cancel()
+            terminal.cancel()
+            await asyncio.gather(work, terminal, return_exceptions=True)
+
     async def call(self, method: str, path: str, *, ok: int, json: dict | None = None) -> None:
         """One request to the Desk with the run's cookie: `RunFailed` for any answer but `ok`, and the chat's end for a
         401 `no_session`."""
+        self.check()
         try:
             answer = await self.http.request(method, f"{self.path}{path}", headers={"Cookie": self.cookie},
                                              json=json)
@@ -357,13 +389,10 @@ class _Chat:
         and the run ends after `OWNER_SILENT_S`; the run's own time limit holds throughout."""
         nudged = False
         while True:
+            self.check()
             answer = _answer(self.feed.events, mark)
             if answer.answered:
                 return nudged
-            if self.feed.ended:
-                if self.feed.failed:
-                    raise RunFailed("the event stream sent a frame that isn't an event")
-                raise _Ended("chat_ended")
             now = self.clock()
             wait = (self.deadline - now).total_seconds()
             if wait <= 0:
@@ -375,8 +404,8 @@ class _Chat:
                 if not nudged and quiet >= NUDGE_AFTER_S:
                     nudged = True
                     if self.run.messages_sent < MAX_MESSAGES:
-                        await self.call("POST", "/typing", ok=204)
-                        await self.send(DEMO_VISITOR_NUDGE)
+                        await self.active(self.call("POST", "/typing", ok=204))
+                        await self.active(self.send(DEMO_VISITOR_NUDGE))
                     continue
                 wait = min(wait, (OWNER_SILENT_S if nudged else NUDGE_AFTER_S) - quiet)
             await _first(self.feed, self.sleep(wait))
@@ -430,15 +459,18 @@ async def run_demo_visitor(slug: str, task_set: DemoTaskSet, http: httpx.AsyncCl
     started = clock()
     path = f"/api/public/desks/{quote(slug, safe='')}"
     try:                                            # everything in the run ends it, however it goes
-        cookie = await _open_session(http, path, run)
-        if opened is not None:
-            await opened(run)
-        async with _listening(http, path, cookie, clock) as feed:
-            chat = _Chat(http=http, path=path, cookie=cookie, feed=feed, run=run, clock=clock, sleep=sleep,
-                         deadline=started + RUN_LIMIT)
-            await _converse(chat, model, task_set, record=record, spent=spent)
+        async with asyncio.timeout(RUN_LIMIT.total_seconds()):
+            cookie = await _open_session(http, path, run)
+            if opened is not None:
+                await opened(run)
+            async with _listening(http, path, cookie, clock) as feed:
+                chat = _Chat(http=http, path=path, cookie=cookie, feed=feed, run=run, clock=clock, sleep=sleep,
+                             deadline=started + RUN_LIMIT)
+                await _converse(chat, model, task_set, record=record, spent=spent)
     except _Ended as ended:
         _end(run, ended.how)
+    except TimeoutError:
+        _end(run, "limit")
     except ModelUnavailable:
         _fail(run, "the model was unavailable")
     except RunFailed as failed:
@@ -461,15 +493,15 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
     while True:
         if chat.run.messages_sent >= MAX_MESSAGES or calls >= MAX_MODEL_CALLS or chat.clock() >= chat.deadline:
             raise _Ended("limit")
-        if spent is not None and await spent():
+        if spent is not None and await chat.active(spent()):
             raise _Ended("budget")
-        step = await _step(model, messages, record)
+        step = await chat.active(_step(model, messages, record))
         calls += 1
         if step.done:
             raise _Ended("finished")
         if not step.message.strip():
             raise RunFailed("the model wrote an empty message")
-        mark = await chat.write(step.message, read=read)
+        mark = await chat.active(chat.write(step.message, read=read))
         nudged = await chat.answered(mark, chat.clock())
         lines = _lines(chat.feed.events, shown)
         shown, read = len(chat.feed.events), sum(len(line) for line in lines)
