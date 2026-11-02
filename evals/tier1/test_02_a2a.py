@@ -35,19 +35,20 @@ import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from desk.contracts import A2ARequest, DemoAgentIssued
+from desk.contracts import A2ARequest, DemoAgentIssued, Review
 from desk.events import A2AResponse
 from evals.client import DeskClient
 from evals.fakes import FakeAnthropic, Json, ToolUse
 from evals.tier1.args import find_slots_args
 from evals.tier1.golden_desk import REVIEW_PASS, REVIEWER_MODEL, GoldenDesk, golden_desk
 from evals.tier1.harness import AgentTurns, Auth, KernelHarness
-from evals.tier1.targets import SOFT_PROMISE_MODEL, ApiTarget
+from evals.tier1.targets import API_HAIKU_MODEL, SOFT_PROMISE_MODEL, ApiTarget
 from evals.tier1.test_api_payloads import found_in, send_reply
 
 pytestmark = pytest.mark.requires("01c", "02")
 
 OPUS = "claude-opus-5-5"                 # the conversation model (Plan 02a)
+REVIEW_FIELDS = frozenset(Review.model_fields)   # the kernel's reviewer's answer; its schema has no title (Plan 01a)
 SOFT_PROMISE_SCHEMA = "SoftPromiseVerdict"   # the kernel's soft-promise check (Plan 01a)
 TRANSLATION_SCHEMA = "Translation"       # the owner's translation job (Plan 02b, Task 10)
 ANNOTATION_ROUTES = frozenset({"translation", "triage"})   # the owner's annotation jobs' model routes
@@ -66,7 +67,7 @@ SLOTS = "Here are some times we could come out."
 def script_the_checks(fake: FakeAnthropic) -> None:
     """The kernel's reviewer passes if asked, and the owner's translation job finds English: neither changes a turn."""
     fake.default(REVIEWER_MODEL, Json(REVIEW_PASS))
-    fake.default(SOFT_PROMISE_MODEL, Json(ENGLISH), schema=TRANSLATION_SCHEMA)
+    fake.default(API_HAIKU_MODEL, Json(ENGLISH), schema=TRANSLATION_SCHEMA)
 
 
 async def mint(k: KernelHarness, desk: GoldenDesk) -> DemoAgentIssued:
@@ -111,9 +112,19 @@ def prose(answer: A2AResponse) -> list[str]:
 
 # What the stack holds
 
+def answer_fields(body: dict) -> frozenset[str]:
+    """The fields of the answer a structured call asks for (`output_config.format.schema`), or none."""
+    node: object = body
+    for key in ("output_config", "format", "schema", "properties"):
+        node = node.get(key) if isinstance(node, dict) else None
+    return frozenset(node) if isinstance(node, dict) else frozenset()
+
+
 def turn_calls(fake: FakeAnthropic) -> int:
-    """The model calls turns made so far: Claude's and the kernel's checks (module docstring)."""
-    return (len(fake.calls(OPUS)) + len(fake.calls(REVIEWER_MODEL))
+    """The model calls turns made so far: Claude's and the kernel's checks (module docstring). The reviewer shares
+    its model with the soft-promise check, so its calls are told apart by the `Review` they ask for."""
+    reviews = [body for body in fake.calls(REVIEWER_MODEL) if answer_fields(body) == REVIEW_FIELDS]
+    return (len(fake.calls(OPUS)) + len(reviews)
             + len(fake.calls(SOFT_PROMISE_MODEL, schema=SOFT_PROMISE_SCHEMA)))
 
 

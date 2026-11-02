@@ -29,8 +29,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from desk.api.model import ModelRequest, build_kwargs, parse_structured, strict_schema
+from desk.api.prompts import Translation
+from desk.api.triage import ANNOTATION_MODEL, TRANSLATION_MAX_TOKENS, TRANSLATION_ROUTE
 from desk.contracts import A2ARequest, CopyCreated, DemoAgentIssued, Mandate, RenderedBlock
 from desk.events import A2AResponse
+from desk.kernel_service.decisions import REVIEW_SCHEMA, SOFT_PROMISE_SCHEMA
 from evals.fakes import FakeAnthropic, LoopbackServer
 from evals.tier1 import test_02_a2a as a2a
 from evals.tier1.harness import Auth, Expect, TravelClock
@@ -282,6 +286,50 @@ class RowsOf:
 
     async def app_rows(self, session_id: str) -> str:
         return "\n".join(f"app.{table} {json.dumps(row, sort_keys=True)}" for table, row in self.rows)
+
+
+async def post(fake: FakeAnthropic, body: dict) -> httpx.Response:
+    async with httpx.AsyncClient(base_url=fake.url, timeout=10, trust_env=False) as http:
+        return await http.post("/v1/messages", json=body)
+
+
+def structured(model: str, schema: dict) -> dict:
+    """A structured call to `model` as the kernel's checks send one: the answer's JSON schema in `output_config`."""
+    return {"model": model, "max_tokens": 64, "messages": [{"role": "user", "content": "{}"}],
+            "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": schema}}}
+
+
+async def test_the_checks_answer_the_apis_translation_with_english():
+    """`script_the_checks` answers the owner's translation as the API asks for it (`triage.translate_message`'s model
+    and schema) with a `Translation` finding English, so the job stores nothing."""
+    fake = FakeAnthropic().start()
+    try:
+        a2a.script_the_checks(fake)
+        answer = await post(fake, build_kwargs(ModelRequest(
+            route=TRANSLATION_ROUTE, system=[{"type": "text", "text": "Translate the message."}],
+            messages=[{"role": "user", "content": a2a.HELLO}], model=ANNOTATION_MODEL, effort="low",
+            max_tokens=TRANSLATION_MAX_TOKENS, output_schema=Translation)))
+    finally:
+        fake.stop()
+    assert answer.status_code == 200, answer.text
+    [block] = answer.json()["content"]
+    assert parse_structured(Translation, block["text"]) == Translation(language="en", translation="")
+
+
+async def test_turn_calls_count_claude_the_reviewer_and_the_soft_promise_check_once_each():
+    """`turn_calls` counts Claude's calls and the kernel's checks', each once, though the reviewer and the soft-promise
+    check share a model; the owner's translation isn't a turn's call."""
+    fake = FakeAnthropic().start()
+    try:
+        for body in ({"model": a2a.OPUS, "max_tokens": 64, "messages": [{"role": "user", "content": a2a.HELLO}]},
+                     structured(a2a.REVIEWER_MODEL, REVIEW_SCHEMA),
+                     structured(a2a.SOFT_PROMISE_MODEL, SOFT_PROMISE_SCHEMA),
+                     structured(ANNOTATION_MODEL, strict_schema(Translation))):
+            await post(fake, body)   # unscripted, so each is answered 500, and each is kept as a call
+        assert len(fake.calls()) == 4
+        assert a2a.turn_calls(fake) == 3
+    finally:
+        fake.stop()
 
 
 async def test_session_rows_leave_out_only_the_annotation_jobs_usage():
