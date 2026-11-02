@@ -149,7 +149,15 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   const nameRef = useRef<HTMLHeadingElement>(null);
   const transcriptRef = useRef<HTMLElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
+  // Whether focus was in the owner's controls at the foot as they went: the demo visitor ended while she
+  // was in the whisper box, or Hand back (or Resume Claude) left an ended demo chat with nobody there.
+  const controlsHadFocus = useRef(false);
+  const holdControls = useCallback((controls: HTMLDivElement | null) => {
+    const leaving = controlsRef.current;
+    if (controls === null && leaving !== null && leaving.contains(leaving.ownerDocument.activeElement)) controlsHadFocus.current = true;
+    controlsRef.current = controls;
+  }, []);
   const [unsent, setUnsent] = useState<{ kind: 'say' | 'whisper'; text: string } | null>(null);
 
   const chat = useQuery({
@@ -218,7 +226,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   // When Take over goes from the bar with focus on it (she took the chat over, or it changed hands
   // elsewhere while she was on it), focus moves to the first line of the owner's controls, as
   // TakeOverBar moves it for its own buttons, so a keyboard user isn't dropped to the top of the page.
-  // A demo visitor's chat that ended while Claude has it has no controls: focus goes to its name.
+  // A demo visitor's chat that ended while Claude has it has no controls: focus goes to its name, as it
+  // does when those controls go with focus in them.
   const takeOverButton = useRef<HTMLButtonElement | null>(null);
   const takeOverHadFocus = useRef(false);
   const holdTakeOver = useCallback((button: HTMLButtonElement | null) => {
@@ -227,8 +236,9 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
     takeOverButton.current = button;
   }, []);
   useLayoutEffect(() => {
-    if (!takeOverHadFocus.current) return;
+    if (!takeOverHadFocus.current && !controlsHadFocus.current) return;
     takeOverHadFocus.current = false;
+    controlsHadFocus.current = false;
     const active = document.activeElement;
     if (active !== null && active !== document.body) return;
     const first = controlsRef.current?.querySelector<HTMLElement>('.cd-take-over__first');
@@ -289,8 +299,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   const now = new Date();
   // Take over is offered in the bar while Claude answers (and in a mode this build doesn't know), as
   // TakeOverBar would offer it: no one is on the other side of a recorded chat, nor of a demo
-  // visitor's that has ended while Claude has it, and a paused chat keeps it beside Resume Claude at
-  // the foot.
+  // visitor's that has ended while Claude has it, and a paused chat keeps it under Resume Claude at
+  // the foot, until a demo visitor's has ended: then only Resume Claude.
   const takeOverHere = !nobodyThere && state.mode !== 'owner' && state.mode !== 'paused';
 
   // The requests held in this chat: as Needs you lists them, those answered or being answered here, oldest first.
@@ -445,15 +455,17 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
       </div>
       {/* No one is on the other side of a recorded chat, nor of a demo visitor's once it has ended (its visitor
           session is gone, or idle for good) and Claude has it again: nothing to take over, whisper or write. An ended
-          demo chat the owner still has keeps Hand back (or Resume), with no composer. */}
+          demo chat the owner still has keeps Hand back, and one the breaker paused keeps only Resume Claude, with no
+          Take over and no composer. */}
       {nobodyThere ? null : (
-        <div ref={controlsRef} className="cd-conversation__controls">
+        <div ref={holdControls} className="cd-conversation__controls">
           <TakeOverBar
             mode={state.mode}
             visitorName={who}
             ownerName={business.owner_display_name}
             agent={state.kind === 'agent'}
             takeOverAbove
+            offerTakeOver={!demoEnded}
             onTakeOver={controls.takeOver}
             onHandBack={controls.handBack}
             onResume={controls.resume}

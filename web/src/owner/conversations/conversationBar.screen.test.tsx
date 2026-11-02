@@ -657,19 +657,60 @@ describe("a demo visitor's chat in the bar", () => {
     expectNoHorizontalScroll();
   });
 
-  it('a_demo_visitor_ending_while_take_over_has_focus_hands_focus_to_the_name', async () => {
+  it.each(SIZES)('keeps_only_resume_claude_at_the_foot_of_an_ended_demo_chat_claude_paused_at_%sx%s', async (width, height) => {
+    // The breaker paused the chat, then the demo visitor ended: Claude can still be resumed, but nobody is left to take over from.
+    mockStore.world.pause(mockStore.world.sessions.get(SEEDED_HOLD)!);
+    await withLatest(LONG_LATEST, demoRun('stopped_by_owner'));
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
+    const bar = await opened(screen, 'Visitor');
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.stopped)).toBeInTheDocument();
+    await expect.element(screen.getByText('Claude paused this chat after repeated blocked attempts.', { exact: true })).toBeVisible();
+    // Resume Claude alone at the foot, filling the controls' width as it does over Take over; no Take over in the bar or the foot.
+    const controls = landed('.cd-conversation__controls');
+    expect([...controls.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Resume Claude']);
+    const resume = screen.getByRole('button', { name: 'Resume Claude' });
+    await expect.element(resume).toBeVisible();
+    expect(rect(resume.element()).width).toBeCloseTo(rect(controls.querySelector('.cd-take-over__buttons')!).width, 0);
+    expect(screen.getByRole('button', { name: 'Take over' }).elements()).toHaveLength(0);
+    expect(bar.querySelector('button')).toBeNull();
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expectNoHorizontalScroll();
+  });
+
+  it.each(SIZES)('a_demo_visitor_ending_while_take_over_has_focus_hands_focus_to_the_name_at_%sx%s', async (width, height) => {
     const run = demoRun();
     await withLatest(LONG_LATEST, run);
-    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
     await opened(screen, 'Visitor');
     await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.running)).toBeInTheDocument();
     const takeOver = screen.getByRole('button', { name: 'Take over' });
+    // On a phone the name takes focus on opening; move to Take over so it cannot mask a lost-focus failure.
     (takeOver.element() as HTMLElement).focus();
+    await expect.element(takeOver).toHaveFocus();
     // It finishes while she is on Take over: Take over goes with nothing left at the foot, and focus
     // goes to the conversation's name rather than falling to the page.
     Object.assign(run, { state: 'done', ended: 'finished' } satisfies Partial<DemoVisitorRun>);
     await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.finished)).toBeInTheDocument();
     await expect.element(takeOver).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor' })).toHaveFocus();
+  });
+
+  it.each(SIZES)('a_demo_visitor_ending_while_the_whisper_box_has_focus_hands_focus_to_the_name_at_%sx%s', async (width, height) => {
+    const run = demoRun();
+    await withLatest(LONG_LATEST, run);
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
+    await opened(screen, 'Visitor');
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.running)).toBeInTheDocument();
+    // On a phone the name takes focus as the chat opens; she moves on to the whisper box first.
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    (box.element() as HTMLElement).focus();
+    await expect.element(box).toHaveFocus();
+    // It finishes while she is in the box: the owner's controls go with it, and focus goes to the
+    // conversation's name rather than falling to the page.
+    Object.assign(run, { state: 'done', ended: 'finished' } satisfies Partial<DemoVisitorRun>);
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.finished)).toBeInTheDocument();
+    await expect.element(box).not.toBeInTheDocument();
+    expect(document.querySelector('.cd-conversation__controls')).toBeNull();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor' })).toHaveFocus();
   });
 });

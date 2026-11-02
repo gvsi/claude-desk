@@ -354,6 +354,8 @@ describe('Demo visitor', () => {
     await expect.element(screen.getByRole('button', { name: 'Hand back to Claude', exact: true })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: 'Take over', exact: true })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).not.toBeInTheDocument();
+    // Hand back had focus as the controls went: focus goes to the conversation's name rather than falling to the page.
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Riley' })).toHaveFocus();
     await router.navigate(LIST);
     const row = screen.getByRole('link', { name: /^Riley Demo visitor/ });
     await expect.element(row).toBeVisible();
@@ -470,13 +472,14 @@ describe('Demo visitor', () => {
     expectNoHorizontalScroll();
   });
 
-  it('the_card_and_stop_take_the_keyboard_by_their_names', async () => {
-    const { screen, router } = await renderRoute(TODAY);
+  it.each(['desktop', 'phone'] as const)('the_card_and_stop_take_the_keyboard_by_their_names_on_%s', async (viewport: Viewport) => {
+    const { screen, router } = await renderRoute(TODAY, { viewport });
     const things = region(screen, 'Things to try');
-    const start = things.getByRole('button', { name: 'Start a demo visitor', exact: true });
+    const start = startControl(things, viewport);
     await expect.element(start).toBeVisible();
-    // The card's button is the stop after "Open your public page", and Enter starts it.
-    (things.getByRole('link', { name: 'Open your public page', exact: true }).element() as HTMLElement).focus();
+    // The card's button follows the public-page card's link at either width, and Enter starts it.
+    const publicPage = viewport === 'phone' ? 'Chat as a customer' : 'Open your public page';
+    (things.getByRole('link', { name: publicPage, exact: true }).element() as HTMLElement).focus();
     await userEvent.tab();
     await expect.element(start).toHaveFocus();
     await userEvent.keyboard('{Enter}');

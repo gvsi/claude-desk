@@ -36,6 +36,7 @@ With `takeOverAbove`, the screen draws Take over itself, in the bar at the top o
 | `ownerName` | `string` | Required. `owner_display_name`. |
 | `agent` | `boolean` | An agent's session. |
 | `takeOverAbove` | `boolean` | The `ai` bar keeps only its line. The screen owns Take over above: spin only for its own press, move focus to `.cd-take-over__first` when the focused button goes, and reveal the alert or owner's first line after its press as described above. |
+| `offerTakeOver` | `boolean` | Defaults to `true`. Set to `false` for an ended demo visitor: the paused bar keeps only Resume Claude. |
 | `onTakeOver` | `() => void` | Required. |
 | `onHandBack` | `() => void` | Required. |
 | `onResume` | `() => void` | Required. |

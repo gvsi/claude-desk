@@ -460,7 +460,7 @@ export const Ended: Story = {
   render: () => <ConversationBoard stage="ended" />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-ended-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}" Stopped by a failure or the day's budget, "${DEMO_VISITOR_NOTE.stoppedEarly}" The board still draws Take over and the whisper box under it; since UX QA on 2026-11-02 an ended demo visitor's chat offers neither, as nobody is left to answer: the bar has no Take over while Claude has the chat, and one the owner still holds keeps only Hand back at its foot. ${SINCE_THE_BAR}`,
+    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}" Stopped by a failure or the day's budget, "${DEMO_VISITOR_NOTE.stoppedEarly}" The board still draws Take over and the whisper box under it; since UX QA on 2026-11-02 an ended demo visitor's chat offers neither, as nobody is left to answer: while Claude has it, there are no controls; while the owner holds it, only Hand back stays at its foot; if the breaker paused it, only Resume Claude stays. ${SINCE_THE_BAR}`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
