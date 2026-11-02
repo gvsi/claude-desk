@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, onTestFinished, vi } from 'vitest';
@@ -9,6 +9,7 @@ import { useOwnerPreviewBack, type OwnerPreviewBack } from './ownerPreview.ts';
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 it('reopening_preview_does_not_reuse_an_owner_read_from_before_leaving', async () => {
+  const errors = vi.spyOn(console, 'error');
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   const root = createRoot(document.createElement('div'));
   const outcomes: RequestOutcome[] = [];
@@ -18,6 +19,8 @@ it('reopening_preview_does_not_reuse_an_owner_read_from_before_leaving', async (
     client.clear();
     stop();
     vi.unstubAllGlobals();
+    errors.mockRestore();
+    notifyManager.setNotifyFunction((fn) => fn());
   });
 
   let release!: (response: Response) => void;
@@ -37,6 +40,7 @@ it('reopening_preview_does_not_reuse_an_owner_read_from_before_leaving', async (
     root.render(createElement(QueryClientProvider, { client }, open ? createElement(Preview) : null));
   });
 
+  notifyManager.setNotifyFunction((fn) => act(fn));
   await draw(true);
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(view).toEqual({ settled: false, href: null });
@@ -47,12 +51,11 @@ it('reopening_preview_does_not_reuse_an_owner_read_from_before_leaving', async (
   await act(async () => {
     release(Response.json({ desks: [{ desk_id: 'desk-turner', slug: 'turner-plumbing' }] }));
   });
-  // TanStack tells the hook on a tick of its own after the read ends, so wait for the view itself,
-  // letting React draw each time, not only for the read to end.
-  await vi.waitFor(async () => {
-    await act(async () => {});
+  // TanStack notifies on its own tick, wrapped in act above; wait for the view it draws.
+  await vi.waitFor(() => {
     expect(view).toEqual({ settled: true, href: null });
   });
   expect(fetchMock).toHaveBeenCalledTimes(2);
   expect(outcomes.filter((outcome) => !outcome.ok && outcome.error.kind === 'network')).toEqual([]);
+  expect(errors.mock.calls.filter((args) => args.some((arg) => String(arg).includes('not wrapped in act')))).toEqual([]);
 });

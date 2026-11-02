@@ -68,6 +68,12 @@ it('mock_sources_stay_on_the_copys_starting_desk', async () => {
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Knowledge' })).toBeVisible();
   await expect.element(screen.getByRole('textbox', { name: 'A note' })).toBeVisible();
   expect(screen.getByText('Maintenance plan.pdf', { exact: true }).query()).toBeNull();
+  // The sample business's other Desk still asks Turner's questions: its words go by the business.
+  const questions = screen.getByRole('region', { name: 'Questions Claude couldn’t answer', exact: true });
+  await expect.element(questions).toBeVisible();
+  expect([...questions.element().querySelectorAll('li')].map((row) => row.querySelector('.cd-knowledge-list__title')?.textContent)).toEqual([
+    'Do you install water softeners?', 'Can you come out on a Sunday for a burst pipe?', 'Do you take credit cards on site?',
+  ]);
 });
 
 it('source_kinds_keep_their_tiles_and_detail_prefixes', async () => {
