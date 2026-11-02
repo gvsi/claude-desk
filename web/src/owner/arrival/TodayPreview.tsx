@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { Component, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 import { AppShell, ReviewerBar } from '../../ds/index.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { OwnerDeskProvider, OwnerSidebar, type OwnerDeskContext } from '../OwnerLayout.tsx';
 import { TodayClockContext } from '../today/todayClock.ts';
 import { TodayPage } from '../today/TodayPage.tsx';
@@ -79,7 +80,7 @@ function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
           <OwnerDeskProvider value={still.desk}>
             <AppShell
               business={business.name}
-              banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={ignore} />}
+              banner={<ReviewerBar ownerName={givenOwnerName(business.owner_display_name)} onStartOver={ignore} />}
               sidebar={
                 <OwnerSidebar
                   businesses={[business]}

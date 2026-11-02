@@ -481,6 +481,21 @@ async def test_visitor_callback_replaced_by_a_newer_one_is_not_called_back(scene
     assert await visitor_outcome(scene, who) == "quoted"
 
 
+async def test_visitor_callback_superseded_is_not_called_back(scene):
+    """A call-back the one-open revision superseded (kernel_one_open_handoff) is `superseded`, never `done`, so it
+    is no call-back the owner made, even once an entry on the ledger names it closed."""
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, "native.quote", "executed")
+    scene.fake.now = at + timedelta(minutes=1)
+    await who.run("native.request_callback", CALLBACK)
+    (handoff_id,) = [h for h, row in scene.fake.handoffs.items() if row["session_id"] == who.session_id]
+    scene.fake.handoffs[handoff_id]["status"] = "superseded"
+    scene.fake._put("handoffs", (handoff_id,), dict(scene.fake.handoffs[handoff_id]))
+    entry(scene, who.ids, at + timedelta(minutes=2), "desk_data", {"part": "handoffs", "refs": [handoff_id]})
+    assert await visitor_outcome(scene, who) == "quoted"
+
+
 async def test_visitor_outcome_follows_the_recorded_time_of_replayed_history(scene):
     at = local(2026, 10, 30, 9)
     who = await scene.visitor(at)
