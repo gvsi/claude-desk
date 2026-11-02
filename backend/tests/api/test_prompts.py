@@ -711,6 +711,18 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
         assert "documents_and_payments (a limit): whether the Desk may send customers their own documents" in system
 
 
+def test_the_start_reading_names_the_limits_a_description_gives_without_setting_them():
+    # The owner's description may say how the Desk should handle a limit on its own ("you can take up to 10% off
+    # without asking me"). The start reading names that limit's topic, so setup asks its own question; it never sets
+    # the limit, which comes only from that question's answer.
+    flat = " ".join(SETUP_START_SYSTEM.split())
+    assert "- named_limits: each limit the description says how the Desk should handle on its own" in flat
+    assert 'such as discounts for "you can take up to 10% off without asking me"' in flat
+    assert "Setup then asks each one's own question: naming a limit here never sets it." in flat
+    assert "never for a price, a payment method or an offer" in flat
+    assert "not a limit on what the Desk may do without asking, which goes in named_limits" in flat
+
+
 def test_decided_cards_stay_as_decided():
     # Claude never points the owner back to a decided card. After the plan closes, Change something is how they change
     # one: its own turn says how a drop shows the card again for them to decide.

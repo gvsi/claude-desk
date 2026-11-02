@@ -50,6 +50,7 @@ from desk.api.prompts import (
     SetupNextStep,
     SetupUnderstanding,
     LIMIT_CHOICES,
+    LimitTopic,
     question_text,
 )
 from desk.api.ratelimit import RateLimited
@@ -4447,6 +4448,52 @@ async def test_skip_ignores_covered_topics_and_a_covered_topic_is_never_asked_ag
     after = await stored(engine, state["interview_id"])
     assert after["transcript"][:len(before["transcript"])] == before["transcript"]
     assert sum("what_you_do" in entry.get("covered", []) for entry in after["transcript"]) == 1
+
+
+NAMES_A_DISCOUNT = "I'm Mike Turner. Turner Plumbing fixes leaks. You can take up to 10% off without asking me."
+
+
+@pytest.mark.parametrize(("named", "limit", "value"), [
+    ([], None, None), (["discounts"], "discount_auto_max_bp", 1000), (["money_limit"], "auto_money_cap_cents", 10000)])
+async def test_a_limit_the_description_names_is_asked_even_when_a_turn_skips_it(
+    app, browser, kernel_http, model, engine, named, limit, value,
+):
+    # The owner's description named a limit ("you can take up to 10% off without asking me"), so the start reading
+    # lists its topic among the named limits. A turn that skips it is overruled: code asks that limit's own question
+    # next, the opt-in money question too. Naming it sets nothing: the limit comes only from that question's answer,
+    # and answering it closes the questions. With no limit named, the same skip closes the questions as before.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model, description=NAMES_A_DISCOUNT if named else DESCRIPTION, named_limits=named)
+    iid = state["interview_id"]
+    assert (await stored(engine, iid))["answers"].get("named_limits", []) == named
+    await consent(owner, iid, False, model)
+    await answer(owner, model, iid, "We fix leaks.")
+    skipped = [key for key in QUESTION_KEYS if key not in ("what_you_do", "hours_and_area", "contact_and_after_hours")]
+    await answer(owner, model, iid, "Oakland, 8 to 6.", turn(next=next_ask("contact_and_after_hours"), skip=skipped))
+    response = await answer(owner, model, iid, "Call (510) 555-0142. After hours, take a message.",
+                            turn(next=next_ask("done"), skip=skipped))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    if not named:
+        assert (body["step"], body["question"]) == ("questions", "test_client")
+        return
+    (topic,) = named
+    assert (body["step"], body["question"]) == ("questions", topic)
+    assert body["messages"][-1]["text"] == question_text(topic, "trade")
+    before = (await stored(engine, iid))["answers"]
+    assert (before.get("discount_auto_max_bp"), before.get("auto_money_cap_cents", 0)) == (None, 0)   # nothing set yet
+    response = await answer(owner, model, iid, "Up to 10%." if topic == "discounts" else "$100.",
+                            turn(**{limit: value}), unavailable())
+    assert response.status_code == 200, response.text
+    assert (response.json()["step"], response.json()["question"]) == ("questions", "test_client")
+    assert (await stored(engine, iid))["answers"][limit] == value
+    # The named limits are code's: no model call reads them.
+    assert all("named_limits" not in json.dumps(request.messages) for request in model.requests)
+
+
+def test_named_limit_topics_are_the_limit_questions():
+    from desk.api.prompts import LIMIT_QUESTIONS as fields
+    assert set(get_args(LimitTopic)) == set(LIMIT_CHOICES) == set(fields.values())
 
 
 async def test_a_failed_next_step_asks_the_first_uncovered_topic(app, browser, kernel_http, model, engine):
