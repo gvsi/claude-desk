@@ -2066,6 +2066,59 @@ describe('rules and tools', () => {
     expect((await confirm(8)).status).toBe(401);
   });
 
+  it.each(['ask_first', 'auto'] as const)('preset_%s_keeps_person_card_on_non_money_job', async (preset) => {
+    const desk = mockStore.world.desks[0]!;
+    const person: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: 'person-dana-callback', who: 'person', person_id: rivera.people.dana.personId };
+    desk.policy.cards.push(person);
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    expect(draft.cards).toContainEqual(person);
+    expect(draft.diff?.removed).not.toContainEqual(person);
+    expect(draft.diff?.changed?.some(([old]) => old.card_id === person.card_id)).toBe(false);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe(preset);
+  });
+
+  it.each([
+    ['needs_review', 'new', false], ['needs_review', 'changed', true],
+    ['needs_review', 'delisted', false], ['disabled', null, false],
+  ] as const)('preset_handles_job_state_%s_%s', async (status, reviewReason, kept) => {
+    for (const preset of ['ask_first', 'auto'] as const) {
+      mockStore.reset('rivera');
+      const desk = mockStore.world.desks[0]!;
+      const job = desk.tools.find((row) => row.tool === 'desk.emergency-callback')!;
+      job.status = status;
+      job.review_reason = reviewReason;
+      const urgent = desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!;
+      const before = await rules();
+      expect(before.tools.find((row) => row.tool === job.tool)?.review_reason).toBe(reviewReason);
+      const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+      expect(response.status).toBe(200);
+      const draft = response.body as RulesDraft;
+      expect(draft.cards.some((card) => card.card_id === urgent.card_id)).toBe(kept);
+      expect(draft.diff?.removed?.some((card) => card.card_id === urgent.card_id)).toBe(!kept);
+      expect((await confirm(draft.version)).status).toBe(200);
+      expect((await rules()).preset).toBe(preset);
+    }
+  });
+
+  it.each(['ask_first', 'auto'] as const)('preset_%s_card_wins_job_card_id_collision', async (preset) => {
+    const desk = mockStore.world.desks[0]!;
+    const presetCard = presetCards(preset, RIVERA_HOURS)[0]!;
+    const collision: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: presetCard.card_id, mode: 'never' };
+    desk.policy.cards = [...desk.policy.cards.filter((card) => card.card_id !== collision.card_id), collision];
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    expect(draft.cards).toContainEqual(presetCard);
+    expect(draft.cards).not.toContainEqual(collision);
+    expect(draft.diff?.changed).toContainEqual([collision, presetCard]);
+    expect(new Set(draft.cards.map((card) => card.card_id)).size).toBe(draft.cards.length);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe(preset);
+  });
+
   it.each(['ask_first', 'auto'] as const)('preset_%s_removes_automatic_money_job_cards', async (preset) => {
     const desk = mockStore.world.desks[0]!;
     const urgent = desk.tools.find((row) => row.tool === 'desk.emergency-callback')!;
@@ -2085,22 +2138,6 @@ describe('rules and tools', () => {
     expect((await rules()).preset).toBe(preset);
     desk.policy.cards.push(payment);
     expect((await rules()).preset).toBeNull();
-  });
-
-  it.each(['ask_first', 'auto'] as const)('preset_%s_card_wins_job_card_id_collision', async (preset) => {
-    const desk = mockStore.world.desks[0]!;
-    const presetCard = presetCards(preset, RIVERA_HOURS)[0]!;
-    const collision: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: presetCard.card_id, mode: 'never' };
-    desk.policy.cards = [...desk.policy.cards.filter((card) => card.card_id !== collision.card_id), collision];
-    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
-    expect(response.status).toBe(200);
-    const draft = response.body as RulesDraft;
-    expect(draft.cards).toContainEqual(presetCard);
-    expect(draft.cards).not.toContainEqual(collision);
-    expect(draft.diff?.changed).toContainEqual([collision, presetCard]);
-    expect(new Set(draft.cards.map((card) => card.card_id)).size).toBe(draft.cards.length);
-    expect((await confirm(draft.version)).status).toBe(200);
-    expect((await rules()).preset).toBe(preset);
   });
 
   it.each(['ask_first', 'auto'] as const)('preset_%s_keeps_the_desks_job_cards', async (preset) => {

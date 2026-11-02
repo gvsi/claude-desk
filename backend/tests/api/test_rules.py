@@ -851,24 +851,33 @@ async def test_a_money_cap_lowering_that_fails_sends_nothing(app, browser, fake,
 
 
 @pytest.mark.parametrize("preset", ["ask_first", "auto"])
-@pytest.mark.parametrize("status,review_reason,kept", [
-    ("needs_review", "new", False), ("needs_review", "changed", True)])
-async def test_preset_with_job_awaiting_review(app, browser, fake, kernel_http, preset, status, review_reason, kept):
+async def test_preset_keeps_person_card_on_non_money_job(app, browser, fake, kernel_http, preset):
     owner = await new_owner(app, browser, fake, kernel_http)
     desk = fake.desks[owner.desk_id]
-    job = "desk.emergency-callback"
-    urgent = next(each for each in owner_cards(fake, owner.desk_id) if each.applies_to == job)
-    fake._put_tool(desk, desk.tools[job].model_copy(update={
-        "status": status, "review_reason": review_reason}))
-    fake.flush()
-
-    reply = await owner.browser.get(rules_url(owner))
-    assert reply.status_code == 200, reply.text
-    row = next(each for each in reply.json()["tools"] if each["tool"] == job)
-    assert row["review_reason"] == review_reason
+    person = card("person-dana-callback", "desk.emergency-callback", who="person",
+                  person_id=desk.person("dana").person_id)
+    await confirmed(owner, kernel_http, owner.desk_id, [*owner_cards(fake, owner.desk_id), person],
+                    desk.policy_version)
     draft = await drafted(owner, rules_path(owner, "preset"), {"preset": preset})
-    assert (urgent in draft.cards) == kept
-    assert (urgent in draft.diff.removed) == (not kept)
+    assert person in draft.cards and person not in draft.diff.removed
+    assert all(old.card_id != person.card_id for old, _ in draft.diff.changed)
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
+    assert (await owner.browser.get(rules_url(owner))).json()["preset"] == preset
+
+
+@pytest.mark.parametrize("preset", ["ask_first", "auto"])
+async def test_preset_card_wins_job_card_id_collision(app, browser, fake, kernel_http, preset):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    preset_card = preset_cards(preset, desk.hours)[0]
+    collision = card(preset_card.card_id, "desk.emergency-callback", mode="never")
+    await confirmed(owner, kernel_http, owner.desk_id,
+                    [each for each in owner_cards(fake, owner.desk_id) if each.card_id != collision.card_id]
+                    + [collision], desk.policy_version)
+    draft = await drafted(owner, rules_path(owner, "preset"), {"preset": preset})
+    assert preset_card in draft.cards and collision not in draft.cards
+    assert (collision, preset_card) in draft.diff.changed
+    assert len({each.card_id for each in draft.cards}) == len(draft.cards)
     assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
     assert (await owner.browser.get(rules_url(owner))).json()["preset"] == preset
 
@@ -894,18 +903,25 @@ async def test_preset_removes_automatic_money_job_cards(app, browser, fake, kern
 
 
 @pytest.mark.parametrize("preset", ["ask_first", "auto"])
-async def test_preset_card_wins_job_card_id_collision(app, browser, fake, kernel_http, preset):
+@pytest.mark.parametrize("status,review_reason,kept", [
+    ("needs_review", "new", False), ("needs_review", "changed", True),
+    ("needs_review", "delisted", False), ("disabled", None, False)])
+async def test_preset_with_job_awaiting_review(app, browser, fake, kernel_http, preset, status, review_reason, kept):
     owner = await new_owner(app, browser, fake, kernel_http)
     desk = fake.desks[owner.desk_id]
-    preset_card = preset_cards(preset, desk.hours)[0]
-    collision = card(preset_card.card_id, "desk.emergency-callback", mode="never")
-    await confirmed(owner, kernel_http, owner.desk_id,
-                    [each for each in owner_cards(fake, owner.desk_id) if each.card_id != collision.card_id]
-                    + [collision], desk.policy_version)
+    job = "desk.emergency-callback"
+    urgent = next(each for each in owner_cards(fake, owner.desk_id) if each.applies_to == job)
+    fake._put_tool(desk, desk.tools[job].model_copy(update={
+        "status": status, "review_reason": review_reason}))
+    fake.flush()
+
+    reply = await owner.browser.get(rules_url(owner))
+    assert reply.status_code == 200, reply.text
+    row = next(each for each in reply.json()["tools"] if each["tool"] == job)
+    assert row["review_reason"] == review_reason
     draft = await drafted(owner, rules_path(owner, "preset"), {"preset": preset})
-    assert preset_card in draft.cards and collision not in draft.cards
-    assert (collision, preset_card) in draft.diff.changed
-    assert len({each.card_id for each in draft.cards}) == len(draft.cards)
+    assert (urgent in draft.cards) == kept
+    assert (urgent in draft.diff.removed) == (not kept)
     assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
     assert (await owner.browser.get(rules_url(owner))).json()["preset"] == preset
 
