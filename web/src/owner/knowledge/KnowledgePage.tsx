@@ -355,8 +355,9 @@ export function KnowledgePage() {
 
   return (
     <>
-      {/* The page's sample rows, previews and website field are mocks in this prototype: it says so once, beside its title. */}
-      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} badge={<Pill>Mock</Pill>} />
+      {/* The plumbing demo's sample rows and questions are mocks: it says so once, beside its title. Every Desk's More
+          sources and website field say on their own line what doesn't work yet, with no pill. */}
+      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} {...(isStartingDesk ? { badge: <Pill>Mock</Pill> } : {})} />
       <div className="cd-knowledge">
         <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} isStartingDesk={isStartingDesk} /></div>
         <div className="cd-knowledge__add">

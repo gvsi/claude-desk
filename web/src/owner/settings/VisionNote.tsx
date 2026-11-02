@@ -4,7 +4,7 @@ import { Pill } from '../../ds/index.ts';
 
 /**
  * A section this prototype doesn't run: the Mock pill, then the explanation. Without `pill`, the
- * explanation alone, on a page that says it is a mock once, beside its title (Knowledge).
+ * explanation alone: Knowledge's notes, whose plumbing demo says it is a mock once, beside its title.
  */
 export function VisionNote({ children, pill = true }: { children: ReactNode; pill?: boolean }) {
   return (

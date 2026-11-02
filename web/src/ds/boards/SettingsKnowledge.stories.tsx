@@ -43,7 +43,7 @@ export const Board: Story = {
     await expect(within(list).getAllByRole('listitem')).toHaveLength(6);
     await expect(canvas.getByText('6 sources. Customers can see 5.')).toBeVisible();
     await expect(canvas.getByRole('button', { name: 'Add a website' })).toBeVisible();
-    // The page says it is a mock once, beside its title.
+    // The plumbing demo's page says it is a mock once, beside its title.
     const mocks = canvas.getAllByText('Mock');
     await expect(mocks).toHaveLength(1);
     await expect(mocks[0]?.previousElementSibling).toBe(canvas.getByRole('heading', { level: 1, name: 'Knowledge' }));

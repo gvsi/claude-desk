@@ -1453,7 +1453,7 @@ describe('Conversations', () => {
     chat.state = { ...chat.state, mode: 'owner' };
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
-    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Mike. Can you send me a photo?");
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Mike. What time suits you?");
     await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
     await expect.element(box).toHaveAccessibleDescription(TAKE_OVER_HELPER);
   });
@@ -1468,11 +1468,11 @@ describe('Conversations', () => {
     chat.state = { ...chat.state, mode: 'owner' };
     const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
     const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
-    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Fenster & Fenster. Can you send me a photo?");
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Fenster & Fenster. What time suits you?");
     await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
   });
 
-  it('whisper_box_on_another_desk_asks_for_a_photo', async () => {
+  it('whisper_box_on_another_desk_asks_what_they_have_tried', async () => {
     // Off the plumbing demo, the whisper's example is one that fits any business.
     const { deskId } = await liveSetupDeskIds('A hair salon in Oakland');
     const desk = mockStore.world.desk(deskId);
@@ -1481,7 +1481,7 @@ describe('Conversations', () => {
     mockStore.world.visitorText(chat, 'Can you fix a bad dye job?');
     const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
     const box = screen.getByRole('textbox', { name: 'Whisper to Claude', exact: true });
-    await expect.element(box).toHaveAttribute('placeholder', 'Ask for a photo of the problem');
+    await expect.element(box).toHaveAttribute('placeholder', "Ask what they've tried so far");
     expect(box.element().hasAttribute('aria-describedby')).toBe(false);
   });
 

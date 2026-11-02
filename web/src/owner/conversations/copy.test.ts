@@ -52,14 +52,14 @@ describe('agentLine', () => {
 
 describe('takeOverPlaceholder', () => {
   it('writes_as_the_owners_first_name', () => {
-    expect(takeOverPlaceholder('Mike Turner', 'Turner Plumbing')).toBe("Hi, it's Mike. Can you send me a photo?");
+    expect(takeOverPlaceholder('Mike Turner', 'Turner Plumbing')).toBe("Hi, it's Mike. What time suits you?");
   });
 
   it('writes_as_the_business_when_the_owner_gave_no_name', () => {
     // Setup's fallback owner, "Owner", and an empty name both leave the business's name, whose
     // full stop ends the sentence on its own.
-    expect(takeOverPlaceholder('Owner', 'Acme Inc.')).toBe("Hi, it's Acme Inc. Can you send me a photo?");
-    expect(takeOverPlaceholder('', 'Acme Inc.')).toBe("Hi, it's Acme Inc. Can you send me a photo?");
-    expect(takeOverPlaceholder('   ', 'Turner Plumbing')).toBe("Hi, it's Turner Plumbing. Can you send me a photo?");
+    expect(takeOverPlaceholder('Owner', 'Acme Inc.')).toBe("Hi, it's Acme Inc. What time suits you?");
+    expect(takeOverPlaceholder('', 'Acme Inc.')).toBe("Hi, it's Acme Inc. What time suits you?");
+    expect(takeOverPlaceholder('   ', 'Turner Plumbing')).toBe("Hi, it's Turner Plumbing. What time suits you?");
   });
 });
