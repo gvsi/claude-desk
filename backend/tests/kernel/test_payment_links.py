@@ -589,6 +589,35 @@ async def test_reconciling_a_link_never_waits_for_a_confirm(desk_prove, app, cli
                                 f"session:{visitor.session_id}", "open")]
 
 
+@pytest.mark.solver
+async def test_a_link_whose_quote_another_link_paid_reads_as_cancelled(desk_prove, app, client, monkeypatch):
+    """A quote is paid once, so once one of its links is paid, any other link of it still open (a
+    stand-in here, since asking again for a link answers with the open one) can never be paid: the
+    next read cancels it (no `cancel_reason`), ledgered `quote_paid` on its session, with nothing
+    asked of the provider, and its completion is refused. The paid link still reads as paid."""
+    copy = await link_desk(client, await rivera(app, client))
+    visitor = await open_visitor(client, copy)
+    link = await issued(app, client, copy, visitor, ("deposit", 1))
+    token = await stand_in(app, copy, link, session_id=visitor.session_id, customer_id=link.customer_id)
+    response = await client.post(f"/payment_links/{link.token}/complete", json={})
+    assert response.status_code == 200, response.text
+
+    def no_provider(ctx):
+        raise AssertionError("a link whose quote is paid needs nothing from the provider")
+
+    monkeypatch.setattr(payments, "provider", no_provider)
+    seen = await view(client, token)
+    assert (seen.state, seen.cancel_reason) == ("cancelled", None)
+    [other] = [row for row in await links_of(app, copy) if row.token == token]
+    assert (other.state, other.cancel_reason) == ("cancelled", None)
+    assert (await payment_entries(app, copy))[-1] == (
+        visitor.session_id, {"link_id": other.link_id, "state": "cancelled", "reason": "quote_paid"})
+    assert (await view(client, link.token)).state == "paid"
+    response = await client.post(f"/payment_links/{token}/complete", json={})
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert [(key, state) for key, *_, state in checkouts(copy)] == [(link.action_id, "succeeded")]
+
+
 KEY = "k" * 32
 
 

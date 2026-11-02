@@ -36,7 +36,7 @@ from desk.kernel_service import adapters, execute, ledger, reply_check
 from desk.kernel_service.decisions import SoftPromiseVerdict
 
 from .helpers import kernel_ctx, ledger_rows, rows_of
-from .test_adapters import Rivera, book, quote_args, rivera, run, visitor_of
+from .test_adapters import WHO_NOTE, Rivera, book, quote_args, rivera, run, visitor_of
 from .test_approvals import answered, post_cancel
 from .test_context import context_of, fact_ids, owner_session_id
 from .test_decide import PASS, Visitor, decided, open_visitor, set_mode, set_session
@@ -961,7 +961,7 @@ async def test_a_held_request_awaiting_the_owner_is_the_conversations_item(app, 
     copy, visitor = await visitor_of(app, client)
     await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     held = await held_quote(client, visitor)
-    status = await checked(client, visitor, BLOCKED)             # the visitor is told to check the request
+    status = await checked(client, visitor, BLOCKED)             # the visitor is told the request is waiting for approval
     assert [(block.kind, block.text) for block in status.blocks] == [("prose", STATUS_LINE["en"])]
     assert (await checked(client, visitor, "", [clause("handoff")])).ok          # nor a card Claude cites
     assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
@@ -1099,7 +1099,7 @@ async def test_the_owner_handling_the_conversation_leaves_a_call_back_open(app, 
 # ---- A booking closes the card's handoff (the owner's decision of 2026-11-01) --------------------------
 
 SLOT = "S-20261102-1000"                    # Monday 10:00 to 12:00, inside rv-book-wk's hours
-BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm."
+BOOKED = "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm." + WHO_NOTE
 
 
 async def preview_of(client, copy: Rivera) -> Visitor:
@@ -1245,8 +1245,8 @@ async def test_a_booking_that_fails_closes_nothing(app, client, reviewer, monkey
 
 
 # The kernel's status line, the API's signed `STATUS_LINES["check_status"]`.
-STATUS_LINE = {"en": "Please check the request status in this chat.",
-               "es": "Consulte el estado de la solicitud en este chat."}
+STATUS_LINE = {"en": "Your request is waiting for approval; you can see where it stands in this chat.",
+               "es": "Su solicitud está esperando aprobación; puede consultar su estado en este chat."}
 SERVICE_AREA_CLAUSE = ("policy", "charter:policy:service_area")
 
 

@@ -14,6 +14,7 @@ import type { SseEvent } from '../api/contracts.ts';
 import { apiPath } from '../api/routes.ts';
 import type { ApprovalAnswerOut, CopyOut, NeedsYouItem, SetupState, SetupTools, VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { openChat } from '../public/PublicChatProvider.tsx';
+import { START_EXAMPLES } from '../setup/copy.ts';
 import { createMockApi, mockApiPlugin, type MockApi } from './devServer.ts';
 import { DEMO_CODE } from './script.ts';
 
@@ -435,10 +436,10 @@ describe('the dev server mock', () => {
     // Chen's setup as the mock app runs it, every turn streamed (faster than a model writes): each
     // card's own button pressed as the page sends it, "Not now" on Stripe and the retainer, then the
     // Tools step's reads, as after a reload. The booking job's card is the owner's own "on its own".
-    const api = createMockApi({ streams: { wordMs: 1, setupTurns: true } });
+    const api = createMockApi({ streams: { wordMs: 1, setupTurns: true, demoVisitorMs: 60 } });
     const tab = browserOf(api).tab();
     await tab.json<CopyOut>('POST', apiPath('copies', {}), { passcode: 'demo' }, 201);
-    const description = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses.";
+    const description = START_EXAMPLES.en.examples[3]!.description;
     const { interview_id: id } = await tab.json<SetupState>('POST', apiPath('startSetup', {}), { description, timezone: 'America/Los_Angeles', idempotency_key: crypto.randomUUID() }, 201);
     const cards = { cards: 1 };
     await tab.json<SetupState>('POST', apiPath('setupConsent', { id }, cards), { allow: true }, 202);

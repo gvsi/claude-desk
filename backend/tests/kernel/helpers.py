@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from sqlalchemy import event, func, select, text
 
 from desk.contracts import NotificationDefaults, PolicyVersion, RuleCard, ToolProfile
-from desk.db.models import ActorSession, Business, Copy, Desk, LedgerEntry, NotificationPref
+from desk.db.models import ActorSession, Business, Copy, Desk, Lead, LedgerEntry, NotificationPref
 from desk.db.models import PolicyVersion as PolicyVersionRow
 from desk.kernel_service import activation, auth, compiler, desks
 from desk.kernel_service.repo import KernelCtx, kernel_transaction, new_id
@@ -100,6 +100,16 @@ async def verify_session(app: FastAPI, copy_id: str, session_id: str, person_id:
         row = (await ctx.db.scalars(repo.scoped(select(ActorSession).where(
             ActorSession.session_id == session_id)))).one()
         row.person_id, row.assurance, row.verified = person_id, "demo_code", True
+
+
+async def save_lead(app: FastAPI, rows: CopyRows, session_id: str, *, name: str | None = "Jane Doe",
+                    contact: str | None = "jane@example.com") -> None:
+    """Test only: the lead `native.capture_lead` saves for a session, with the visitor's name and
+    contact (its note is the contact, as `capture_lead.lead_note` writes it), so the session may book."""
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(rows.copy_id)
+        ctx.db.add(Lead(lead_id=new_id("lead"), copy_id=rows.copy_id, desk_id=rows.desk_id, session_id=session_id,
+                        display_name=name, note=contact, created_at=ctx.clock.now()))
 
 
 async def ledger_rows(app: FastAPI, rows: CopyRows) -> list[LedgerEntry]:

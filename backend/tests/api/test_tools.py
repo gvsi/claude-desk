@@ -332,6 +332,23 @@ async def test_refuse_is_an_error_result(api_conn, caller, fake):
     assert len(await events(api_conn, caller.session_id)) == 3
 
 
+async def test_a_booking_without_a_name_and_contact_tells_claude_what_to_ask_for(api_conn, caller, fake):
+    """A booking with no name and phone number or email is refused (#740) with the kernel's own line, which says what
+    Claude must ask the visitor for; the same booking with them goes through."""
+    slots = sorted(fake.desks[caller.desk_id].slots.values(), key=lambda slot: slot.starts_at)
+    slot = next(slot.slot_id for slot in slots if slot.starts_at.weekday() < 5)
+    refused = await route_call(api_conn, caller, 0, tool_use("native__book", {"slot_id": slot}, id="toolu_bare"))
+
+    decision = refused.status.decision
+    assert (decision.state, decision.action) == ("refused", None)
+    assert refused.result == {"outcome": "refused", "decision_id": decision.decision_id,
+                              "message": "To book, I need your name and a phone number or email"}
+    assert refused.is_error is True and routes(fake, "/execute") == []
+    booked = await route_call(api_conn, caller, 0, tool_use("native__book", {
+        "slot_id": slot, "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_named"))
+    assert booked.result["outcome"] == "done", booked.result
+
+
 async def test_stale_generation_marks_fenced_and_runs_nothing(api_conn, caller, fake):
     fake.set_mode(caller.session_id, "owner")                  # take-over: generation 1, mode owner
     stale = await route_call(api_conn, caller, 0, tool_use("native__quote", DRAIN))

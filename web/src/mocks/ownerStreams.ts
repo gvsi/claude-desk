@@ -19,12 +19,14 @@ export interface StreamSettings {
   setupTurns: boolean;
   /** Answers and decisions answer 202 busy at once too, as the API does once a turn outlasts its wait. */
   answersAtOnce?: boolean;
+  /** Milliseconds the demo visitor (demoVisitors.ts) reads before it types, and types before it sends. */
+  demoVisitorMs: number;
 }
 
-/** The dev server's: about the pace of a model writing, with every setup turn streamed. */
-export const MODEL_PACE: StreamSettings = { wordMs: 45, setupTurns: true };
+/** The dev server's: about the pace of a model writing, with every setup turn streamed, and a person's pace in a chat. */
+export const MODEL_PACE: StreamSettings = { wordMs: 45, setupTurns: true, demoVisitorMs: 2_500 };
 /** The screen tests' default: quick, with setup's turns landing in their requests as before. */
-export const TEST_PACE: StreamSettings = { wordMs: 2, setupTurns: false };
+export const TEST_PACE: StreamSettings = { wordMs: 2, setupTurns: false, demoVisitorMs: 60 };
 
 /** A read is about this many words' time. */
 const READ_WORDS = 20;
