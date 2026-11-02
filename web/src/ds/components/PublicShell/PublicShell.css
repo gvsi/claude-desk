@@ -35,43 +35,6 @@
   flex: none;
 }
 
-.cd-public-shell .cd-public-shell-skeleton__phone-line {
-  display: none;
-}
-
-.cd-public-shell .cd-public-shell-skeleton__beside-line {
-  display: none;
-}
-
-@container cd-public-shell (min-width: 900px) {
-  .cd-public-shell .cd-public-shell-skeleton__beside-line {
-    display: flex;
-  }
-}
-
-/* The fresh copy's wrapped card lines follow the column's content width as it grows. */
-.cd-public-shell--skeleton .cd-public-shell__about {
-  container: cd-public-about / inline-size;
-}
-
-@container cd-public-about (min-width: 280px) {
-  .cd-public-shell .cd-public-shell-skeleton__deposit-wrap {
-    display: none;
-  }
-}
-
-@container cd-public-about (min-width: 300px) {
-  .cd-public-shell .cd-public-shell-skeleton__hours-wrap {
-    display: none;
-  }
-}
-
-@container cd-public-shell (max-width: 639.98px) {
-  .cd-public-shell .cd-public-shell-skeleton__phone-line {
-    display: flex;
-  }
-}
-
 .cd-public-shell-skeleton__composer {
   position: relative;
 }

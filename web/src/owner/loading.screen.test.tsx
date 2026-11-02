@@ -620,7 +620,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
   // Each card's line wraps in its third of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 2, 3, 1, 3] : [2, 2, 2, 1, 2]).forEach((count, i) => {
+  (viewport === 'phone' ? [2, 3, 3, 1, 3] : [2, 2, 3, 1, 3]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -696,17 +696,18 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
  * Decision 15's accepted move on a Desk switch. A copy with two Desks has made a Desk of its own, so
  * Things to try's last row lands ticked ("Create your own Desk", one done line) where the skeleton
  * draws a fresh copy's row. The card keeps its top, left and width and lands one row's change
- * shorter; what Today draws under it in its column, the aside stacked under that on a phone and the
- * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
+ * shorter; what Today draws under the band (its column, and the aside beside or under it) and the
+ * frame's footer each land once, by exactly that change. From 640 px the ticked card shares its row
+ * with "Answer a held request", whose step at the card's foot moves with the row: its fresh line
+ * ("Describe a business…") takes a line more than the held request's room. Everything else lands
+ * where its shape was.
  */
-const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card'];
-const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'week-title', 'week-bar-0'];
+const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card', 'week-title', 'week-bar-0'];
+const MOVED_FROM_640 = ['thing-action-3', ...UNDER_THINGS];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
   const ticked = ['thing-tile-4', 'thing-action-4', 'thing-go-4'];
-  // From 640 px the cards of a row share its height, so the ticked card moves nothing.
-  if (!phone) return TODAY_CONTENT_ANCHORS.filter(({ name }) => !ticked.includes(name));
-  const under = new Set(UNDER_THINGS_ON_A_PHONE);
+  const under = new Set(phone ? UNDER_THINGS : MOVED_FROM_640);
   return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && !ticked.includes(name)).map((anchor) =>
     anchor.name === 'things-card' ? { name: anchor.name, page: anchor.page, dimensions: ['width'] as const } : anchor,
   );
@@ -725,7 +726,7 @@ function boundsFromRect({ top, left, width, height }: DOMRect) {
 
 /** Sample the landed geometry from its first commit, even while the shapes fade over it. */
 function watchTheTickedRow(phone: boolean) {
-  const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS).includes(name));
+  const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS : MOVED_FROM_640).includes(name));
   const shape = (name: string) => document.querySelector(`.cd-today-opening [data-skeleton-anchor="${name}"]`)!.getBoundingClientRect();
   let before: { card: DOMRect; under: DOMRect[]; footer: DOMRect } | undefined;
   const snapshot = () => {
@@ -809,6 +810,7 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  const ticked = watchTheTickedRow(false);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
@@ -817,11 +819,13 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
       await screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' }).click();
       await screen.getByRole('button', { name: 'Main line', exact: true }).click();
     },
-    release: () => reads.forEach((read) => read.release()),
+    release: () => {
+      ticked.record();
+      reads.forEach((read) => read.release());
+    },
   });
-  // The last card lands ticked in the shape's place: its row of cards keeps its height.
-  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
-  expect(last?.textContent).toContain('Done. Your new Desk is live.');
+  // The last card lands ticked, and its row of cards moves once, by the line its fresh words took.
+  await ticked.expectOneMove();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -953,15 +957,18 @@ it('todays_hold_still_under_reduced_motion', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  const ticked = watchTheTickedRow(false);
   await expectSkeletonStill({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
     open: async () => { await router.navigate(TODAY); },
-    release: () => needsYou.release(),
+    release: () => {
+      ticked.record();
+      needsYou.release();
+    },
   });
-  // From 640 px the ticked card keeps its row's height, so everything lands in its shape's place.
-  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
-  expect(last?.textContent).toContain('Done. Your new Desk is live.');
+  // The ticked card's row moves once, with no fade; everything else lands in its shape's place.
+  await ticked.expectOneMove();
   await expectScreenBasics(document.body, { owner: true });
 });
 

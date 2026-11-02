@@ -442,6 +442,11 @@ export function useShellLayout(shell: RefObject<HTMLElement | null>, keepCompose
     shell.current?.classList.toggle(SHORT_CLASS, short.current);
     if (!shell.current) return;
     watchAbout(shell.current, observerRef.current, watchedAbout);
+    // A render that grows the chat's head or the composer at the top of a short chat, while the head
+    // still sits under the brand header, brings the composer out from under it before the next
+    // frame, rather than when the observer next hears of the new sizes.
+    const { head } = partsOf(shell.current);
+    if (head && head.getBoundingClientRect().top > shell.current.getBoundingClientRect().top) uncoverComposer(shell.current);
     markAboutUnderHead(shell.current);
   });
 

@@ -68,10 +68,11 @@ export const Board: Story = {
     await expectAgentsDisclosure(canvasElement);
     const send = canvas.getByRole('region', { name: 'Send an agent' });
     const demoKey = canvas.getByRole('region', { name: 'Try it with a demo key' });
-    // The two cards, 16 px apart; the send card adds a second 28 px chip row and an 8 px gap.
+    // The two cards, 16 px apart: the demo key's line takes two lines, and the send card adds a second
+    // 28 px chip row and an 8 px gap.
     const box = (el: HTMLElement) => el.getBoundingClientRect();
-    await expect([Math.round(box(demoKey).top), Math.round(box(demoKey).height)]).toEqual([226, 124]);
-    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([366, 221]);
+    await expect([Math.round(box(demoKey).top), Math.round(box(demoKey).height)]).toEqual([230, 145]);
+    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([391, 225]);
 
     // The limit inside the card: 726 px by 65, 10 px under the card's line, on the card's fill.
     const limit = within(send).getByRole('region', { name: 'Signed limit' });
@@ -91,7 +92,7 @@ export const Board: Story = {
       return buttons;
     });
     for (const [index, chip] of chips.entries()) {
-      await expect([Math.round(box(chip).top), Math.round(box(chip).height)]).toEqual([index < 2 ? 506 : 542, 28]);
+      await expect([Math.round(box(chip).top), Math.round(box(chip).height)]).toEqual([index < 2 ? 535 : 571, 28]);
     }
     await expect(box(rows[1]!).top - box(rows[0]!).bottom).toBe(8);
 

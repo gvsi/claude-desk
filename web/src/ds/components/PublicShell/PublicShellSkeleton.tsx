@@ -23,6 +23,57 @@ const DISCLOSURE: Record<CopyLanguage, readonly TextPart[]> = {
   es: ['Estás hablando con Claude, una IA que responde por Turner Plumbing. Puedes pedir hablar con ', { text: 'Mike Turner', className: 'cd-public-shell__owner' }, ' cuando quieras.'],
 };
 
+/** The fresh greeting's words, measured only, so its shape takes as many lines as they do. */
+const GREETING: Record<CopyLanguage, string> = {
+  en: 'How can Turner Plumbing help?',
+  es: '¿En qué te puede ayudar Turner Plumbing?',
+};
+
+/** The fresh charter's card titles, measured only, so each card's shape takes as many lines as its words. */
+const CARD_TITLES: Record<CopyLanguage, readonly string[]> = {
+  en: [
+    'Monday to Friday, 8:00 am to 6:00 pm',
+    '(510) 555-0142',
+    'We work in Oakland, Berkeley, Alameda and Emeryville.',
+    'The service call deposit is credited to the repair if you go ahead.',
+    'Mike texts before he arrives.',
+  ],
+  es: [
+    'De lunes a viernes, de 8:00 a 18:00',
+    '(510) 555-0142',
+    'We work in Oakland, Berkeley, Alameda and Emeryville.',
+    'The service call deposit is credited to the repair if you go ahead.',
+    'Mike texts before he arrives.',
+  ],
+};
+
+/** A wrapped line's width: each line shorter than the one before, down to the last width given. */
+function lineWidth(widths: readonly string[], line: number): string | undefined {
+  return widths[Math.min(line, widths.length - 1)];
+}
+
+/** A charter card's shape, its title as many lines as the fresh copy's take at the card's width. */
+function AboutCardShape({ index, title, layoutKey }: { index: number; title: string; layoutKey: unknown }) {
+  const headline = useRef<HTMLDivElement>(null);
+  const lines = useTextLines(headline, { parts: [title], className: 'cd-reply-card__headline cd-type-section' }, 1, layoutKey);
+  return (
+    <SkeletonCard padding={16} className="cd-reply-card" anchor={`about-card-${index}`}>
+      <div className="cd-reply-card__label">
+        <Skeleton shape="block" width={16} height={16} />
+        <Skeleton shape="line" text="caption" width={70} />
+      </div>
+      <div className="cd-reply-card__data">
+        <div ref={headline} className="cd-reply-card__headline">
+          {Array.from({ length: lines }, (_, line) => (
+            <Skeleton key={line} shape="line" text="section" width={lineWidth(['100%', '75%', '65%'], line)} />
+          ))}
+        </div>
+        {index === 0 ? <Skeleton shape="line" text="meta" width="85%" className="cd-reply-card__detail" /> : null}
+      </div>
+    </SkeletonCard>
+  );
+}
+
 /**
  * The shell's own layout and measurements, with no visitor content or interactive elements. History
  * is unknown until the page lands, so every load draws the first view: the greeting, its meta line,
@@ -34,6 +85,9 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
   const aboutBeside = useShellLayout(shell);
   const disclosure = useRef<HTMLDivElement>(null);
   const disclosureLines = useTextLines(disclosure, { parts: DISCLOSURE[language], className: 'cd-public-shell__disclosure cd-type-meta' }, 2, aboutBeside);
+  const welcome = useRef<HTMLDivElement>(null);
+  // In the greeting's type only: a probe with the greeting's own class would count as a greeting mounted.
+  const greetingLines = useTextLines(welcome, { parts: [GREETING[language]], className: 'cd-type-greeting' }, 1, aboutBeside);
   useFirstView(shell, true, aboutBeside, CHIP_WIDTHS.length);
   const about = footer ? (
     <div className="cd-public-shell__about" data-skeleton-anchor="about-column">
@@ -47,21 +101,8 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
         </div>
       ) : null}
       <div className="cd-public-shell__blocks">
-        {[0, 1, 2, 3, 4].map((i) => (
-          <SkeletonCard key={i} padding={16} className="cd-reply-card" anchor={`about-card-${i}`}>
-            <div className="cd-reply-card__label">
-              <Skeleton shape="block" width={16} height={16} />
-              <Skeleton shape="line" text="caption" width={70} />
-            </div>
-            <div className="cd-reply-card__data">
-              <div className="cd-reply-card__headline">
-                <Skeleton shape="line" text="section" />
-                {i === 2 || i === 3 ? <Skeleton shape="line" text="section" width="75%" /> : null}
-                {i === 0 || i === 3 ? <Skeleton shape="line" text="section" width="65%" className={`cd-public-shell-skeleton__beside-line cd-public-shell-skeleton__${i === 0 ? 'hours' : 'deposit'}-wrap`} /> : null}
-              </div>
-              {i === 0 ? <Skeleton shape="line" text="meta" width="85%" className="cd-reply-card__detail" /> : null}
-            </div>
-          </SkeletonCard>
+        {CARD_TITLES[language].map((title, i) => (
+          <AboutCardShape key={i} index={i} title={title} layoutKey={aboutBeside} />
         ))}
       </div>
       <div className="cd-public-shell__links">
@@ -92,11 +133,10 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
           </div>
           <div className="cd-public-shell__scroll">
             <div className="cd-public-shell__conversation" data-skeleton-anchor="conversation">
-              <div className="cd-public-shell__welcome">
-                <Skeleton shape="line" text="greeting" width="70%" anchor="greeting" />
-                {/* The greeting takes two lines on a phone, and in Spanish two from 640 px and three on a phone. */}
-                <Skeleton shape="line" text="greeting" width="60%" className={language === 'en' ? 'cd-public-shell-skeleton__phone-line' : undefined} />
-                {language === 'es' ? <Skeleton shape="line" text="greeting" width="50%" className="cd-public-shell-skeleton__phone-line" /> : null}
+              <div ref={welcome} className="cd-public-shell__welcome">
+                {Array.from({ length: greetingLines }, (_, line) => (
+                  <Skeleton key={line} shape="line" text="greeting" width={lineWidth(['70%', '60%', '50%'], line)} anchor={line === 0 ? 'greeting' : undefined} />
+                ))}
                 <Skeleton shape="line" text="meta" width={INVITATION_WIDTH[language]} className="cd-public-shell__invitation" anchor="invitation" />
               </div>
             </div>

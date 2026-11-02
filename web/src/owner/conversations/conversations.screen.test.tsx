@@ -25,7 +25,7 @@ import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.t
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, nextFrames, tokenColor } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -1051,6 +1051,10 @@ describe('Conversations', () => {
     // The booked card and its checks stay under their message.
     await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
     await expect.element(log(screen).getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).last()).toBeVisible();
+    // Opened at the chat's end, a phone can rest a receipt half under the pinned bar, where axe counts
+    // only its visible sliver as the button; check the screen with the log at its top, every line whole.
+    scrollerOf(log(screen).element()).scrollTop = 0;
+    await nextFrames();
     await expectScreenBasics(screen.container, { owner: true });
     expectNoHorizontalScroll();
 
