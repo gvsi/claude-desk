@@ -934,6 +934,21 @@ describe('public chat page', () => {
     await expect.element(screen.getByText(UNREACHABLE_COPY.en, { exact: true })).not.toBeInTheDocument();
   });
 
+  it('ask_is_disabled_when_the_session_cannot_open_after_the_desk_loads', async () => {
+    mockStore.inject({ route: 'openSession', status: 503 });
+    const { screen } = await renderRoute(PAGE);
+    await expect.element(screen.getByRole('heading', { name: 'Turner Plumbing', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+    await expect.element(chatBox(screen)).toBeDisabled();
+    const ask = screen.getByRole('button', { name: 'Ask for Mike Turner', exact: true });
+    await expect.element(ask).toBeDisabled();
+    const before = mockStore.requests.length;
+    (ask.element() as HTMLButtonElement).click();
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).not.toBe(ask.element());
+    expect(mockStore.requests.slice(before).filter(({ key }) => key === 'sendMessage')).toHaveLength(0);
+  });
+
   it.each(['desktop', 'phone'] as const)('deleted_desk_ends_the_chat_on_%s', async (viewport) => {
     // The owner deletes the Desk the moment Claude starts writing a reply.
     const { screen } = await renderRoute(PAGE, { seed: 'rivera', viewport });

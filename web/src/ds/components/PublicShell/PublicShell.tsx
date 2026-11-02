@@ -68,7 +68,7 @@ export interface PublicShellProps {
    * until it has, as the composer's Send does. `false` by default.
    */
   askWaits?: boolean;
-  /** The chat has ended: Ask is disabled like the composer and Send. */
+  /** The chat can't be written in: Ask is disabled like the composer and Send. */
   askDisabled?: boolean;
   /**
    * The owner is in the chat (a take-over). While it is set, the chat's head says so on the
