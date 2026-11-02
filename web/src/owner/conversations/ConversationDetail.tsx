@@ -29,13 +29,12 @@ import {
 } from '../../ds/index.ts';
 import { fillComposer } from '../../lib/composer.ts';
 import { formatStarted } from '../../lib/format.ts';
-import { givenOwnerName } from '../../public/brand.ts';
 import { HeldRequest, useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
-import { firstName, heldOldestFirst, useNeedsYou } from '../useDesks.ts';
+import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
@@ -138,16 +137,6 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
     );
   }
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
-}
-
-/**
- * Whom the owner writes as in the take-over box's example: their first name, or the business's
- * name when they gave none and the Desk carries setup's fallback.
- */
-function writesAs(ownerDisplayName: string, businessName: string): string {
-  const given = givenOwnerName(ownerDisplayName);
-  const first = given === null ? '' : firstName(given).trim();
-  return first === '' ? businessName : first;
 }
 
 export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk }: ConversationDetailProps) {
@@ -341,7 +330,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
           key="say"
           variant="owner"
           label="Write to them"
-          placeholder={takeOverPlaceholder(writesAs(business.owner_display_name, business.name))}
+          placeholder={takeOverPlaceholder(business.owner_display_name, business.name)}
           helper={TAKE_OVER_HELPER}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}

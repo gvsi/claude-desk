@@ -1,15 +1,23 @@
 import type { ConversationSummary } from '../../api/views.ts';
 import { formatCents, formatDayAndTime } from '../../lib/format.ts';
-import { afterName } from '../../lib/names.ts';
+import { afterName, firstName } from '../../lib/names.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 
 /** The note at the head of an owner's transcript, beside where the chat came from. */
 export const TRANSCRIPT_NOTE = 'Notes from the checks sit under each message. Select one for the full trace.';
 
 /**
  * The take-over box's example, written as the owner would to the visitor: "Hi, it's Mike. Can you
- * send me a photo?", in the owner's first name, or the business's name when the owner gave none.
+ * send me a photo?", in the first name of `owner_display_name`, or the business's name when the
+ * owner gave none (an empty name, or setup's fallback "Owner"). A name that ends in a full stop
+ * ("Acme Inc.") ends the sentence itself.
  */
-export const takeOverPlaceholder = (name: string): string => `Hi, it's ${name}${afterName(name, '. Can you send me a photo?')}`;
+export function takeOverPlaceholder(ownerDisplayName: string, businessName: string): string {
+  const given = givenOwnerName(ownerDisplayName);
+  const first = given === null ? '' : firstName(given).trim();
+  const name = first === '' ? businessName : first;
+  return `Hi, it's ${name}${afterName(name, '. Can you send me a photo?')}`;
+}
 
 /** The line under the take-over box: the visitor reads the owner's words as they are. */
 export const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';

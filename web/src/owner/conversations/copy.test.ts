@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ConversationSummary } from '../../api/views.ts';
-import { agentLine } from './copy.ts';
+import { agentLine, takeOverPlaceholder } from './copy.ts';
 
 const LA = 'America/Los_Angeles';
 
@@ -47,5 +47,19 @@ describe('agentLine', () => {
     expect(agentLine({ ...none, latest_outcome_starts_at: '2026-11-02T18:00:00Z', latest_outcome_cents: 2000 }, LA)).toBeNull();
     // Outcomes only a visitor's chat has say nothing here.
     expect(agentLine({ ...none, latest_outcome: 'quoted' }, LA)).toBeNull();
+  });
+});
+
+describe('takeOverPlaceholder', () => {
+  it('writes_as_the_owners_first_name', () => {
+    expect(takeOverPlaceholder('Mike Turner', 'Turner Plumbing')).toBe("Hi, it's Mike. Can you send me a photo?");
+  });
+
+  it('writes_as_the_business_when_the_owner_gave_no_name', () => {
+    // Setup's fallback owner, "Owner", and an empty name both leave the business's name, whose
+    // full stop ends the sentence on its own.
+    expect(takeOverPlaceholder('Owner', 'Acme Inc.')).toBe("Hi, it's Acme Inc. Can you send me a photo?");
+    expect(takeOverPlaceholder('', 'Acme Inc.')).toBe("Hi, it's Acme Inc. Can you send me a photo?");
+    expect(takeOverPlaceholder('   ', 'Turner Plumbing')).toBe("Hi, it's Turner Plumbing. Can you send me a photo?");
   });
 });
