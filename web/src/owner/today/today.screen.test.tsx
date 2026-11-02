@@ -1754,7 +1754,9 @@ describe('Today', () => {
     const live = region(screen, 'Live now');
     const column = await focusMarkDoneAtTheFoot(screen, live.element());
     const before = { column: column.scrollTop, window: window.scrollY };
-    const todayLine = () => document.querySelector('.cd-how__today')!.getBoundingClientRect().height;
+    // The page's own line: Today's loading shapes, while they fade out, draw one of their own.
+    const howToday = region(screen, 'How your Desk works').element();
+    const todayLine = () => howToday.querySelector('.cd-how__today')!.getBoundingClientRect().height;
     const lineBefore = todayLine();
 
     await userEvent.keyboard('{Enter}');
@@ -2417,7 +2419,8 @@ const box = (el: Element) => el.getBoundingClientRect();
  * drawn, with a band and a greeting of their own, so a query for those finds the shapes until then.
  */
 async function skeletonGone(): Promise<void> {
-  await expect.poll(() => document.querySelector('.cd-today--skeleton')).toBeNull();
+  // The fade's own fallback takes the shapes away within a second, so allow that and more.
+  await expect.poll(() => document.querySelector('.cd-today--skeleton'), { timeout: 2_000 }).toBeNull();
 }
 
 /** The controls in `root` that a pointer or Tab can reach now (drawn, not hidden). */
