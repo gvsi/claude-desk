@@ -69,10 +69,14 @@ An interview (`app.setup_interviews`, one row per interview, copy-scoped) runs i
 - **Change something** (`reopen`): from a step after the questions (`tools` through `preview`; never once live,
   when changes are made in the owner app), the owner's message takes the interview back to `questions` as its next
   turn, answered on the contact question behind a code ask the owner isn't shown. A change that belongs to another
-  topic is asked there next, a limit on its own question with code's choices (`_next_ask`). The turn drops the rules
-  draft, so the rules, situations and safety check are drafted again on the way forward; the confirm then waits for
-  the safety check to run again, and proving work that read the interview before a reopen never writes after it
-  (`Interview.reopens`). Each send carries an idempotency key, kept on the owner's message.
+  topic is asked there next, a limit on its own question with code's choices (`_next_ask`, on that turn alone), and
+  so is a fact the turn gave that the contact question can't record off its topic (`_held_off_topic`). A drop of a
+  job or connector the owner accepted shows its card again for them to decide, and a new job of an accepted one's
+  kind replaces it (`_record_plan`). The turn drops the rules draft, so the rules, situations and safety check are
+  drafted again on the way forward; the confirm then waits for the safety check to run again, and proving work that
+  read the interview before a reopen never writes after it (`Interview.reopens`). The safety check, the confirm and
+  going live never run alongside a change in this process (`_transition`). Each send carries an idempotency key, kept
+  on the owner's message.
 
 `run_turn` runs consent, answers and card decisions with one guard and one background task per interview. After
 admission it stores staged entries with a fresh pending run ID. Any pending entry makes the interview busy. The
