@@ -477,11 +477,14 @@ describe('Arrival', () => {
     const dialog = introDialog(screen);
     await expect.element(dialog).toBeVisible();
     const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
-    // Whether the old copy's inbox, its count beside Notifications, ever shows from now on.
-    const oldInbox = '.cd-sidebar [aria-label="2 unread"]';
+    // Whether the old copy's inbox, its count beside Notifications, ever shows from now on. Only the Notifications
+    // row counts: the Conversations row has a count of its own (its unread chats).
     let sawTheOldInbox = false;
     const look = new MutationObserver(() => {
-      if (document.querySelector(oldInbox) !== null) sawTheOldInbox = true;
+      const rows = document.querySelectorAll<HTMLAnchorElement>('.cd-sidebar a');
+      if ([...rows].some((row) => /^Notifications\b/.test(row.textContent ?? '') && row.querySelector('[aria-label="2 unread"]') !== null)) {
+        sawTheOldInbox = true;
+      }
     });
     look.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label'] });
     onTestFinished(() => look.disconnect());
