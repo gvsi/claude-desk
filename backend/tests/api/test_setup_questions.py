@@ -3906,6 +3906,40 @@ async def test_a_gap_closing_keeps_its_reply_unless_this_answer_already_has_one(
         ["Got it, I'll ask you first.", plan] if earlier == "kept" else [closing, plan])
 
 
+async def test_a_closing_retry_never_takes_back_the_reply_already_shown(monkeypatch):
+    from desk.api.owner_streaming import Display, displaying
+
+    plan = "Your Desk will take tax preparation requests."
+    said = "Understood, I'll leave Stripe out for now."
+    interview = interview_with(SetupAnswers(summary="Tax preparation."), [
+        desk_setup.Entry(role="owner", text="Use the plan."),
+        desk_setup.Entry(role="claude", text="", covered=list(QUESTION_KEYS)),
+    ])
+    reply = desk_setup.Entry(role="claude", text=said)
+    interview.transcript.append(reply)
+    replies = desk_setup._TurnReplies()
+    replies.track(reply)
+    # The decision's call was the run's first, so its reply is the text on the owner's display.
+    display = Display("r_1")
+    assert display.take()
+    display.begin("reply")(json.dumps({"reply": said}))
+    events = display.events()
+    assert await anext(events) == {"event": "delta", "data": json.dumps({"run": "r_1", "text": said},
+                                                                         separators=(",", ":"))}
+
+    def closing(reply, plan):
+        return SetupNextStep(reply=reply, next=next_ask("done"), question="", choices=[], skip=[], drop=[],
+                             add_jobs=[], plan=plan)
+
+    # No plan on the first try, with the same words as the decision's reply; the plan on the retry.
+    monkeypatch.setattr(desk_setup, "_next_step", AsyncMock(side_effect=[closing(said, ""), closing(said, plan)]))
+    with displaying(display):
+        await desk_setup._ensure_answerable(None, None, None, interview, since=1, replies=replies)
+    display.finish("done", {"run": "r_1"})
+    assert await anext(events) == {"event": "done", "data": '{"run":"r_1"}'}     # no reset: still shown
+    assert [entry.text for entry in interview.transcript if entry.role == "claude" and entry.text] == [said, plan]
+
+
 @pytest.mark.parametrize("typed", [True, False])
 @pytest.mark.parametrize("next_topic", ["what_you_do", "quote_limit"])
 async def test_a_card_answer_with_no_ask_uses_the_same_guard(monkeypatch, typed, next_topic, caplog):

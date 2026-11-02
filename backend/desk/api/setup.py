@@ -2660,7 +2660,8 @@ async def close_setup(owner, engine, model, interview: Interview, *, answered: b
             if plan:
                 interview.transcript.append(Entry(role="claude", text=plan))
             break
-        _unshow(closing.reply)                # asked again for a plan: this reply isn't kept
+        if not answered:                      # else this call never showed: the display holds the earlier reply
+            _unshow(closing.reply)            # asked again for a plan: this reply isn't kept
     if not plan:
         interview.transcript.append(Entry(role="claude", text=QUESTIONS_DONE))
     finish(interview)
