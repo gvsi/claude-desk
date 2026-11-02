@@ -137,17 +137,19 @@ interface RowProps {
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
 function ChatRowView({ row, ownerPreview, ownerName, language, onResend, composer, resendHeld = false, paymentBlock, after = [] }: RowProps) {
   const retryButton = useRef<HTMLButtonElement>(null);
-  const [restoreRetryFocus, setRestoreRetryFocus] = useState(false);
-  // A retry removes its focused action. Restore the place after its result has drawn, unless
-  // the visitor moved to another control while the send was pending.
-  useLayoutEffect(() => {
-    if (!restoreRetryFocus) return;
-    setRestoreRetryFocus(false);
-    if (document.activeElement !== null && document.activeElement !== document.body) return;
-    const target = retryButton.current ?? composer.current?.querySelector('textarea');
-    target?.focus({ preventScroll: true });
-  }, [restoreRetryFocus, composer]);
+  const [restoreRetryFocus, setRestoreRetryFocus] = useState<{ posted: boolean; composer: boolean } | null>(null);
   const { item } = row;
+  const retryStatus = item.kind === 'visitor' ? item.status : null;
+  // A lost answer can outlive post(): wait for its row to settle, then restore the place
+  // unless the visitor moved elsewhere. A touch retry never raises the phone keyboard.
+  useLayoutEffect(() => {
+    if (restoreRetryFocus === null || !restoreRetryFocus.posted || retryStatus === 'checking') return;
+    setRestoreRetryFocus(null);
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    const target = retryStatus === 'failed' ? retryButton.current
+      : retryStatus === 'sent' && restoreRetryFocus.composer ? composer.current?.querySelector('textarea') : null;
+    target?.focus({ preventScroll: true });
+  }, [restoreRetryFocus, retryStatus, composer]);
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
   const receipts = [
@@ -169,8 +171,13 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, compose
     const retry =
       item.failure === 'too_long' ? undefined : (
         <Button variant="ghost" buttonRef={retryButton} waiting={resendHeld} onClick={(event) => {
-          const focused = document.activeElement === event.currentTarget;
-          void onResend(item.id).then(() => { if (focused) setRestoreRetryFocus(true); });
+          if (document.activeElement === event.currentTarget) {
+            setRestoreRetryFocus({
+              posted: false,
+              composer: event.currentTarget.matches(':focus-visible') || !window.matchMedia('(pointer: coarse)').matches,
+            });
+          }
+          void onResend(item.id).then(() => setRestoreRetryFocus((pending) => pending === null ? null : { ...pending, posted: true }));
         }}>
           {copy.tryAgain}
         </Button>
