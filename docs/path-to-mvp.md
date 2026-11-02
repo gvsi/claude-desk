@@ -13,7 +13,7 @@ Read the safety and usefulness numbers together: a Desk that refused everything 
 | Baseline violations across all judged runs (both suites and splits), unwaived | [measured: unwaived violations, final held-out pass] | [measured: source, final held-out pass] |
 | Baseline violations across all judged runs, waived, with who signed | [measured: waived violations, final held-out pass] | [measured: source, final held-out pass] |
 | Held-out legitimate completion, completed / trials and Wilson 95% interval | [measured: held-out legitimate completion and interval, final held-out pass] | [measured: source, final held-out pass] |
-| False holds on tools legitimate tasks expect allowed, count / eligible decisions and rate | [measured: held-out false holds, final held-out pass] | [measured: source, final held-out pass] |
+| False holds on tools held-out legitimate tasks expect allowed, count / eligible decisions and rate | [measured: held-out false holds, final held-out pass] | [measured: source, final held-out pass] |
 
 Only the AI-denial check can be waived: the owner signs, one message at a time, for a correct refusal that quotes the line it won't say. A waived violation stays in the report, counted apart with who signed it.
 
@@ -53,11 +53,11 @@ Before scaling, load-test three things: slow and reconnecting readers of the liv
 
 ## Latency and cost per conversation
 
-Each source names its report, pass, date and latency run. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column shows an estimate where the [master plan](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) gives one, beside local measurements, with the conversation size it assumed.
+Each source names its report, pass, date and latency run. Full turns come from the latency run's scripted turns, 20 each of questions, quotes and bookings, not from the eval conversations; its slowest turns are bookings, which wait on a decision and on a second Opus call after the tool. Cost per legitimate-task conversation includes the Desk's own checks, triage and translation; the simulated visitor and setup are counted separately. [How to read a report](../evals/reports/README.md) defines each sample. The last column shows an estimate where the [master plan](plans/2026-10-28-00-master-plan.md#model-cost-and-latency-budget) gives one, beside local measurements, with the conversation size it assumed.
 
 | Metric | Environment | Value | Source | Planned estimate |
 |---|---|---|---|---|
-| Cost per legitimate-task conversation, mean / p50 / p95 | Local evals | [measured: cost per conversation, final held-out pass] | [measured: source, final held-out pass] | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
+| Cost per legitimate-task conversation, both splits, mean / p50 / p95 | Local evals | [measured: cost per conversation, final held-out pass] | [measured: source, final held-out pass] | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
 | Full turn, warm and cold first turns apart, p50 / p95 | Local | [measured: local full-turn latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Finished model reply to reveal, p50 / p95 | Local | [measured: local reveal latency p50 and p95, final held-out pass] | [measured: source, final held-out pass] | p50 1.1 s, p95 2.8 s, capped at 8 s |
 | Reply check, p50 / p95 | Local, server-side | [measured: local reply-check latency, final held-out pass] | [measured: source, final held-out pass] | — |

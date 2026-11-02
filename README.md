@@ -67,7 +67,7 @@ The [threat model](docs/threat-model.md) lists what is claimed and what isn't, a
 
 ## Evidence
 
-Two eval suites run against the real kernel and Claude: an attack suite of hostile visitors and agents, and a legitimate-task suite of ordinary customer requests. The thresholds are tuned on one split of the scenarios and reported on another, held out.
+Two eval suites run against the real kernel and Claude: an attack suite of hostile visitors and agents, and a legitimate-task suite of ordinary customer requests. The scenarios are split in two: one for tuning the reviewer's thresholds, and one held out for reporting. The final pass ran on the kernel's initial thresholds, with none tuned.
 
 | Measure | Result |
 |---|---|
