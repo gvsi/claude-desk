@@ -2284,14 +2284,21 @@ _UNIT_EN = r"(?:(?:business|working|work|calendar)\s+)?(?:minute|hour|day|week|m
 _COUNT_ES = (r"(?:\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|quince|veinte|treinta|"
              r"cuarenta\s+y\s+ocho|setenta\s+y\s+dos|unos\s+pocos|unas\s+pocas|pocos|pocas|unos|unas)")
 _UNIT_ES = r"(?:minutos?|horas?|días?|semanas?|mes(?:es)?)(?:\s+(?:hábil(?:es)?|laborables?))?"
+# A weekday only as a deadline ("by Friday"): "Monday to Friday" is the hours.
+_WEEKDAY_EN = r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|the\s+weekend)"
+_WEEKDAY_ES = r"(?:lunes|martes|miércoles|jueves|viernes|sábado|domingo|fin\s+de\s+semana)"
 OWNER_TIME_FRAME = re.compile(
     rf"(?<!\w)(?:{_COUNT_EN}\s+{_UNIT_EN}"
     r"|(?:the\s+)?(?:next|same|following)\s+(?:(?:business|working)\s+)?(?:day|week|month)"
+    r"|within\s+the\s+(?:hour|day|week|month)"
     r"|end\s+of\s+(?:the\s+)?(?:(?:business|working)\s+)?(?:day|week|month)"
+    rf"|(?:by|before|until|no\s+later\s+than)\s+(?:(?:this|next)\s+)?{_WEEKDAY_EN}"
     r"|this\s+(?:week|month)|today|tonight|tomorrow"
     rf"|{_COUNT_ES}\s+{_UNIT_ES}"
     r"|(?:el\s+)?mismo\s+día|(?:la\s+)?próxima\s+semana|(?:el\s+)?próximo\s+mes"
     r"|(?:el\s+)?(?:siguiente|próximo)\s+día(?:\s+hábil)?|día\s+(?:hábil\s+)?siguiente"
+    r"|dentro\s+de\s+la\s+(?:hora|semana)"
+    rf"|(?:antes\s+del?|para\s+el|hasta\s+el)\s+{_WEEKDAY_ES}"
     r"|esta\s+semana|hoy|(?<!la\s)mañana)(?!\w)")
 # The days a week it opens are hours, which no customer line holds.
 _DAYS_A_WEEK = re.compile(r"(?<!\w)\w+\s+days?\s+a\s+week(?!\w)|(?<!\w)24/7(?!\w)")

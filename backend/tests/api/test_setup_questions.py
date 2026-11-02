@@ -2712,10 +2712,25 @@ def test_setup_public_line_examples_hold_against_the_kernel_check():
     ("Call 555-123-4567. We're open 7 days a week, 24/7 by email; we reply within 24 hours.", ["24 hours"]),
     ("Fuera de horario dejen mensaje; respondemos en un día hábil. Abrimos por la mañana.", ["un día hábil"]),
     ("Un aviso del IRS con plazo la próxima semana es urgente.", ["próxima semana"]),
+    ("We reply within the hour, and returns are due by next Monday.", ["within the hour", "by next monday"]),
+    ("Respondemos antes del viernes.", ["antes del viernes"]),
+    # the days it opens are hours, never a deadline
+    ("Open Monday to Friday, 9 to 5; abrimos de lunes a viernes.", []),
     ("We do tax returns for families and small firms.", []),
 ])
 def test_owner_time_frames_are_read_from_the_answer(text, frames):
     assert desk_setup.owner_time_frames(text) == frames
+
+
+@pytest.mark.parametrize("text", ["We reply within the hour.", "We reply by Friday.", "Respondemos antes del viernes."])
+def test_a_dropped_deadline_gets_the_retry_line(text):
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    softened = answer_turn(SETUP_TURNS["what_you_do"], intake="We reply soon.")
+    assert desk_setup.owner_time_frame_errors(text, softened) == [TIME_FRAME_UNACCOUNTED]
+    named = answer_turn(SETUP_TURNS["what_you_do"], f'Customer lines can\'t name days, so "{text[:-1]}" reads "soon".',
+                        intake="We reply soon.")
+    assert desk_setup.owner_time_frame_errors(text, named) == []
 
 
 IRS_ANSWER = "Tax returns for families. Nothing is urgent except an IRS notice with a deadline in the next week."
