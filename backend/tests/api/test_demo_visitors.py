@@ -555,6 +555,11 @@ async def test_handback_kernel_failure_ends_the_wait_without_a_reply(
     release.set()
     assert await sleeps.waiting(NUDGE_AFTER_S) == NUDGE_AFTER_S
     await owner_writes(owner, started.session_id, "Check the available times for Riley.", kind="whisper")
+    # The visitor's second message started a runner pass of its own, which a slow machine can still be running here.
+    # Left running, it would read the whisper as waiting work through the failing lookup below and fail a turn of its
+    # own besides the hand-back's: a second error and turn end. Let it finish first, so the hand-back's pass is the
+    # only one the failing lookup sees.
+    await app.state.runtime.runner.drain()
 
     events = []
     ended = asyncio.Event()
