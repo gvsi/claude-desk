@@ -143,6 +143,11 @@ it('keyboard_focus_draws_a_2px_focus_edge_unlike_the_chosen_segments_field_edge'
       expect(style.borderTopColor, theme).toBe(focus);
       expect(style.boxShadow, theme).toBe(`${focus} 0px 0px 0px 1px inset`);
       expect(chosen.getBoundingClientRect().toJSON(), `${theme}: focus moves nothing`).toEqual(box);
+      // Hovered too, the chosen option keeps its fill and the focus edge stays one colour.
+      await userEvent.hover(chosen);
+      expect(getComputedStyle(chosen).borderTopColor, `${theme}: hovered with focus`).toBe(focus);
+      expect(getComputedStyle(chosen).boxShadow, `${theme}: hovered with focus`).toBe(`${focus} 0px 0px 0px 1px inset`);
+      await userEvent.unhover(chosen);
       chosen.blur();
     }
   } finally {

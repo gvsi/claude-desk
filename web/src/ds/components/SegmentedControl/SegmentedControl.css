@@ -44,8 +44,8 @@
   background: var(--fill-hover);
 }
 
-.cd-segmented__option[aria-checked='true'],
-.cd-segmented__option[aria-checked='true']:hover {
+/* After :hover, so the chosen option keeps its fill when hovered; :focus-visible below outranks it. */
+.cd-segmented__option[aria-checked='true'] {
   border-color: var(--line-field);
   background: var(--bg-selected);
   color: var(--text-primary);
