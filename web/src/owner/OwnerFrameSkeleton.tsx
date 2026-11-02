@@ -1,6 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
+import type { BusinessOut } from '../api/views.ts';
+import { DESKS_KEY } from './useDesks.ts';
+import { isStartingSampleDesk } from './knowledge/sampleDesk.ts';
 import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { AppShell, ConceptFooter, ReviewerBarSkeleton, SidebarSkeleton, type NavKey } from '../ds/index.ts';
 import { ConversationsSkeleton } from './conversations/ConversationsSkeleton.tsx';
@@ -13,7 +17,7 @@ import { SafetySkeleton } from './safety/SafetySkeleton.tsx';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
 
 /** The page's shapes at an exact route; detail pages (a customer, All rules, a draft) keep an empty area. */
-function pageShapes(page: string, rest: readonly string[], search: string): ReactNode | null {
+function pageShapes(page: string, rest: readonly string[], search: string, showSampleQuestions: boolean): ReactNode | null {
   const exact = rest.every((part) => part === '');
   if ((page === '' || page === 'today') && exact) return <TodaySkeleton />;
   if (page === 'rules' && exact) return <RulesSkeleton withHeader />;
@@ -22,7 +26,7 @@ function pageShapes(page: string, rest: readonly string[], search: string): Reac
   if (page === 'safety' && safetyRoute && new URLSearchParams(search).get('view') !== 'entries') return <SafetySkeleton withHeader />;
   if (page === 'people' && exact) return <PeopleSkeleton withHeader />;
   if (page === 'profile' && exact) return <ProfileSkeleton />;
-  if (page === 'knowledge' && exact) return <KnowledgeSkeleton />;
+  if (page === 'knowledge' && exact) return <KnowledgeSkeleton showSampleQuestions={showSampleQuestions} />;
   if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} />;
   // One conversation open beside the list: `/conversations/:id`.
   const [conversation = '', ...after] = rest;
@@ -31,15 +35,19 @@ function pageShapes(page: string, rest: readonly string[], search: string): Reac
 }
 
 /** Exact routes only: later tasks add their pages here, while detail pages keep an empty area. */
-export function pageSkeletonFor(pathname: string, search: string): { page: ReactNode | null; fill: boolean; centered: boolean } {
+export function pageSkeletonFor(pathname: string, search: string, showSampleQuestions = true): { page: ReactNode | null; fill: boolean; centered: boolean } {
   const [page = '', ...rest] = pathname.split('/').slice(3);
-  return { page: pageShapes(page, rest, search), fill: FILL_PAGES.has(page as NavKey), centered: CENTERED_PAGES.has(page as NavKey) };
+  return { page: pageShapes(page, rest, search, showSampleQuestions), fill: FILL_PAGES.has(page as NavKey), centered: CENTERED_PAGES.has(page as NavKey) };
 }
 
 /** The owner's frame at the current address, with the same gutters and footer as the landed frame. */
 export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
   const { search } = useLocation();
-  const { page, fill, centered } = pageSkeletonFor(pathname, search);
+  const queryClient = useQueryClient();
+  const businesses = queryClient.getQueryData<BusinessOut[]>(DESKS_KEY);
+  const deskId = decodeURIComponent(pathname.split('/')[2] ?? '');
+  const showSampleQuestions = businesses === undefined || isStartingSampleDesk(queryClient, businesses, deskId);
+  const { page, fill, centered } = pageSkeletonFor(pathname, search, showSampleQuestions);
   return (
     <AppShell
       skeleton

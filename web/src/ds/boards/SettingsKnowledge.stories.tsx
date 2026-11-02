@@ -20,7 +20,7 @@ function KnowledgeBoard() {
     <PageHeader title="Knowledge" subtitle={KNOWLEDGE_SUMMARY} />
     <div className="cd-knowledge">
       <div className="cd-knowledge__known"><KnowledgeList items={ITEMS} caption="6 sources. Customers can see 5." /></div>
-      <div className="cd-knowledge__add"><KnowledgeAdd note="" onNoteChange={fn()} onAddNote={fn()} onAddFile={fn()} /></div>
+      <div className="cd-knowledge__add"><KnowledgeAdd websitePlaceholder="turner-plumbing.example/blog" note="" onNoteChange={fn()} onAddNote={fn()} onAddFile={fn()} /></div>
       <KnowledgePreviews />
     </div>
   </RiveraFrame>;
