@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { storageKey } from './storage.ts';
 
@@ -20,15 +20,31 @@ function themeScript(): HTMLScriptElement {
   return script;
 }
 
+/** This test's page's own color-scheme meta, written as index.html writes it. */
+function schemeMeta(): HTMLMetaElement {
+  let meta = document.head.querySelector<HTMLMetaElement>('meta[name="color-scheme"]');
+  if (meta === null) {
+    meta = document.createElement('meta');
+    meta.name = 'color-scheme';
+    document.head.append(meta);
+  }
+  return meta;
+}
+
 /** Runs the first script against this test's page and storage, as the browser runs it in the head. */
 function runThemeScript(): void {
   new Function(themeScript().text)();
 }
 
+beforeEach(() => {
+  schemeMeta().content = 'dark light';
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
   delete document.documentElement.dataset.theme;
+  schemeMeta().remove();
 });
 
 describe('the theme script in index.html', () => {
@@ -55,16 +71,20 @@ describe('the theme script in index.html', () => {
     for (const choice of ['light', 'dark']) {
       localStorage.setItem(storageKey('theme'), choice);
       runThemeScript();
-      expect(root.dataset.theme, choice).toBe(choice);
+      // The root is marked, and the page's scheme names the choice alone, so the blank page before
+      // the styles load is already in its colors.
+      expect([root.dataset.theme, schemeMeta().content], choice).toEqual([choice, choice]);
       delete root.dataset.theme;
+      schemeMeta().content = 'dark light';
     }
-    // Nothing stored, or something that isn't a choice: the system's theme, so no mark.
+    // Nothing stored, or something that isn't a choice: the system's theme, so no mark, and the
+    // scheme still offers both for the system to pick.
     localStorage.clear();
     runThemeScript();
-    expect(root.hasAttribute('data-theme')).toBe(false);
+    expect([root.hasAttribute('data-theme'), schemeMeta().content]).toEqual([false, 'dark light']);
     localStorage.setItem(storageKey('theme'), 'sepia');
     runThemeScript();
-    expect(root.hasAttribute('data-theme')).toBe(false);
+    expect([root.hasAttribute('data-theme'), schemeMeta().content]).toEqual([false, 'dark light']);
   });
 
   test('blocked_storage_leaves_the_system_theme_without_throwing', () => {
@@ -73,6 +93,6 @@ describe('the theme script in index.html', () => {
       throw new DOMException('The operation is insecure.', 'SecurityError');
     });
     expect(runThemeScript).not.toThrow();
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    expect([document.documentElement.hasAttribute('data-theme'), schemeMeta().content]).toEqual([false, 'dark light']);
   });
 });
