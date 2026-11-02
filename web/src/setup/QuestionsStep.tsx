@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../api/http.ts';
-import type { Choice, SetupAnswerBody, SetupMessage, SetupState } from '../api/views.ts';
+import type { Choice, SetupAnswerBody, SetupMessage, SetupQuestion, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
@@ -9,7 +9,7 @@ import { GrowingReply } from '../lib/GrowingReply.tsx';
 import { useTopFade } from '../lib/useTopFade.ts';
 import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { ProposalCard, type CardDecision } from './ProposalCard.tsx';
-import { isCard, liveChoices } from './conversation.ts';
+import { isCard, liveChoices, pickedAnswer } from './conversation.ts';
 import { SetupChoices } from './SetupChoices.tsx';
 import './SetupConversation.css';
 import { hasWords, useSetupStream } from './setupStream.ts';
@@ -48,13 +48,26 @@ function awaitsConsent(state: SetupState): boolean {
  * An answer as sent: the question it answers, the words, and how many messages the interview held
  * when it was sent, so a read can tell what came after. A change sent from a later step ("Change
  * something") answers no question: it carries its idempotency key (`reopen`) instead, sent again
- * as it is by "Try again".
+ * as it is by "Try again". Picks from a question that takes several are sent as picks with the
+ * typed words (`picks`, `typed`); `text` is then the message the API writes from them.
  */
-type Answer = SetupAnswerBody & {
+type Answer = { text: string } & ({ question: SetupQuestion; card?: never } | { question: null; card: string }) & {
   seen: number;
   /** The API refused it (a 409 to its first send): final, whatever a later read holds. */
   refused?: true;
   reopen?: string;
+  picks?: string[];
+  typed?: string;
+}
+
+/** At least one pick. */
+const somePicked = (picks: string[] | undefined): picks is [string, ...string[]] => picks !== undefined && picks.length > 0;
+
+/** What the API is sent for an answer: its words, or its picks with any typed words. */
+function bodyOf(answer: Answer): SetupAnswerBody {
+  if (answer.question === null) return { question: null, card: answer.card, text: answer.text };
+  if (somePicked(answer.picks)) return { question: answer.question, picks: answer.picks, ...(answer.typed ? { text: answer.typed } : {}) };
+  return { question: answer.question, text: answer.text };
 }
 
 /**
@@ -84,9 +97,10 @@ function Line({ message }: { message: SetupMessage }) {
 /**
  * "Let's set up your Desk": the setup conversation in order, Claude's words in its serif, the owner's as
  * theirs and each read of their memory or website as its label. First Claude asks to read the
- * owner's Claude memory, docked with its two answers ("Yes, use it" or "No, I'll type it") above
- * the message box, and words typed there are "No, I'll type it"; then each answer goes to the API,
- * which asks the next question. An answer that didn't go through stays in the composer.
+ * owner's Claude memory, docked with its two answers ("Yes, use it" or "No, I'll type it"), and
+ * words typed in the message box, which Esc brings back under them, are "No, I'll type it"; then
+ * each answer goes to the API, which asks the next question, docked with its choices while the
+ * message box is hidden. An answer that didn't go through stays in the composer.
  */
 export function QuestionsStep({ state, onState, reread, onContinue, changing: changingHere = false }: QuestionsStepProps) {
   const step = useRef<HTMLDivElement>(null);
@@ -140,13 +154,42 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
     if (live) setDismissed((previous) => new Set([...previous, live.index]));
   };
   const toComposer = () => composer.current?.querySelector('textarea')?.focus({ preventScroll: true });
-  const dismissPanel = () => {
-    closePanel();
-    toComposer();
-  };
   // The memory question docks like every question, its ask moved into the panel, until it is answered.
   const askAt = asking && !busy && consenting === null ? state.messages.findLastIndex((message) => message.role === 'claude' && !isCard(message)) : -1;
   const consentPanel = askAt >= 0 ? askAt : null;
+  /** Esc on the memory question brought the message box back under it. */
+  const [consentTyping, setConsentTyping] = useState(false);
+  /** The message box holds words the owner typed, or that were given back to them. */
+  const [boxWords, setBoxWords] = useState(false);
+  /** The docked question whose message box stays shown: it held words while the question was docked. */
+  const [boxKept, setBoxKept] = useState<number | null>(null);
+  useEffect(() => {
+    if (panel && boxWords) setBoxKept(panel.index);
+  }, [panel?.index, boxWords]);
+  // The message box is hidden while a question docks. Esc brings it back: a question goes back to the
+  // chat as Claude's line, while the memory question stays docked, since its answers are the only way
+  // to say yes; "No, I'll type it" brings it back too. Words in the box are never hidden: a question
+  // that docks while the owner has words there docks above the box, as the owner typed them for it.
+  // Nor is an answer that didn't go through, with its "Try again".
+  const boxHidden = failed === null && !boxWords
+    && ((panel !== null && boxKept !== panel.index) || (consentPanel !== null && !consentTyping));
+  /** The box takes focus once it shows again. */
+  const focusBox = useRef(false);
+  const revealBox = () => {
+    if (boxHidden) focusBox.current = true;
+    else toComposer();
+  };
+  useEffect(() => {
+    if (boxHidden || !focusBox.current) return;
+    focusBox.current = false;
+    toComposer();
+  }, [boxHidden]);
+  /** Esc or Dismiss: the question goes back to the chat, and words typed in "Something else…" go on in the box. */
+  const dismissPanel = (words: string) => {
+    closePanel();
+    if (words.trim() !== '') setRefill({ text: words.trim() });
+    revealBox();
+  };
   useEffect(() => { if (!busy) setDeciding(null); }, [busy]);
   const work = useSetupWork(state, reread, stream.progress);
   const wasBusy = useRef(busy);
@@ -232,7 +275,7 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
     try {
       const next = answer.reopen !== undefined
         ? await request('setupReopen', { params: { id }, body: { text: answer.text, idempotency_key: answer.reopen } })
-        : await request('setupAnswer', { params: { id }, body: answer.question === null ? { question: null, card: answer.card, text: answer.text } : { question: answer.question, text: answer.text } });
+        : await request('setupAnswer', { params: { id }, body: bodyOf(answer) });
       onState(next);
       if (next.busy === true && outcomeOf(next, answer) !== 'taken') setRefill({ text: answer.text });
       setSending(null);
@@ -339,6 +382,20 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
       setDecisionOut(false);
       if (!background) setDeciding(null);
     }
+  };
+
+  /**
+   * The picks from a question that takes several, with any typed words: one answer, which the API
+   * writes as one message. Typed words alone are a typed answer.
+   */
+  const sendPicks = (picks: string[], typed: string) => {
+    if (picks.length === 0) {
+      send(typed);
+      return;
+    }
+    if (failed !== null || retrying || !live || state.question === null) return;
+    closePanel();
+    void submit({ question: state.question, text: pickedAnswer(live.choices, picks, typed), picks, typed, seen: state.messages.length });
   };
 
   /** The composer's words: the answer to the question the page shows. */
@@ -501,12 +558,13 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
       ) : null}
       </div></div>
       <div className="cd-setup-dock"><div className="cd-setup-dock__column">
-      {panel ? <SetupChoices key={panel.index} question={state.messages[panel.index]!.text} choices={panel.choices}
+      {panel ? <SetupChoices key={panel.index} question={state.messages[panel.index]!.text} choices={panel.choices} several={panel.several}
         maxLength={ANSWER_MAX} disabled={blocked || failed !== null} onDismiss={dismissPanel}
-        onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; send(text); }} /> : null}
+        onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; send(text); }}
+        onPicks={(picks, typed) => { returnFocus.current = true; returnToTextarea.current = false; sendPicks(picks, typed); }} /> : null}
       {asking && !busy && consentError !== null ? <Notice tone="error">{consentError}</Notice> : null}
       {consentPanel === null ? null : <SetupChoices key="consent" kind="consent" question={state.messages[consentPanel]!.text} choices={CONSENT_CHOICES}
-        maxLength={ANSWER_MAX} disabled={blocked} onDismiss={toComposer}
+        maxLength={ANSWER_MAX} disabled={blocked} onDismiss={() => { setConsentTyping(true); revealBox(); }}
         onChoose={(text) => { returnFocus.current = true; returnToTextarea.current = false; void consent(text === copy.allow); }} />}
       {closing ? (
         <div className="cd-setup-step__actions">
@@ -514,7 +572,8 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
           <Button variant="primary" size="main" onClick={onContinue}>{SETUP_COPY.tools.continue}</Button>
         </div>
       ) : (
-        <div ref={composer}>
+        <div ref={composer} hidden={boxHidden}
+          onInput={(event) => { if (event.target instanceof HTMLTextAreaElement) setBoxWords(event.target.value.trim() !== ''); }}>
           <Composer
             variant="owner"
             label={copy.composerLabel}
@@ -523,7 +582,7 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
             // Only "Try again" waits on the turn; the message box holds Send instead.
             disabled={failed !== null ? blocked : retrying}
             sendHeld={replying}
-            onSend={send}
+            onSend={(text) => { setBoxWords(false); send(text); }}
             {...(failed === null ? {} : { failed: { text: failed.text, line: copy.failed, onRetry: () => void retry() } })}
           />
         </div>
