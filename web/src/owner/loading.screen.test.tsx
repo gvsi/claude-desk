@@ -1172,12 +1172,19 @@ function firstListRow(): Element | null {
   return document.querySelector(`${LIST_REGION} [data-skeleton-anchor="conversation-row-0"]`) ?? landedElement('.cd-conversations__items .cd-conversation-item');
 }
 
-it.each(['desktop', 'phone'] as const)('setup_desk_conversations_land_at_their_shapes at %s', async (viewport) => {
+it.each([
+  ['desktop', false], ['phone', false], ['desktop', true], ['phone', true],
+] as const)('setup_desk_conversations_land_at_their_shapes at %s after deleting starting Desk: %s', async (viewport, deleteStarting) => {
   const { deskId } = await liveSetupDeskIds('Maple Street Rentals. We rent apartments in Oakland.');
   const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
   if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the conversations');
   // Reuse the live rows on the new Desk: none is recorded history.
   mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: answer.body });
+  if (deleteStarting) {
+    const deleted = await mockStore.dispatch('deleteDesk', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in deleted || deleted.status !== 204) throw new Error('the mock deletes the starting Desk');
+    expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
+  }
   const read = holdReads(ROUTES.conversations.path.replace('{desk_id}', deskId));
   await expectSkeletonLoad({
     status: 'Reading your conversations',

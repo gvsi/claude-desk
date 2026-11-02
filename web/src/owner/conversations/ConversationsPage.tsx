@@ -15,7 +15,7 @@ import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, Record
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
-import { startingDeskFor } from '../arrival/keptCopy.ts';
+import { isStartingSampleDesk } from '../knowledge/sampleDesk.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
@@ -68,7 +68,7 @@ export function ConversationsPage() {
   const deskId = desk.desk_id;
   const queryClient = useQueryClient();
   const desks = useDesks(deskId, { passive: true });
-  const startingDesk = desks.data === undefined ? null : startingDeskFor(queryClient, desks.data);
+  const recordedHistory = desks.data === undefined || isStartingSampleDesk(queryClient, desks.data, deskId);
   const navigate = useNavigate();
   const location = useLocation();
   const titleId = useId();
@@ -144,7 +144,7 @@ export function ConversationsPage() {
         <SkeletonScreen
           loading={!listRead}
           status="Reading your conversations"
-          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} recordedHistory={startingDesk === null || startingDesk === deskId} />}
+          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} recordedHistory={recordedHistory} />}
           className="cd-conversations__region"
         >
           <div className="cd-conversations__under">
