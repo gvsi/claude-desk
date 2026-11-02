@@ -110,6 +110,114 @@
   }
 }
 
+/* How your Desk works: three numbered steps in one card, each a 32 px icon tile beside "Step n", its
+   title and its line. Stacked 12 px apart; from 1000 px three columns side by side, 20 px apart, the
+   second and third each after a hairline with 20 px inside it. Under them, once Today is read, what
+   Claude did today on one line that wraps, under a hairline, each outcome a status dot and a link
+   with its count in the primary ink, or one quiet line on a day with nothing in it. */
+
+.cd-how__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-how__step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-how__tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--size-control);
+  height: var(--size-control);
+  border-radius: var(--radius-control);
+  background: var(--fill-secondary);
+  color: var(--text-secondary);
+}
+
+.cd-how__words {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-how__label,
+.cd-how__title,
+.cd-how__line {
+  margin: 0;
+}
+
+.cd-how__label {
+  color: var(--text-tertiary);
+}
+
+.cd-how__title {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-how__line {
+  color: var(--text-secondary);
+}
+
+@media (min-width: 1000px) {
+  .cd-how__steps {
+    flex-direction: row;
+    gap: var(--space-20);
+  }
+
+  .cd-how__step {
+    flex: 1 1 0;
+  }
+
+  .cd-how__step + .cd-how__step {
+    padding-left: var(--space-20);
+    border-left: 1px solid var(--line-hairline);
+  }
+}
+
+.cd-how__today {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+  margin: var(--space-16) 0 0;
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--line-hairline);
+  color: var(--text-secondary);
+}
+
+.cd-how__outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+}
+
+/* Each outcome's words stay quiet and its count stands out; the link's underline marks the whole. */
+.cd-how__link {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-color: var(--line-control);
+  text-underline-offset: 3px;
+}
+
+.cd-how__link:hover {
+  text-decoration-color: currentColor;
+}
+
+.cd-how__count {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Things to try */
 
 .cd-things {
@@ -737,3 +845,8 @@
 @container cd-approval-answers (max-width: 437.98px) {
   .cd-today-skeleton__answer { min-height: calc(var(--size-control-main) + var(--space-4)); }
 }
+/* How your Desk works: the tile's room keeps its size; the Today line's rows, 8 px apart as the line's. */
+.cd-today-skeleton__how-tile { flex: none; }
+.cd-today-skeleton__how-today { display: block; }
+.cd-today-skeleton__how-items { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); }
+.cd-today-skeleton__how-paint { gap: var(--space-8); }
