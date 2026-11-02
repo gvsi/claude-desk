@@ -728,13 +728,16 @@ export interface OwnerMessageIn {
  * `GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as
  * the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).
  * `typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,
- * kept in the API's memory and shown to the owner alone.
+ * kept in the API's memory and shown to the owner alone. `visitor_here`, presence too, is true while the visitor's
+ * public chat stream is open, when a whisper reaches Claude at once; an agent holds no stream, so its session reads
+ * false (Claude reads a whisper at its next request).
  */
 export interface OwnerTranscript {
   state: SessionState;
   items: OwnerTranscriptItem[];
   typing_until: string | null;
   replayed?: boolean;
+  visitor_here?: boolean;
   demo_visitor?: boolean;
   demo_visitor_run_id?: string | null;
 }

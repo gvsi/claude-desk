@@ -464,7 +464,8 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
                        after: Annotated[int, Query(ge=0)] = 0) -> OwnerTranscript:
     """A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).
     The cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the
-    visitor's typing dots stop, while they are typing (presence in this process's memory, never stored).
+    visitor's typing dots stop, while they are typing, and `visitor_here` whether their public stream is open now
+    (presence in this process's memory, never stored).
     Status reasons are read concurrently with the owner's kernel credential, with bounded caching for final
     execution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true
     for a demo visitor's chat (`owner_reads.demo_visitors`)."""
@@ -484,6 +485,7 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
     mark = (await owner_reads.demo_visitors(ctx, session["desk_id"], session_id)).get(session_id)
     return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()),
+                           visitor_here=process.listener is not None and process.listener.streaming(session_id),
                            replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id),
                            demo_visitor=mark is not None, demo_visitor_run_id=mark.run_id if mark else None)
 

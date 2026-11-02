@@ -1566,7 +1566,7 @@
     "/api/owner/conversations/{session_id}": {
       "get": {
         "summary": "Conversation",
-        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing (presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true\nfor a demo visitor's chat (`owner_reads.demo_visitors`).",
+        "description": "A conversation on one of the copy's Desks, as the owner sees it, after the cursor `after` (polled every 2 s).\nThe cursor never skips a row: a session's rows commit in the order of their `n`. `typing_until` is when the\nvisitor's typing dots stop, while they are typing, and `visitor_here` whether their public stream is open now\n(presence in this process's memory, never stored).\nStatus reasons are read concurrently with the owner's kernel credential, with bounded caching for final\nexecution refusals; an unreadable reason is null, so the stored transcript still renders. `demo_visitor` is true\nfor a demo visitor's chat (`owner_reads.demo_visitors`).",
         "operationId": "owner_conversation",
         "parameters": [
           {
@@ -12250,6 +12250,11 @@
             "title": "Replayed",
             "default": false
           },
+          "visitor_here": {
+            "type": "boolean",
+            "title": "Visitor Here",
+            "default": false
+          },
           "demo_visitor": {
             "type": "boolean",
             "title": "Demo Visitor",
@@ -12274,7 +12279,7 @@
           "typing_until"
         ],
         "title": "OwnerTranscript",
-        "description": "`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as\nthe owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).\n`typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,\nkept in the API's memory and shown to the owner alone."
+        "description": "`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as\nthe owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).\n`typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,\nkept in the API's memory and shown to the owner alone. `visitor_here`, presence too, is true while the visitor's\npublic chat stream is open, when a whisper reaches Claude at once; an agent holds no stream, so its session reads\nfalse (Claude reads a whisper at its next request)."
       },
       "OwnerTranscriptItem": {
         "properties": {
