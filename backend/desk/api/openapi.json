@@ -7397,7 +7397,7 @@
     "/api/owner/policy/{desk_id}/preset": {
       "post": {
         "summary": "Draft Preset",
-        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). Every owner card goes, those for one person and \"never\" ones included, and the draft's diff lists\neach; nothing changes until `confirm`.",
+        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). The Desk's own job cards stay unchanged. Other owner cards go, those for one person and \"never\"\nones included, and the draft's diff lists each; nothing changes until `confirm`.",
         "operationId": "owner_draft_preset",
         "parameters": [
           {
@@ -14811,6 +14811,22 @@
                 "type": "null"
               }
             ]
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "changed",
+                  "delisted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
           }
         },
         "type": "object",
