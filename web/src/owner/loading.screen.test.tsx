@@ -171,7 +171,8 @@ it('unfinished_setup_card_lands_once_after_the_skeleton', async () => {
   // Decision 15: the skeleton draws a fresh copy's Today, which has no "Not live yet" card. For a
   // Desk whose setup isn't finished, nothing of the card shows while Today's reads are out; once
   // they settle, the card lands once with Today, first in its column, in the place the skeleton's
-  // Things to try had, and Things to try lands under it and stays there.
+  // first section under the greeting (How your Desk works) had, and Things to try lands under it and
+  // stays there.
   const state = await deskLeftAtRules();
   const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', state.desk_id));
   const cardsAdded = new Set<Element>();
@@ -188,7 +189,7 @@ it('unfinished_setup_card_lands_once_after_the_skeleton', async () => {
   expect(layer.querySelector('.cd-things'), "the skeleton draws Today's Things to try").not.toBeNull();
   expect(document.querySelector('.cd-continue-setup'), 'no setup card while the reads are out').toBeNull();
   expect(sawNotLive()).toBe(false);
-  const shapeThings = layer.querySelector('.cd-things')!.getBoundingClientRect();
+  const shapeFirst = layer.querySelector('.cd-how')!.getBoundingClientRect();
   const thingsTops = watchTop(() => landedElement('.cd-things'));
 
   needsYou.release();
@@ -200,7 +201,7 @@ it('unfinished_setup_card_lands_once_after_the_skeleton', async () => {
   expect(card.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING, 'the card comes before Things to try').toBeTruthy();
   expect(card.element().parentElement?.firstElementChild?.classList.contains('cd-today__greeting')).toBe(true);
   expect(card.element().previousElementSibling?.classList.contains('cd-today__greeting')).toBe(true);
-  expect(Math.abs(card.element().getBoundingClientRect().top - shapeThings.top), "the card takes Things to try's place").toBeLessThanOrEqual(
+  expect(Math.abs(card.element().getBoundingClientRect().top - shapeFirst.top), "the card takes How your Desk works' place").toBeLessThanOrEqual(
     SKELETON_TOLERANCE_PX,
   );
   expect(thingsTops(), 'Things to try lands once, under the card').toHaveLength(1);
@@ -253,6 +254,11 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
   { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
+  // How your Desk works: its title, its card (the steps and the Today line), and the first and last step's tiles.
+  { name: 'how-title', page: '.cd-how .cd-section-header__heading' },
+  { name: 'how-card', page: '.cd-how > .cd-card', size: true },
+  { name: 'how-tile-0', page: '.cd-how__step:first-child .cd-how__tile', size: true },
+  { name: 'how-tile-2', page: '.cd-how__step:last-child .cd-how__tile', size: true },
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
   { name: 'thing-tile-0', page: '.cd-things__item:first-child .cd-things__icon' },
