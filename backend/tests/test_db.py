@@ -885,6 +885,34 @@ def test_messages_take_the_demo_visitors_mark(scratch):
         scratch.migrate(command.upgrade, "head")
 
 
+def test_the_demo_visitors_marks_are_indexed_and_both_checks_hold_for_every_row(scratch):
+    """The owner's reads find a Desk's demo visitor chats by a partial index over the marks alone, which the downgrade
+    drops; and both widened checks, added unvalidated so a live table is never locked for a full scan, are then
+    validated, so they hold for every row."""
+    admin = scratch.conn
+
+    def index() -> str | None:
+        row = admin.execute("SELECT indexdef FROM pg_indexes"
+                            " WHERE schemaname = 'app' AND indexname = 'messages_demo_visitor'").fetchone()
+        return row[0] if row else None
+
+    def validated() -> dict[str, bool]:
+        return dict(admin.execute("SELECT conname, convalidated FROM pg_constraint WHERE conname IN"
+                                  " ('messages_kind', 'model_calls_route')").fetchall())
+
+    before = ScriptDirectory.from_config(alembic_config()).get_revision(DEMO_VISITOR_ROUTE_REVISION).down_revision
+    try:
+        assert index() == ("CREATE INDEX messages_demo_visitor ON app.messages USING btree (copy_id, desk_id)"
+                           " WHERE (kind = 'demo_visitor'::text)")
+        assert validated() == {"messages_kind": True, "model_calls_route": True}
+        scratch.migrate(command.downgrade, before)
+        assert index() is None
+        scratch.migrate(command.upgrade, DEMO_VISITOR_ROUTE_REVISION)
+        assert index() is not None and validated() == {"messages_kind": True, "model_calls_route": True}
+    finally:
+        scratch.migrate(command.upgrade, "head")
+
+
 DOCUMENT_LINKS_REVISION = "01b_6_document_links"
 
 

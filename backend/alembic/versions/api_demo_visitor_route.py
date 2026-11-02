@@ -5,7 +5,9 @@ Each of its model calls is recorded like any other, under a route of its own, so
 own and from the built-in visiting agent's. The chat it opens is marked by a `demo_visitor` row in that chat's
 transcript, written before it says anything, so the owner's reads label the chat as a demo visitor's after the
 process that ran it is gone (its runs live in memory only). Each check is widened by dropping it and adding it again
-with the new value; the previous release never writes either one, so it runs unchanged beside this one during a deploy.
+with the new value, NOT VALID, then validated on its own, so a live table is never locked for a full scan while the
+check is added; the previous release never writes either value, so it runs unchanged beside this one during a deploy.
+A partial index over the marks alone lets the owner's reads find a Desk's demo visitor chats; the downgrade drops it.
 
 The downgrade puts the narrower checks back as NOT VALID: rows already written stay (the usage records count toward
 the day's spend, and the marks keep labelling the chats they mark), while no new row may name either one.
@@ -39,15 +41,19 @@ def upgrade() -> None:
     op.execute(f"""
         ALTER TABLE app.model_calls
             DROP CONSTRAINT IF EXISTS model_calls_route,
-            ADD CONSTRAINT model_calls_route CHECK (route IN {_in(AFTER)});
+            ADD CONSTRAINT model_calls_route CHECK (route IN {_in(AFTER)}) NOT VALID;
+        ALTER TABLE app.model_calls VALIDATE CONSTRAINT model_calls_route;
         ALTER TABLE app.messages
             DROP CONSTRAINT IF EXISTS messages_kind,
-            ADD CONSTRAINT messages_kind CHECK (kind IN {_in(KINDS_AFTER)});
+            ADD CONSTRAINT messages_kind CHECK (kind IN {_in(KINDS_AFTER)}) NOT VALID;
+        ALTER TABLE app.messages VALIDATE CONSTRAINT messages_kind;
+        CREATE INDEX IF NOT EXISTS messages_demo_visitor ON app.messages (copy_id, desk_id) WHERE kind = 'demo_visitor';
     """)
 
 
 def downgrade() -> None:
     op.execute(f"""
+        DROP INDEX IF EXISTS app.messages_demo_visitor;
         ALTER TABLE app.messages
             DROP CONSTRAINT IF EXISTS messages_kind,
             ADD CONSTRAINT messages_kind CHECK (kind IN {_in(KINDS_BEFORE)}) NOT VALID;
