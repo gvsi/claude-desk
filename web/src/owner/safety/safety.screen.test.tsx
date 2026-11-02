@@ -805,16 +805,17 @@ describe('Safety', () => {
     expect(open.element().textContent).not.toContain('From the visitor');
   });
 
-  it('an_entry_from_an_api_without_the_field_shows_no_visitor_words', async () => {
-    // During a deploy, a newer page can read an older API that sends no `from_the_visitor` at all:
-    // the entry shows no label and no empty quotes.
+  it.each(['missing', 'empty'] as const)('an_entry_with_its_visitor_words_%s_shows_none', async (words) => {
+    // During a deploy, a newer page can read an older API that sends no `from_the_visitor` at all,
+    // and an empty one quotes nothing: either way the entry shows no label and no quote.
     injectLedger(ledgerPage(threeEntries()));
     const { from_the_visitor: _, ...older } = attempt();
-    injectAttempts([older as Attempt]);
+    injectAttempts([words === 'missing' ? (older as Attempt) : { ...older, from_the_visitor: '' }]);
     const { screen } = await renderRoute(`${SAFETY}/dec-refund`);
     const open = detail(screen);
     await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeVisible();
-    expect(open.element().textContent).not.toContain('From the visitor');
+    expect(open.getByText('From the visitor', { exact: true }).elements()).toHaveLength(0);
+    expect(open.element().querySelector('.cd-attempt__visitor')).toBeNull();
     expect(open.element().textContent).not.toContain('“”');
   });
 
