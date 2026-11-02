@@ -18,7 +18,7 @@ const SECONDARY = 'rgba(250, 249, 245, 0.64)';
 const meta = {
   title: 'Settings/KnowledgeAdd',
   component: KnowledgeAdd,
-  args: { note: NOTE, onNoteChange: fn(), onAddNote: fn(), onAddFile: fn() },
+  args: { websitePlaceholder: 'turner-plumbing.example/blog', note: NOTE, onNoteChange: fn(), onAddNote: fn(), onAddFile: fn() },
   render: (args) => (
     <div style={{ maxWidth: 720 }}>
       <KnowledgeAdd {...args} />

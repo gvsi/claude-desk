@@ -37,7 +37,7 @@ export interface KnowledgeRowView {
 }
 
 export interface KnowledgeListProps {
-  /** The items, in the order the screen lists them. With none, nothing is drawn. */
+  /** The items in order. With none, only the heading and note are drawn when a note is supplied. */
   items: readonly KnowledgeRowView[];
   title?: string;
   caption?: ReactNode;
@@ -53,12 +53,12 @@ const WITHHELD_TITLE = 'A note only you can see';
  */
 export function KnowledgeList({ items, title = 'What Claude knows', caption, note }: KnowledgeListProps) {
   const headingId = useId();
-  if (items.length === 0) return null;
+  if (items.length === 0 && !note) return null;
   return (
     <section className="cd-knowledge-list" aria-labelledby={headingId}>
       <SectionHeader id={headingId} title={title} caption={caption} />
       {note}
-      <div className={note ? 'cd-knowledge-list__noted-card' : undefined}>
+      {items.length > 0 ? <div className={note ? 'cd-knowledge-list__noted-card' : undefined}>
         <Card padding={0}>
           <ul role="list" className="cd-knowledge-list__rows" aria-labelledby={headingId}>
             {items.map((item) => {
@@ -89,7 +89,7 @@ export function KnowledgeList({ items, title = 'What Claude knows', caption, not
             })}
           </ul>
         </Card>
-      </div>
+      </div> : null}
     </section>
   );
 }

@@ -33,6 +33,8 @@ export interface KnowledgeAddedView {
 }
 
 export interface KnowledgeAddProps {
+  /** The Desk's website example, supplied by the screen. */
+  websitePlaceholder: string;
   /** The note, as typed. */
   note: string;
   /** Each change to the note, with the raw text. */
@@ -66,7 +68,7 @@ const FILE_TYPES = '.txt,.md,text/plain,text/markdown';
  * switch, and the line above it, show the readers the kernel returned. Nothing here reads, checks or
  * sends anything: the screen does, and passes back what came of it.
  */
-export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, error, noteError, added }: KnowledgeAddProps) {
+export function KnowledgeAdd({ websitePlaceholder, note, onNoteChange, onAddNote, onAddFile, busy, error, noteError, added }: KnowledgeAddProps) {
   const [website, setWebsite] = useState('');
   const ids = useId();
   const headingId = `${ids}-heading`;
@@ -98,7 +100,7 @@ export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, e
         <p id={filesId} className="cd-knowledge-add__files cd-type-caption">
           Text or Markdown files, up to 100 KB.
         </p>
-        <TextField label="A website" placeholder="turner-plumbing.example/blog" value={website} onChange={setWebsite} />
+        <TextField label="A website" placeholder={websitePlaceholder} value={website} onChange={setWebsite} />
         <div className="cd-knowledge-add__actions">
           <Button variant="secondary" size="main">Add a website</Button>
           <Pill>Mock</Pill>
