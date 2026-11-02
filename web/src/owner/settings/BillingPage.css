@@ -1,0 +1,99 @@
+.cd-billing {
+  display: grid;
+  gap: var(--space-24);
+  min-width: 0;
+}
+
+.cd-billing p,
+.cd-billing h2 {
+  margin: 0;
+}
+
+.cd-billing .cd-billing__plan-line {
+  margin-top: var(--space-8);
+}
+
+.cd-billing__quiet {
+  color: var(--text-secondary);
+}
+
+.cd-billing__section {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.cd-billing__section > .cd-section-header {
+  align-items: baseline;
+}
+
+.cd-billing__row {
+  padding: var(--space-16);
+}
+
+.cd-billing__row + .cd-billing__row {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-billing__usage {
+  display: grid;
+  grid-template-columns: 1.4fr repeat(3, 1fr);
+  gap: var(--space-16);
+  align-items: start;
+}
+
+.cd-billing__names,
+.cd-billing__stat,
+.cd-billing__invoice > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cd-billing__number {
+  font-variant-numeric: tabular-nums;
+}
+
+.cd-billing__budget-labels,
+.cd-billing__invoice {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.cd-billing__invoice {
+  align-items: center;
+}
+
+.cd-billing__invoice > .cd-billing__number {
+  flex: none;
+}
+
+.cd-billing__budget-track {
+  height: var(--space-6);
+  margin-top: var(--space-8);
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--fill-secondary);
+}
+
+.cd-billing__budget-fill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--text-secondary);
+}
+
+@media (max-width: 767.98px) {
+  .cd-billing__usage {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: var(--space-12);
+  }
+
+  .cd-billing__names {
+    grid-column: 1 / -1;
+  }
+
+  /* The signed phone board leaves the business name in the app's header. */
+  .cd-billing__business {
+    display: none;
+  }
+}

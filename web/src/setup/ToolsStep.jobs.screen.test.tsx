@@ -182,3 +182,25 @@ it('keeps an empty kernel-valid title accessible with the existing tool-name fal
   await screen.getByRole('button', { name: 'Turn it on', exact: true }).click();
   await expect.element(screen.getByRole('heading', { name: 'Turn on A connected tool', exact: true })).toBeVisible();
 });
+
+it.each([1440, 390])('at %i px, an intake job lists its questions one per line, numbered in asking order', async (width) => {
+  const { state, desk } = await interviewAtTools();
+  const questions = ['Which tax year is this for?', 'Is it for a business?', 'Who did your books last year?'];
+  const rows = businessToolRows([{ title: 'Before an intro call', how: '', config: { block: 'intake', questions } }]);
+  desk.tools = desk.tools.filter((row) => row.source !== 'business');
+  seedBusinessTools(desk, rows);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Before an intro call' }).click();
+  const setup = screen.getByRole('region', { name: 'How it’s set up' });
+  await expect.element(setup.getByText('Asks', { exact: true })).toBeVisible();
+  const list = setup.element().querySelector('.cd-connector-review__setup-row dd > ol');
+  if (!(list instanceof HTMLOListElement)) throw new Error('The Asks row holds a numbered list');
+  expect([...list.children].map((item) => [item.tagName, item.textContent])).toEqual(questions.map((question) => ['LI', question]));
+  const style = getComputedStyle(list);
+  expect([style.marginTop, style.paddingInlineStart, style.display, style.rowGap]).toEqual(['0px', '16px', 'grid', '4px']);
+  // Each question takes its own line, in the row's meta type.
+  const tops = [...list.children].map((item) => item.getBoundingClientRect().top);
+  expect(new Set(tops).size).toBe(questions.length);
+  expect(getComputedStyle(list.children[0]!).fontSize).toBe(getComputedStyle(list.closest('.cd-connector-review__setup-row')!).fontSize);
+  await expectScreenBasics(screen.container, { owner: true });
+});

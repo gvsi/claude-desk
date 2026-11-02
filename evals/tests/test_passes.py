@@ -714,17 +714,25 @@ async def test_record_rate_requires_sign_off_and_three_heldout_runs(repo, tmp_pa
     violating = await run_pass(config(runs=3, results=True), deps(repo, ViolatingRun(scenario="atk-cal")))
     with pytest.raises(PassRefused, match="clean pass"):
         record_rate(violating, signed_off_by="The owner", reason="First held-out run", root=repo, now=NOW)
-    # A whole results pass in which the held-out legitimate scenario waits for a plan: it has no runs to record.
+    # A whole results pass in which every scenario waits for a plan judged no run, so its gate reads not evaluated:
+    # it is no clean pass to record.
     waiting = repo_with(tmp_path / "waiting", landed=("master", "01a"))
     run_free = await run_pass(config(runs=3, results=True), deps(waiting, prices={}, keys={}, stack=None))
     assert run_free.runs == [] and run_free.pending["leg-held"] == "02"
-    with pytest.raises(PassRefused, match="doesn't cover the held-out legitimate suite: 3 runs missing, from leg-held"):
+    with pytest.raises(PassRefused, match="clean pass"):
         record_rate(run_free, signed_off_by="The owner", reason="First held-out run", root=waiting, now=NOW)
+    # One in which only the held-out legitimate scenario waits for a plan has no runs of it to record.
+    held_waits = repo_with(tmp_path / "held-waits", landed=("master", "01a", "02a", "02"),
+                           scenarios={"leg-held": {"requires": ["01a", "01b", "02"]}})
+    partway = await run_pass(config(runs=3, results=True), deps(held_waits))
+    assert len(partway.runs) == 9 and partway.pending == {"leg-held": "01b"}
+    with pytest.raises(PassRefused, match="doesn't cover the held-out legitimate suite: 3 runs missing, from leg-held"):
+        record_rate(partway, signed_off_by="The owner", reason="First held-out run", root=held_waits, now=NOW)
     held = repo / "evals" / "tier2" / "scenarios" / "leg-held.yaml"
     held.write_text(held.read_text().replace("A crafted goal.", "Another goal."))
     with pytest.raises(PassRefused, match="held-out set changed"):
         record_rate(three, signed_off_by="The owner", reason="First held-out run", root=repo, now=NOW)
-    for root in (repo, waiting):    # nothing was recorded
+    for root in (repo, waiting, held_waits):    # nothing was recorded
         assert (root / "evals" / "recorded_rates.json").read_text() == '{"history": []}\n'
 
 

@@ -97,7 +97,8 @@ export const REFERENCE_BOARDS = [
   'N-Run2-Settings-DeleteDesk',
   'N-Run2-Settings-Knowledge',
   'N-Run2-Settings-Notifications',
-  'N-Run2-Settings-Billing',
+  'N-Live-REV-BIL-1512',
+  'N-Live-REV-BIL-390',
   'N-Run2-Settings-Phone',
   // Settings › Channels, signed on 2026-10-30: the page the app builds, with no vision bar; and the
   // same page under the vision bar, a vision story only.
@@ -170,7 +171,8 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Run2-Settings-DeleteDesk': 'laptop',
   'N-Run2-Settings-Knowledge': 'laptop',
   'N-Run2-Settings-Notifications': 'laptop',
-  'N-Run2-Settings-Billing': 'laptop',
+  'N-Live-REV-BIL-1512': 'laptop',
+  'N-Live-REV-BIL-390': 'phone',
   'N-Run2-Settings-Phone': 'phone-900',
   'N-Run2-Settings-Channels': 'laptop',
   'N-R2-Vision-Channels': 'laptop',

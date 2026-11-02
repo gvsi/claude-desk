@@ -496,25 +496,14 @@ describe('Settings against its boards', () => {
     expect(content.querySelectorAll('button, a, input')).toHaveLength(0);
     await expectFooterAtFoot(screen.container);
 
-    // Billing as N-Run2-Settings-Billing draws it: the vision note, then the plan 20 px under it,
-    // each of its lines 8 px under the one before.
+    // Billing opens on its sample note and Plan; its own screen tests check the details.
     await subNav(screen).getByRole('link', { name: 'Billing' }).click();
     const plan = main(screen).getByRole('region', { name: 'Plan' });
     await expect.element(plan).toBeVisible();
-    await expectOwnerBoard(screen.container, { current: 'Settings', fill: true });
     content = await expectSettingsColumns(screen, 'Billing');
-    const note = expectVisionNote(content, 'Nothing is billed in this prototype.');
-    expect(round(top(plan.element()) - bottom(note))).toBe(20);
-    const name = plan.getByRole('heading', { level: 2, name: 'Plan' }).element();
-    expectComputed(name, { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
-    const offer = plan.getByText('One business, up to three Desks.', { exact: true }).element();
-    const later = plan.getByText('Billing would live here, with usage per Desk.', { exact: true }).element();
-    expectComputed(offer, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(later, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
-    expect(round(top(offer) - bottom(name))).toBe(8);
-    expect(round(top(later) - bottom(offer))).toBe(8);
-    expect(content.querySelectorAll('button, a, input')).toHaveLength(0);
-    await expectFooterAtFoot(screen.container);
+    expectVisionNote(one(content, '.cd-billing'), 'Nothing is billed in this prototype. The usage and invoices below are samples.');
+    await expect.element(plan.getByText('One business, up to three Desks.', { exact: true })).toBeVisible();
+    await expect.element(plan.getByText('Free while Claude Desk is a prototype.', { exact: true })).toBeVisible();
 
     // On a phone, as N-Run2-Settings-Phone draws it: the title 16 px under the top bar, SubNav as one
     // line across the page, and each part 16 px under the one before, down to the footer.
