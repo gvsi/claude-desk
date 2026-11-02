@@ -48,6 +48,8 @@ import { usePaymentLinks } from './usePaymentLinks.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
 import { VisitorInbox, inboxShown, useVisitorInbox, useWideWindow } from './inbox/VisitorInbox.tsx';
 import { messageReceiptVisible } from './messageReceipt.ts';
+import { OwnerPreviewBar } from './OwnerPreviewBar.tsx';
+import { useOwnerPreviewBack } from './ownerPreview.ts';
 import { useVisitorChat, type ChatStatus } from './PublicChatProvider.tsx';
 import { useOpenStatus } from './useOpenStatus.ts';
 import { useVisitorTyping } from './useVisitorTyping.ts';
@@ -209,19 +211,23 @@ function scrollerOf(el: Element): Element {
 
 /**
  * Where the conversation is scrolled: the element whose scrolling moves it, how far down, and the
- * size of the shell around it ("390x844"), which tells whether the page has changed size since.
+ * size of the shell around it with its composer area's height ("390x844/96"), which tells whether
+ * the page has changed size since.
  */
 interface ScrollerAt {
   scroller: Element;
   top: number;
-  shellSize: string;
+  layoutSize: string;
 }
 
 /** Where the element whose scrolling moves `el` stands now. */
 function scrollerAt(el: Element): ScrollerAt {
   const scroller = scrollerOf(el);
-  const shell = el.closest(SHELL)?.getBoundingClientRect();
-  return { scroller, top: scroller.scrollTop, shellSize: shell ? `${Math.round(shell.width)}x${Math.round(shell.height)}` : '' };
+  const shell = el.closest(SHELL);
+  const box = shell?.getBoundingClientRect();
+  const area = shell?.querySelector(COMPOSER_AREA)?.getBoundingClientRect();
+  const layoutSize = box ? `${Math.round(box.width)}x${Math.round(box.height)}/${Math.round(area?.height ?? 0)}` : '';
+  return { scroller, top: scroller.scrollTop, layoutSize };
 }
 
 /** The design system's classes for the shell around the page and its composer area, which stays at the bottom of the window. */
@@ -231,12 +237,15 @@ const COMPOSER_AREA = '.cd-public-shell__composer';
 /**
  * Whether a visitor who was at the end, where the page last knew they were (`seen`), has moved
  * away from it to stand where the conversation is now: only by moving it up, in the same scroller,
- * with the shell the same size. The page changing size moves the conversation too, before the page
- * hears of the new size: the browser's scroll anchoring moves it down or up as the rows rewrap, and
- * the shell switching scrollers leaves it where the new scroller was. Nothing lies below the end.
+ * with the shell and its composer area the same size. The page changing size moves the conversation
+ * too, before the page hears of the new size: the browser's scroll anchoring moves it down or up as
+ * the rows rewrap, and the shell switching scrollers leaves it where the new scroller was. And the
+ * browser moves it up on its own, its event coming only with the next frame, as a row that landed
+ * rising settles at the bottom: a composer that grew in between hides the end, and that scroll
+ * still isn't the visitor leaving it. Nothing lies below the end.
  */
 function leftTheEnd(seen: ScrollerAt, now: ScrollerAt): boolean {
-  return now.scroller === seen.scroller && now.shellSize === seen.shellSize && now.top < seen.top;
+  return now.scroller === seen.scroller && now.layoutSize === seen.layoutSize && now.top < seen.top;
 }
 
 /**
@@ -324,11 +333,12 @@ interface NewestInView {
  * anchoring moves the conversation down or up to keep the rows on screen where they were. And the
  * shell can switch which of its parts scrolls the conversation (going short or tall), which leaves
  * it where the new scroller was; the shell says so with its own event, and the end comes back. So
- * while the visitor is at the end, only a move up of the same scroller, with the shell the same
- * size, counts as them leaving it (`leftTheEnd`); once they have moved back, any move counts. Only
- * the conversation's own scroller counts at all, looked up afresh each time: not the about column
- * beside the chat, the composer's text box, or a part of the shell that has just stopped scrolling
- * the conversation. The trade-off: a visitor's scroll up in the very frame the shell changes size,
+ * while the visitor is at the end, only a move up of the same scroller, with the shell and its
+ * composer area the same size, counts as them leaving it (`leftTheEnd`); once they have moved back,
+ * any move counts. Only the conversation's own scroller counts at all, looked up afresh each time:
+ * not the about column beside the chat, the composer's text box, or a part of the shell that has
+ * just stopped scrolling the conversation. The trade-off: a visitor's scroll up in the very frame
+ * the shell or its composer area changes size,
  * before the page has seen the new size, is taken for the browser's and the end comes back once; a
  * scroll gesture goes on past that frame and is followed from there.
  *
@@ -673,10 +683,14 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   const [language] = useState(browserLanguage);
   const copy = PUBLIC_COPY[language];
   const { openStatus, desk } = useOpenStatus(slug, chat.desk);
+  // The owner's way back from their own preview, read with their session; never in setup's preview,
+  // which sits inside the owner's app already.
+  const back = useOwnerPreviewBack(slug, embedded ? undefined : previewDeskId);
   // The first session/history read shapes the opening view too. Keep the shell's first header
-  // (including the served hours) together with that view rather than landing it in stages.
+  // (including the served hours, and the owner's preview bar) together with that view rather than
+  // landing it in stages.
   const opening =
-    (desk === null || (chat.session === null && chat.status === 'loading')) &&
+    (desk === null || (chat.session === null && chat.status === 'loading') || !back.settled) &&
     chat.status !== 'not_found' && chat.status !== 'unavailable';
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -752,19 +766,19 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // given back after "Start a new chat" take focus, which was on that button; the idea takes it only
   // when nothing else has it, so a visitor who moved on while the chat opened stays where they are.
   // The idea speaks as this Desk's owner, by the name the Desk carries; there is a composer to
-  // type it into only once the Desk is read.
+  // type it into only once the page has opened (the Desk read, and on the owner's preview, the bar).
   const carried = useRef<Carried | null>(idea === undefined ? null : { text: { idea }, focus: 'if_free' });
   const ideaOwner = desk === null ? null : brandFrom(desk).ownerName;
   useEffect(() => {
     const words = carried.current;
     const box = composerRef.current?.querySelector('textarea');
-    if (!ready || words === null || !box) return;
+    if (opening || !ready || words === null || !box) return;
     carried.current = null;
     const text = typeof words.text === 'string' ? words.text : breakItIdea(words.text.idea, ideaOwner);
     if (text === null) return;
     const free = document.activeElement === null || document.activeElement === document.body;
     fillComposer(box, text, { focus: words.focus === 'always' || free });
-  }, [ready, ideaOwner]);
+  }, [opening, ready, ideaOwner]);
 
   const present = (children?: ReactNode) => (
     <>
@@ -950,6 +964,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
         about={desk.charter}
         aboutLinks={aboutLinks}
         footer={!embedded}
+        banner={back.href === null ? undefined : <OwnerPreviewBar backHref={back.href} />}
         firstView={!conversationStarted(state, chat.status)}
         starters={{
           words: (desk.starters ?? []).slice(0, 3),

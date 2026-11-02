@@ -22,7 +22,7 @@ const SITUATIONS: SituationRowProps[] = [
 function SetupSituations() {
   return (
     <SetupFrame business={rivera.business.name}>
-      <PageHeader title="Real situations" subtitle="How your draft rules handle things that really happen at Turner Plumbing. Nothing here is real." />
+      <PageHeader title="Real situations" subtitle="How your rules will handle things that really happen at Turner Plumbing. Nothing here is real." />
       <ul role="list" className="board-setup__rows" aria-label="Real situations">
         {SITUATIONS.map((situation) => (
           <li key={situation.title}>

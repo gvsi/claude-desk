@@ -8,7 +8,7 @@ import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
 import { DESKS_KEY, withAnswering } from '../owner/useDesks.ts';
-import { SETUP_COPY, stillCheckingLine } from './copy.ts';
+import { COMING_LATER_CHANNELS, SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { gaveUp } from './shared.ts';
 
 const copy = SETUP_COPY.live;
@@ -46,8 +46,9 @@ function publicLink(wentLive: WentLive | null, slug: string): string {
  * Answering stays off and only the owner sees the preview, and "Go live", which turns it on. Live:
  * "Acting for you now" under the title, its handled dot breathing, while the Desk answers; the link to
  * share with "Copy link" and "Open"; "Go to Today"; and under them "Share it" as N-R2-Setup-14-Live
- * draws it: the link's QR code, and the website embed, coming later. It is built from the link
- * alone; the printable card and the ready-made words are on Share.
+ * draws it: the link's QR code, and the website embed, coming later; then "More channels", each
+ * coming later (`COMING_LATER_CHANNELS`). It is built from the link alone; the printable card and
+ * the ready-made words are on Share.
  */
 export function LiveStep({ state, business, answering, onLive, reread }: LiveStepProps) {
   const queryClient = useQueryClient();
@@ -131,6 +132,20 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
               <Pill>{copy.comingLater}</Pill>
             </div>
           </div>
+        </Card>
+        <Card as="section" label={copy.moreChannels} padding={16}>
+          <h2 className="cd-setup-live__share-title cd-type-control">{copy.moreChannels}</h2>
+          <ul role="list" className="cd-setup-live__channels">
+            {COMING_LATER_CHANNELS.map((channel) => (
+              <li key={channel.key} className="cd-setup-live__embed cd-setup-live__channel">
+                <div className="cd-setup-live__embed-text">
+                  <p className="cd-setup-live__embed-title cd-type-body">{channel.name}</p>
+                  {channel.line ? <p className="cd-setup-live__embed-line cd-type-meta">{channel.line}</p> : null}
+                </div>
+                <Pill>{copy.comingLater}</Pill>
+              </li>
+            ))}
+          </ul>
         </Card>
       </div>
     );

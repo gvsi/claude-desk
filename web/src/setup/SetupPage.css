@@ -44,6 +44,17 @@
   flex: none;
   align-items: center;
   gap: var(--space-10);
+  /* A link home that keeps the lockup's look: its own ink, no underline, and no change on hover. */
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: var(--radius-control);
+}
+
+/* The keyboard's ring stands 4 px off the lockup, so it clears the Preview badge. A click shows none. */
+.cd-setup__brand:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 4px;
 }
 
 .cd-setup__business {
@@ -482,6 +493,29 @@
 .cd-setup-live__embed-text .cd-setup-live__embed-line {
   margin-top: var(--space-2);
   color: var(--text-secondary);
+}
+
+/* "More channels": each a row laid out as the embed is, 12 px above and below, a hairline between. */
+.cd-setup-live__channels {
+  margin: var(--space-10) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-setup-live__channel {
+  padding-block: var(--space-12);
+}
+
+.cd-setup-live__channel:first-child {
+  padding-top: 0;
+}
+
+.cd-setup-live__channel:last-child {
+  padding-bottom: 0;
+}
+
+.cd-setup-live__channel + .cd-setup-live__channel {
+  border-top: 1px solid var(--line-hairline);
 }
 
 
