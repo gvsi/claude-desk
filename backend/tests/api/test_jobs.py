@@ -600,7 +600,7 @@ async def test_a_booking_turn_shows_the_held_quote_it_closed(copy, engine, fake)
     quote = await held_half_off(engine, fake, caller)
 
     assert await turn(engine, caller, "Never mind, book me in at list price.",
-                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0]})),
+                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0], "name": "Jane Doe", "contact": "jane@example.com"})),
                       response(reply("You're booked."))) == "done"
 
     assert fake.decisions[quote.decision_id].decision.state == "cancelled"
@@ -613,7 +613,7 @@ async def test_a_booking_turn_shows_the_held_quote_it_closed(copy, engine, fake)
         await runner.handle_controls(conn, caller)
     found = await session_rows(engine, caller.session_id)
     assert found["sse"][-1] == ("resolved", "cancelled")
-    assert found["action_update"] == [(quote.decision_id, "Cancelled", True)]
+    assert found["action_update"] == [(quote.decision_id, "Closed: your booking replaced this request", True)]
     assert all(handled for _, _, handled in found["control"])
 
 
@@ -623,14 +623,14 @@ async def test_a_call_that_runs_leaves_what_it_didnt_settle_waiting(copy, engine
     isn't final would keep the minute sweep from marking it again). Once the owner answers, the sweep picks each up."""
     caller = await copy.visitor()
     first, second = open_slots(fake, caller)[:2]
-    assert await turn(engine, caller, "Book me in, please.", response(tool_use("native__book", {"slot_id": first})),
+    assert await turn(engine, caller, "Book me in, please.", response(tool_use("native__book", {"slot_id": first, "name": "Jane Doe", "contact": "jane@example.com"})),
                       response(reply("You're booked."))) == "done"
     quote = await held_half_off(engine, fake, caller)
     fake.script("native.book", outcome="hold")                           # the owner looks at the next booking first
     fake.calls.clear()
 
     assert await turn(engine, caller, "Book a second visit too, and which times are free this week?",
-                      response(tool_use("native__book", {"slot_id": second}),
+                      response(tool_use("native__book", {"slot_id": second, "name": "Jane Doe", "contact": "jane@example.com"}),
                                tool_use("native__find_slots", {"days": 3})),
                       response(reply("I've asked Mike about the second visit."))) == "done"
 
@@ -653,7 +653,7 @@ async def test_a_call_that_runs_with_nothing_waiting_reads_no_other_decision(cop
     quote = await held_half_off(engine, fake, other)
     fake.calls.clear()
 
-    assert await turn(engine, caller, "Book me in, please.", response(tool_use("native__book", {"slot_id": first})),
+    assert await turn(engine, caller, "Book me in, please.", response(tool_use("native__book", {"slot_id": first, "name": "Jane Doe", "contact": "jane@example.com"})),
                       response(reply("You're booked."))) == "done"
 
     (booking,) = decisions(fake, caller, "native.book")
@@ -662,7 +662,7 @@ async def test_a_call_that_runs_with_nothing_waiting_reads_no_other_decision(cop
 
     fake.calls.clear()
     assert await turn(engine, other, "Book me in at list price instead.",
-                      response(tool_use("native__book", {"slot_id": second})),
+                      response(tool_use("native__book", {"slot_id": second, "name": "Jane Doe", "contact": "jane@example.com"})),
                       response(reply("You're booked."))) == "done"
     (booked,) = decisions(fake, other, "native.book")
     assert reads(fake) == [booked.decision_id, quote.decision_id]
@@ -707,7 +707,7 @@ async def test_a_waiting_decision_that_cant_be_read_is_left_for_later(copy, engi
         error if route == "GET /decisions/{id}" and path["id"] in quotes else None))
 
     assert await turn(engine, replace(caller, kernel=kernel), "Never mind, book me in at list price.",
-                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0]})),
+                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0], "name": "Jane Doe", "contact": "jane@example.com"})),
                       response(reply("You're booked."))) == "done"
 
     assert len(kernel.failed) == tried and {path["id"] for _, path in kernel.failed} <= quotes
@@ -735,7 +735,7 @@ async def test_a_turn_stopping_on_an_unreachable_kernel_doesnt_look(copy, engine
     fake.calls.clear()
     assert await turn(engine, replace(caller, kernel=FailingKernel(caller.kernel, unreachable)),
                       "Book me in at list price, and which other times are free?",
-                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0]}),
+                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0], "name": "Jane Doe", "contact": "jane@example.com"}),
                                tool_use("native__find_slots", {"days": 3}))) == "kernel_unavailable"
 
     (booking,) = decisions(fake, caller, "native.book")
