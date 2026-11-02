@@ -352,8 +352,9 @@
   background: var(--va-tile);
 }
 
+/* The About pages' one exception to "hover is a fill" (owner, 2026-11-01): Read next darkens its border. */
 .vision-article .va-next:hover {
-  background: var(--va-hover);
+  border-color: var(--va-line-strong);
 }
 
 .vision-article .va-end .va-next__label {

@@ -1340,22 +1340,21 @@ describe('ReaderPage', () => {
     await screen.unmount();
   });
 
-  it('read_next_fills_on_hover_and_keeps_its_border', async () => {
-    // Hover is a fill only, the paper's hover ink over the card, and the card's border stays as it rests: only
-    // keyboard focus changes an edge.
+  it('read_next_darkens_its_border_on_hover', async () => {
+    // The About pages' one exception to "hover is a fill" (owner, 2026-11-01): Read next darkens its border on
+    // hover, as it always has, and keeps its fill.
     const screen = await renderReader('proposal', { size: DESKTOP });
     const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
     const over = screen.container.querySelector('.cd-about-next') as HTMLElement;
     const card = over.querySelector('.cd-card') as HTMLElement;
     over.scrollIntoView({ block: 'center' });
     const rest = { fill: getComputedStyle(card).backgroundColor, border: getComputedStyle(card).borderTopColor };
-    const hoverInk = tokenColor('--fill-hover', root);
-    expect(hoverInk).toBe('rgba(28, 27, 25, 0.06)');
-    expect(rest.fill).not.toBe(hoverInk);
+    const hoverLine = tokenColor('--line-control-hover', root);
+    expect(rest.border).not.toBe(hoverLine);
     await userEvent.hover(over);
     expect(over.matches(':hover')).toBe(true);
-    await expect.poll(() => getComputedStyle(card).backgroundColor).toBe(hoverInk);
-    expect(getComputedStyle(card).borderTopColor).toBe(rest.border);
+    await expect.poll(() => getComputedStyle(card).borderTopColor).toBe(hoverLine);
+    expect(getComputedStyle(card).backgroundColor).toBe(rest.fill);
     await screen.unmount();
   });
 

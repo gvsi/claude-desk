@@ -411,25 +411,30 @@ describe('The Vision article', () => {
     expect(getComputedStyle(nextLink, '::after').boxShadow, 'the next page').toBe('none');
   });
 
-  it('cards_fill_on_hover_and_keep_their_border', async () => {
-    // Hover is a fill only, in the paper's own hover ink, and a card's border stays as it rests: only keyboard focus
-    // changes a border.
+  it('picture_cards_fill_on_hover_and_read_next_darkens_its_border', async () => {
+    // A picture card's hover is a fill only, in the paper's own hover ink, and its border stays as it rests. Read
+    // next is the About pages' one exception (owner, 2026-11-01): its border darkens on hover, and its fill stays.
     const { screen } = await renderRoute(PATH);
     await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
     const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
+    const hoverInk = 'rgba(28, 27, 25, 0.06)';
+    card.scrollIntoView({ block: 'center' });
+    const cardRest = { fill: getComputedStyle(card).backgroundColor, border: getComputedStyle(card).borderTopColor };
+    expect(cardRest.fill).not.toBe(hoverInk);
+    await userEvent.hover(card);
+    await expect.poll(() => getComputedStyle(card).backgroundColor).toBe(hoverInk);
+    expect(getComputedStyle(card).borderTopColor).toBe(cardRest.border);
+    await userEvent.unhover(card);
+
     const next = document.querySelector<HTMLElement>('.va-next');
     if (next === null) throw new Error('no Read next');
-    const hoverInk = 'rgba(28, 27, 25, 0.06)';
-    for (const [name, el] of [['a picture card', card], ['Read next', next]] as const) {
-      el.scrollIntoView({ block: 'center' });
-      const rest = { fill: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderTopColor };
-      expect(rest.fill, name).not.toBe(hoverInk);
-      await userEvent.hover(el);
-      expect(el.matches(':hover'), name).toBe(true);
-      await expect.poll(() => getComputedStyle(el).backgroundColor, { message: name }).toBe(hoverInk);
-      expect(getComputedStyle(el).borderTopColor, name).toBe(rest.border);
-      await userEvent.unhover(el);
-    }
+    next.scrollIntoView({ block: 'center' });
+    const nextRest = { fill: getComputedStyle(next).backgroundColor, border: getComputedStyle(next).borderTopColor };
+    await userEvent.hover(next);
+    expect(next.matches(':hover')).toBe(true);
+    await expect.poll(() => getComputedStyle(next).borderTopColor).not.toBe(nextRest.border);
+    expect(getComputedStyle(next).backgroundColor).toBe(nextRest.fill);
+    await userEvent.unhover(next);
   });
 
   it('the_picture_cards_draw_their_phones_with_an_even_bezel_and_a_clean_crop', async () => {
