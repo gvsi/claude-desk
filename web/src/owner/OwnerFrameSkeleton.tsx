@@ -10,12 +10,12 @@ import { ProfileSkeleton } from './profile/ProfileSkeleton.tsx';
 import { KnowledgeSkeleton } from './knowledge/KnowledgeSkeleton.tsx';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
 import { SafetySkeleton } from './safety/SafetySkeleton.tsx';
-import { TodaySkeleton } from './today/TodaySkeleton.tsx';
+import { TodaySkeleton, type SkeletonSetup } from './today/TodaySkeleton.tsx';
 
 /** The page's shapes at an exact route; detail pages (a customer, All rules, a draft) keep an empty area. */
-function pageShapes(page: string, rest: readonly string[], search: string): ReactNode | null {
+function pageShapes(page: string, rest: readonly string[], search: string, setup: SkeletonSetup | undefined): ReactNode | null {
   const exact = rest.every((part) => part === '');
-  if ((page === '' || page === 'today') && exact) return <TodaySkeleton />;
+  if ((page === '' || page === 'today') && exact) return <TodaySkeleton setup={setup} />;
   if (page === 'rules' && exact) return <RulesSkeleton withHeader />;
   // Attempts may open at a detail route too; Entries keeps its existing record loader.
   const safetyRoute = exact || (rest[0] !== '' && rest.slice(1).every((part) => part === ''));
@@ -30,16 +30,26 @@ function pageShapes(page: string, rest: readonly string[], search: string): Reac
   return null;
 }
 
-/** Exact routes only: later tasks add their pages here, while detail pages keep an empty area. */
-export function pageSkeletonFor(pathname: string, search: string): { page: ReactNode | null; fill: boolean; centered: boolean } {
+/**
+ * Exact routes only: later tasks add their pages here, while detail pages keep an empty area.
+ * `setup` is the Desk's unfinished setup once the copy's Desks say so, which Today draws first.
+ */
+export function pageSkeletonFor(
+  pathname: string,
+  search: string,
+  setup?: SkeletonSetup,
+): { page: ReactNode | null; fill: boolean; centered: boolean } {
   const [page = '', ...rest] = pathname.split('/').slice(3);
-  return { page: pageShapes(page, rest, search), fill: FILL_PAGES.has(page as NavKey), centered: CENTERED_PAGES.has(page as NavKey) };
+  return { page: pageShapes(page, rest, search, setup), fill: FILL_PAGES.has(page as NavKey), centered: CENTERED_PAGES.has(page as NavKey) };
 }
 
-/** The owner's frame at the current address, with the same gutters and footer as the landed frame. */
-export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
+/**
+ * The owner's frame at the current address, with the same gutters and footer as the landed frame.
+ * `setup`: the Desk's unfinished setup, once the copy's Desks are read and say it isn't live.
+ */
+export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setup?: SkeletonSetup }) {
   const { search } = useLocation();
-  const { page, fill, centered } = pageSkeletonFor(pathname, search);
+  const { page, fill, centered } = pageSkeletonFor(pathname, search, setup);
   return (
     <AppShell
       skeleton

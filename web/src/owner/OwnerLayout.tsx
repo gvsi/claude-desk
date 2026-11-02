@@ -200,6 +200,12 @@ function DeskGate({ deskId }: { deskId: string }) {
   const shown = found ?? held;
   const readingAhead = useTodayReadAhead(deskId, found === null && opensToday(location.pathname));
 
+  // Once the copy's Desks say this Desk's setup isn't finished, Today's shapes draw its card.
+  const setupShape =
+    shown === null || shown.desk.setup === null || shown.desk.setup === undefined
+      ? undefined
+      : { step: shown.desk.setup.step, answering: shown.desk.answering, business: shown.desk.business_name };
+
   const titleId = useId();
   const loading = shown ? readingAhead : !desks.isError && !(desks.data && !desks.isFetching);
   const next = shown ? (
@@ -220,7 +226,7 @@ function DeskGate({ deskId }: { deskId: string }) {
         loading={loading}
         status="Opening your Desk"
         className="cd-owner-opening"
-        skeleton={<OwnerFrameSkeleton pathname={location.pathname} />}
+        skeleton={<OwnerFrameSkeleton pathname={location.pathname} setup={setupShape} />}
       >
         {loading ? null : next}
       </SkeletonScreen>

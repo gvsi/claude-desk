@@ -100,6 +100,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
   // and for a Desk listed without it (an API from before it).
   const setup = isLive(desk) ? null : desk.setup;
+  // Today's skeleton draws the "Not live yet" card where it will land.
+  const skeletonSetup = setup === null ? undefined : { step: setup.step, answering: desk.answering, business: desk.business_name };
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
@@ -260,7 +262,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   return (
     <>
       {opening ? <h1 className="cd-sr-only">Today</h1> : null}
-      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton />} className="cd-today-opening">
+      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton setup={skeletonSetup} />} className="cd-today-opening">
         <div className="cd-today" onClick={followInAppLinks(navigate)} onClickCapture={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
