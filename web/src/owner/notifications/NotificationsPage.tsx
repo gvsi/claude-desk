@@ -85,17 +85,8 @@ export function NotificationsPage() {
   const [openedAt] = useState(() => Date.now() - FRESH_MS);
   // What the owner had seen as the page opened: every other entry keeps its dot for this visit.
   const [seenAtOpen] = useState(seenIds);
-  const inbox = useNotifications({ onPage: true });
-  const failure = useReadFailure(inbox, { pausedRoute: 'ownerInbox' });
-
-  // Read again as the page opens, so it shows what is there now.
-  const { refetch } = inbox;
-  useEffect(() => {
-    void refetch();
-  }, [refetch]);
-
   // Whether the page is still shown: false from the moment it goes, before its effects are cleaned
-  // up, so a poll that comes due as the owner leaves reads nothing.
+  // up, so a poll, a return to the tab or the network as the owner leaves reads nothing.
   const shown = useRef(true);
   useLayoutEffect(() => {
     shown.current = true;
@@ -103,6 +94,14 @@ export function NotificationsPage() {
       shown.current = false;
     };
   }, []);
+  const inbox = useNotifications({ shown });
+  const failure = useReadFailure(inbox, { pausedRoute: 'ownerInbox' });
+
+  // Read again as the page opens, so it shows what is there now.
+  const { refetch } = inbox;
+  useEffect(() => {
+    void refetch();
+  }, [refetch]);
 
   // Then every few seconds while it stays open and the tab is in view, counted again from each change
   // to the read (it going out, its answer, read or failed), as React Query's `refetchInterval` counts.
@@ -133,9 +132,9 @@ export function NotificationsPage() {
   }, [refetch, queryClient]);
 
   // The held requests the alerts name, each read for its Desk. A read that hasn't answered, failed,
-  // or names no action draws no link.
+  // or names no action draws no link. One that failed is read again each time the page opens.
   const decisionIds = [...new Set((inbox.data ?? []).flatMap((entry) => (entry.decision_id ? [entry.decision_id] : [])))];
-  const decisions = useQueries({ queries: decisionIds.map((id) => decisionQuery(id)) });
+  const decisions = useQueries({ queries: decisionIds.map((id) => ({ ...decisionQuery(id), retryOnMount: true })) });
   const deskOf = new Map<string, string>();
   decisions.forEach(({ data }, index) => {
     const id = decisionIds[index];
@@ -167,11 +166,10 @@ export function NotificationsPage() {
 
   // What the page shows counts as seen, so the sidebar's count of unread ones goes, before the
   // browser paints the frame that shows them: the count never shows an entry the page is showing.
-  const shownIds = (inbox.data ?? []).map((entry) => entry.entry_id).join(' ');
+  // The ids as one string, so a read that brings the same entries marks nothing new.
+  const shownIds = inbox.data === undefined ? null : inbox.data.map((entry) => entry.entry_id).join('\n');
   useLayoutEffect(() => {
-    if (inbox.data !== undefined) markSeen(inbox.data.map((entry) => entry.entry_id));
-    // `shownIds` stands for the entries: a read that brings the same ones marks nothing new.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (shownIds !== null) markSeen(shownIds === '' ? [] : shownIds.split('\n'));
   }, [shownIds]);
 
   const rows: Row[] = (inbox.data ?? []).map((entry) => ({
@@ -205,7 +203,7 @@ export function NotificationsPage() {
   if (inbox.data !== undefined && rows.length === 0 && failed === null) list = <EmptyState title={EMPTY_TITLE} body={EMPTY_BODY} />;
   else if (rows.length > 0) {
     list = days.map(({ day, rows: dayRows }) => (
-      <section key={day} className="cd-notifications__day" aria-label={day}>
+      <div key={day} className="cd-notifications__day">
         <h2 className="cd-conversations__day cd-type-caption">
           <span>{day}</span>
         </h2>
@@ -214,7 +212,7 @@ export function NotificationsPage() {
             <NotificationRow key={row.entry.entry_id} {...row} />
           ))}
         </ul>
-      </section>
+      </div>
     ));
   }
 
@@ -256,15 +254,13 @@ function NotificationRow({ entry, time, unread, requestHref }: Row) {
       <span className="cd-notifications__time cd-type-meta">{time}</span>
     </>
   );
+  // Always an `<a>`, a link only with its href: as the request's link comes or goes, the row stays the
+  // same element, so a screen reader hears only that change, not the whole row again.
   return (
     <li className={unread ? 'cd-notifications__item cd-notifications__item--unread' : 'cd-notifications__item'}>
-      {requestHref === undefined ? (
-        <div className="cd-notifications__row">{content}</div>
-      ) : (
-        <a className="cd-notifications__row" href={requestHref}>
-          {content}
-        </a>
-      )}
+      <a className="cd-notifications__row" href={requestHref}>
+        {content}
+      </a>
     </li>
   );
 }

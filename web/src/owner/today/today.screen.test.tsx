@@ -3761,13 +3761,15 @@ describe('Notifications from Today', () => {
    * Every timer the page starts from now on at the notifications' poll interval, for as long as the
    * page keeps it: `started()` lists them, oldest first, `kept()` the ones it keeps now, and
    * `due()` runs each one still kept (or each of `only` still kept) at once, as if all came due at
-   * that moment, and returns the ones it ran.
+   * that moment, and returns the ones it ran. `late(ids)` runs each of `ids` whether or not the page
+   * has stopped it yet, as a timer that fired just as it was stopped would, and returns them.
    */
-  function inboxPacedPolls(): { started: () => number[]; kept: () => number[]; due: (only?: number[]) => number[] } {
+  function inboxPacedPolls(): { started: () => number[]; kept: () => number[]; due: (only?: number[]) => number[]; late: (ids: number[]) => number[] } {
     // The page's timers as the browser has them (the Node typings say otherwise).
     const timers = window as unknown as { setInterval: (run: () => void, ms?: number) => number; clearInterval: (id?: number) => void };
     const started: number[] = [];
     const running = new Map<number, () => void>();
+    const every = new Map<number, () => void>();
     const start = timers.setInterval.bind(window);
     const stop = timers.clearInterval.bind(window);
     const starting = vi.spyOn(timers, 'setInterval').mockImplementation((run, ms) => {
@@ -3775,6 +3777,7 @@ describe('Notifications from Today', () => {
       if (typeof run === 'function' && ms === pollMs('inbox')) {
         started.push(id);
         running.set(id, run);
+        every.set(id, run);
       }
       return id;
     });
@@ -3793,6 +3796,11 @@ describe('Notifications from Today', () => {
         const due = [...running].filter(([id]) => only === undefined || only.includes(id));
         for (const [, run] of due) run();
         return due.map(([id]) => id);
+      },
+      late: (ids) => {
+        const late = [...every].filter(([id]) => ids.includes(id));
+        for (const [, run] of late) run();
+        return late.map(([id]) => id);
       },
     };
   }
@@ -4289,8 +4297,9 @@ describe('Notifications from Today', () => {
   });
 
   it('notifications_read_nothing_from_the_moment_the_page_goes', async () => {
-    // The page is shut from the moment it goes: a poll that comes due then reads nothing. No poll
-    // lands by itself here, so the test brings it due.
+    // The page is shut from the moment it goes: a poll that comes due then, or the owner coming back
+    // to the tab or to the network then, reads nothing. No poll lands by itself here, so the test
+    // brings them due.
     const polls = inboxPacedPolls();
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
     await expect.element(notificationsRow(screen)).toBeVisible();
@@ -4305,11 +4314,16 @@ describe('Notifications from Today', () => {
     const heading = notificationsHeading(screen);
     const closedReads = closedInboxReads(heading);
     // The page's own polls come due the moment it goes, whether or not they are stopped yet.
+    let ran: number[] = [];
     onceGone(heading.element(), () => {
-      polls.due(pagesOwn);
+      ran = polls.late(pagesOwn);
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+      window.dispatchEvent(new Event('offline'));
+      window.dispatchEvent(new Event('online'));
     });
     await leaveNotifications(screen);
     await nextFrames();
+    expect(ran, "the page's own poll came due as it went").not.toEqual([]);
     expect(closedReads(), 'notifications reads sent once their page had gone').toBe(0);
   });
 });

@@ -165,8 +165,7 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
 }
 
 /**
- * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with the Demo
- * inbox and Start over,
+ * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Start over,
  * the sidebar (the business, which opens the business switcher; the Desk picker; the pages; the
  * About this prototype links; the Answering switch; the owner), the page, and one concept footer
  * under it. A Desk outside the copy is not found.

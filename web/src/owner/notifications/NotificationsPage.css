@@ -60,11 +60,11 @@
   text-decoration: none;
 }
 
-a.cd-notifications__row:hover {
+a[href].cd-notifications__row:hover {
   background: var(--fill-hover);
 }
 
-a.cd-notifications__row:hover .cd-text-link {
+a[href].cd-notifications__row:hover .cd-text-link {
   text-decoration-color: currentColor;
 }
 
@@ -98,9 +98,9 @@ a.cd-notifications__row:hover .cd-text-link {
   font-weight: 520;
 }
 
+/* In meta type, at its own weight, not the kind's. */
 .cd-notifications__to {
   color: var(--text-secondary);
-  font-weight: 400;
 }
 
 /* Word for word, broken anywhere, so a checkpoint's long signature never runs past the column. */

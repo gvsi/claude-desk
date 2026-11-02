@@ -6,22 +6,29 @@
  * Notifications page also reads them every few seconds while it is open.
  */
 import { useQuery } from '@tanstack/react-query';
+import type { RefObject } from 'react';
 
 import { FRESH_MS, ownerInboxQuery } from '../useDesks.ts';
 import { useUnreadCount } from './seen.ts';
 
 /**
  * The read of the notifications: as the frame first draws, and on a return to the tab or the
- * network once the last read is no longer fresh. With `onPage`, the Notifications page's own: a
+ * network once the last read is no longer fresh. With `shown`, the Notifications page's own: it
+ * sends nothing as it mounts (the page reads once, itself, as it opens), and while `shown` is set a
  * return reads however fresh the last read is, so the page shows what is there now.
  */
-export function useNotifications({ onPage = false }: { onPage?: boolean } = {}) {
+export function useNotifications({ shown }: { shown?: RefObject<boolean> } = {}) {
+  const onPage = shown === undefined ? {} : {
+    refetchOnMount: false,
+    refetchOnWindowFocus: () => (shown.current ? ('always' as const) : false),
+    refetchOnReconnect: () => (shown.current ? ('always' as const) : false),
+  };
   return useQuery({
     ...ownerInboxQuery(),
     staleTime: FRESH_MS,
     // A failed read is read again from the page's "Try again", or on a return, not each time the frame draws again.
     retryOnMount: false,
-    ...(onPage ? { refetchOnWindowFocus: 'always' as const, refetchOnReconnect: 'always' as const } : {}),
+    ...onPage,
   });
 }
 

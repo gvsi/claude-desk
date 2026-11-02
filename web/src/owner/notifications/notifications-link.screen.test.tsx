@@ -122,6 +122,24 @@ describe('Notifications request link', () => {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   });
 
+  it('failed_request_read_is_read_again_as_the_page_opens_again', async () => {
+    // The held request's read fails, so its alert isn't a link. That read is kept, as every
+    // decision read is, but a failed one is read again each time the page opens: back on
+    // Notifications, the alert links once more.
+    const held = seededHold();
+    mockStore.inject({ route: 'decision', status: 503 });
+    const { screen } = await renderRoute(TODAY);
+    let page = await openNotifications(screen, held.decision_id);
+    await vi.waitFor(() => expect(mockStore.requests.filter((r) => r.key === 'decision')).toHaveLength(1));
+    await nextFrames();
+    expect(requestRows(page).elements()).toHaveLength(0);
+    await leaveNotifications(screen);
+
+    page = await openNotifications(screen, held.decision_id);
+    await expect.element(requestRows(page)).toHaveAttribute('href', requestLink(held.decision_id));
+    expect(mockStore.requests.filter((r) => r.key === 'decision')).toHaveLength(2);
+  });
+
   it('answered_and_dismissed_request_has_no_link', async () => {
     // Denied and dismissed on Today, the request is no longer held: its alert stays in
     // Notifications, and isn't a link to a card Today no longer has.

@@ -12,8 +12,9 @@ import { readLocal, writeLocal } from '../../lib/storage.ts';
 let kept: string | null = null;
 const listeners = new Set<() => void>();
 
+/** What was seen: what a failed write left in this page first, as storage may still hold an older value. */
 function stored(): string | null {
-  return readLocal('notificationsSeen') ?? kept;
+  return kept ?? readLocal('notificationsSeen');
 }
 
 function parse(raw: string | null): ReadonlySet<string> {
