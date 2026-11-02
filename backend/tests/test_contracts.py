@@ -474,6 +474,19 @@ def test_demo_inbox_decision_id_is_optional():
     assert "decision_id" not in export_schema()["$defs"]["DemoInboxEntry"]["required"]   # optional in the web's too
 
 
+def test_demo_inbox_title_is_optional():
+    # the owner's alert carries its preview line as a title; every other entry, every entry a session reads, and a
+    # kernel that doesn't fill it, still validate
+    alert = {"entry_id": "inbox-1", "to": "owner", "kind": "alert", "body": "Sam Lee reported a burst pipe.",
+             "created_at": "2026-10-30T10:04:05-07:00"}
+    assert DemoInboxEntry.model_validate_json(json.dumps(alert)).title is None
+    assert DemoInboxEntry.model_validate_json(json.dumps(alert | {"title": None})).title is None
+    titled = alert | {"title": "Urgent callback requested"}
+    assert DemoInboxEntry.model_validate_json(json.dumps(titled)).title == "Urgent callback requested"
+    assert list(DemoInboxEntry.model_fields)[-2:] == ["decision_id", "title"]
+    assert "title" not in export_schema()["$defs"]["DemoInboxEntry"]["required"]   # optional in the web's too
+
+
 def test_a_decisions_owner_reason_is_optional_and_unsigned():
     # why an action didn't run, for the owner alone: None unless the kernel filled it, so a kernel that doesn't
     # and every answer to a session still validate; it sits beside reason_plain, and the signature leaves it out

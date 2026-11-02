@@ -2803,7 +2803,8 @@ class FakeKernelState:
             answers = [answer for answer in HELD_ANSWERS
                        if (answer != "allow_person" or (session.person_id is not None and not past_cap))
                        and (answer != "deny_always" or not limit_hold)]
-            inbox = [self._alert_owner(desk, "A request is waiting for you.", decision_id=decision_id)]
+            inbox = [self._alert_owner(desk, "A request needs your answer", "A request is waiting for you.",
+                                       decision_id=decision_id)]
         decision = self._signed(Decision(
             decision_id=decision_id, session_id=session.session_id, call_id=call.call_id, action=action,
             outcome=outcome, state=state, policy_version=desk.policy_version,
@@ -2846,11 +2847,12 @@ class FakeKernelState:
         autos = set() if scripted else {card.card_id for card in desk.cards if card.mode == "auto"}
         return sorted(f"H.{'twin' if card_id in autos else 'ask'}.{card_id}" for card_id in card_ids)
 
-    def _alert_owner(self, desk: Desk, preview: str, *, decision_id: str | None = None) -> InboxNotice:
+    def _alert_owner(self, desk: Desk, preview: str, body: str, *, decision_id: str | None = None) -> InboxNotice:
         """An owner alert in the copy's Demo inbox ("approval" alerts at once by the seed's defaults), and its
-        code-free notice. A held request's alert names its decision, as the kernel's does."""
-        entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", body=preview, created_at=self.now,
-                               decision_id=decision_id)
+        code-free notice. The owner reads it under its preview line, and a held request's alert names its decision,
+        as the kernel's do."""
+        entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", body=body, created_at=self.now,
+                               decision_id=decision_id, title=preview)
         self.inbox.append((desk.copy_id, entry))
         return InboxNotice(entry_id=entry.entry_id, to=entry.to, preview=preview)
 
@@ -3245,6 +3247,7 @@ class FakeKernelState:
             if not session.preview:
                 self.inbox.append((desk.copy_id, DemoInboxEntry(
                     entry_id=new_id('inbox'), to='owner', kind='alert', created_at=self.now,
+                    title='Urgent callback requested',
                     body=f'Reported as urgent through {quoted(urgent.business.title)}. '
                          + claudes_note((args['name'], args['contact'], args['reason'])))))
         elif tool == "native.request_callback":
@@ -3662,6 +3665,7 @@ class FakeKernelState:
             person = desk.people.get(session.person_id or "") if session.verified else None
             who = person.display_name if person is not None else "A visitor"
             entry = DemoInboxEntry(entry_id=new_id("inbox"), to="owner", kind="alert", created_at=self.now,
+                                   title="A conversation was handed to you",
                                    body=f"{who} is waiting in a conversation the Desk handed to you.")
             self.inbox.append((desk.copy_id, entry))
         self.append(desk, "desk_data", {"part": "handoffs", "refs": [handoff_id], "kind": "card"},
@@ -4448,7 +4452,8 @@ class FakeKernelState:
                                        "definition_sha256": changed.definition_sha256,
                                        "pending_sha256": changed.pending_sha256})
         if not disabled:
-            self._alert_owner(desk, f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
+            self._alert_owner(desk, "A connected tool changed",
+                              f"{TOOL_LABELS[profile.tool]} changed. Review it before Claude uses it again.")
         return changed
 
     # Verification --------------------------------------------------------------------------------

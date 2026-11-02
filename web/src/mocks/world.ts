@@ -715,8 +715,12 @@ export class MockWorld {
     return held;
   }
 
-  /** The owner's Demo inbox alert for a hold, naming the held decision; the decision carries its notice. */
+  /**
+   * The owner's Demo inbox alert for a hold, naming the held decision and titled with its preview
+   * line, as the kernel's owner read gives it; the decision carries its notice.
+   */
   private ownerAlert(desk: DeskRecord, decisionId: string, reason: string) {
+    const preview = 'A request needs your answer';
     const entry: DemoInboxEntry = {
       entry_id: this.id('inbox'),
       to: 'owner',
@@ -724,9 +728,10 @@ export class MockWorld {
       body: reason,
       created_at: isoTime(this.now()),
       decision_id: decisionId,
+      title: preview,
     };
     this.inbox.push({ entry, deskId: desk.summary.desk_id, sessionId: null });
-    return { entry_id: entry.entry_id, to: 'owner', preview: 'A request needs your answer' };
+    return { entry_id: entry.entry_id, to: 'owner', preview };
   }
 
   /**
@@ -1056,6 +1061,7 @@ export class MockWorld {
       body: fields.body,
       created_at: isoTime(this.now()),
       decision_id: null,
+      title: null,
     };
     this.inbox.push({ entry, deskId: session.deskId, sessionId: session.state.session_id });
     return { type: 'demo_inbox', entry_id: entry.entry_id, to: entry.to, preview: fields.preview };
@@ -1125,6 +1131,7 @@ export class MockWorld {
       body: `${session.person?.name ?? 'A visitor'} is waiting in a conversation the Desk handed to you.`,
       created_at: isoTime(this.now()),
       decision_id: null,
+      title: 'A conversation was handed to you',
     };
     this.inbox.push({ entry, deskId: session.deskId, sessionId: null });
     this.appendLedger(desk, {

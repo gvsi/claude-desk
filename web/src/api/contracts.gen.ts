@@ -572,6 +572,7 @@ export interface DemoInboxEntry {
   body: string;
   created_at: string;
   decision_id?: string | null;
+  title?: string | null;
 }
 export interface DeskAnsweringRequest {
   on: boolean;

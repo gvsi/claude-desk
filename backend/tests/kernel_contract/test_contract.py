@@ -2003,6 +2003,37 @@ async def test_demo_inbox_is_scoped_to_the_session(kernel, ro_read):
         entry.entry_id for entry in every}
 
 
+@pytest.mark.kernel_plan("01c")
+async def test_the_owners_alerts_carry_their_preview_line(kernel, ro_read):
+    """The owner reads each alert to them under its fixed preview line, the one its notice carried: a held request's
+    "A request needs your answer", an urgent callback's "Urgent callback requested". A code entry has no title, and
+    neither does anything a session reads, since a visitor's panel stays in their own language."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug, owner = desk_slug(ro_read, ro_schema, copy), http.owner(copy.owner_token)
+    asking, urgent = await new_visitor(http, slug), await new_visitor(http, slug)
+    a, a_id = http.session(asking.session_token), asking.state.session_id
+    held = await decide(a, a_id, 0, "call-1", "native.quote",
+                        quote_args(item_id(ro_read, ro_schema, copy, "Drain clearing"), 1500))
+    (alert,) = held.inbox
+    started = await verify_start(a, a_id, DANA)
+    (code,) = started.inbox
+    u, u_id = http.session(urgent.session_token), urgent.state.session_id
+    allowed = await decide(u, u_id, 0, "burst", "desk.emergency-callback",
+                           {"name": "Sam Lee", "contact": "(510) 555-0100", "reason": "My pipes have burst"})
+    assert (await execute(u, allowed, 0)).state == "succeeded"
+
+    entries = {entry.entry_id: entry for entry in await owner.call("GET /demo_inbox")}
+    assert (entries[alert.entry_id].title, alert.preview) == ("A request needs your answer",) * 2
+    assert entries[code.entry_id].title is None
+    (urgent_alert,) = [entry for entry in entries.values() if entry.kind == "alert"
+                       and entry.body.startswith("Reported as urgent through “Emergency callback”. ")]
+    assert urgent_alert.title == "Urgent callback requested"
+    (read,) = await session_inbox(a, a_id)
+    assert (read.entry_id, read.title) == (code.entry_id, None)
+    assert await session_inbox(u, u_id) == []
+
+
 async def verify_check(view: CredentialView, session_id: str, code: str) -> SessionState:
     return await view.call("POST /verify/check", VerifyCheckRequest(session_id=session_id, code=code))
 
