@@ -40,6 +40,7 @@ export const ICON_NAMES = [
   'rules',
   'connectors',
   'safety',
+  'bell',
   'share',
   'settings',
   'chevrons',
@@ -66,6 +67,10 @@ export const ICON_NAMES = [
   'menu',
   'shared',
   'quote',
+  'app-window',
+  'message-circle',
+  'message-square',
+  'phone',
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];
@@ -154,6 +159,12 @@ const SHAPES = {
   ),
   safety: (
     <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+  ),
+  bell: (
+    <>
+      <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+      <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+    </>
   ),
   share: (
     <>
@@ -317,6 +328,22 @@ const SHAPES = {
       <path d="M6.5 3h7l4 4v14h-11z" />
       <path d="M13.5 3v4h4M9.5 12h5M9.5 16h5" />
     </>
+  ),
+  // Share's More channels (board REV-CHAN A): Lucide's neutral line icons for each channel, never
+  // a brand's mark. A browser window for the website embed.
+  'app-window': (
+    <>
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M2 8h20M6 4v4M10 4v4" />
+    </>
+  ),
+  // A round speech bubble, for WhatsApp.
+  'message-circle': <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />,
+  // A square speech bubble, for iMessage: the same shape as `conversations`, named for what it draws.
+  'message-square': <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />,
+  // A handset, for phone calls.
+  phone: (
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
   ),
 } satisfies Record<IconName, ReactElement>;
 

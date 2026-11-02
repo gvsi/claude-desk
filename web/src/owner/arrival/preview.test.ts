@@ -129,6 +129,9 @@ describe('The preview behind the intro dialog', () => {
       const copy = mockCopy(opened, readAt);
       expect(drawn(still)).toEqual(drawn(copy));
       expect(shown(still, readAt)).toEqual(shown(copy, readAt));
+      // The preview's inbox goes into the cache as is, past `ownerInboxQuery`'s read, so it holds
+      // none of the record's checkpoints, which the owner's inbox leaves out.
+      expect(still.inbox.some((entry) => entry.kind === 'head_checkpoint')).toBe(false);
     });
   });
 

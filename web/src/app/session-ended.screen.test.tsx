@@ -21,14 +21,14 @@ function introDialog(screen: RenderResult) {
 }
 
 /**
- * Today has drawn what its first reads brought (its greeting, its held request and the Demo
- * inbox's count), and polls too slowly to read again: nothing of this page's is still out to
- * answer the page a reload opens, as nothing can be after a real reload.
+ * Today has drawn what its first reads brought (its greeting, its held request and the sidebar's
+ * count of unread notifications), and polls too slowly to read again: nothing of this page's is
+ * still out to answer the page a reload opens, as nothing can be after a real reload.
  */
 async function everyFirstReadIsIn(screen: RenderResult): Promise<void> {
   await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
   await expect.element(screen.getByRole('article', { name: /^Held for you: / })).toBeVisible();
-  await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+  await expect.element(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Notifications \d+ unread$/ })).toBeVisible();
 }
 
 // Whether this browser had a copy lives in its storage, which outlives a test.

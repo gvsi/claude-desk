@@ -1,7 +1,7 @@
 /** Setup's public lines, scoped to the mock copy and interview. The real API uses the kernel scan. */
-import type { SetupPublicLine, SetupPublicLines, PublicPriceItem, SetupState } from '../api/views.ts';
+import type { JobProposal, SetupPublicLine, SetupPublicLines, PublicPriceItem, SetupState } from '../api/views.ts';
 import type { Failure, Req, Server, ServedRoutes } from './served.ts';
-import { SETUP_QUESTIONS, SETUP_ROUTES, TEST_CLIENT_OFFER, setupAbout } from './setup.ts';
+import { SETUP_QUESTIONS, SETUP_ROUTES, TEST_CLIENT_OFFER, setupAbout, setupDeclinedJobs } from './setup.ts';
 import { heldPublicLineSeed, storedPublicState, storePublicState } from './publicLineStore.ts';
 import { publicLineRefused } from './publicLineScan.ts';
 import { publicLineLimit } from '../setup/publicLineLimit.ts';
@@ -9,13 +9,29 @@ import { SETUP_PUBLIC_LINE_KEYS } from '../api/views.ts';
 
 /** The signed Chen & Co. starter lines, including the approved public-text revisions. */
 const CPA_LINES = [
-  ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
+  ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping.'],
   ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
   ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
   ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
   ['service_area', 'Clients in San Jose and the South Bay, in person or online.'],
-  ['how_we_help', 'New clients book a short introductory call.\nBefore their call, new clients answer three short questions.\nClients get a secure link to pay a retainer before work starts.'],
 ] as const;
+
+/**
+ * The signed How we help line, one sentence per job. A job whose card the owner turned down leaves its
+ * sentence out, and turning down every job leaves no line. Narrower than the API, which lists only accepted
+ * jobs: setup's own decline of a retainer with no amount keeps its sentence here, until the loading shapes
+ * can draw a shorter line (#855).
+ */
+const CPA_HOW_WE_HELP: readonly (readonly [JobProposal['job'], string])[] = [
+  ['schedule', 'New clients book a short introductory call.'],
+  ['intake', 'Before their call, new clients answer three short questions.'],
+  ['payment', 'Clients get a secure link to pay a retainer before work starts.'],
+];
+
+function cpaHowWeHelp(sv: Server, state: SetupState): string {
+  const declined = setupDeclinedJobs(sv.world, state.interview_id);
+  return CPA_HOW_WE_HELP.filter(([job]) => !declined.has(job)).map(([, sentence]) => sentence).join('\n');
+}
 
 /** Only customer-facing after-hours statements are known; private instructions stay out. */
 function afterHoursOf(answer: string | undefined): string | undefined {
@@ -46,9 +62,9 @@ function priceItems(items: Pick<PublicPriceItem, 'title' | 'unit_cents'>[]): Pub
 function seed(sv: Server, state: SetupState): Omit<SetupPublicLines, 'revision'> {
   const desk = sv.world.desk(state.desk_id);
   if (/^Chen & Co\.?(?: CPA)?$/i.test(desk?.summary.business_name ?? '')) {
-    const lines = CPA_LINES.map(([key, text]): SetupPublicLine => ({
-      key: `policy:${key}`, text, source: 'owner', editable: key !== 'how_we_help',
-    }));
+    const lines = CPA_LINES.map(([key, text]): SetupPublicLine => ({ key: `policy:${key}`, text, source: 'owner', editable: true }));
+    const howWeHelp = cpaHowWeHelp(sv, state);
+    if (howWeHelp) lines.push({ key: 'policy:how_we_help', text: howWeHelp, source: 'owner', editable: false });
     lines.splice(1, 0, { key: 'contact', text: '(408) 555-0199, linda@chenandco.com', source: 'suggested', editable: true });
     return {
       lines,

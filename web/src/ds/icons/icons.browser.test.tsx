@@ -93,6 +93,12 @@ it.each([
   ['globe', 3, 'M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20'],
   ['list', 6, 'M3 12h.01'],
   ['note', 2, 'M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z'],
+  ['bell', 2, 'M10.268 21a2 2 0 0 0 3.464 0'],
+  // Share's More channels (board REV-CHAN A): a browser window, a round and a square speech bubble, a phone.
+  ['app-window', 2, 'M2 8h20M6 4v4M10 4v4'],
+  ['message-circle', 1, 'M7.9 20A9 9 0 1 0 4 16.1L2 22Z'],
+  ['message-square', 1, 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'],
+  ['phone', 1, 'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z'],
 ] as const)('source_and_sidebar_icon_%s_uses_lucides_grid_and_stroke', (name, shapes, firstPath) => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement('div');

@@ -229,8 +229,8 @@ async def draft_rules(desk_id: DeskId, body: DraftCardsIn | DraftAddIn, request:
 async def draft_preset(desk_id: DeskId, body: PresetIn, request: Request,
                        ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> Any:
     """Draft a preset in place of the Desk's owner cards: "Ask me first for everything" (`ask_first`) or "Recommended
-    rules" (`auto`). Every owner card goes, those for one person and "never" ones included, and the draft's diff lists
-    each; nothing changes until `confirm`."""
+    rules" (`auto`). The Desk's own job cards stay unchanged. Other owner cards go, those for one person and "never"
+    ones included, and the draft's diff lists each; nothing changes until `confirm`."""
     async def work(owner: OwnerCtx, state: Runtime) -> RulesDraft:
         return await rules.draft_preset(owner, desk_id, body.preset)
 

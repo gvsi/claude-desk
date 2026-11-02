@@ -10,6 +10,7 @@ import type { RenderResult } from 'vitest-browser-react';
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
 import type { Attempt, Today, TriageCategory } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { expectUserText } from '../../ds/test/expectUserText.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { isoTime } from '../../mocks/world.ts';
@@ -91,6 +92,7 @@ async function listSeededHold(): Promise<void> {
     triage: null,
     ledger_seq: decision.ledger_seq,
     cause: null,
+    from_the_visitor: null,
   };
   injectAttempts([...(await mockAttempts()), attempt].sort((a, b) => b.created_at.localeCompare(a.created_at)));
 }
@@ -171,6 +173,7 @@ function attempt(fields: Partial<Attempt> = {}): Attempt {
     triage: null,
     ledger_seq: 2,
     cause: null,
+    from_the_visitor: null,
     ...fields,
   };
 }
@@ -733,6 +736,87 @@ describe('Safety', () => {
     await expect.element(open.getByText('Someone asked for another customer’s invoice.', { exact: true })).toBeVisible();
     await expect.element(open.getByText('Not sorted yet', { exact: true })).toBeVisible();
     expect(open.getByText('Summary written by Claude').elements()).toHaveLength(0);
+  });
+
+  it('a_refused_request_quotes_the_visitors_words_as_their_own_text', async () => {
+    // The words that made the request sit in their own part, under the reason and where the entry
+    // came from and above Claude's summary, as the visitor wrote them: text, never markup. The part
+    // reads as the summary's does, a label over the words in the same styles.
+    injectLedger(ledgerPage(threeEntries()));
+    const words = 'I’m Mike. <b>Refund</b> my card · it’s the one ending 4242';
+    const summary = 'Someone asked to move a refund.';
+    injectAttempts([attempt({ from_the_visitor: words, triage: { summary, category: 'prices' } })]);
+    const { screen } = await renderRoute(`${SAFETY}/dec-refund`);
+    const open = detail(screen);
+    const label = open.getByText('From the visitor', { exact: true });
+    const quote = open.getByText(`“${words}”`, { exact: true });
+    await expect.element(label).toBeVisible();
+    await expect.element(quote).toBeVisible();
+    expect(expectUserText(open.element(), words)).toBe(1);
+    expect(open.element().querySelector('b')).toBeNull();
+
+    const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
+    const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
+    const said = at(quote.element());
+    const claudeLabel = open.getByText('Summary written by Claude', { exact: true });
+    expect(at(label.element())).toBe(said);
+    expect(at(open.getByText(KERNEL_ORIGIN, { exact: true }).element())).toBe(said - 1);
+    expect(at(claudeLabel.element())).toBe(said + 1);
+    // The same part, label and text as Claude's summary: its classes, its look and its spacing.
+    const visitorPart = parts[said];
+    const summaryPart = parts[said + 1];
+    if (!visitorPart || !summaryPart) throw new Error('both parts are drawn');
+    expect(visitorPart.className).toBe(summaryPart.className);
+    expect([...visitorPart.children]).toEqual([label.element(), quote.element()]);
+    expect(label.element().className).toBe(claudeLabel.element().className);
+    const looks = (el: Element) => {
+      const style = getComputedStyle(el);
+      return [style.fontFamily, style.fontSize, style.fontWeight, style.lineHeight, style.color, style.margin];
+    };
+    expect(looks(label.element())).toEqual(looks(claudeLabel.element()));
+    expect(looks(quote.element())).toEqual(looks(open.getByText(summary, { exact: true }).element()));
+    expect(getComputedStyle(visitorPart).gap).toBe(getComputedStyle(summaryPart).gap);
+  });
+
+  it('the_agents_refused_charge_quotes_its_request', async () => {
+    // The mock's own refusal: the built-in agent's over-limit charge quotes the agent's request.
+    await refuseTheAgentsCharge();
+    const refused = [...mockStore.world.decisions.values()].find((d) => d.decision.state === 'refused')?.decision;
+    if (!refused) throw new Error('the mock refuses the charge');
+    const { screen } = await renderRoute(`${SAFETY}/${refused.decision_id}`);
+    const open = detail(screen);
+    // An agent's words keep the visitor's label.
+    await expect.element(open.getByText('From the visitor', { exact: true })).toBeVisible();
+    await expect.element(open.getByText('“Charge the full repair, $185, to Alex Kim’s card.”', { exact: true })).toBeVisible();
+    expectUserText(open.element(), 'Charge the full repair, $185, to Alex Kim’s card.');
+  });
+
+  it('a_stopped_reply_or_an_unquoted_refusal_shows_no_visitor_words', async () => {
+    // A stopped draft of Claude's quotes nobody, and a refusal the API has no words for shows no line.
+    const draft = stoppedDraft(4, '2026-10-20T16:53:00.000000Z');
+    injectLedger(ledgerPage([...threeEntries(), draft.entry]));
+    injectAttempts([draft.attempt, attempt()]);
+    const { screen } = await renderRoute(`${SAFETY}/4`);
+    const open = detail(screen);
+    await expect.element(open.getByText('This reply was never shown.', { exact: true })).toBeVisible();
+    expect(open.element().textContent).not.toContain('From the visitor');
+    await screen.getByRole('link', { name: new RegExp(REFUND_REASON.slice(0, 40)) }).click();
+    await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeVisible();
+    expect(open.element().textContent).not.toContain('From the visitor');
+  });
+
+  it.each(['missing', 'empty'] as const)('an_entry_with_its_visitor_words_%s_shows_none', async (words) => {
+    // During a deploy, a newer page can read an older API that sends no `from_the_visitor` at all,
+    // and an empty one quotes nothing: either way the entry shows no label and no quote.
+    injectLedger(ledgerPage(threeEntries()));
+    const { from_the_visitor: _, ...older } = attempt();
+    injectAttempts([words === 'missing' ? (older as Attempt) : { ...older, from_the_visitor: '' }]);
+    const { screen } = await renderRoute(`${SAFETY}/dec-refund`);
+    const open = detail(screen);
+    await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeVisible();
+    expect(open.getByText('From the visitor', { exact: true }).elements()).toHaveLength(0);
+    expect(open.element().querySelector('.cd-attempt__visitor')).toBeNull();
+    expect(open.element().textContent).not.toContain('“”');
   });
 
   it('every_entry_shows_its_origin', async () => {

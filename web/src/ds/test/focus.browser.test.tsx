@@ -11,6 +11,7 @@ import { IconButton } from '../components/IconButton/IconButton.tsx';
 import { Sidebar } from '../components/Sidebar/Sidebar.tsx';
 import { TextField } from '../components/TextField/TextField.tsx';
 import { TextLink } from '../components/TextLink/TextLink.tsx';
+import { chooseTheme } from './theme.ts';
 import { rivera } from '../fixtures';
 
 import '../components/VerifyCodeForm/VerifyCodeForm.css';
@@ -92,6 +93,8 @@ describe('focus', () => {
   // Each text entry with how its edge is drawn: a field's own border, or the composer box's inset edge.
   const TEXT_ENTRY: [string, ReactNode, 'field' | 'composer'][] = [
     ['a text field', <TextField label="Business name" value="" onChange={noop} />, 'field'],
+    ['a held field', <TextField label="Business name" value="Turner Plumbing" readOnly onChange={noop} />, 'field'],
+    ['a held text area', <TextField label="Your business" value="Turner Plumbing" multiline readOnly onChange={noop} />, 'field'],
     ['a text area', <TextField label="Your business" multiline value="" onChange={noop} />, 'field'],
     // A field drawn by its own component's stylesheet, as the verify code, the intro's passcode and the checkout's name are.
     ['a verify code field', <input type="text" className="cd-verify-code__field cd-type-body" aria-label="Code" />, 'field'],
@@ -100,42 +103,44 @@ describe('focus', () => {
     ['the whisper composer', <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude" onSend={noop} />, 'composer'],
   ];
 
-  it.each(TEXT_ENTRY)('text_entry_shows_its_caret_and_a_stronger_edge: %s', async (_, entry, kind) => {
-    // No ring and no focus edge of its own on text entry, by pointer or keyboard: its caret, and its own
-    // edge one step stronger, so focus shows even while the caret blinks off (owner, 2026-11-01, WCAG
-    // 2.4.7). A field's border goes from line-field to line-field-focus; the composer's inset edge from
-    // line-hairline to line-field.
-    const screen = await render(<AfterStart>{entry}</AfterStart>);
-    const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
-    const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] :is(input, textarea)');
-    if (field === null) throw new Error('no text field');
-    const box = kind === 'composer' ? field.closest<HTMLElement>('.cd-composer__box') : field;
-    if (box === null) throw new Error("no composer box");
-    const edge = () => (kind === 'field' ? getComputedStyle(box).borderTopColor : getComputedStyle(box).boxShadow);
-    const [resting, focused] = kind === 'field'
-      ? [tokenColor('--line-field'), tokenColor('--line-field-focus')]
-      : [tokenColor('--line-hairline'), tokenColor('--line-field')];
-    expect(focused).not.toBe(resting);
-    expect(focused).not.toBe(tokenColor('--accent-blue'));
-    expect(edge()).toContain(resting);
-
-    // Clicked: focus, no ring, and the stronger edge.
-    await userEvent.click(field);
-    expect(document.activeElement).toBe(field);
-    expect(getComputedStyle(field).outlineStyle).toBe('none');
-    expect(getComputedStyle(field).boxShadow).toBe('none');
-    expect(edge()).toContain(focused);
-
-    // Away, the resting edge comes back; by keyboard, the same stronger edge and still no ring.
-    start.focus();
-    expect(edge()).toContain(resting);
-    await userEvent.tab();
-    expect(document.activeElement).toBe(field);
-    expect(field.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
-    expect(getComputedStyle(field).outlineStyle).toBe('none');
-    expect(getComputedStyle(field).boxShadow).toBe('none');
-    expect(edge()).toContain(focused);
-    await screen.unmount();
+  describe.each(['dark', 'light'] as const)('%s text entry', (theme) => {
+    it.each(TEXT_ENTRY)('text_entry_shows_a_stronger_edge_without_resizing: %s', async (_, entry, kind) => {
+      chooseTheme(theme);
+      const screen = await render(<AfterStart>{entry}</AfterStart>);
+      try {
+        const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
+        const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] :is(input, textarea)')!;
+        const box = kind === 'composer' ? field.closest<HTMLElement>('.cd-composer__box')! : field;
+        const bounds = box.getBoundingClientRect().toJSON();
+        const resting = tokenColor(kind === 'field' ? '--line-field' : '--line-hairline');
+        const focused = tokenColor(kind === 'field' ? '--line-focus' : '--line-field');
+        const edge = () => kind === 'field' ? getComputedStyle(box).borderTopColor : getComputedStyle(box).boxShadow;
+        expect(edge()).toContain(resting);
+        const checkFocus = () => {
+          const style = getComputedStyle(field);
+          expect(style.outlineStyle).toBe('none');
+          expect(style.boxShadow).toBe(kind === 'field' ? insetEdge(focused) : 'none');
+          expect(edge()).toContain(focused);
+          if (kind === 'field') {
+            expect([style.borderTopWidth, style.borderRightWidth, style.borderBottomWidth, style.borderLeftWidth]).toEqual(Array(4).fill('1px'));
+            expect([style.borderTopColor, style.borderRightColor, style.borderBottomColor, style.borderLeftColor]).toEqual(Array(4).fill(focused));
+          }
+          expect(box.getBoundingClientRect().toJSON()).toEqual(bounds);
+        };
+        await userEvent.click(field);
+        expect(document.activeElement).toBe(field);
+        checkFocus();
+        start.focus();
+        expect(edge()).toContain(resting);
+        await userEvent.tab();
+        expect(document.activeElement).toBe(field);
+        expect(field.matches(':focus-visible')).toBe(true);
+        checkFocus();
+      } finally {
+        await screen.unmount();
+        chooseTheme('dark');
+      }
+    });
   });
 
   it('focus_edge_is_its_own_warm_token', () => {
@@ -281,28 +286,6 @@ describe('focus', () => {
     await keyboardFocus(link);
     const style = getComputedStyle(link);
     expect([style.boxShadow, style.textDecorationLine]).toEqual([insetEdge(tokenColor('--line-focus')), 'none']);
-    await screen.unmount();
-  });
-
-  it('a_held_text_field_shows_the_edge_on_focus', async () => {
-    // A held (read-only) field draws no caret, so caret-only focus would leave it nothing: like any
-    // other borderless edge, it shows the 1 px line-focus edge inside it; its border doesn't change.
-    const screen = await render(<AfterStart><TextField label="Business name" value="Turner Plumbing" readOnly onChange={noop} /></AfterStart>);
-    const start = screen.getByRole('button', { name: 'Start' }).element() as HTMLButtonElement;
-    const field = screen.container.querySelector<HTMLElement>('[data-focus-probe] input');
-    if (field === null) throw new Error('no held field');
-    const border = getComputedStyle(field).borderTopColor;
-    start.focus();
-    await userEvent.tab();
-    expect(document.activeElement).toBe(field);
-    const style = getComputedStyle(field);
-    expect([style.outlineStyle, style.boxShadow, style.borderTopColor]).toEqual(['none', insetEdge(tokenColor('--line-focus')), border]);
-    // Clicked into, to copy its words, it shows it too: browsers match :focus-visible on a text field
-    // clicked, and with no caret the edge is its only cue.
-    start.focus();
-    await userEvent.click(field);
-    expect(document.activeElement).toBe(field);
-    expect(getComputedStyle(field).boxShadow).toBe(insetEdge(tokenColor('--line-focus')));
     await screen.unmount();
   });
 

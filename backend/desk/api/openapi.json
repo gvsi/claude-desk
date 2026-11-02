@@ -7397,7 +7397,7 @@
     "/api/owner/policy/{desk_id}/preset": {
       "post": {
         "summary": "Draft Preset",
-        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). Every owner card goes, those for one person and \"never\" ones included, and the draft's diff lists\neach; nothing changes until `confirm`.",
+        "description": "Draft a preset in place of the Desk's owner cards: \"Ask me first for everything\" (`ask_first`) or \"Recommended\nrules\" (`auto`). The Desk's own job cards stay unchanged. Other owner cards go, those for one person and \"never\"\nones included, and the draft's diff lists each; nothing changes until `confirm`.",
         "operationId": "owner_draft_preset",
         "parameters": [
           {
@@ -8486,6 +8486,17 @@
               }
             ],
             "title": "Cause"
+          },
+          "from_the_visitor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From The Visitor"
           }
         },
         "type": "object",
@@ -8498,10 +8509,11 @@
           "created_at",
           "triage",
           "ledger_seq",
-          "cause"
+          "cause",
+          "from_the_visitor"
         ],
         "title": "Attempt",
-        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`\nand the session's verified state;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals."
+        "description": "A Safety entry (`GET /api/owner/desks/{desk_id}/safety`): a refused decision (`ref_id` its\n`decision_id`) or a reply of Claude's it blocked (`ref_id` the reply entry's `seq`, as text). `reason_plain` is the\nkernel's owner text for a decision, or a line the API composes for a reply; `origin` is the ledger entry's;\n`ledger_seq` is the entry to show it with. `triage` is AI-written, when there is one (Plan 02b). `cause` is a\nclosed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`\nand the session's verified state;\nthe web holds its words. It is null for held requests, stopped drafts and unmapped refusals.\n`from_the_visitor` is what the visitor (or visiting agent) wrote in the turn that made a refused request, read as\nNeeds you reads a held request's: at most two of their lines since Claude's last reply before the refusal's\nreceipt in the chat, each a one-line glimpse of at most 200 characters, joined with \" \u00b7 \"; if that window is\nempty, the newest line before the receipt. It is their own untrusted words, for the owner alone. It is null for\nheld requests and stopped drafts, and for a refusal whose receipt isn't in the chat: an entry can be days old, so\nthe chat's latest lines would quote something else."
       },
       "Briefing": {
         "properties": {
@@ -9191,6 +9203,17 @@
             "type": "boolean",
             "title": "Verified"
           },
+          "person_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Id"
+          },
           "mode": {
             "type": "string",
             "enum": [
@@ -9332,6 +9355,7 @@
           "kind",
           "display_name",
           "verified",
+          "person_id",
           "mode",
           "last_activity",
           "outcome_counts",
@@ -9340,7 +9364,7 @@
           "latest_outcome"
         ],
         "title": "ConversationSummary",
-        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose\nor positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never\nthe owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger\nentries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release\n(`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the\nowner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later\nrequest still held, expired or cancelled, or a handoff card opening, clears it to null.\n\nAn agent's outcome carries the facts behind it, read from the kernel's rows, never from anyone's words:\n`latest_outcome_starts_at`, the booking's start (`visit_booked`, from the booking decision's action);\n`latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored\npayment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide\n(`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its\noutcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview."
+        "description": "A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when\nanything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own\npreview. `person_id` is the person on record a visitor's session was verified as, which that person's page lists\nthe conversation by; null for an unverified visitor, an agent and the owner's preview, even a verified one.\n`latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its\nwhitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and \"\u2026\" when longer than 200;\nnever Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't\nwritten yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose\nor positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,\nchecked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual\nrefusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never\nthe owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger\nentries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release\n(`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the\nowner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later\nrequest still held, expired or cancelled, or a handoff card opening, clears it to null.\n\nAn agent's outcome carries the facts behind it, read from the kernel's rows, never from anyone's words:\n`latest_outcome_starts_at`, the booking's start (`visit_booked`, from the booking decision's action);\n`latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored\npayment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide\n(`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its\noutcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview."
       },
       "CopyOut": {
         "properties": {
@@ -10028,6 +10052,17 @@
                 "type": "null"
               }
             ]
+          },
+          "business_type": {
+            "type": "string",
+            "enum": [
+              "rivera",
+              "trade",
+              "office",
+              "landlord",
+              "other"
+            ],
+            "title": "Business Type"
           }
         },
         "type": "object",
@@ -10038,10 +10073,11 @@
           "business_name",
           "hours",
           "answering",
-          "setup"
+          "setup",
+          "business_type"
         ],
         "title": "DeskSummary",
-        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup."
+        "description": "One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back\ninto it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.\n`answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its\nsetup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set\n(`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the\nTurner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."
       },
       "DeskUpdated": {
         "properties": {
@@ -11331,7 +11367,7 @@
           "claude_summary"
         ],
         "title": "NeedsYouItem",
-        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200\ncharacters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff only, the conversation's newest\nAI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,\nshown as \"Claude's note on what the Desk stopped: {summary}\" and never quoted as the visitor's), else None. A held\nrequest asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries\nAI-written text: a visitor could steer a summary to sway an approval."
+        "description": "`GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which\napplies expiry, with `held_by`, the reason of the owner's ask card that held it, none for a hold past an automatic\ncard's limit or one only the default ask decided, whose headline already says why, and `held_at`, when it was\ndecided) or\nan open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they\nwrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's\nlast reply before its held status (a request whose status isn't in the chat quotes the chat's latest).\nIf that window is empty, it quotes the newest visitor line before the status. A handoff quotes the chat's\nlatest. Each is\na one-line glimpse of at most 200 characters, joined with \" \u00b7 \"; their own untrusted words); and, on a handoff\nonly, the conversation's newest AI-written triage summary (`claude_summary`: what the person asked for and what\nthe Desk did, for the owner alone, shown as \"Claude's note on what the Desk stopped: {summary}\" and never quoted\nas the visitor's), else None. A held request asks the owner for a decision, so neither it nor a handoff in a\nsession with one awaiting the owner carries AI-written text: a visitor could steer a summary to sway an\napproval."
       },
       "NeedsYouSession": {
         "properties": {
@@ -14811,6 +14847,22 @@
                 "type": "null"
               }
             ]
+          },
+          "review_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "new",
+                  "changed",
+                  "delisted"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Reason"
           }
         },
         "type": "object",

@@ -10,7 +10,7 @@ import { Notice } from '../Notice/Notice.tsx';
 import { Pill } from '../Pill/Pill.tsx';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
 import { TextLink } from '../TextLink/TextLink.tsx';
-import { CHECKOUT_COPY, TEST_CARD, type FinalPaymentState } from './checkoutCopy.ts';
+import { CHECKOUT_COPY, TEST_CARD, type CheckoutCopy, type FinalPaymentState } from './checkoutCopy.ts';
 
 import './MockCheckout.css';
 
@@ -22,7 +22,7 @@ const FINAL_DOT = {
   unknown: 'held',
 } as const satisfies Record<FinalPaymentState, StatusTone>;
 
-/** A public chat's own path, `/d/` and a Desk's slug: the one place the paid line links to. */
+/** A public chat's own path, `/d/` and a Desk's slug: the one place the return link goes. */
 const CHAT_PATH = /^\/d\/[a-z0-9-]+$/;
 
 /** True for the states with a line of their own: every known state but `issued`. */
@@ -66,9 +66,10 @@ export interface MockCheckoutProps {
    */
   customerName?: string;
   /**
-   * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Once paid,
-   * the line's "Go back to the chat" links there, in the same tab. Anything but a public chat's
-   * path is ignored, and the line keeps its words with no link.
+   * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Paid and
+   * cancelled lines link "Go back to the chat"; expired and rule-change lines link "the chat",
+   * in the same tab. Anything but a public chat's path is ignored, and the line keeps its
+   * original words with no link.
    */
   chatHref?: string;
   /** A request to pay or cancel is in flight. The pressed button spins; Pay does when none was pressed here. */
@@ -100,7 +101,7 @@ export function MockCheckout({
   onPay,
   onCancel,
 }: MockCheckoutProps) {
-  const copy = CHECKOUT_COPY[language];
+  const copy: CheckoutCopy = CHECKOUT_COPY[language];
   const id = useId();
   const titleId = `${id}-title`;
   const cardLabelId = `${id}-card`;
@@ -145,21 +146,23 @@ export function MockCheckout({
   const final: FinalPaymentState = isFinal(state) ? state : 'unknown';
   // A blank name is no name: the card then asks for one.
   const nameOnCard = customerName?.trim();
-  // Paid, with the visitor's chat known: the same words, with the way back a link in the sentence.
-  const back = final === 'paid' && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
+  // Each line that sends the visitor to the chat uses the same validated, same-tab link.
+  const lineKey = final === 'cancelled' && cancelReason === 'rules_changed' ? 'rules_changed' : final;
+  const parts = copy.returnLine[lineKey];
+  const back = parts !== undefined && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
   const finalLine =
-    back !== null ? (
+    back !== null && parts !== undefined ? (
       <span>
-        {copy.paid.before}
+        {parts.before}
         <TextLink href={back} runningText>
-          {copy.paid.back}
+          {parts.back}
         </TextLink>
-        {copy.paid.after}
+        {parts.after}
       </span>
-    ) : final === 'cancelled' && cancelReason === 'rules_changed' ? (
+    ) : lineKey === 'rules_changed' ? (
       copy.cancelledRulesChanged
     ) : (
-      copy.final[final]
+      copy.final[lineKey]
     );
 
   // Whether focus is in the checkout, kept from its own focus events. Focus that leaves for

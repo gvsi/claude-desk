@@ -123,6 +123,12 @@ export interface ApprovalAnswerOut {
  * closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
  * and the session's verified state;
  * the web holds its words. It is null for held requests, stopped drafts and unmapped refusals.
+ * `from_the_visitor` is what the visitor (or visiting agent) wrote in the turn that made a refused request, read as
+ * Needs you reads a held request's: at most two of their lines since Claude's last reply before the refusal's
+ * receipt in the chat, each a one-line glimpse of at most 200 characters, joined with " · "; if that window is
+ * empty, the newest line before the receipt. It is their own untrusted words, for the owner alone. It is null for
+ * held requests and stopped drafts, and for a refusal whose receipt isn't in the chat: an entry can be days old, so
+ * the chat's latest lines would quote something else.
  */
 export interface Attempt {
   ref_id: string;
@@ -158,6 +164,7 @@ export interface Attempt {
         | "no_rule"
       )
     | null;
+  from_the_visitor: string | null;
 }
 /**
  * A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk
@@ -260,7 +267,9 @@ export interface BusinessOut {
  * One of the copy's Desks. `setup` is its setup interview while that isn't finished, so the owner can go back
  * into it; null once its setup interview went live (setup's go-live step) and for a Desk made outside setup.
  * `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
- * setup.
+ * setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
+ * (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
+ * Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's.
  */
 export interface DeskSummary {
   desk_id: string;
@@ -270,6 +279,7 @@ export interface DeskSummary {
   hours: HoursWindow[];
   answering: boolean;
   setup: DeskSetup | null;
+  business_type: "rivera" | "trade" | "office" | "landlord" | "other";
 }
 /**
  * A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.
@@ -334,7 +344,9 @@ export interface ConnectorProposal {
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
  * anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
- * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+ * preview. `person_id` is the person on record a visitor's session was verified as, which that person's page lists
+ * the conversation by; null for an unverified visitor, an agent and the owner's preview, even a verified one.
+ * `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
  * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
  * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
  * written yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose
@@ -359,6 +371,7 @@ export interface ConversationSummary {
   kind: "visitor" | "agent" | "owner";
   display_name: string | null;
   verified: boolean;
+  person_id: string | null;
   mode: "ai" | "owner" | "paused";
   last_activity: string;
   outcome_counts: {
@@ -625,14 +638,20 @@ export interface MoneyCapIn {
 }
 /**
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
- * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
+ * applies expiry, with `held_by`, the reason of the owner's ask card that held it, none for a hold past an automatic
+ * card's limit or one only the default ask decided, whose headline already says why, and `held_at`, when it was
+ * decided) or
  * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
- * wrote last (`from_the_visitor`: their previous and last messages, each a one-line glimpse of at most 200
- * characters, joined with " · "; their own untrusted words); and, on a handoff only, the conversation's newest
- * AI-written triage summary (`claude_summary`: what the person asked for and what the Desk did, for the owner alone,
- * shown as "Claude's note on what the Desk stopped: {summary}" and never quoted as the visitor's), else None. A held
- * request asks the owner for a decision, so neither it nor a handoff in a session with one awaiting the owner carries
- * AI-written text: a visitor could steer a summary to sway an approval.
+ * wrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's
+ * last reply before its held status (a request whose status isn't in the chat quotes the chat's latest).
+ * If that window is empty, it quotes the newest visitor line before the status. A handoff quotes the chat's
+ * latest. Each is
+ * a one-line glimpse of at most 200 characters, joined with " · "; their own untrusted words); and, on a handoff
+ * only, the conversation's newest AI-written triage summary (`claude_summary`: what the person asked for and what
+ * the Desk did, for the owner alone, shown as "Claude's note on what the Desk stopped: {summary}" and never quoted
+ * as the visitor's), else None. A held request asks the owner for a decision, so neither it nor a handoff in a
+ * session with one awaiting the owner carries AI-written text: a visitor could steer a summary to sway an
+ * approval.
  */
 export interface NeedsYouItem {
   decision: Decision | null;
@@ -871,6 +890,7 @@ export interface ToolRow {
   pending_sha256: string | null;
   cards: CoveringCard[];
   business?: BusinessToolDef | null;
+  review_reason?: ("new" | "changed" | "delisted") | null;
 }
 /**
  * `POST /api/owner/policy/setup/{id}/safety_check`: what a bad actor would try against the drafted rules,
