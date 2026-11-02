@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Before something the owner can't easily undo: "Start over with a fresh copy?", "Delete Turner Plumbing's Main line?".
+- Before something the owner can't easily undo: "Start over with a fresh copy?", "Delete Main line for Turner Plumbing?".
 - Deleting a Desk from Settings › General uses the default tone, a neutral question with neutral buttons, as Boards/Settings, delete this Desk shows (owner decision, 2026-10-30).
 - `tone="danger"` adds a refused dot beside the title; no signed screen uses it now.
 - Not for errors or news, which are a `Notice`, and not for anything a visitor sees.

@@ -6,7 +6,7 @@ import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import './Dialog.css';
 
 export interface DialogProps {
-  /** The question, which names the dialog: "Delete Turner Plumbing's Emergencies?", "Start over with a fresh copy?". */
+  /** The question, which names the dialog: "Delete Emergencies for Turner Plumbing?", "Start over with a fresh copy?". */
   title: ReactNode;
   /** What happens, in plain words, which describes the dialog. */
   body: ReactNode;

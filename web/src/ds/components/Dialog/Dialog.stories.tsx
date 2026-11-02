@@ -6,7 +6,7 @@ import { expectComputed } from '../../test/expectComputed.ts';
 import { Button } from '../Button/Button.tsx';
 import { Dialog, type DialogProps } from './Dialog.tsx';
 
-const TITLE = "Delete Turner Plumbing's Emergencies?";
+const TITLE = "Delete Emergencies for Turner Plumbing?";
 const BODY = 'Its public link stops working and its chats close. Its safety record is kept.';
 
 /**

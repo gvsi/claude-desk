@@ -160,7 +160,7 @@ export function GeneralPage() {
         <Dialog
           title={
             <>
-              Delete <bdi data-copy="user">{business.name}</bdi>'s <bdi data-copy="user">{desk.name}</bdi>?
+              Delete <bdi data-copy="user">{desk.name}</bdi> for <bdi data-copy="user">{business.name}</bdi>?
             </>
           }
           body={DELETE_LINE}
