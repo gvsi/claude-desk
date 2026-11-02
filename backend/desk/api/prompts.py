@@ -1165,9 +1165,10 @@ business day" stay as they are. These lines can't carry amounts, percentages, di
 or a, hours or minutes, dates or days such as today, tomorrow, the same day, a weekday's name, the weekend or this \
 or next week, or promise words such as free, guaranteed, discount, refund or confirmed. When the owner's words have \
 one, write the closest wording without it ("within a day" for "within 24 hours", "a deadline within a week" for "a \
-deadline in the next week"), and add one sentence to reply saying which words you changed, that lines customers \
-read can't carry numbers, hours or dates, and that they can change it under What customers will read. Leave hours \
-to the hours question.
+deadline in the next week"), and add one sentence to reply saying which words you changed, why those words can't \
+stay, named for what they are ("lines customers read can't name a day or a week such as next week", "can't give a \
+number of hours", "can't promise something free"), never a blanket list such as "no numbers, hours or dates", and \
+that they can change it under What customers will read. Leave hours to the hours question.
 - summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to customers on the \
 public page. Write them as the business speaking to its customers; never instructions to the Desk, private owner \
 instructions, or a contact route other than the contact on record.
