@@ -954,12 +954,15 @@ async def held_quote(client, visitor):
 async def test_a_held_request_awaiting_the_owner_is_the_conversations_item(app, client, frozen_clock, ends):
     """While the session has a held request awaiting the owner, the owner already has that
     request's alert and item for the conversation: a card shown meanwhile opens no handoff and
-    sends no alert, so the owner sees one item and gets one alert. Once the hold has an end
-    (the owner's answer, the visitor's cancel, or its expiry), the next card opens one as usual."""
+    sends no alert, so the owner sees one item and gets one alert, and a draft blocked only for its
+    prose shows the kernel's status line instead of the card. Once the hold has an end (the owner's
+    answer, the visitor's cancel, or its expiry), the next blocked draft shows the card, which opens
+    one as usual."""
     copy, visitor = await visitor_of(app, client)
     await without_call_backs(app, copy)                          # so the blocked drafts show the handoff card
     held = await held_quote(client, visitor)
-    assert_handed_off(await checked(client, visitor, BLOCKED))
+    status = await checked(client, visitor, BLOCKED)             # the visitor is told to check the request
+    assert [(block.kind, block.text) for block in status.blocks] == [("prose", STATUS_LINE["en"])]
     assert (await checked(client, visitor, "", [clause("handoff")])).ok          # nor a card Claude cites
     assert (await handoffs_of(app, copy), await handoff_alerts(app, copy)) == ([], [])
     assert handoff_entries(await ledger_rows(app, copy)) == []
@@ -1239,3 +1242,94 @@ async def test_a_booking_that_fails_closes_nothing(app, client, reviewer, monkey
     assert [(row.handoff_id, row.status) for row in await handoffs_of(app, copy)] == [(card.handoff_id, "open")]
     assert closing_summaries(await ledger_rows(app, copy)) == []
     assert visitor.session_id not in {row.session_id for row in await rows_of(app, copy.copy_id, select(Booking))}
+
+
+# The kernel's status line, the API's signed `STATUS_LINES["check_status"]`.
+STATUS_LINE = {"en": "Please check the request status in this chat.",
+               "es": "Consulte el estado de la solicitud en este chat."}
+SERVICE_AREA_CLAUSE = ("policy", "charter:policy:service_area")
+
+
+@pytest.mark.parametrize("cited", [True, False], ids=["policy-card", "no-card"])
+@pytest.mark.parametrize(("prose", "soft_answer", "kind", "language"), [
+    ("I guarantee it.", None, "promise_word", "en"),
+    ("Eso es gratis.", None, "promise_word", "es"),
+    (CLEAN, FLAGGED, "soft_promise", "en"),
+], ids=["promise-en", "promise-es", "soft-en"])
+async def test_a_held_request_shows_the_status_line_when_only_the_prose_is_blocked(app, client, reviewer, prose,
+                                                                                  soft_answer, kind, language, cited):
+    """While a held request awaits the owner, a final draft blocked only for its prose still gives the visitor
+    words: the kept checked cards, if any, then the kernel's status line in the reply's language, in place of the
+    call-back offer. No owner handoff opens and no handoff alert goes out."""
+    from desk.contracts import RenderedBlock
+
+    from .test_approvals import held_quote
+
+    copy, visitor, _ = await held_quote(app, client)
+    if soft_answer is not None:
+        reviewer.soft_answer = soft_answer
+    alerts_before = len(await handoff_alerts(app, copy))
+    verdict = await checked(client, visitor, prose, [clause(*SERVICE_AREA_CLAUSE)] if cited else [])
+    assert not verdict.ok and {v.kind for v in verdict.violations} == {kind}
+    assert [(block.kind, block.template) for block in verdict.blocks[:-1]] == (
+        [("card", "policy")] if cited else [])
+    assert verdict.blocks[-1] == RenderedBlock(kind="prose", text=STATUS_LINE[language])
+    assert verdict.language == language
+    assert await handoffs_of(app, copy) == []
+    assert len(await handoff_alerts(app, copy)) == alerts_before
+    verify_verdict(await public_key(client), visitor.session_id, verdict)
+
+
+@pytest.mark.parametrize("cited", [True, False], ids=["policy-card", "no-card"])
+@pytest.mark.parametrize("ending", ["none", "answered", "cancelled"])
+async def test_without_a_held_request_awaiting_the_owner_a_prose_block_is_unchanged(app, client, cited, ending):
+    """With no held request, or one the owner answered or the visitor cancelled, a final draft blocked only for its
+    prose keeps its checked cards alone, or, with none, shows the call-back offer, as before."""
+    from .test_approvals import held_quote
+    from .test_reply_check import assert_kept
+
+    if ending == "none":
+        copy, visitor = await visitor_of(app, client)
+    else:
+        copy, visitor, held = await held_quote(app, client)
+        if ending == "answered":
+            await answered(client, copy.owner, held.decision_id, "deny_once")
+        else:
+            assert (await post_cancel(client, visitor, held.decision_id)).status_code == 200
+    verdict = await checked(client, visitor, "I guarantee it.", [clause(*SERVICE_AREA_CLAUSE)] if cited else [])
+    assert {v.kind for v in verdict.violations} == {"promise_word"}
+    if cited:
+        assert_kept(verdict, [SERVICE_AREA_CLAUSE])
+    else:
+        assert_offered(verdict)
+    assert await handoffs_of(app, copy) == []
+
+
+async def test_a_held_request_leaves_a_first_attempt_the_api_rewrites_unshown(app, client):
+    """A first attempt blocked only for kinds a rewrite can fix is never shown, held request or not: no blocks."""
+    from .test_approvals import held_quote
+
+    copy, visitor, _ = await held_quote(app, client)
+    verdict = await checked(client, visitor, "I guarantee it.", [clause(*SERVICE_AREA_CLAUSE)], final=False)
+    assert {v.kind for v in verdict.violations} == {"promise_word"}
+    assert verdict.blocks == []
+    assert await handoffs_of(app, copy) == []
+
+
+@pytest.mark.parametrize("session", ["checker outage", "drafted handoff"])
+async def test_a_held_request_never_replaces_a_handoff(app, client, reviewer, session):
+    """A checker outage (`check_unavailable`) hands off, and a handoff clause Claude drafted is honoured, held
+    request or not: the handoff card, with no status line."""
+    from .test_approvals import held_quote
+
+    copy, visitor, _ = await held_quote(app, client)
+    prose, clauses = BLOCKED, []
+    if session == "checker outage":
+        prose, reviewer.soft_answer = CLEAN, None                 # the soft check gives no verdict
+    else:
+        clauses = [clause("handoff")]
+    verdict = await checked(client, visitor, prose, clauses)
+    assert {v.kind for v in verdict.violations} == {"check_unavailable" if session == "checker outage"
+                                                    else "number_in_prose"}
+    assert_handed_off(verdict)
+    assert STATUS_LINE["en"] not in [block.text for block in verdict.blocks]
