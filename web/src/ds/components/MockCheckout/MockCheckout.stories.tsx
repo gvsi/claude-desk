@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
+import { CHECKOUT_COPY } from './checkoutCopy.ts';
 import { MockCheckout } from './MockCheckout.tsx';
 
 const BOARD = 'N-Checkout-Run2';
@@ -376,12 +377,17 @@ export const Paying: Story = {
  * test card go, and one line with its dot says what happened and where to go next. There is
  * nothing to press, so nothing can pay twice.
  */
-async function expectFinal(root: HTMLElement, line: string, dot: 'handled' | 'held' | 'info') {
-  const { card, title, footnote } = await expectChrome(root, 'en');
+async function expectFinal(
+  root: HTMLElement,
+  line: string,
+  dot: 'handled' | 'held' | 'info',
+  language: 'en' | 'es' = 'en',
+) {
+  const { card, title, footnote } = await expectChrome(root, language);
   // final_states_have_no_pay_button: no button of any kind, and none of the open link's parts.
   await expect(within(card).queryAllByRole('button')).toHaveLength(0);
   await expect(card.textContent).not.toContain(AMOUNT);
-  await expect(within(card).queryByText('This link works once.')).toBeNull();
+  await expect(within(card).queryByText(CHECKOUT_COPY[language].worksOnce)).toBeNull();
   await expect(within(card).queryByRole('group')).toBeNull();
   await expect(card.textContent).not.toContain('4242');
 
@@ -495,14 +501,18 @@ export const CancelledBackToTheChatSpanish: Story = {
     canvasNote: 'Cancelled for any reason but a rule change, in Spanish: appends the paid state’s “Vuelve al chat” link. Copy and design await owner sign-off.',
   },
   play: async ({ canvasElement }) => {
-    const { card } = await expectChrome(canvasElement, 'es');
-    const state = card.querySelector<HTMLElement>('.cd-checkout__state');
-    if (!state) throw new globalThis.Error('no cancelled line');
-    await expect(state.textContent).toBe('Este pago se canceló. No se cobró nada. Vuelve al chat.');
+    const { state } = await expectFinal(
+      canvasElement,
+      'Este pago se canceló. No se cobró nada. Vuelve al chat.',
+      'info',
+      'es',
+    );
     const back = within(state).getByRole('link', { name: 'Vuelve al chat' });
+    await expect(state.querySelectorAll('a')).toHaveLength(1);
     await expect(back).toHaveAttribute('href', CHAT_HREF);
     await expect(back).not.toHaveAttribute('target');
     await expect(back).toHaveClass('cd-text-link', 'cd-text-link--running-text');
+    expectComputed(back, { color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
   },
 };
 
