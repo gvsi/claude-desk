@@ -1,7 +1,8 @@
 /* KnowledgeList: the section's heading, then 8 px under it a card of rows. Each row is padded
    12 px 16 px under a hairline (none above the first): the title in body type at 520 over one meta
    line in the secondary ink, 2 px apart, and who can see it in a pill at the right, centered on
-   the row. The words wrap beside the pill; the pill keeps its line. */
+   the row. The words wrap beside the pill; the pill keeps its line. Below 640 px, tiled rows
+   move the pill under the text; untiled rows keep it at the right. */
 
 .cd-knowledge-list {
   display: flex;
