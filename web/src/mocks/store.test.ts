@@ -1814,6 +1814,52 @@ describe('taking over', () => {
   const kindsFor = (sessionId: string) =>
     (mockStore.world.desks[0]?.ledger ?? []).filter((e) => e.event.session_id === sessionId).map((e) => e.event.kind);
 
+  it('hand_back_answers_the_waiting_visitor_once', async () => {
+    const { session, events } = await openChat();
+    const params = { session_id: session.session_id };
+    expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
+    await send('Do you work in Alameda?');
+    await drain();
+    expect(typesOf(events)).toEqual(['owner_joined']);
+
+    expect((await call('handback', { params, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events)).toEqual(['owner_joined', 'owner_left', 'writing', 'message', 'turn_end']);
+    expect(events[3]?.[1]).toMatchObject({ type: 'message', author: 'claude', generation: session.generation + 2 });
+    await drain();
+    expect(typesOf(events).filter((kind) => kind === 'message')).toHaveLength(1);
+  });
+
+  it('hand_back_leaves_a_waiting_agent_line_for_its_next_request', async () => {
+    // As on the API, an agent's line waits too, but its turn runs only on the agent's own next request.
+    const world = mockStore.world;
+    const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+    const params = { session_id: agent.state.session_id };
+    expect((await call('takeover', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    world.agentText(agent, 'Can someone come on Thursday?');
+    expect((await call('handback', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    await drain();
+    expect(agent.events.map(({ ev }) => ev.type)).toEqual(['owner_joined', 'owner_left']);
+  });
+
+  it.each(['empty', 'owner_answered', 'owner', 'claude'] as const)('hand_back_starts_nothing_after_%s', async (latest) => {
+    const { session, events } = await openChat();
+    const params = { session_id: session.session_id };
+    if (latest === 'claude') {
+      await send('Do you work in Alameda?');
+      await drain();
+    }
+    expect((await call('takeover', { params, body: { generation: session.generation } })).status).toBe(200);
+    if (latest === 'owner_answered') await send('Do you work in Alameda?');
+    if (latest === 'owner_answered' || latest === 'owner') {
+      expect((await call('ownerMessage', { params, body: { kind: 'say', text: 'Yes, we do.' } })).status).toBe(200);
+    }
+    const before = events.length;
+    expect((await call('handback', { params, body: { generation: session.generation + 1 } })).status).toBe(200);
+    await drain();
+    expect(typesOf(events.slice(before))).toEqual(['owner_left']);
+  });
+
   it('takeover_fences_the_turn_in_flight', async () => {
     const { session, events } = await openChat();
     // The visitor picks a time, and Mike takes the chat over before Claude's turn has done anything.

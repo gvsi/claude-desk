@@ -69,7 +69,7 @@ from desk.api.prompts import NOTES
 from desk.api.ratelimit import RateLimited, RateLimitLedger
 from desk.api.ro import KernelRO
 from desk.api.sse import RUN_EVENTS
-from desk.api.store import MESSAGES, Ids, append_message, append_note_once, lock_key
+from desk.api.store import MESSAGES, Ids, append_message, append_note_once, lock_key, mode_for_message
 from desk.api.tools import Caller
 from desk.contracts import A2ARequest, AgentAuth, SessionState
 from desk.db.models import A2AError, A2ATurn
@@ -428,15 +428,18 @@ async def _turn(state: Runtime, conn: AsyncConnection, caller: Caller, session: 
     await state.runner.handle_controls(conn, caller)
     if body.verify_code is not None:
         await _verify(conn, caller, body.verify_code)
-    waits = session.mode == "owner"                     # the owner has the chat: the message waits for them
+    mode = session.mode
     if body.message.strip() and not (since is not None and await _stored_since(conn, caller.ids, body.message, since)):
-        n = await append_message(conn, caller.ids, "agent_text", text=body.message, wake=not waits)
+        # The mode now, not the one the request was named in: a hand-back since then has already looked for this
+        # message.
+        mode = await mode_for_message(KernelRO(conn, caller.copy_id, caller.ro_schema), caller.session_id, mode)
+        n = await append_message(conn, caller.ids, "agent_text", text=body.message, wake=mode != "owner")
         message_id = (await conn.execute(select(MESSAGES.c.message_id).where(MESSAGES.c.n == n))).scalar_one()
         await conn.commit()
-        if session.mode != "paused":                    # the owner's English copy, if it needs one (none when paused)
+        if mode != "paused":                            # the owner's English copy, if it needs one (none when paused)
             await defer_translation(state.jobs, caller.ids, message_id, limiter=state.limiter, ledger=RateLimitLedger(
                 caller.kernel, desk_id=caller.desk_id, session_id=caller.session_id))
-    if waits:
+    if mode == "owner":                                 # the owner has the chat: the message waits for them
         return 200, None
     resend = since if since is not None and not await _later_request(conn, caller.ids, since) else None
     outcome = await state.runner.run_agent_turn(caller, resend_since=resend)

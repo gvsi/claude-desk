@@ -26,8 +26,9 @@ from desk.api.main import create_app
 from desk.api.prompts import NOTES
 from desk.api.routes import public
 from desk.kernel_api import CreateCopyRequest, DeskBusinessRequest
-from tests.api.fakes import ScriptedModel, response
+from tests.api.fakes import ScriptedModel, response, tool_use
 from tests.api.notes import conversation_notes
+from tests.api.test_a2a import Agent, new_agent
 from tests.api.test_approvals import answer, held_request, resolved
 from tests.api.test_loop_fencing import Kernel
 from tests.api.test_owner_desks import new_desk
@@ -358,6 +359,254 @@ async def test_visitor_messages_during_take_over_do_not_wake_claude(app, browser
     assert [(item["kind"], item["text"]) for item in owner_items] == [("owner_joined", None),
                                                                         ("visitor_text", "Is that Mike?"),
                                                                         ("delivered", None)]
+
+
+async def test_hand_back_answers_the_waiting_visitor_once(app, browser, fake, kernel_http, model, engine):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Do you fix leaks?"})
+    assert sent.status_code == 202
+    await app.state.runtime.runner.drain()
+    assert model.requests == []
+    model.add(response(reply("Yes, we can help with leaks. What is leaking?")))
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+        events = await stream.until(lambda events: "turn_end" in types(events))
+        # Repeating the same mode at its current generation must not start another turn.
+        assert (await mode_change(chat, "handback", 2)).status_code == 200
+        await app.state.runtime.runner.drain()
+
+    assert len(model.requests) == 1
+    assert "<visitor_message>Do you fix leaks?</visitor_message>" in json.dumps(model.requests[0].messages)
+    assert types(events) == ["owner_joined", "owner_left", "writing", "message", "turn_end"]
+    assert (events[-2][1].author, events[-2][1].generation) == ("claude", 2)
+    # The waiting line is resumed work: the visitor's stream is told which generation's turn answers it.
+    assert (events[1][1].resuming, events[1][1].generation) == (True, 2)
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]
+    assert len(fake.called("POST /check_reply")) == 1
+
+
+async def test_hand_back_answers_a_waiting_line_and_a_whisper_in_one_turn(app, browser, fake, kernel_http, model,
+                                                                          engine):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                    json={"text": "Do you fix leaks?"})).status_code == 202
+    assert (await message(chat, "Offer a visit today.", "whisper")).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert model.requests == []
+    model.add(response(reply("Yes, we can help with leaks. We could come by today.")))
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+        events = await stream.until(lambda events: "turn_end" in types(events))
+        await app.state.runtime.runner.drain()
+    await app.state.runtime.runner.drain()
+
+    (request,) = model.requests
+    sent = json.dumps(request.messages)
+    assert "<visitor_message>Do you fix leaks?</visitor_message>" in sent
+    assert "<owner_whisper>Offer a visit today.</owner_whisper>" in sent
+    assert types(events) == ["owner_joined", "owner_left", "writing", "message", "turn_end"]
+    assert len(fake.called("POST /check_reply")) == 1
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]
+
+
+@pytest.mark.parametrize("latest", ["empty", "owner_answered", "owner", "claude"])
+async def test_hand_back_without_a_waiting_visitor_starts_nothing(app, browser, fake, kernel_http, model, engine,
+                                                               latest):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    if latest == "claude":
+        model.add(response(reply("Yes, we can help with leaks.")))
+        async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+            assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                            json={"text": "Do you fix leaks?"})).status_code == 202
+            await stream.until(lambda events: "turn_end" in types(events))
+        await app.state.runtime.runner.drain()
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    if latest == "owner_answered":
+        assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                        json={"text": "Do you fix leaks?"})).status_code == 202
+        await app.state.runtime.runner.drain()
+    if latest in ("owner", "owner_answered"):
+        assert (await message(chat, "Yes, it's Mike. I can help with that.")).status_code == 200
+    calls_before = len(model.requests)
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+        left = await stream.until(lambda events: "owner_left" in types(events))
+        await app.state.runtime.runner.drain()
+
+    assert len(model.requests) == calls_before
+    assert await control_types(engine, chat.session_id) == []
+    # Nothing waits, so the visitor's stream isn't told to wait for a resumed turn.
+    owner_left = next(event for _, event in left if event.type == "owner_left")
+    assert (owner_left.resuming, owner_left.generation) == (False, None)
+    assert await conversation_notes(engine, chat.session_id, "text", "wake") == [
+        (NOTES["taken_over"], False), (NOTES["handed_back"], False)]
+
+
+async def test_hand_back_turn_still_decides_executes_and_checks_with_the_visitor_credential(
+        app, browser, fake, kernel_http, model, engine):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                    json={"text": "How much is drain clearing?"})).status_code == 202
+    await app.state.runtime.runner.drain()
+    model.add(response(tool_use("native__quote", {"items": [{"item_id": "drain", "qty": 1}],
+                                                "requested_discount_bp": 0})),
+              response(reply("I have checked the price list.")))
+    fake.calls.clear()
+
+    # With no open stream, the hand-back leaves work for the next visitor request; it never borrows the owner cookie.
+    assert (await mode_change(chat, "handback", 1)).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert model.requests == []
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        events = await stream.until(lambda events: "turn_end" in types(events))
+    await app.state.runtime.runner.drain()
+
+    assert len(model.requests) == 2 and types(events).count("turn_end") == 1
+    turn = fake.calls[fake.calls.index(fake.called("POST /sessions/{id}/mode")[0]) + 1:]
+    assert [call.route for call in turn if call.route in ("POST /decide", "POST /execute", "POST /check_reply")] == [
+        "POST /decide", "POST /execute", "POST /check_reply"]
+    assert all(call.headers.get(VISITOR) == chat.token and OWNER not in call.headers for call in turn)
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]
+
+
+async def test_a_line_sent_as_the_owner_hands_back_is_answered_once(app, browser, fake, kernel_http, model, engine,
+                                                                    kernel):
+    """The kernel names the visitor's session in the owner's mode, and the owner hands back before the line is stored:
+    the hand-back finds no line waiting, so the line, stored after it, wakes Claude itself, who answers it once."""
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    model.add(response(reply("Yes, we can help with leaks. What is leaking?")))
+    landed: list[bool] = []
+
+    async def hand_back(request: httpx.Request) -> None:
+        if landed or request.headers.get(VISITOR) != chat.token:
+            return
+        landed.append(True)
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+
+    kernel.after["/whoami"] = hand_back
+    sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Do you fix leaks?"})
+    del kernel.after["/whoami"]
+    await app.state.runtime.runner.drain()
+    assert landed and sent.status_code == 202, sent.text
+    assert len(model.requests) == 1
+    assert "<visitor_message>Do you fix leaks?</visitor_message>" in json.dumps(model.requests[0].messages)
+
+    # The next stream open sends nothing more.
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        await stream.until(lambda events: "turn_end" in types(events))
+    await app.state.runtime.runner.drain()
+
+    assert len(model.requests) == 1
+    assert len(fake.called("POST /check_reply")) == 1
+    assert [event.type for event in await stored_events(engine, chat.session_id)] == [
+        "owner_joined", "owner_left", "writing", "message", "turn_end"]
+    assert await rows(engine, chat.session_id, "visitor_text", "wake") == [(True,)]
+    assert await conversation_notes(engine, chat.session_id, "text", "wake") == [
+        (NOTES["taken_over"], False), (NOTES["handed_back"], False)]
+
+
+def owner_browser(app, browser, owner_token: str) -> httpx.AsyncClient:
+    owner = browser(app, ip=OWNER_IP)
+    owner.cookies.set("desk_owner", owner_token, domain="desk.test", path="/api/owner")
+    return owner
+
+
+async def agent_mode_change(owner: httpx.AsyncClient, agent: Agent, action: str) -> httpx.Response:
+    generation = agent.fake.sessions[agent.session_id].generation
+    return await owner.post(f"/api/owner/conversations/{agent.session_id}/{action}", json={"generation": generation})
+
+
+async def test_an_agents_line_sent_as_the_owner_hands_back_gets_claudes_answer(app, browser, fake, kernel_http, model,
+                                                                              engine, kernel):
+    """The same for a visiting agent: the kernel names its session in the owner's mode, and the owner hands back
+    before its line is stored, so its request runs Claude's turn and gets the checked reply, not the owner's wait."""
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(reply("Happy to help.")))
+    assert (await agent.send("Hello")).status_code == 200
+    owner = owner_browser(app, browser, agent.owner_token)
+    assert (await agent_mode_change(owner, agent, "takeover")).status_code == 200
+    model.add(response(reply("Yes, we can help with leaks.")))
+    landed: list[bool] = []
+
+    async def hand_back(request: httpx.Request) -> None:
+        if landed or "x-agent-key-id" not in request.headers:
+            return
+        landed.append(True)
+        assert (await agent_mode_change(owner, agent, "handback")).status_code == 200
+
+    kernel.after["/whoami"] = hand_back
+    fake.calls.clear()
+    answered = await agent.send("Do you fix leaks?")
+    del kernel.after["/whoami"]
+    await app.state.runtime.runner.drain()
+
+    assert landed and answered.status_code == 200, answered.text
+    assert [block["text"] for block in answered.json()["blocks"]] == ["Yes, we can help with leaks."]
+    assert len(model.requests) == 2 and len(fake.called("POST /check_reply")) == 1
+    assert await rows(engine, agent.session_id, "agent_text", "text", "wake") == [
+        ("Hello", True), ("Do you fix leaks?", True)]
+
+
+async def test_hand_back_answers_a_waiting_agent_at_its_next_request(app, browser, fake, kernel_http, model, engine):
+    """A visiting agent's line during a take-over waits for the owner, as a visitor's does; handed back with it
+    unanswered, Claude answers it once, at the agent's next request (an agent's turn runs only on its own request)."""
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(reply("Happy to help.")))
+    assert (await agent.send("Hello")).status_code == 200
+    owner = owner_browser(app, browser, agent.owner_token)
+    assert (await agent_mode_change(owner, agent, "takeover")).status_code == 200
+    waited = await agent.send("Do you fix leaks?")
+    assert waited.status_code == 200 and waited.json()["blocks"] == []
+    assert (await agent_mode_change(owner, agent, "handback")).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert len(model.requests) == 1
+    assert await control_types(engine, agent.session_id) == ["run_resumable"]
+    assert await conversation_notes(engine, agent.session_id, "text", "wake") == [
+        (NOTES["taken_over"], False), (NOTES["handed_back"], True)]
+
+    model.add(response(reply("Yes, we can help with leaks.")))
+    answered = await agent.send("")
+    await app.state.runtime.runner.drain()
+
+    assert answered.status_code == 200, answered.text
+    assert [block["text"] for block in answered.json()["blocks"]] == ["Yes, we can help with leaks."]
+    assert len(model.requests) == 2
+    assert "<agent_message>Do you fix leaks?</agent_message>" in json.dumps(model.requests[1].messages)
+
+
+async def test_a_take_over_drops_the_wake_of_a_hand_back_no_turn_has_read(app, browser, fake, kernel_http, model,
+                                                                          engine):
+    """The owner hands back with no stream open, so the waiting line's turn waits for the visitor's next request, then
+    takes the chat over again and answers the line: the next hand-back finds nothing waiting, and Claude never
+    answers it a second time under the owner's answer."""
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                    json={"text": "Do you fix leaks?"})).status_code == 202
+    await app.state.runtime.runner.drain()
+    assert (await mode_change(chat, "handback", 1)).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert (await mode_change(chat, "takeover", 2)).status_code == 200
+    assert (await message(chat, "Yes, we fix leaks. I can come by today.")).status_code == 200
+    assert (await mode_change(chat, "handback", 3)).status_code == 200
+    await app.state.runtime.runner.drain()
+
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]      # the first hand-back's alone
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        await stream.until(lambda events: types(events).count("owner_left") == 2)
+        await app.state.runtime.runner.drain()
+    await app.state.runtime.runner.drain()
+
+    assert model.requests == []
+    assert await conversation_notes(engine, chat.session_id, "text", "wake") == [
+        (NOTES["taken_over"], False), (NOTES["handed_back"], False)] * 2
 
 
 async def test_hand_back_resumes_claude_with_the_visitor_credential(app, browser, fake, kernel_http, model, engine):

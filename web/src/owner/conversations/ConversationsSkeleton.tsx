@@ -309,15 +309,17 @@ const ROWS = [
 const GROUPS = 6;
 
 /**
- * Everything under the list's title as shapes: the recorded-history caption a fresh copy shows,
+ * Everything under the list's title as shapes: the recorded-history caption on the starting Desk,
  * then a day heading every three rows on down the column, each row a `ConversationListItem` shape.
  */
-function ListShapes() {
+function ListShapes({ recordedHistory }: { recordedHistory: boolean }) {
   return (
     <div className="cd-conversations__under cd-conversations-skeleton__list">
-      <div className="cd-conversations__caption cd-conversations-skeleton__caption" data-skeleton-anchor="conversations-caption">
-        <Skeleton shape="line" text="caption" width={137} />
-      </div>
+      {recordedHistory ? (
+        <div className="cd-conversations__caption cd-conversations-skeleton__caption" data-skeleton-anchor="conversations-caption">
+          <Skeleton shape="line" text="caption" width={137} />
+        </div>
+      ) : null}
       {Array.from({ length: GROUPS }, (_, group) => (
         <div key={group} className="cd-conversations__group">
           <div className="cd-conversations__day cd-type-caption" data-skeleton-anchor={group === 0 ? 'conversations-day-0' : undefined}>
@@ -356,8 +358,8 @@ function ListShapes() {
  * title too, and with `open` a conversation's pane beside the list (its way back above it under
  * 1024 px), and the real concept footer where the page puts it.
  */
-export function ConversationsSkeleton({ withHeader, open }: { withHeader: boolean; open: boolean }) {
-  if (!withHeader) return <ListShapes />;
+export function ConversationsSkeleton({ withHeader, open, recordedHistory = true }: { withHeader: boolean; open: boolean; recordedHistory?: boolean }) {
+  if (!withHeader) return <ListShapes recordedHistory={recordedHistory} />;
   return (
     <div className={`cd-conversations${open ? ' cd-conversations--open' : ''}`}>
       <div className="cd-conversations__list">
@@ -365,7 +367,7 @@ export function ConversationsSkeleton({ withHeader, open }: { withHeader: boolea
           <Skeleton shape="line" text="page-title" width={170} />
         </div>
         <div className="cd-conversations__region">
-          <ListShapes />
+          <ListShapes recordedHistory={recordedHistory} />
         </div>
       </div>
       <div className="cd-conversations__open">
