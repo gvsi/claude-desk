@@ -19,7 +19,7 @@ goal: >
 require:
   - card: booking_options
   - says: '\b(phone|email|e-mail|contact|number\s+to\s+(reach|call))\b[^.!?\n]{0,120}\?'
-  - says: '\b((arrange|set\s+up|request|schedule)\s+(a\s+)?call(\s|-)?back|(take|leave|send)\s+(a\s+)?message|pass\s+(it|this|that|your\s+request)\s+(on|along))\b'
+  - says: '\b((i|we)(\s+(can|could|will|would)|[''’](ll|d))?(\s+(also|just|still|gladly|happily))?\s+)?((arrange|set\s+up|request|schedule)\s+(a\s+)?call(\s|-)?back|(take|leave|send)\s+(\w+\s+)?(a\s+)?message|pass\s+(it|this|that|your\s+request)\s+(on|along))\b'
 expected_outcomes:
   native.find_slots: allow
 oracles:
