@@ -28,19 +28,36 @@ export interface NamedRule {
 }
 
 /**
- * How specific a card is, as the API ranks the cards behind a hold (`holding_card`): a rule for one
- * person or agent above one for a group, then a tool's own rule above a rule on its effect.
+ * How specific a card is, as the kernel ranks the cards behind a hold (`specificity` in
+ * `backend/desk/always_on.py`, which `rulesForTool` follows): a rule for one person or agent above
+ * one for a group, then a tool's own rule above a rule on its effect; a default card below every
+ * other.
  */
 function rank(card: RuleCard): number {
+  if (card.is_default === true) return -1;
   return (card.who === 'person' || card.who === 'agent' ? 2 : 0) + (card.applies_to.startsWith('effect:') ? 0 : 1);
 }
 
+/** `cards` by ID. */
+const byId = (cards: readonly RuleCard[]): RuleCard[] => [...cards].sort((a, b) => (a.card_id < b.card_id ? -1 : a.card_id > b.card_id ? 1 : 0));
+
 /** The most specific of `cards`, the first by ID among equals; null for none. */
 function mostSpecific(cards: readonly RuleCard[]): RuleCard | null {
-  return cards.reduce<RuleCard | null>((best, card) => {
-    if (best === null || rank(card) > rank(best)) return card;
-    return rank(card) === rank(best) && card.card_id < best.card_id ? card : best;
-  }, null);
+  const top = Math.max(...cards.map(rank));
+  return byId(cards.filter((card) => rank(card) === top))[0] ?? null;
+}
+
+/**
+ * The cards that decided a hold, among the cards behind it, as the kernel's `hold_decider` reads
+ * them: the most specific, and of those the ask cards when there are any (an ask card wins a tie
+ * with an automatic rule's hold); by ID.
+ */
+function decidingCards(behind: readonly RuleCard[]): RuleCard[] {
+  if (behind.length === 0) return [];
+  const top = Math.max(...behind.map(rank));
+  const tied = behind.filter((card) => rank(card) === top);
+  const asks = tied.filter((card) => card.mode === 'ask');
+  return byId(asks.length > 0 ? asks : tied);
 }
 
 /** Whether `card` is a rule on the action's tool, or on one of its effects. */
@@ -49,35 +66,58 @@ function onTheTool(card: RuleCard, action: NonNullable<Decision['action']>): boo
   return card.applies_to.startsWith('effect:') && (action.effects as readonly string[]).includes(card.applies_to.slice('effect:'.length));
 }
 
+/** An owner's ask card, in its own sentence. */
+function askRule(card: RuleCard, words: SentenceWords): NamedRule {
+  return { parts: ruleSentence(card, words), meta: ruleMeta(card, words), outcome: 'ask' };
+}
+
 /**
- * The rule that held a request, among the active version's `cards`, as B5 names it:
- * - the owner's Ask me first card whose reason is the item's `held_by`, in its own sentence;
- * - past an automatic rule's limit (`held_by` null), the automatic card behind the hold whose limit
- *   the request passed: a discount past a quote rule's "Claude asks you before **any discount**",
- *   an amount past a limit its hold line ("Claude asks you before payment links over **$300**"),
- *   each for that card's own people (`holdRows`);
- * - otherwise none, such as a hold only the default ask decided, or one whose rule has changed.
+ * What an automatic card that decided a hold says the request went past, as its hold line: a
+ * discount past a quote rule's "Claude asks you before **any discount**", an amount past a limit
+ * "Claude asks you before payment links over **$300**", each for the card's own people
+ * (`holdRows`); null for anything else it held for (its hours, the reviewer), which no line words.
+ */
+function pastTheLimit(card: RuleCard, action: NonNullable<Decision['action']>, words: SentenceWords): NamedRule | null {
+  const discount = action.discount_bp ?? 0;
+  const discountParts = card.applies_to === 'native.quote' && discount > (card.max_discount_bp ?? 0) ? discountHoldSentence(card) : null;
+  if (discountParts !== null) return { parts: discountParts, meta: ruleMeta(card, words), outcome: 'ask' };
+  const amount = action.amount_cents;
+  const [row] = amount != null && card.max_amount_cents != null && amount > card.max_amount_cents ? holdRows([card], words) : [];
+  return row === undefined ? null : { ...row, outcome: 'ask' };
+}
+
+/**
+ * The rule that held a request, among the active version's `cards`, as B5 names it. First the card
+ * that decided the hold, as the kernel picks it (`decidingCards`) among the active cards behind it
+ * (the decision's `card_ids`, on the request's tool); then its sentence:
+ * - the owner's Ask me first card whose reason is the item's `held_by`, in its own sentence. When the
+ *   active rules no longer hold the hold's cards (a newer version), the most specific ask card of
+ *   that reason on the request's tool;
+ * - past an automatic rule's limit (`held_by` null), that rule's hold line (`pastTheLimit`);
+ * - otherwise none: a hold only the default ask decided, one an automatic rule held for its hours,
+ *   or one whose rule has changed. A less specific card never stands in for the one that decided.
  */
 export function heldRule(item: Pick<NeedsYouItem, 'held_by'> & { decision: Decision }, cards: readonly RuleCard[], words: SentenceWords): NamedRule | null {
   const { decision } = item;
-  const owners = cards.filter((card) => card.is_default !== true);
-  if (item.held_by !== null) {
-    const asks = owners.filter((card) => card.mode === 'ask' && card.reason === item.held_by);
-    const card = asks.find((ask) => decision.card_ids.includes(ask.card_id)) ?? mostSpecific(asks);
-    return card === null || card === undefined ? null : { parts: ruleSentence(card, words), meta: ruleMeta(card, words), outcome: 'ask' };
-  }
   const action = decision.action;
+  const behind = cards.filter((card) => decision.card_ids.includes(card.card_id) && (action === null || onTheTool(card, action)));
+  const deciding = decidingCards(behind);
+  if (item.held_by !== null) {
+    const asks = (pool: readonly RuleCard[]) => pool.filter((card) => card.mode === 'ask' && card.is_default !== true && card.reason === item.held_by);
+    if (behind.length > 0) {
+      const [card] = asks(deciding);
+      return card === undefined ? null : askRule(card, words);
+    }
+    const card = action === null ? null : mostSpecific(asks(cards).filter((ask) => onTheTool(ask, action)));
+    return card === null ? null : askRule(card, words);
+  }
   if (action === null) return null;
-  // Only an automatic card the hold names, whose limit the request still passes.
-  const behind = owners.filter((card) => card.mode === 'auto' && decision.card_ids.includes(card.card_id) && onTheTool(card, action));
-  const discount = action.discount_bp ?? 0;
-  const discounted = mostSpecific(behind.filter((card) => card.applies_to === 'native.quote' && discount > (card.max_discount_bp ?? 0)));
-  const discountParts = discounted === null ? null : discountHoldSentence(discounted);
-  if (discounted !== null && discountParts !== null) return { parts: discountParts, meta: ruleMeta(discounted, words), outcome: 'ask' };
-  const amount = action.amount_cents;
-  const limited = amount == null ? null : mostSpecific(behind.filter((card) => card.max_amount_cents != null && amount > card.max_amount_cents));
-  const [row] = limited === null ? [] : holdRows([limited], words);
-  return row === undefined ? null : { ...row, outcome: 'ask' };
+  for (const card of deciding) {
+    if (card.mode !== 'auto' || card.is_default === true) continue;
+    const rule = pastTheLimit(card, action, words);
+    if (rule !== null) return rule;
+  }
+  return null;
 }
 
 /**

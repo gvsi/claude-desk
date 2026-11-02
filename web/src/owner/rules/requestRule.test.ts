@@ -99,6 +99,65 @@ describe('heldRule', () => {
   });
 });
 
+describe('heldRule picks the card that decided the hold first', () => {
+  // As the kernel's `hold_decider` and the API's `holding_card` pick it: the most specific card
+  // behind the hold (a person's or an agent's, then a tool's own, then a shared one), an ask card
+  // winning a tie. Only then is its sentence built, so a less specific card never stands in for it.
+  const dana = rivera.people.dana;
+  const people: PeopleOut = { people: [{ person_id: dana.personId, display_name: dana.name, masked_contact: dana.maskedContact }], leads: [] };
+  const weekdays = { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' } satisfies RuleCard['hours'];
+
+  it('a_persons_hours_rule_decides_over_a_general_limit', () => {
+    // A $450 weekend request from Dana: her own weekday rule up to $500 held it for its hours, which
+    // the box doesn't word; the general $300 limit stands behind the hold too, but didn't decide it.
+    const danas = card({ card_id: 'rv-dana-link', applies_to: 'native.payment_link', mode: 'auto', who: 'person', person_id: dana.personId, max_amount_cents: 50_000, hours: weekdays });
+    const withDana = [...active, danas];
+    expect(heldRule({ decision: heldLink(45_000, ['rv-dana-link', 'rv-link']), held_by: null }, withDana, { ...words, cards: withDana, people })).toBeNull();
+  });
+
+  it('the_most_specific_ask_card_of_that_reason', () => {
+    // Two ask cards with the same words: one on every payment for anyone, one on payment links for
+    // Dana. Dana's is more specific, so it decided, whichever comes first.
+    const shared = card({ card_id: 'a-charges', applies_to: 'effect:charge', mode: 'ask', who: 'anyone', reason: 'Payments wait for you.' });
+    const danas = card({ card_id: 'b-dana-link', applies_to: 'native.payment_link', mode: 'ask', who: 'person', person_id: dana.personId, reason: 'Payments wait for you.' });
+    const both = [...active, shared, danas];
+    const held = { decision: heldLink(45_000, ['a-charges', 'b-dana-link']), held_by: 'Payments wait for you.' };
+    expect(shown(heldRule(held, both, { ...words, cards: both, people }))).toBe(`Claude asks you before **any payment link** / Payment link · ${dana.name} / ask`);
+  });
+
+  it('a_persons_automatic_limit_decides_over_a_shared_ask_card', () => {
+    // Dana's own $500 limit outranks the shared ask card on every payment, so past it, her limit's
+    // hold line names the rule (and Needs you names no ask card's reason).
+    const shared = card({ card_id: 'a-charges', applies_to: 'effect:charge', mode: 'ask', who: 'anyone', reason: 'Payments wait for you.' });
+    const danas = card({ card_id: 'rv-dana-link', applies_to: 'native.payment_link', mode: 'auto', who: 'person', person_id: dana.personId, max_amount_cents: 50_000 });
+    const both = [...active, shared, danas];
+    expect(shown(heldRule({ decision: heldLink(60_000, ['a-charges', 'rv-dana-link']), held_by: null }, both, { ...words, cards: both, people }))).toBe(
+      `Claude asks you before payment links over **$500** / Payment link · ${dana.name} / ask`,
+    );
+  });
+
+  it('an_ask_card_wins_a_tie_with_an_automatic_rules_hold', () => {
+    const asks = card({ card_id: 'z-link-ask', applies_to: 'native.payment_link', mode: 'ask', who: 'anyone', reason: 'Big links wait for you.' });
+    const withAsk = [...active, asks];
+    const held = { decision: heldLink(45_000, ['rv-link', 'z-link-ask']), held_by: 'Big links wait for you.' };
+    expect(shown(heldRule(held, withAsk, { ...words, cards: withAsk }))).toBe('Claude asks you before **any payment link** / Payment link · Anyone / ask');
+  });
+
+  it('an_ask_card_of_that_reason_only_on_the_requests_tool', () => {
+    // The hold's own cards are gone from the active rules: an ask card with the same words on
+    // another tool is not the rule that held it.
+    const elsewhere = card({ card_id: 'q-ask', applies_to: 'native.quote', mode: 'ask', who: 'anyone', reason: 'Payments wait for you.' });
+    const withIt = [...active, elsewhere];
+    expect(heldRule({ decision: heldLink(45_000, ['gone']), held_by: 'Payments wait for you.' }, withIt, { ...words, cards: withIt })).toBeNull();
+    // On the request's tool, it is.
+    const onIt = card({ card_id: 'l-ask', applies_to: 'native.payment_link', mode: 'ask', who: 'anyone', reason: 'Payments wait for you.' });
+    const withBoth = [...withIt, onIt];
+    expect(read(heldRule({ decision: heldLink(45_000, ['gone']), held_by: 'Payments wait for you.' }, withBoth, { ...words, cards: withBoth })?.parts ?? [])).toBe(
+      'Claude asks you before **any payment link**',
+    );
+  });
+});
+
 /** A turned-down request with `fields`. */
 function refused(fields: Partial<Attempt>): Attempt {
   return {
