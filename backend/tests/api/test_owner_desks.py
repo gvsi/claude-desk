@@ -338,7 +338,7 @@ async def test_reports_count_bookings_payments_and_who_handled(api, browser, fak
         await write(engine, db, owner, who.session_id, "visitor_text", at, "Hi, can you come this week?")
         if book:
             slot = max(slot.slot_id for slot in rivera.slots.values() if slot.slot_id not in rivera.booked)
-            await who.run("native.book", {"slot_id": slot})
+            await who.run("native.book", {"slot_id": slot, "name": "Jane Doe", "contact": "jane@example.com"})
         if pay:
             token, _ = await issue_payment_link(who.kernel, who.session_id, "deposit", next(_CALL_IDS))
             assert (await checkout(kernel_http, "POST /payment_links/{token}/complete", token)).state == "paid"
