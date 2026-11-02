@@ -131,6 +131,25 @@ export const SetupPhone: Story = {
   },
 };
 
+export const Unknown: Story = {
+  args: { current: null },
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'none', canvasNote: 'While the step is read, none is marked and the phone line keeps its place without naming a step.' },
+  play: async ({ canvasElement }) => {
+    await expectPhoneSteps(canvasElement, 'Connect Google Calendar');
+    await expect(canvasElement.querySelector('[aria-current]')).toBeNull();
+    // toBeVisible does not account for clipping: every list name is inside this fully clipped box.
+    expectComputed(within(canvasElement).getByRole('list', { name: 'Connect Google Calendar' }), {
+      height: '1px', overflow: 'hidden', clipPath: 'inset(50%)',
+    });
+    const line = compactLine(canvasElement);
+    await expect(line).toBeVisible();
+    await expect(line).toHaveAttribute('aria-hidden', 'true');
+    await expect(line.textContent?.trim()).toBe('');
+    await expect(line.getBoundingClientRect().height).toBe(18);
+  },
+};
+
 export const LaptopHasNoLine: Story = {
   args: { label: 'Set up your Desk', steps: ['Questions', 'Tools', 'Rules', 'Safety check', 'Live'], current: 2 },
   parameters: { canvas: 'none', canvasNote: PHONE_NOTE },

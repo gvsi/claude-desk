@@ -341,7 +341,7 @@ function Body() {
                                 ? 'Signed agents · Up to $20'
                                 : tool.summary
                           }
-                          className="cd-connector-section__tool-summary cd-type-meta"
+                          className="cd-connector-section__tool-summary cd-rules-skeleton__summary cd-type-meta"
                           text="meta"
                         />
                         <Outcome words={outcomePhrase(tool.mode, 'limit' in tool ? tool.limit : undefined)} />

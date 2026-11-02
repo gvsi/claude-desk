@@ -4,7 +4,7 @@
  * the list and an open conversation each have the page to themselves, and the conversation offers
  * a way back to the list. The list is polled.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router';
 
@@ -16,9 +16,10 @@ import { conversationDay, formatListTime, type ConversationDay } from '../../lib
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks, returnThroughHistory } from '../inAppLinks.ts';
+import { isStartingSampleDesk } from '../knowledge/sampleDesk.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
-import { firstName, useNeedsYou } from '../useDesks.ts';
+import { firstName, useDesks, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { agentLine } from './copy.ts';
@@ -66,6 +67,9 @@ export function ConversationsPage() {
   const { sessionId } = useParams();
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
+  const queryClient = useQueryClient();
+  const desks = useDesks(deskId, { passive: true });
+  const recordedHistory = desks.data === undefined || isStartingSampleDesk(queryClient, desks.data, deskId);
   const navigate = useNavigate();
   const location = useLocation();
   const navigationType = useNavigationType();
@@ -154,7 +158,7 @@ export function ConversationsPage() {
         <SkeletonScreen
           loading={!listRead}
           status="Reading your conversations"
-          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} />}
+          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} recordedHistory={recordedHistory} />}
           className="cd-conversations__region"
         >
           <div className="cd-conversations__under">
