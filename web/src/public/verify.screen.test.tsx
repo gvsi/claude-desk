@@ -610,7 +610,7 @@ describe('Demo inbox', () => {
     await aPollPasses();
     expect(closedReads()).toBe(0);
 
-    // Its page: the alert, its kind, and no word of who it went to, the owner's own.
+    // Its page: the alert, headed by its title, and no word of who it went to, the owner's own.
     await row.click();
     await expect.element(heading).toBeVisible();
     const page = screen.getByRole('main');

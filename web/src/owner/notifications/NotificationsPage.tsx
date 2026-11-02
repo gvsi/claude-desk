@@ -241,8 +241,9 @@ function headingOf(entry: DemoInboxEntry): string {
 }
 
 /**
- * One notification: a dot while it was unread as the page opened, what kind it is (with who it went
- * to, unless the owner), its body word for word, and the time at the right. An alert whose request
+ * One notification: a dot while it was unread as the page opened, its heading (an owner's alert's
+ * title, else its kind, with who it went to unless the owner), its body word for word, and the time
+ * at the right. An alert whose request
  * still waits is a link as a whole, "Open the request" under its body.
  */
 function NotificationRow({ entry, time, unread, requestHref }: Row) {
