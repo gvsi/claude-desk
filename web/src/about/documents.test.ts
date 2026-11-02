@@ -254,7 +254,7 @@ describe('the About documents', () => {
     const prediction = documentText(ABOUT_DOCUMENTS.prediction.blocks);
     expect(prediction).toContain('Why it’s coming');
     expect(prediction.join('\n')).toContain('“the gap between ‘capable’ and ‘completely robust’ remains wide”');
-    expect(prediction.join('\n')).toContain('such as a visitor saying “I’m the owner”.');
+    expect(prediction.join('\n')).toContain('such as a visitor saying “I’m the owner”, though');
     // After a link, the quote mark closes the link's last word.
     expect(documentText(ABOUT_DOCUMENTS.proposal.blocks).join('\n')).toContain('’s $20 monthly');
   });
