@@ -243,6 +243,16 @@ function hoursRuns(hours: NonNullable<RuleCard['hours']>): SentencePart[] {
   return lowered.startsWith('every day') ? [{ text: ' ' }, key(when)] : [{ text: ' on ' }, key(when)];
 }
 
+/**
+ * Whether a target is a tool this version can word: the catalog's or an effect group's, a named
+ * business tool, or any tool the Desk lists (`words.tools`), whatever its namespace, which reads in
+ * the app's words when it has no title ("use a connected tool").
+ */
+function knownTarget(target: string, words: SentenceWords): boolean {
+  if (Object.hasOwn(TOOL_PHRASES, target) || toolDisplayName(target, words.business) !== null) return true;
+  return (words.tools ?? []).some((row) => row.tool === target);
+}
+
 /** Whether any of the row's cards is for people who confirmed it's them. */
 const forVerified = (cards: readonly RuleCard[]) => cards.some((card) => card.who === 'verified' || card.who === 'record_owner');
 
@@ -255,11 +265,15 @@ const forVerified = (cards: readonly RuleCard[]) => cards.some((card) => card.wh
  * - then its conditions, each value set off: " up to **$300**"; on an automatic quote ", at **list
  *   price**" or " with up to **10%** off"; " on **weekdays, 8:00 am to 6:00 pm**"; and on an
  *   automatic rule for verified people or the record's owner, ", once they've confirmed it's them".
+ * A target that is neither the catalog's nor a tool on the Desk (`knownTarget`) reads "A rule for a
+ * tool this version can't name", whatever its mode.
  */
 export function ruleSentence(card: RuleCard | readonly RuleCard[], words: SentenceWords): SentencePart[] {
   const cards = asCards(card);
   const [first] = cards;
   const targets = targetsOf(cards);
+  // A future target, or a tool the Desk doesn't list, describes a stored rule, never a present capability.
+  if (!targets.every((target) => knownTarget(target, words))) return [{ text: "A rule for a tool this version can't name" }];
   const phrase = rowPhrase(targets, words.business);
   const parts: SentencePart[] = [];
   if (first.mode === 'auto') parts.push({ text: 'Claude can ' }, ...runs(phrase.can));

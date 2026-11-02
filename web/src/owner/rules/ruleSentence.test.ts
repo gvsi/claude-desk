@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut, ToolRow } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
-import { NO_BUSINESS_TOOLS } from '../connectors/catalog.ts';
+import { NO_BUSINESS_TOOLS, businessTools } from '../connectors/catalog.ts';
 import {
   ALWAYS_ON_SENTENCES,
   canJoin,
@@ -187,9 +187,35 @@ describe('any tool', () => {
     for (const applies_to of ['native.teleport', 'desk.not-listed', 'mcp.secret_tool']) {
       const unknown = card({ card_id: 'u', applies_to, mode: 'auto', who: 'anyone' });
       const sentence = read(ruleSentence(unknown, words));
-      expect(sentence).toBe('Claude can use a connected tool');
+      expect(sentence).toBe("A rule for a tool this version can't name");
+      expect(sentence).not.toContain('Claude can');
       expect(sentence).not.toContain(applies_to);
       expect(line(ruleMeta(unknown, words))).toBe('A connected tool · Anyone');
+    }
+  });
+
+  it('any_tool_listed_on_the_desk_keeps_its_outcome_but_an_unlisted_target_does_not', () => {
+    // The Desk lists these tools, so a rule on one still reads as what Claude does, in the app's words for it,
+    // whatever its namespace: a business tool without a title, a tool from a newer catalog, a connector's own.
+    const rows = [
+      { tool: 'desk.untitled', source: 'business', business: null, effects: [] },
+      { tool: 'native.teleport', source: 'native', business: null, effects: [] },
+      { tool: 'mcp.secret_tool', source: 'mcp', business: null, effects: [] },
+    ] as unknown as Pick<ToolRow, 'tool' | 'source' | 'business' | 'effects'>[];
+    const onDesk = { business: businessTools(rows), tools: rows };
+    for (const applies_to of ['desk.untitled', 'native.teleport', 'mcp.secret_tool']) {
+      const listed = card({ card_id: 'l', applies_to, mode: 'auto', who: 'anyone' });
+      expect(read(ruleSentence(listed, onDesk)), applies_to).toBe('Claude can use a connected tool');
+      expect(read(ruleSentence({ ...listed, mode: 'ask' }, onDesk)), applies_to).toBe('Claude asks you before using a connected tool');
+      expect(read(ruleSentence({ ...listed, mode: 'never' }, onDesk)), applies_to).toBe('Claude never uses a connected tool');
+      expect(line(ruleMeta(listed, onDesk)), applies_to).toBe('A connected tool · Anyone');
+    }
+    // A target the Desk doesn't list describes a stored rule, never a present capability, in every mode.
+    for (const applies_to of ['desk.not-listed', 'native.not-listed', 'effect:teleport']) {
+      for (const mode of ['auto', 'ask', 'never'] as const) {
+        const unknown = card({ card_id: 'x', applies_to, mode, who: 'anyone' });
+        expect(read(ruleSentence(unknown, onDesk)), `${applies_to} ${mode}`).toBe("A rule for a tool this version can't name");
+      }
     }
   });
 
