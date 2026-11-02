@@ -1,5 +1,6 @@
-/* SegmentedControl: options on a faint track, the chosen one on the selected fill. Colors change
-   at motion-instant; nothing moves under reduced motion. */
+/* SegmentedControl: options on a faint track, the chosen one on the selected fill with the field
+   outline as its edge, so it shows by more than its ink. Colors change at motion-instant; nothing
+   moves under reduced motion. */
 
 .cd-segmented {
   display: inline-flex;
@@ -16,8 +17,11 @@
   box-sizing: border-box;
   height: var(--space-28);
   margin: 0;
-  padding: 0 var(--space-12);
-  border: 0;
+  /* Every segment has a 1 px edge, clear unless chosen, so choosing moves nothing; the padding
+     gives that pixel back, so a segment is as wide as the canvas draws it. */
+  --cd-edge: 1px;
+  padding: 0 calc(var(--space-12) - var(--cd-edge));
+  border: var(--cd-edge) solid transparent;
   /* The track's radius less its inset, so the thumb's corners run parallel to the track's. */
   border-radius: calc(var(--radius-control) - var(--space-2));
   background: transparent;
@@ -41,6 +45,7 @@
 
 .cd-segmented__option[aria-checked='true'],
 .cd-segmented__option[aria-checked='true']:hover {
+  border-color: var(--line-field);
   background: var(--bg-selected);
   color: var(--text-primary);
 }
@@ -57,11 +62,13 @@
     --cd-touch-reach-inline: calc(var(--space-2) / 2);
   }
 
+  /* Insets are measured from inside the segment's edge, so each one also crosses that edge, and
+     100% is the segment less its two edges. */
   .cd-segmented__option::after {
     content: '';
     position: absolute;
-    inset-block: max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
-    inset-inline: max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% - var(--size-touch)) / 2));
+    inset-block: calc(max(-1 * var(--cd-touch-reach-block, var(--size-touch)), min(0px, (100% + 2 * var(--cd-edge) - var(--size-touch)) / 2)) - var(--cd-edge));
+    inset-inline: calc(max(-1 * var(--cd-touch-reach-inline, var(--size-touch)), min(0px, (100% + 2 * var(--cd-edge) - var(--size-touch)) / 2)) - var(--cd-edge));
   }
 }
 
