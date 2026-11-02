@@ -12,13 +12,27 @@ import { ACTING_SWITCH_COPY } from '../Switch/copy.ts';
 import './Sidebar.css';
 
 /** The owner app's pages, in the sidebar's fixed order. */
-export type NavKey = 'today' | 'conversations' | 'people' | 'knowledge' | 'rules' | 'connectors' | 'safety' | 'profile' | 'share' | 'settings';
+export type NavKey =
+  | 'today'
+  | 'conversations'
+  | 'people'
+  | 'knowledge'
+  | 'rules'
+  | 'connectors'
+  | 'safety'
+  | 'notifications'
+  | 'profile'
+  | 'share'
+  | 'settings';
+
+/** The rows an app may leave out, with no page for them: the sidebar draws no row for one without an href. */
+type OptionalRow = 'connectors' | 'notifications';
 
 /**
- * Where each row goes. Every page needs its href but Connectors: an app without a Connectors page
- * leaves `connectors` out, and the sidebar draws no row for it.
+ * Where each row goes. Every page needs its href but Connectors and Notifications: an app without
+ * one of those pages leaves its href out, and the sidebar draws no row for it.
  */
-export type SidebarHrefs = Record<Exclude<NavKey, 'connectors'>, string> & { connectors?: string };
+export type SidebarHrefs = Record<Exclude<NavKey, OptionalRow>, string> & Partial<Record<OptionalRow, string>>;
 
 /** What a nav row's link receives: a router's link component takes the same props as `<a>`. */
 export interface SidebarLinkProps {
@@ -66,12 +80,15 @@ export interface SidebarProps {
   onSwitchDesk: (deskId: string) => void;
   /** The page the owner is on; its row is marked `aria-current="page"`. */
   current: NavKey;
-  /** Where each row goes. Without `connectors`, there is no Connectors row and the rows close up. */
+  /** Where each row goes. Without `connectors` or `notifications`, that row isn't drawn and the rows close up. */
   hrefs: SidebarHrefs;
   /** The business's word for the people it serves, the third row: "Customers", "Clients". */
   peopleLabel: string;
-  /** Counts on Conversations and Safety only; `attention` adds a held dot beside Safety's. */
-  counts?: { conversations?: NavCount; safety?: NavCount & { attention?: boolean } };
+  /**
+   * Counts on Conversations, Safety and Notifications only; `attention` adds a held dot beside
+   * Safety's.
+   */
+  counts?: { conversations?: NavCount; safety?: NavCount & { attention?: boolean }; notifications?: NavCount };
   /** Whether Claude is answering on this Desk. */
   answering: boolean;
   onAnsweringChange: (answering: boolean) => void;
@@ -100,6 +117,7 @@ export const NAV_LABELS = {
   rules: 'Rules',
   connectors: 'Connectors',
   safety: 'Safety',
+  notifications: 'Notifications',
   profile: 'Profile',
   share: 'Share',
   settings: 'Settings',
@@ -112,6 +130,7 @@ const NAV_ROWS = [
   { key: 'rules', icon: 'rules', label: NAV_LABELS.rules },
   { key: 'connectors', icon: 'connectors', label: NAV_LABELS.connectors },
   { key: 'safety', icon: 'safety', label: NAV_LABELS.safety },
+  { key: 'notifications', icon: 'bell', label: NAV_LABELS.notifications },
   { key: 'profile', icon: 'store', label: NAV_LABELS.profile },
   { key: 'share', icon: 'share', label: NAV_LABELS.share },
   { key: 'knowledge', icon: 'knowledge', label: NAV_LABELS.knowledge },
@@ -132,7 +151,7 @@ export function initialsOf(name: string): string {
 
 /**
  * The owner app's sidebar: the Claude Desk mark, the business and Desk switchers, the pages in a
- * fixed order (Connectors only when it has an href), an optional "About this prototype" group, and
+ * fixed order (Connectors and Notifications only when they have an href), an optional "About this prototype" group, and
  * at the bottom the Answering switch and the owner. It fills the column the `AppShell` gives it.
  */
 export function Sidebar({
@@ -184,10 +203,12 @@ export function Sidebar({
         <nav className="cd-sidebar__nav" aria-label="Main">
           {NAV_ROWS.map((row) => {
             const href = hrefs[row.key];
-            // Only Connectors' href may be left out, and then its row isn't drawn. Every other page
-            // keeps its row even if its href goes missing past the types, as it always has.
-            if (row.key === 'connectors' && href === undefined) return null;
-            const count = row.key === 'conversations' ? counts?.conversations : row.key === 'safety' ? counts?.safety : undefined;
+            // Only Connectors' and Notifications' hrefs may be left out, and then their row isn't
+            // drawn. Every other page keeps its row even if its href goes missing past the types, as
+            // it always has.
+            if ((row.key === 'connectors' || row.key === 'notifications') && href === undefined) return null;
+            const count =
+              row.key === 'conversations' || row.key === 'safety' || row.key === 'notifications' ? counts?.[row.key] : undefined;
             const attention = row.key === 'safety' && counts?.safety?.attention === true;
             return (
               <Link

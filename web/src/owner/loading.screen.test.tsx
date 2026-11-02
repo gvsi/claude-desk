@@ -299,34 +299,29 @@ it.each([
   await expectSetupCardLands(width, height, 'navigation');
 });
 
-it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
-  // The Demo inbox is the demo bar's: Today opens with its read still out, the bar draws no inbox
-  // button meanwhile (nor a line that it is opening), then draws it once the read is in.
+it('reload_opens_today_without_waiting_for_the_notifications', async () => {
+  // The notifications are the sidebar's count: Today opens with their read still out, the sidebar
+  // counts none meanwhile, then counts them once the read is in.
   const inbox = holdReads(ROUTES.ownerInbox.path);
   onTestFinished(inbox.release);
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
   await vi.waitFor(() => expect(inbox.held()).toBe(1));
   await expect.element(screen.getByRole('heading', { name: 'Needs you', exact: true })).toBeVisible();
-  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
+  const nav = screen.getByRole('navigation', { name: 'Main' });
+  await expect.element(nav.getByRole('link', { name: 'Notifications', exact: true })).toBeVisible();
   inbox.release();
-  const button = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
-  await expect.element(button).toBeVisible();
-  expect(button.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
+  await expect.element(nav.getByRole('link', { name: 'Notifications 1 unread', exact: true })).toBeVisible();
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
-/** The demo bar's Demo inbox, which the frame's shapes draw before Start over. */
-const INBOX_ANCHOR: SkeletonAnchor = { name: 'inbox', page: '.cd-reviewer-bar .cd-owner-inbox > .cd-button', size: true };
-
-it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_shape at %s', async (viewport) => {
-  // The inbox is read with the Desks, so once it is in before them, the bar draws it with the frame,
-  // where the frame's shapes drew it.
+it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_desks at %s', async (viewport) => {
+  // The notifications are read with the Desks, so once they are in before them, the frame lands
+  // where its shapes drew it, the demo bar with Start over alone, and reads them only the once.
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: [...(viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS), INBOX_ANCHOR],
+    anchors: viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS,
     open: async () => {
       await renderRoute(TODAY, { viewport, pollScale: 100 });
       await vi.waitFor(() => expect(desks.held()).toBe(1));
@@ -335,6 +330,7 @@ it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_
     },
     release: desks.release,
   });
+  expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Start over']);
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
@@ -508,7 +504,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
   // Each card's line wraps in its quarter of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 3, 3, 3] : [2, 4, 4, 3]).forEach((count, i) => {
+  (viewport === 'phone' ? [2, 3, 1, 3] : [2, 4, 2, 3]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -518,7 +514,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
-  lines('.cd-today-skeleton__rule .cd-skeleton-line', '.cd-today-skeleton__rule', viewport === 'phone' ? ['100%', '75%'] : ['100%']);
+  // The seed's hold went past an automatic rule's limit, so its card names no rule.
+  expect(today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__held-by')).toBeNull();
   lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
   lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
   for (const child of [1, 2]) {
@@ -536,6 +533,17 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['100%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
+
+  const heldRow = '.cd-things__item:nth-child(3)';
+  const skeletonHeight = today.querySelector(heldRow)!.getBoundingClientRect().height;
+  desks.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const landed = landedElement(heldRow)!;
+  const detail = landed.querySelector('.cd-things__detail')!;
+  const words = document.createRange();
+  words.selectNodeContents(detail.querySelector('.cd-things__detail-now') ?? detail);
+  expect(new Set([...words.getClientRects()].map((rect) => rect.top)).size, 'the landed waiting line').toBe(viewport === 'phone' ? 1 : 2);
+  expect(Math.abs(landed.getBoundingClientRect().height - skeletonHeight), 'the held row lands at its skeleton height').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });
 
 it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
@@ -667,7 +675,7 @@ const WIDE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'sidebar-mark', page: '.cd-sidebar__brand .cd-mark' },
   { name: 'business-row', page: '.cd-sidebar__business' },
   { name: 'page-row-0', page: '.cd-sidebar__nav > a:first-child' },
-  ...Array.from({ length: 8 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
+  ...Array.from({ length: 9 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
   { name: 'owner-avatar', page: '.cd-sidebar__avatar' },
 ];
 const PHONE_ANCHORS: readonly SkeletonAnchor[] = [
@@ -1095,28 +1103,28 @@ it('desk_gate_hides_the_old_error_while_retrying_a_missing_desk', async () => {
   await expect.element(error).not.toBeInTheDocument();
 });
 
-it('failed_demo_inbox_read_says_so_in_its_sheet', async () => {
-  // The first read fails, and so does its one retry: the bar draws the inbox's button with no count,
-  // and its sheet holds the line with Try again, never an inbox that looks empty.
+it('failed_notifications_read_says_so_on_their_page', async () => {
+  // The first read fails, and so does its one retry: the sidebar counts nothing, and Notifications
+  // holds the line with Try again, never a page that looks empty.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
   const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-  const button = screen.getByRole('button', { name: 'Demo inbox', exact: true });
-  await expect.element(button).toBeVisible();
+  const nav = screen.getByRole('navigation', { name: 'Main' });
+  const row = nav.getByRole('link', { name: 'Notifications', exact: true });
+  await expect.element(row).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
-  expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2);
+  await vi.waitFor(() => expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2));
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
-  // The sheet's own read as it opens fails too.
+  // The page's own read as it opens fails too.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
-  await button.click();
-  const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-  await expect.element(sheet.getByRole('alert').getByText(/^Couldn't open your Demo inbox\./), { timeout: 4_000 }).toBeVisible();
-  expect(sheet.element().querySelector('.cd-demo-inbox__empty')).toBeNull();
-  await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
-  await expect.element(sheet.getByRole('alert')).not.toBeInTheDocument();
-  await expect.element(sheet.getByRole('list')).toBeVisible();
-  await sheet.getByRole('button', { name: 'Close' }).click();
-  await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+  await row.click();
+  const page = screen.getByRole('main');
+  await expect.element(page.getByRole('alert').getByText(/^Couldn't open your notifications\./), { timeout: 4_000 }).toBeVisible();
+  expect(page.element().querySelector('.cd-empty-state')).toBeNull();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+  await expect.element(page.getByRole('list')).toBeVisible();
+  // Shown, the entry is seen: the sidebar counts none.
+  await expect.element(row).toBeVisible();
 });
 
 it('screen_helper_selects_the_region_by_its_status', async () => {

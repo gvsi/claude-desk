@@ -74,8 +74,8 @@ export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setu
       todayHref={`/app/${encodeURIComponent(deskId)}/today`}
       skeleton
       business=""
-      banner={<ReviewerBarSkeleton inbox />}
-      sidebar={<SidebarSkeleton rows={9} about={SIDEBAR_ABOUT.links.length} conceptFooter />}
+      banner={<ReviewerBarSkeleton />}
+      sidebar={<SidebarSkeleton rows={10} about={SIDEBAR_ABOUT.links.length} conceptFooter />}
       fill={fill}
     >
       <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}${centered ? ' cd-owner-layout--centered' : ''}`}>

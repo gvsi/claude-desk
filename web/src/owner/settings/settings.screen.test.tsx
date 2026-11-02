@@ -1,7 +1,7 @@
 /**
  * Settings in a real browser against the mock API: its sections, with no connectors (they have
  * their own tab); General's details from the copy's Desks, its Answering switch (the sidebar's,
- * the same control) and deleting a Desk; Notifications and Billing as vision; each as its signed
+ * the same control) and deleting a Desk; Alerts and Billing as vision; each as its signed
  * board draws it, on a laptop and on a phone.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
@@ -24,7 +24,7 @@ const DESK = `/app/${RIVERA.deskId}`;
 const SETTINGS = `${DESK}/settings`;
 const PROFILE = `${DESK}/profile`;
 const GENERAL = `${SETTINGS}/general`;
-const NOTIFICATIONS = `${SETTINGS}/notifications`;
+const ALERTS = `${SETTINGS}/alerts`;
 const BILLING = `${SETTINGS}/billing`;
 
 /** What Answering on means, under General's switch (owner decision, 2026-10-30: the short line everywhere). */
@@ -48,18 +48,18 @@ const REFUSED: readonly (readonly [status: number, line: string])[] = [
   [429, "That's a lot of requests at once. Wait a moment, then try again."],
 ];
 
-/** Notifications' lead, under its vision note. */
-const NOTIFICATIONS_LEAD = 'Held requests and paused chats reach your Demo inbox right away. Other alerts wait for your briefing.';
+/** Alerts' lead, under its vision note. */
+const ALERTS_LEAD = 'Held requests and paused chats arrive in Notifications right away. Other alerts wait for your briefing.';
 
 /** The alerts set for a plumber, as the board writes them: when, which, and how they arrive. */
 const PLUMBER = [
-  ['Right away', 'Held requests, paused chats and emergencies', 'Demo inbox'],
+  ['Right away', 'Held requests, paused chats and emergencies', 'Notifications'],
   ['In your briefing', 'New leads, bookings and payments', 'Each morning at 7:00 am'],
   ['Not at all', 'Messages Claude answered on its own'],
 ];
 
 /** The sections Settings ships with, in order. Channels joins when its page does. */
-const SECTIONS = ['General', 'Notifications', 'Billing'];
+const SECTIONS = ['General', 'Alerts', 'Billing'];
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -104,7 +104,7 @@ describe('Settings', () => {
 
     // Each section at its own address, marked as the current one, with its own page drawn.
     for (const [name, path, region] of [
-      ['Notifications', NOTIFICATIONS, 'Set for a plumber'],
+      ['Alerts', ALERTS, 'Set for a plumber'],
       ['Billing', BILLING, 'Plan'],
       ['General', GENERAL, 'Claude acts for you'],
     ] as const) {
@@ -172,13 +172,13 @@ describe('Settings', () => {
     expect(regions).toEqual(['Claude acts for you', 'Appearance', 'Delete this Desk']);
     await expect.element(appearance.getByText(APPEARANCE_LINE, { exact: true })).toBeVisible();
 
-    // Dark is chosen until the owner picks: the default, so the root carries no mark.
+    // System is chosen until the owner picks: the device's own setting, so the root carries no mark.
     const group = appearance.getByRole('radiogroup', { name: 'Appearance' });
     const option = (name: string) => group.getByRole('radio', { name, exact: true });
     expect(group.getByRole('radio').elements().map((radio) => [radio.textContent, radio.getAttribute('aria-checked')])).toEqual([
-      ['System', 'false'],
+      ['System', 'true'],
       ['Light', 'false'],
-      ['Dark', 'true'],
+      ['Dark', 'false'],
     ]);
     expect(root.hasAttribute('data-theme')).toBe(false);
 
@@ -188,17 +188,16 @@ describe('Settings', () => {
     expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['light', 'light']);
     expectComputed(main(screen).element(), { color: 'rgba(28, 27, 25, 0.92)' });
 
-    // As radios from the keyboard: the arrow moves to Dark and chooses it, the default again: no
-    // mark, nothing stored.
+    // As radios from the keyboard: the arrow moves to Dark and chooses it.
     await userEvent.keyboard('{ArrowRight}');
     await expect.element(option('Dark')).toHaveAttribute('aria-checked', 'true');
     await expect.element(option('Dark')).toHaveFocus();
-    expect([root.hasAttribute('data-theme'), localStorage.getItem('claude-desk.theme')]).toEqual([false, null]);
+    expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['dark', 'dark']);
 
-    // System hands it to the device: the root marked for it, and kept in this browser.
+    // System hands it back to the device: no mark, nothing stored.
     await option('System').click();
     await expect.element(option('System')).toHaveAttribute('aria-checked', 'true');
-    expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['system', 'system']);
+    expect([root.hasAttribute('data-theme'), localStorage.getItem('claude-desk.theme')]).toEqual([false, null]);
 
     // A choice kept from before is the one shown when the app opens again, as index.html's first
     // script marks the root with it.
@@ -230,13 +229,13 @@ describe('Settings', () => {
     await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
     expect(root.dataset.theme).toBe('light');
 
-    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    await subNav(screen).getByRole('link', { name: 'Alerts' }).click();
     await expect.element(main(screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
     await subNav(screen).getByRole('link', { name: 'General' }).click();
     await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
 
-    await option('Dark').click();
-    await expect.element(option('Dark')).toHaveAttribute('aria-checked', 'true');
+    await option('System').click();
+    await expect.element(option('System')).toHaveAttribute('aria-checked', 'true');
     expect(root.hasAttribute('data-theme')).toBe(false);
   });
 
@@ -590,7 +589,7 @@ describe('Settings against its boards', () => {
     const { screen } = await renderRoute(GENERAL);
     const answering = main(screen).getByRole('switch', { name: 'Claude acts for you' });
     await expect.element(answering).toBeVisible();
-    const chosenTheme = main(screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name: 'Dark' });
+    const chosenTheme = main(screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name: 'System' });
     const remove = main(screen).getByRole('button', { name: 'Delete this Desk' });
     await expectOwnerBoard(screen.container, {
       current: 'Settings',
@@ -632,15 +631,15 @@ describe('Settings against its boards', () => {
     await userEvent.keyboard('{Escape}');
     await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
 
-    // Notifications as N-Run2-Settings-Notifications draws it: the vision note, the lead 20 px
-    // under it, then the alerts set for a plumber 20 px under that, read-only.
-    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    // Alerts as REV-NOTIF-Aset draws it: the vision note, the lead 20 px under it, then the alerts
+    // set for a plumber 20 px under that, read-only.
+    await subNav(screen).getByRole('link', { name: 'Alerts' }).click();
     const alerts = main(screen).getByRole('region', { name: 'Set for a plumber' });
     await expect.element(alerts).toBeVisible();
     await expectOwnerBoard(screen.container, { current: 'Settings', fill: true });
-    content = await expectSettingsColumns(screen, 'Notifications');
-    const vision = expectVisionNote(content, 'In this prototype, alerts reach your Demo inbox.');
-    const lead = main(screen).getByText(NOTIFICATIONS_LEAD, { exact: true }).element();
+    content = await expectSettingsColumns(screen, 'Alerts');
+    const vision = expectVisionNote(content, 'In this prototype, alerts arrive in Notifications.');
+    const lead = main(screen).getByText(ALERTS_LEAD, { exact: true }).element();
     expectComputed(lead, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
     expect(round(top(lead) - bottom(vision))).toBe(20);
     expect(round(top(alerts.element()) - bottom(lead))).toBe(20);
@@ -713,7 +712,7 @@ describe('Settings against its boards', () => {
     await expect.element(main(screen).getByRole('region', { name: 'Claude acts for you' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     for (const [name, region] of [
-      ['Notifications', 'Set for a plumber'],
+      ['Alerts', 'Set for a plumber'],
       ['Billing', 'Plan'],
     ] as const) {
       await subNav(screen).getByRole('link', { name }).click();
@@ -740,7 +739,7 @@ describe('Settings against its boards', () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     // On a phone too, with nothing scrolling sideways.
-    const phone = await renderRoute(NOTIFICATIONS, { viewport: 'phone', seed: 'rivera' });
+    const phone = await renderRoute(ALERTS, { viewport: 'phone', seed: 'rivera' });
     await expect.element(main(phone.screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
     await expectScreenBasics(phone.screen.container, { owner: true });
     expectNoHorizontalScroll();

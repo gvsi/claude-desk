@@ -162,6 +162,7 @@ export {
   type DemoInboxPanelProps,
 } from './components/DemoInboxPanel/DemoInboxPanel.tsx';
 export { DemoInboxSheet, type DemoInboxSheetProps } from './components/DemoInboxSheet/DemoInboxSheet.tsx';
+export { INBOX_COPY, type InboxCopy } from './components/DemoInboxPanel/inboxCopy.ts';
 
 // Setup
 export { SituationRow, type SituationRowProps } from './components/SituationRow/SituationRow.tsx';

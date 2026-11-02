@@ -267,7 +267,7 @@ export type NeedsYouItem =
   | (NeedsYouBase & {
       decision: Decision;
       handoff: null;
-      /** The reason of the rule card that held it. */
+      /** The reason of the owner's ask card that held it; null past an automatic card's limit or for the default ask alone. */
       held_by: string | null;
       held_at: string;
     })

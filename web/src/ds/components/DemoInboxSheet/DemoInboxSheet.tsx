@@ -13,7 +13,7 @@ export interface DemoInboxSheetProps extends Omit<DemoInboxPanelProps, 'action' 
   onOpenChange?: (open: boolean) => void;
   /**
    * A quiet button (`ghost`, its count 6 px after its words), as a control in the demo bar beside
-   * Start over takes; a secondary button by default.
+   * Start over takes, as TOD-04 drew it; a secondary button by default.
    */
   quiet?: boolean;
 }

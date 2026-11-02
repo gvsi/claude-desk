@@ -4,6 +4,8 @@ import { expect, fn, within } from 'storybook/test';
 import type { RuleCard } from '../../../api/contracts.ts';
 import { rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectSetOffName } from '../../test/expectSetOffName.ts';
+import { expectSharedTitles } from '../../test/expectSharedTitles.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import type { RuleRowProps } from '../RuleRow/RuleRow.tsx';
 import { rulesForTool } from './toolRules.ts';
@@ -67,12 +69,15 @@ export const PaymentLinkOnPayments: Story = {
     // The tool's name and line are one link to its page, with a chevron.
     const link = canvas.getByRole('link', { name: /^Payment link/ });
     await expect(link).toHaveAttribute('href', '/connectors/payments/payment-link');
+    // The tool's title is set off as the business's own words, first in its line.
+    await expectSetOffName(link, 'Payment link');
     await expect(link).toHaveTextContent("Makes a one-time link for a quote. Charges money. Can't be undone.");
     await expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     // A row per rule, the shared one first.
     const rows = canvas.getAllByRole('listitem');
     await expect(rows).toHaveLength(2);
     await expect(rows[0]).toHaveTextContent(`Shared rule. ${rivera.sharedChargeAppliesTo}`);
+    await expectSharedTitles(rows[0] as HTMLElement);
     await expect(rows[0]).toHaveTextContent('Automatic up to $20; over $20, ask me first');
     await expect(rows[1]).toHaveTextContent(rivera.ruleCards['rv-link'].reason);
     await expect(rows[1]).toHaveTextContent('Automatic up to $300; over $300, ask me first');
