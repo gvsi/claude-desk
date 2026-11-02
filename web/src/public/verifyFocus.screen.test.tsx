@@ -54,6 +54,15 @@ it('sends a wrong code only once while Enter is held through the failure', async
   }
 });
 
+it('moves focus from the code field to Start a new chat when the session ends', async () => {
+  const { screen, field } = await codeAsked('desktop');
+  mockStore.inject({ route: 'verifyCheck', status: 401 });
+  await field.fill(DEMO_CODE);
+  await userEvent.keyboard('{Enter}');
+  await expect.element(field).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('button', { name: 'Start a new chat' })).toHaveFocus();
+});
+
 describe.each(['desktop', 'phone'] as const)('focus once the code works at %s size', (viewport) => {
   it.each(['in the field', 'on Confirm'] as const)('moves keyboard focus to the verified line after Enter %s', async (where) => {
     const { screen, box, field, confirm } = await codeAsked(viewport);
