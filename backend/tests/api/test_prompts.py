@@ -152,7 +152,7 @@ def test_system_prompt_uses_the_business_policies():
         "show that policy with the policy clause",
         "Never make up a figure",
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
-        "at a time, before you take their details or book. Before booking or proposing a deposit or payment, ask for "
+        "at a time, before you take their details or book. Before booking or proposing a deposit or payment link, ask for "
         "what's missing of their name and a phone number or email, and for a visit at their place their address, "
         "reusing anything already given, and finish any intake questions, then save their name and contact with "
         "native__capture_lead in the same turn if it's one of your tools, and pass them on the booking as its name "
@@ -161,7 +161,9 @@ def test_system_prompt_uses_the_business_policies():
         "without them; an address isn't needed, so book without one if they don't give it. Book only once they've "
         "given their name and contact: a time they pick without answering isn't a no, so ask once more. If they'd "
         "rather not give their name and contact, don't book: offer a callback or a message to Mike Turner instead, "
-        "and keep helping. Ask only about their request and these booking details: never for a password, "
+        "and keep helping. A charge to a visiting agent's signed limit (native__charge_mandate) is neither a booking "
+        "nor a deposit you propose: make it without asking for these details. Ask only about their request and these "
+        "booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
         "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
@@ -334,6 +336,18 @@ def test_a_booking_refused_for_missing_details_is_asked_for_them_and_tried_once_
     assert refused.endswith("Never try it again reworded, split up or through another tool.")
 
 
+def test_a_charge_to_an_agents_signed_limit_asks_for_no_contact_details():
+    """Only a booking needs the visitor's name and contact (the kernel refuses one without them), and a deposit or
+    payment link is asked for them first. A charge to a visiting agent's signed limit is neither: the agent's mandate
+    already decides it, so the rule that asks for details before a booking or a deposit says it doesn't apply there."""
+    text = conversation_system(RIVERA)[0]["text"]
+    details = next(line for line in text.splitlines()
+                   if line.startswith("- For a new request that isn't urgent, ask what charter:policy:intake says"))
+    assert ("A charge to a visiting agent's signed limit (native__charge_mandate) is neither a booking nor a deposit "
+            "you propose: make it without asking for these details.") in details
+    assert "Before booking or proposing a deposit or payment link, ask for what's missing of their name" in details
+
+
 def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking_details():
     text = conversation_system(RIVERA)[0]["text"]
     lines = text.splitlines()
@@ -367,7 +381,7 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
             "business, never \"the owner\" or \"this business\", unless a name itself would trip the check, as "
             "above.") in lines
     intake = next(line for line in lines if line.startswith("- For a new request"))
-    assert ("Before booking or proposing a deposit or payment, ask for what's missing of their name and a phone "
+    assert ("Before booking or proposing a deposit or payment link, ask for what's missing of their name and a phone "
             "number or email, and for a visit at their place their address") in intake
     assert "reusing anything already given, and finish any intake questions" in intake
     assert ("then save their name and contact with native__capture_lead in the same turn if it's one of your tools, "
