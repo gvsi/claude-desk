@@ -10,6 +10,9 @@ it.each(['desktop', 'phone'] as const)('alerts name a plumber only for the sampl
   const starting = await renderRoute(`/app/${RIVERA.deskId}/settings/alerts`, { viewport, pollScale: 100 });
   await expect.element(starting.screen.getByRole('heading', { name: 'Set for a plumber', exact: true })).toBeVisible();
   await expect.element(starting.screen.getByText('From your business type', { exact: true })).toBeVisible();
+  // Right away names emergencies for a plumber only: a salon has none.
+  const rightAway = (list: Element) => list.querySelector('.cd-alert-list__what')?.textContent;
+  expect(rightAway(starting.screen.getByRole('list', { name: 'Set for a plumber', exact: true }).element())).toBe('Held requests, paused chats and emergencies');
   expectNoHorizontalScroll();
 
   const salon = await liveSetupDeskIds('A hair salon in Oakland');
@@ -18,6 +21,7 @@ it.each(['desktop', 'phone'] as const)('alerts name a plumber only for the sampl
   expect(screen.getByRole('heading', { name: 'Set for a plumber', exact: true }).query()).toBeNull();
   await expect.element(screen.getByRole('region', { name: 'From your business type', exact: true })).toBeVisible();
   await expect.element(screen.getByRole('list', { name: 'From your business type', exact: true })).toBeVisible();
+  expect(rightAway(screen.getByRole('list', { name: 'From your business type', exact: true }).element())).toBe('Held requests and paused chats');
   expectNoHorizontalScroll();
 });
 

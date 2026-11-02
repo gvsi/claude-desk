@@ -12,6 +12,11 @@ const PLUMBER_ALERTS: readonly AlertListItem[] = [
   { when: 'Not at all', what: 'Messages Claude answered on its own' },
 ];
 
+/** Any other business's: the same, with no emergencies, which a salon doesn't have (owner, 2026-11-02). */
+const OTHER_ALERTS: readonly AlertListItem[] = PLUMBER_ALERTS.map((alert) =>
+  alert.when === 'Right away' ? { ...alert, what: 'Held requests and paused chats' } : alert,
+);
+
 /**
  * Settings › Alerts, static and marked as vision: what reaches the owner when, and the alerts set
  * for the business type. In this prototype, alerts arrive in Notifications.
@@ -30,7 +35,7 @@ export function AlertsPage() {
         ) : (
           <p id={alertsId} className="cd-section-header__caption cd-type-meta">From your business type</p>
         )}
-        <AlertList label={isSampleBusiness ? 'Set for a plumber' : 'From your business type'} items={PLUMBER_ALERTS} />
+        <AlertList label={isSampleBusiness ? 'Set for a plumber' : 'From your business type'} items={isSampleBusiness ? PLUMBER_ALERTS : OTHER_ALERTS} />
       </section>
     </>
   );
