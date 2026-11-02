@@ -41,8 +41,8 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       if (!(target instanceof HTMLElement)) return;
       const inside = root.current?.contains(target);
       if (disabled || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) {
-        // On the memory question, Enter with a modifier never presses an answer after typed words either.
-        if (!offersOther && inside && event.key === 'Enter' && typed.current.word) event.preventDefault();
+        // On the memory question, Enter or Space with a modifier never presses an answer after typed words either.
+        if (!offersOther && inside && (event.key === 'Enter' || event.key === ' ') && typed.current.word) event.preventDefault();
         return;
       }
       // What was typed on a row ends once the owner leaves it. On a question it also ends on a key that

@@ -182,7 +182,7 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     await userEvent.keyboard(`${words}{Enter}`);
     await new Promise((resolve) => setTimeout(resolve, 300));
     // Nor after a typo is erased, or a key that neither moves nor picks, or with a modifier.
-    await userEvent.keyboard('s{Backspace}{Enter}{Home}{Enter}{End}{Enter}{ArrowRight}{Enter}{Alt>}{Enter}{/Alt}');
+    await userEvent.keyboard('s{Backspace}{Enter}{Home}{Enter}{End}{Enter}{ArrowRight}{Enter}{Alt>}{Enter}{/Alt}{Control>} {/Control}{Alt>} {/Alt}');
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect.element(row).toHaveFocus();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveValue('');
