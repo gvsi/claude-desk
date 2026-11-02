@@ -247,8 +247,9 @@ describe('ReaderPage', () => {
         expect(entries.map((entry) => entry.getAttribute('href')), where).toEqual(ids.map((anchor) => `#${anchor}`));
         for (const anchor of ids) expect(document.getElementById(anchor)?.localName, `${where}: #${anchor}`).toBe('h2');
 
-        // The lead figure, in the hero and only there: the architecture for the proposal, the τ³-Banking chart
-        // for the prediction.
+        // The proposal's lead figure, the architecture, in the hero and only there. The prediction has no lead
+        // figure: its τ³-Banking chart sits where its marker does, in "Why it’s coming", right after the
+        // paragraph that ends "in ten months."
         const figures = [...screen.container.querySelectorAll('figure')];
         if (id === 'proposal') {
           const lead = figures.filter((figure) => figure.querySelector('[data-diagram]'));
@@ -260,7 +261,15 @@ describe('ReaderPage', () => {
         } else {
           const charts = [...screen.container.querySelectorAll('svg[role="img"]')];
           expect(charts.length, where).toBe(1);
-          expect(charts[0]?.closest('[data-hero]'), where).not.toBeNull();
+          expect(hero?.querySelector('figure'), where).toBeNull();
+          const chart = charts[0]?.closest('figure');
+          expect(chart?.parentElement?.localName, where).toBe('article');
+          const before = chart?.previousElementSibling;
+          expect(flat(before?.textContent), where).toMatch(/^Claude went from 24\.7% .* in ten months\.$/);
+          const headings = [...screen.container.querySelectorAll('article h2')].filter(
+            (h2) => h2.compareDocumentPosition(chart as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+          );
+          expect(flat(headings.at(-1)?.textContent), where).toBe('Why it’s coming');
         }
         await screen.unmount();
       }
@@ -353,14 +362,15 @@ describe('ReaderPage', () => {
   });
 
   it('article_opens_with_the_app_icon', async () => {
-    // The mark on its white tile is the article's app icon (owner, 2026-10-30): a clay field with
+    // The mark on its white tile is the proposal's app icon (owner, 2026-10-30): a clay field with
     // corners a quarter of its size and the tiled bell at two thirds of it, centred above "About
-    // this prototype" and the title. 120 px on the desktop layout, 88 px on the phone's.
+    // this prototype" and the title. 120 px on the desktop layout, 88 px on the phone's. The prediction
+    // opens without it, in its reading column (prediction_opens_in_the_reading_column).
     for (const [size, field, radius, bell, gap, top] of [
       [DESKTOP, 120, '30px', '80', 36, '88px'],
       [PHONE, 88, '22px', '58', 28, '36px'],
     ] as const) {
-      for (const id of IDS) {
+      for (const id of ['proposal'] as const) {
         const where = `${id} at ${size.width}`;
         const screen = await renderReader(id, { size });
         const hero = screen.container.querySelector<HTMLElement>('[data-hero]');
@@ -392,6 +402,129 @@ describe('ReaderPage', () => {
         expect(getComputedStyle(hero).paddingTop, where).toBe(top);
         await screen.unmount();
       }
+    }
+  });
+
+  it('prediction_opens_in_the_reading_column', async () => {
+    // The prediction's own opening (owner, 2026-11-02): no app icon and no centred hero. On a laptop, "About this
+    // prototype", the title and the summary open the article's column, left-aligned on the article's edge, level
+    // with the contents list and the details, 80 px under the top bar; 14 px from the kicker to the title, 20 px to
+    // the summary and 40 px to the first section. On a phone they keep their place above the folded contents,
+    // left-aligned on the article's edge with the byline. The proposal keeps its centred hero.
+    for (const size of [DESKTOP, PHONE]) {
+      const where = `prediction at ${size.width}`;
+      const screen = await renderReader('prediction', { size });
+      const root = screen.container;
+      expect(root.querySelector('.cd-mark-app-icon'), where).toBeNull();
+      const hero = root.querySelector<HTMLElement>('[data-hero]');
+      if (!hero) throw new Error(`${where}: no opening`);
+      const kicker = hero.querySelector('.cd-about-hero__kicker') as Element;
+      const title = hero.querySelector('h1') as Element;
+      const summary = hero.querySelector('[data-summary]') as Element;
+      const article = root.querySelector('article') as Element;
+      const first = article.querySelector('h2') as Element;
+      const box = (el: Element) => el.getBoundingClientRect();
+      expect(getComputedStyle(hero).textAlign, where).toBe('left');
+      const edges = [kicker, title, summary, first, ...(size === PHONE ? [hero.querySelector('[data-byline]') as Element] : [])];
+      for (const el of edges) expect(Math.abs(box(el).left - box(article).left), `${where}: ${el.localName} on the article's edge`).toBeLessThanOrEqual(0.5);
+
+      if (size === DESKTOP) {
+        const column = root.querySelector('.cd-about-column');
+        expect(hero.parentElement, where).toBe(column);
+        expect(column?.firstElementChild, where).toBe(hero);
+        expect(hero.nextElementSibling, where).toBe(article);
+        const body = root.querySelector('.cd-about-body') as Element;
+        expect(getComputedStyle(body).paddingTop, where).toBe('80px');
+        const contents = root.querySelector('nav[aria-label="On this page"]') as Element;
+        const details = root.querySelector('aside[aria-label="About this document"]') as Element;
+        expect(box(contents).top, `${where}: the contents list level with the kicker`).toBe(box(hero).top);
+        expect(box(details).top, `${where}: the details level with the kicker`).toBe(box(hero).top);
+        expect(box(kicker).top, where).toBe(box(hero).top);
+        expect(box(title).top - box(kicker).bottom, where).toBe(14);
+        expect(box(summary).top - box(title).bottom, where).toBe(20);
+        expect(box(first).top - box(summary).bottom, where).toBe(40);
+      } else {
+        expect(hero.closest('.cd-about-body'), where).toBeNull();
+        const contents = root.querySelector('nav[aria-label="On this page"]') as Element;
+        expect(hero.compareDocumentPosition(contents) & Node.DOCUMENT_POSITION_FOLLOWING, where).toBeTruthy();
+      }
+      await screen.unmount();
+    }
+  });
+
+  it('prediction_claim_reads_as_a_card', async () => {
+    // The claim opens "Capability" as a card on the page's paper (owner, 2026-11-02), drawn from the document's own
+    // words: the bold lead, the three things the model will do as the reader's bulleted list, tightened (8 px under
+    // the lead, 4 px apart, 16 px over the caveat), then the caveat, whose payoff alone is bold. Bold is the reader's
+    // 640. Under them, the prediction at a glance: a label column and a value column between hairlines.
+    const LEAD = 'By Q4 2027, a generally available Claude model will be able to act for a person or small business on its own:';
+    const ITEMS = [
+      'answer strangers and the AI agents acting for them',
+      'apply the owner’s policies to new cases',
+      'quote, book and negotiate within set limits',
+    ];
+    const CAVEAT =
+      'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.';
+    const GLANCE = [
+      ['The bar', '80% of a bank’s customer-service tasks done right on the first try, on τ³-Banking'],
+      ['Today', 'Claude Opus 5.5 at 56.0% (Fireworks)'],
+      ['The trend', 'Straight-line fits reach 80% between Q2 and the start of Q4 2027'],
+      ['Wrong if', 'No Claude model reaches 70% by the end of Q2 2027'],
+    ];
+    for (const size of [DESKTOP, PHONE]) {
+      const where = `prediction at ${size.width}`;
+      const screen = await renderReader('prediction', { size });
+      const root = screen.container;
+      const cards = [...root.querySelectorAll<HTMLElement>('[data-claim]')];
+      expect(cards, where).toHaveLength(1);
+      const card = cards[0] as HTMLElement;
+      // Right under the section's heading, inside the article, on a figure's card.
+      expect(card.parentElement?.localName, where).toBe('article');
+      expect(card.previousElementSibling?.id, where).toBe('capability');
+      expect(flat(card.nextElementSibling?.textContent), where).toMatch(/^On its own means over a whole conversation/);
+      expect(card.classList.contains('cd-about-frame'), where).toBe(true);
+      expect(getComputedStyle(card).backgroundColor, where).toBe(tokenColor('--bg-panel', card));
+
+      const [lead, list, caveat, glance, ...more] = [...card.children];
+      expect(more, where).toEqual([]);
+      expect([lead?.localName, list?.localName, caveat?.localName, glance?.localName], where).toEqual(['p', 'ul', 'p', 'dl']);
+      const box = (el: Element | undefined) => (el as Element).getBoundingClientRect();
+      const bold = (el: Element | undefined) => [...(el?.querySelectorAll('strong') ?? [])];
+
+      // The lead: the whole sentence bold.
+      expect(flat(lead?.textContent), where).toBe(LEAD);
+      expect(bold(lead).map((strong) => flat(strong.textContent)), where).toEqual([LEAD]);
+      // The list, in the reader's bullets, tightened.
+      const items = [...(list?.querySelectorAll(':scope > li') ?? [])];
+      expect(items.map((item) => flat(item.textContent)), where).toEqual(ITEMS);
+      expect(getComputedStyle(list as Element).listStyleType, where).toBe('disc');
+      expect(box(list).top - box(lead).bottom, `${where}: lead to list`).toBe(8);
+      for (let i = 1; i < items.length; i += 1) expect(box(items[i]).top - box(items[i - 1]).bottom, `${where}: item ${i}`).toBe(4);
+      expect(box(caveat).top - box(list).bottom, `${where}: list to caveat`).toBe(16);
+      // The caveat: only its payoff bold; the two attacks plain.
+      expect(flat(caveat?.textContent), where).toBe(CAVEAT);
+      expect(bold(caveat).map((strong) => flat(strong.textContent)), where).toEqual(['enforced in code, outside the model']);
+      expect(caveat?.querySelector('em, i, b'), where).toBeNull();
+      for (const strong of [...bold(lead), ...bold(caveat)]) expect(getComputedStyle(strong).fontWeight, where).toBe('640');
+
+      // At a glance: four rows, each a label and its value under a hairline; the benchmark links to its board.
+      const rows = [...(glance?.querySelectorAll(':scope > div') ?? [])];
+      expect(rows.map((row) => [...row.children].map((cell) => `${cell.localName} ${flat(cell.textContent)}`)), where).toEqual(
+        GLANCE.map(([label, value]) => [`dt ${label}`, `dd ${value}`]),
+      );
+      for (const row of rows) {
+        expect(getComputedStyle(row).borderTopWidth, where).toBe('1px');
+        expect(getComputedStyle(row).borderTopColor, where).toBe(tokenColor('--line-hairline', card));
+        const [label, value] = [...row.children] as [Element, Element];
+        expect(Math.round(box(value).left - box(label).left), `${where}: the value column`).toBe(size === PHONE ? 88 : 108);
+      }
+      const link = glance?.querySelector('a');
+      expect([link?.textContent, link?.getAttribute('href'), link?.getAttribute('target')], where).toEqual([
+        'τ³-Banking',
+        'https://taubench.com/leaderboard/',
+        '_blank',
+      ]);
+      await screen.unmount();
     }
   });
 
@@ -532,8 +665,8 @@ describe('ReaderPage', () => {
       const expected = documentText(blocks).map(apostrophes);
       // Each piece's key is its block's place in the document and its place in the block.
       const keys = blocks.flatMap((block, b) => documentText([block]).map((_, i) => `${b}.${i}`));
-      // Header cells the page shows again as labels: the readiness scale's "Watch for", the phone list's
-      // "Prototype".
+      // Header cells the page shows again as labels: the readiness scale's "Watch for", and the phone lists' third
+      // column, the proposal's "Prototype" and the prediction's fits' "Reaches 80%".
       const headerCells = blocks.flatMap((block) => (block.kind === 'table' ? documentText([{ ...block, rows: [] }]) : []));
 
       for (const size of [DESKTOP, PHONE]) {
@@ -543,23 +676,38 @@ describe('ReaderPage', () => {
         expect(marked.map((el) => apostrophes(el.textContent ?? '')), where).toEqual(expected);
         expect(marked.map((el) => el.getAttribute('data-doc-text')), where).toEqual(keys);
 
-        // Everything else the article says is the pull quote, the readiness scale's own words, or a header cell
-        // repeated as a label.
+        // Everything else the article says is the proposal's pull quote, the prediction's claim card's rows at a
+        // glance (prediction_claim_reads_as_a_card), the readiness scale's own words, or a header cell repeated as a
+        // label. The τ³-Banking chart, which sits in the prediction's article, says its own words, which
+        // figures.browser.test.tsx writes out.
         const article = screen.container.querySelector('article');
         expect(article, where).not.toBeNull();
+        expect(article?.querySelectorAll('.cd-about-chart'), where).toHaveLength(id === 'prediction' ? 1 : 0);
         const unmarked: string[] = [];
         const walker = document.createTreeWalker(article ?? document.body, NodeFilter.SHOW_TEXT);
         for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          if ((node.textContent ?? '').trim() === '' || node.parentElement?.closest('[data-doc-text]')) continue;
+          if ((node.textContent ?? '').trim() === '' || node.parentElement?.closest('[data-doc-text], .cd-about-chart')) continue;
           unmarked.push((node.textContent ?? '').trim());
         }
         const steps = ['Lagging', 'Early', 'Gated', 'Near'];
+        const glance = [
+          'The bar',
+          '80% of a bank’s customer-service tasks done right on the first try, on',
+          'τ³-Banking',
+          'Today',
+          'Claude Opus 5.5 at 56.0% (Fireworks)',
+          'The trend',
+          'Straight-line fits reach 80% between Q2 and the start of Q4 2027',
+          'Wrong if',
+          'No Claude model reaches 70% by the end of Q2 2027',
+        ];
         const allowed = (text: string) =>
-          text === pullQuote ||
-          (id === 'prediction' && steps.includes(text)) ||
-          ((text === 'Watch for' || (size === PHONE && text === 'Prototype')) && headerCells.includes(text));
+          (id === 'proposal' && text === pullQuote) ||
+          (id === 'prediction' && (steps.includes(text) || glance.includes(text))) ||
+          ((text === 'Watch for' || (size === PHONE && ['Prototype', 'Reaches 80%'].includes(text))) && headerCells.includes(text));
         expect(unmarked.filter((text) => !allowed(text)), where).toEqual([]);
-        expect(unmarked.filter((text) => text === pullQuote), where).toHaveLength(1);
+        if (id === 'proposal') expect(unmarked.filter((text) => text === pullQuote), where).toHaveLength(1);
+        else expect(unmarked.filter((text) => glance.includes(text)), where).toEqual(glance);
         await screen.unmount();
       }
     }
@@ -831,14 +979,18 @@ describe('ReaderPage', () => {
     await back.unmount();
 
     // Once the document has gone, its section isn't kept: the other document opens at its top and stays there. The
-    // other document's "The first release" is drawn in the very heading that was "Limitations", at the same place in its document.
+    // other document's heading at the same place in its document as "Limitations" is drawn in the very heading that
+    // was "Limitations".
+    const limitationsAt = ABOUT_DOCUMENTS.prediction.blocks.findIndex((block) => block.kind === 'heading' && block.id === 'limitations');
+    const twin = ABOUT_DOCUMENTS.proposal.blocks[limitationsAt];
+    if (twin?.kind !== 'heading') throw new Error('the proposal has no heading where the prediction has Limitations');
     loaded = typeStillLoading();
     const third = await renderReader('prediction', { hash: '#limitations' });
     await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
     const heading = document.getElementById('limitations');
     at.navigate?.('/about/proposal');
     await expect.poll(title).toBe('Product proposal');
-    expect(document.getElementById('the-first-release'), 'the same heading element').toBe(heading);
+    expect(document.getElementById(twin.id), 'the same heading element').toBe(heading);
     await expect.poll(() => window.scrollY).toBe(0);
     swapType();
     loaded();

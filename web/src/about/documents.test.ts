@@ -181,6 +181,7 @@ describe('the About documents', () => {
       title: 'Product proposal',
       summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
       pullQuote: 'Prompt injection and social engineering can’t make Claude act past the owner’s rules.',
+      layout: 'hero',
       hero: 'architecture',
       next: 'prediction',
     });
@@ -190,30 +191,36 @@ describe('the About documents', () => {
       title: 'Capability prediction',
       summary:
         'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
-      pullQuote: 'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.',
-      hero: 'tau3',
+      layout: 'column',
+      claim: { first: 3, last: 5 },
       next: 'proposal',
     });
-    // Each hero figure is one its document places.
-    for (const { id } of DOCUMENTS) {
-      expect(ABOUT_DOCUMENTS[id].blocks).toContainEqual({ kind: 'figure', name: ABOUT_DOCUMENTS[id].hero });
-    }
+    // The proposal's hero figure is one it places; the prediction draws its chart where its marker sits.
+    expect(ABOUT_DOCUMENTS.proposal.blocks).toContainEqual({ kind: 'figure', name: ABOUT_DOCUMENTS.proposal.hero });
+    // The prediction's claim card holds its first section's opening: the bold lead, the list and the caveat, in the
+    // document's words, which the card draws as the article would.
+    const { blocks, claim } = ABOUT_DOCUMENTS.prediction;
+    expect(blocks[(claim?.first ?? 0) - 1]).toMatchObject({ kind: 'heading', depth: 2, text: 'Capability' });
+    expect(documentText(blocks.slice(claim?.first, (claim?.last ?? 0) + 1))).toEqual([
+      'By Q4 2027, a generally available Claude model will be able to act for a person or small business on its own:',
+      'answer strangers and the AI agents acting for them',
+      'apply the owner’s policies to new cases',
+      'quote, book and negotiate within set limits',
+      'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.',
+    ]);
   });
 
   it('pull_quotes_are_sentences_of_their_documents', () => {
     // The page writes curly quote marks and the documents straight ones; the words must be the same.
     const sentences = (paragraph: string) => paragraph.split(/(?<=[.!?])\s+/);
-    for (const { id, file } of DOCUMENTS) {
-      const { pullQuote, blocks } = ABOUT_DOCUMENTS[id];
-      const inTheDocument = documentText(blocks).flatMap(sentences).map(straight);
-      expect(inTheDocument, file).toContain(straight(pullQuote));
-      // Read from disk too, so the quote is the document's and not only the parse's; bold marks are only styling.
-      expect(raw(file).replaceAll('**', ''), file).toContain(straight(pullQuote));
-    }
-    expect(ABOUT_DOCUMENTS.proposal.pullQuote).toBe('Prompt injection and social engineering can’t make Claude act past the owner’s rules.');
-    expect(ABOUT_DOCUMENTS.prediction.pullQuote).toBe(
-      'It will still be open to prompt injection and social engineering, so the business’s limits have to be enforced in code, outside the model.',
-    );
+    const { pullQuote = '', blocks } = ABOUT_DOCUMENTS.proposal;
+    const inTheDocument = documentText(blocks).flatMap(sentences).map(straight);
+    expect(inTheDocument).toContain(straight(pullQuote));
+    // Read from disk too, so the quote is the document's and not only the parse's; bold marks are only styling.
+    expect(raw('product-proposal.md').replaceAll('**', '')).toContain(straight(pullQuote));
+    expect(pullQuote).toBe('Prompt injection and social engineering can’t make Claude act past the owner’s rules.');
+    // The prediction has none: its claim card carries the sentence a pull quote would.
+    expect('pullQuote' in ABOUT_DOCUMENTS.prediction).toBe(false);
   });
 
   it('the_pages_show_curly_quote_marks', () => {
@@ -363,6 +370,18 @@ describe('the About documents', () => {
     expect(() => readDocument('prediction', `${prediction}\n\nSee [this](capability-prediction.md).\n`)).toThrow(
       /^docs\/capability-prediction\.md line \d+: a link to capability-prediction\.md, neither/,
     );
+    // The claim card needs the first section to open with its bold lead, the list and the caveat.
+    const lead = prediction.split('\n').find((text) => text.startsWith('**By Q4 2027')) ?? '';
+    expect(lead).not.toBe('');
+    for (const changed of [
+      prediction.replace(lead, lead.replaceAll('**', '')),
+      prediction.replace(lead, `${lead.slice(0, -2)}** and more.`),
+      prediction.replace(/\n- answer strangers[^]*?within set limits\n/, '\n'),
+    ]) {
+      expect(() => readDocument('prediction', changed)).toThrow(
+        'docs/capability-prediction.md: the claim card needs the first section to open with a bold lead, a list and a paragraph',
+      );
+    }
     expect(readDocument('prediction', `${prediction}\n\nSee [the proposal](product-proposal.md).\n`).blocks.at(-1)).toMatchObject({
       children: [{ kind: 'text', text: 'See ' }, { kind: 'link', href: '/about/proposal', internal: true }, { kind: 'text', text: '.' }],
     });

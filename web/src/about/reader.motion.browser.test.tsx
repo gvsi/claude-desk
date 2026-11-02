@@ -178,8 +178,9 @@ describe('ReaderPage with motion', () => {
   });
 
   it('contents_link_scrolls_smoothly', async () => {
+    // A section a couple of thousand pixels down: the browser's glide takes longer the further it goes.
     const screen = await renderReader('prediction');
-    const heading = headingOf('limitations');
+    const heading = headingOf('why-its-coming');
     // Where the heading is, and what has focus, once the page has handled the click.
     let atClick: { top: number; focused: Element | null } | null = null;
     const onClick = () => {
@@ -190,7 +191,7 @@ describe('ReaderPage with motion', () => {
     const tops = eachFrame(() => Math.round(heading.getBoundingClientRect().top));
     onTestFinished(tops.stop);
 
-    followLink('limitations');
+    followLink('why-its-coming');
     // Right after the click the window hasn't reached the heading yet, though focus is already on it.
     expect(atClick).not.toBeNull();
     const { top, focused } = atClick as unknown as { top: number; focused: Element | null };
@@ -203,7 +204,7 @@ describe('ReaderPage with motion', () => {
     const between = new Set(tops.frames.filter((y) => y < top - 1 && y > 89));
     expect(between.size, 'frames part way there').toBeGreaterThan(2);
     expect(document.activeElement).toBe(heading);
-    await expect.poll(() => at.path).toBe('/about/prediction#limitations');
+    await expect.poll(() => at.path).toBe('/about/prediction#why-its-coming');
     await untilStill();
     await screen.unmount();
   });
@@ -234,18 +235,18 @@ describe('ReaderPage with motion', () => {
     const slides = eachFrame(() => bar()?.getAnimations().map((animation) => (animation as CSSTransition).transitionProperty) ?? []);
     onTestFinished(slides.stop);
 
-    followLink('characteristics');
-    const heading = headingOf('characteristics');
+    followLink('how-its-measured');
+    const heading = headingOf('how-its-measured');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 1000 }).toBeLessThanOrEqual(1);
     // Past the scroll's end: the page has looked again, and nothing moves.
     await new Promise((resolve) => setTimeout(resolve, 300));
     slides.stop();
     watch.disconnect();
-    expect(marks, 'the sections marked on the way').toEqual(['#characteristics']);
-    expect(marked()).toEqual(['#characteristics']);
+    expect(marks, 'the sections marked on the way').toEqual(['#how-its-measured']);
+    expect(marked()).toEqual(['#how-its-measured']);
     expect(places, 'the bar moved once').toHaveLength(1);
     // To the row's words.
-    const words = linkTo('characteristics').querySelector('span:last-child')?.getBoundingClientRect() as DOMRect;
+    const words = linkTo('how-its-measured').querySelector('span:last-child')?.getBoundingClientRect() as DOMRect;
     expect(Math.abs((bar()?.getBoundingClientRect().top ?? 0) - words.top)).toBeLessThanOrEqual(0.5);
     // It slid there: a transition of its place, in motion-base on the emphasis ease.
     expect(slides.frames.some((properties) => properties.includes('transform')), 'the bar slid').toBe(true);
@@ -325,11 +326,11 @@ describe('ReaderPage with motion', () => {
     });
     onTestFinished(() => watch.disconnect());
     document.addEventListener('click', () => window.dispatchEvent(new Event('scrollend')), { once: true });
-    followLink('characteristics');
-    const heading = headingOf('characteristics');
+    followLink('how-its-measured');
+    const heading = headingOf('how-its-measured');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
     await new Promise((resolve) => setTimeout(resolve, 300));
-    expect(marks, 'the sections marked on the way').toEqual(['#characteristics']);
+    expect(marks, 'the sections marked on the way').toEqual(['#how-its-measured']);
 
     // A reader who takes over part way, with the wheel, is followed: the mark is where they stop.
     followLink('readiness');
