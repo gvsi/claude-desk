@@ -214,7 +214,10 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       if (glyph === null) return null;
       // The owner chose to let the job run on its own, but its own rule comes from the card they
       // confirm at the Rules step: until then it asks first, and the review says so. Words only.
-      const chosenOnItsOwn = tool.mode === 'ask' && acceptedAutonomy(job.business, state.messages) === 'auto';
+      // Only a booking card shows the owner that choice, so only a booking job (the typed_booking
+      // block, made only from schedule cards) says they made it.
+      const booking = job.business.config.block === 'typed_booking';
+      const chosenOnItsOwn = booking && tool.mode === 'ask' && acceptedAutonomy(job.business, state.messages) === 'auto';
       const shown = chosenOnItsOwn ? { ...tool, uncoveredLine: copy.chosenOnItsOwn } : tool;
       return (
         <ConnectorReview

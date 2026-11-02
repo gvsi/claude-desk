@@ -128,6 +128,17 @@ it("keeps today's line for a booking job that Use your suggestions accepted for 
   await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
 });
 
+it("keeps today's line for a job whose card never showed the owner its autonomy, such as an intake", async () => {
+  const { state } = await interviewWithBooking('auto');
+  const intake = state.messages.find((message) => message.card?.job?.job === 'intake');
+  // The owner accepted the intake card themselves, and it runs on its own, but only a booking card shows that choice.
+  expect([intake?.owner_decided, intake?.card?.state, intake?.card?.job?.autonomy]).toEqual([true, 'accepted', 'auto']);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Ask new clients three questions' }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask new clients three questions' })).toBeVisible();
+  expect(coverage(screen.getByRole('region', { name: 'Tools', exact: true }))).toEqual([NO_RULE_YET]);
+});
+
 it('turns on a job the owner let run on its own with the request every job sends: its tool at its hash, and no outcome', async () => {
   const { state, desk, booked } = await interviewWithBooking('auto');
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);

@@ -208,8 +208,8 @@ export const SETUP_COPY = {
     empty: 'No tools to add yet',
     emptyBody: 'Continue to your rules. You can add connectors later from Connectors.',
     /**
-     * A setup job's review, under the job, when the owner chose to let it run on its own: it still
-     * asks first, since its own rule comes from the card they confirm at the Rules step.
+     * A setup booking job's review, under the job, when the owner chose on its card to let it run on
+     * its own: it still asks first, since its own rule comes from the card they confirm at the Rules step.
      */
     chosenOnItsOwn: 'You chose to let it run on its own. Until you confirm your rules in the next step, it asks you first.',
     turnOnTitle: (connector: string) => `Turn on ${connector}`,
