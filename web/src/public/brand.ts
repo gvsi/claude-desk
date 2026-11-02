@@ -38,6 +38,11 @@ const MIN_TEXT_CONTRAST = 4.5;
  */
 export const OWNER_NAME_FALLBACK = 'Owner';
 
+/** The owner's name as the Desk carries it, or null when they gave none and it carries setup's fallback. */
+export function givenOwnerName(displayName: string): string | null {
+  return displayName === OWNER_NAME_FALLBACK ? null : displayName;
+}
+
 export interface DeskBrand {
   brand: PublicBrand;
   /**
@@ -77,6 +82,6 @@ export function brandFrom(desk: Pick<PublicDesk, 'business_name' | 'desk_name' |
       statusHandled: field === null ? HANDLED : HANDLED_ON_FIELD,
       accent: plainHex(brand.accent) ?? ACCENT_FALLBACK,
     },
-    ownerName: desk.owner_display_name === OWNER_NAME_FALLBACK ? null : desk.owner_display_name,
+    ownerName: givenOwnerName(desk.owner_display_name),
   };
 }

@@ -247,6 +247,7 @@ export {
 export { OutcomeMenu, type OutcomeMenuProps } from './components/OutcomeMenu/OutcomeMenu.tsx';
 export { OutcomeGroups, type OutcomeGroupRow, type OutcomeGroupsProps } from './components/OutcomeGroups/OutcomeGroups.tsx';
 export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
+export { ToolTitleList, type ToolTitles } from './components/RuleRow/ToolTitles.tsx';
 export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';
 export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
@@ -271,6 +272,7 @@ export {
   type ChangeReviewProps,
   type ChangeRowView,
   type ChangeSide,
+  type RuleTarget,
 } from './components/ChangeReview/ChangeReview.tsx';
 export { ruleDiff, type RuleDiffRow, type RuleField } from './components/ChangeReview/ruleDiff.ts';
 export { reviewChanges, type ReviewChange } from './components/ChangeReview/reviewChanges.ts';
@@ -321,7 +323,7 @@ export { ToolReviewCard, type ToolReviewCardProps, type ToolRowView } from './co
 // Safety
 export { FullTrace, type FullTraceProps } from './components/FullTrace/FullTrace.tsx';
 export { ChainStatus, type ChainStatusProps } from './components/ChainStatus/ChainStatus.tsx';
-export { chainLine } from './components/ChainStatus/chainLine.ts';
+export { chainLine, entriesLabel } from './components/ChainStatus/chainLine.ts';
 export { AttemptRow, type AttemptRowProps } from './components/AttemptRow/AttemptRow.tsx';
 export {
   CheckpointMeter,

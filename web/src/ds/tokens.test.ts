@@ -74,8 +74,9 @@ describe('design tokens', () => {
   });
 
   test('a_light_theme_overrides_only_the_tokens_it_has_values_for', () => {
-    // Dark is the base: every token, on :root and on anything marked dark. Light is chosen in this
-    // browser (data-theme="light" on the root) or by the system while dark isn't chosen, and sets only
+    // Dark is the base and the default: every token, on :root and on anything marked dark. Light is
+    // chosen in this browser (data-theme="light" on the root), or by the system when System is chosen
+    // (data-theme="system") and it prefers light, and sets only
     // the tokens with a light value, with the browser's own scheme. An alias without one (line-focus)
     // resolves against the light values on the same root, and a fixed color (the mark's) stays.
     const usage = 'A test token.';
@@ -115,7 +116,7 @@ describe('design tokens', () => {
     const chosen = [':root[data-theme="light"] {', ...light, '}'].join('\n');
     const system = [
       '@media (prefers-color-scheme: light) {',
-      '  :root:not([data-theme="dark"]) {',
+      '  :root[data-theme="system"] {',
       ...light.map((line) => `  ${line}`),
       '  }',
       '}',
@@ -431,10 +432,12 @@ describe('design tokens', () => {
     };
     const want = { 'color-scheme': 'light', ...Object.fromEntries(Object.entries(expected).map(([name, value]) => [`--${name}`, value])) };
     expect(declarations(':root[data-theme="light"]')).toEqual(want);
-    expect(declarations('@media (prefers-color-scheme: light) {\n  :root:not([data-theme="dark"])')).toEqual(want);
-    // Each theme block once: dark on the root, light chosen, light by the system.
+    expect(declarations('@media (prefers-color-scheme: light) {\n  :root[data-theme="system"]')).toEqual(want);
+    // Each theme block once: dark on the root, light chosen, light by the system when it's chosen.
+    // A root marked neither stays dark whatever the system prefers.
     const count = (opening: string) => css.split(opening).length - 1;
-    expect([':root,\n[data-theme="dark"] {', ':root[data-theme="light"] {', ':root:not([data-theme="dark"]) {'].map(count)).toEqual([1, 1, 1]);
+    expect([':root,\n[data-theme="dark"] {', ':root[data-theme="light"] {', ':root[data-theme="system"] {'].map(count)).toEqual([1, 1, 1]);
+    expect(css).not.toContain(':not([data-theme');
   });
 
   test('every_color_and_shadow_has_a_dark_value', () => {

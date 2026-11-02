@@ -1,7 +1,7 @@
 /**
  * The theme for the design system's browser tests, whose context prefers dark and reduced motion:
- * a test that needs the light theme asks for it, by the system's preference or by the choice
- * index.html's first script applies, and both come back after the test.
+ * a test that needs the light theme chooses it, as index.html's first script applies a choice, or
+ * chooses System with a system that prefers light, and both come back after the test.
  */
 import { expect, onTestFinished } from 'vitest';
 import { cdp } from 'vitest/browser';
@@ -23,10 +23,10 @@ export async function systemPrefersLight(): Promise<void> {
   expect(window.matchMedia('(prefers-color-scheme: light)').matches).toBe(true);
 }
 
-/** Marks the root with a theme chosen in this browser, or unmarks it for the system's, until the test ends. */
+/** Marks the root with a theme chosen in this browser, or unmarks it for dark, the default, until the test ends. */
 export function chooseTheme(choice: 'light' | 'dark' | 'system'): void {
   const root = document.documentElement;
-  if (choice === 'system') delete root.dataset.theme;
+  if (choice === 'dark') delete root.dataset.theme;
   else root.dataset.theme = choice;
   onTestFinished(() => {
     delete root.dataset.theme;

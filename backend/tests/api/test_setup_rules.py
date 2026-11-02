@@ -267,12 +267,13 @@ async def ready(app, browser, kernel_http, model: ScriptedModel, **kwargs) -> tu
     return owner, state
 
 
-async def business_jobs(app, browser, kernel_http, model, engine, *, enabled=True, jobs=None):
-    """An owner at the end of questions with `jobs` accepted (by default four jobs, the third declined)."""
+async def business_jobs(app, browser, kernel_http, model, engine, *, enabled=True, jobs=None, cards=False):
+    """An owner at the end of questions with `jobs` accepted (by default four jobs, the third declined); with `cards`,
+    a setup that shows its cards, so finishing shows each one."""
     app.state.runtime.settings = replace(app.state.runtime.settings, business_tools_enabled=enabled)
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
-    await consent(owner, state["interview_id"], False, model)
+    await consent(owner, state["interview_id"], False, model, cards=cards)
     declined = None if jobs else 2
     jobs = jobs or [
         JobProposal(job="intake", title="Take repair requests!", why="Collect details",
@@ -322,6 +323,41 @@ async def test_accepted_jobs_become_business_tools_needing_review(app, browser, 
     assert {row["tool"] for row in tools} == {"desk.take-repair-requests", "desk.flag-urgent-help"}
     assert all(row["status"] == "needs_review" and row["definition_sha256"] for row in tools)
     assert len([call for call in fake.calls if call.route == "PUT /desks/{id}/business_tools"]) == 1
+
+
+async def test_each_business_tool_carries_its_accepted_cards_title_and_setup(
+    app, browser, kernel_http, model, engine, fake,
+):
+    """The Tools step finds the card a job was made from by its title and setup, so each business tool `setup_tools`
+    lists carries both exactly as the accepted card in the setup state holds them, a title at the 60-character limit
+    included."""
+    long_title = "Book a consult in Linda’s office hours, by phone or by video"
+    assert len(long_title) == 60
+    jobs = [
+        JobProposal(job="schedule", title=long_title, why="Meet new clients", how="Book a consult in office hours.",
+                    autonomy="auto", can_do_today=True,
+                    config={"block": "typed_booking", "appointment_type": "Consult", "minutes": 20}),
+        JobProposal(job="intake", title="Take repair requests!", why="Collect details", how="Ask what needs repair.",
+                    autonomy="ask", can_do_today=True, config={"block": "intake", "questions": ["What needs repair?"]}),
+    ]
+    owner, state, _ = await business_jobs(app, browser, kernel_http, model, engine, jobs=jobs, cards=True)
+    # Still waiting when the owner finishes, so finishing accepts each card and shows it in the conversation.
+    async with engine.begin() as conn:
+        interview = await desk_setup._load(conn, owner.copy_id, state["interview_id"])
+        for card in interview.transcript[-1].planned:
+            card.state = "proposed"
+        await desk_setup._save(conn, interview)
+    await finish_business_jobs(owner, state, model)
+    shown = (await owner.browser.get(f"/api/owner/setup/{state['interview_id']}?cards=1")).json()
+    cards = [message["card"]["job"] for message in shown["messages"]
+             if message["card"] and message["card"]["state"] == "accepted" and message["card"]["job"]]
+    reply = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
+    assert reply.status_code == 200, reply.text
+    business = [row["business"] for row in reply.json()["tools"] if row["source"] == "business"]
+    assert len(cards) == len(business) == len(jobs)
+    assert sorted((card["title"], json.dumps(card["config"], sort_keys=True)) for card in cards) == sorted(
+        (tool["title"], json.dumps(tool["config"], sort_keys=True)) for tool in business)
+    assert long_title in {tool["title"] for tool in business}
 
 
 @pytest.mark.parametrize("failure", ["422", "timeout", "restart"])
@@ -708,15 +744,16 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
 
 OWNER_EMAIL = "mike@turner-plumbing.example"
 CONTACT_SAID = f"Mike Turner. Email {OWNER_EMAIL} or call (510) 555-0142, and take a message after hours."
-CLOSING_PLAN = {"role": "claude", "text": "Your Desk will take customer requests.", "choices": [], "card": None}
+CLOSING_PLAN = {"role": "claude", "text": "Your Desk will take customer requests.", "choices": [], "card": None,
+                "owner_decided": False}
 OFFER = {"role": "claude", "text": setup.TEST_CLIENT_OFFER,
          "choices": [{"text": setup.TEST_CLIENT_YES, "recommended": True},
-                     {"text": setup.TEST_CLIENT_NO, "recommended": False}], "card": None}
-ADDED = {"role": "claude", "text": setup.TEST_CLIENT_ADDED, "choices": [], "card": None}
+                     {"text": setup.TEST_CLIENT_NO, "recommended": False}], "card": None, "owner_decided": False}
+ADDED = {"role": "claude", "text": setup.TEST_CLIENT_ADDED, "choices": [], "card": None, "owner_decided": False}
 
 
 def owner_line(text: str) -> dict:
-    return {"role": "owner", "text": text, "choices": [], "card": None}
+    return {"role": "owner", "text": text, "choices": [], "card": None, "owner_decided": False}
 
 
 def claude_line(text: str) -> dict:
@@ -2522,7 +2559,7 @@ async def test_safety_check_keeps_long_price_titles_out_of_tries(monkeypatch):
          "unit_cents": 30_000},
     ]
     answers = SetupAnswers(summary="Bookkeeping.", owner_display_name="Mike Turner")
-    interview = SimpleNamespace(desk_id="desk-1", step="rules", draft_version=2, answers=answers)
+    interview = SimpleNamespace(desk_id="desk-1", step="rules", draft_version=2, answers=answers, reopens=0, busy=False)
     owner = OwnerCtx(copy_id="copy-1", desk_ids=("desk-1",), owner_session_id="owner-session", owner_generation=1,
                      kernel=None, ro=SimpleNamespace(rows=AsyncMock(return_value=listed)))
     monkeypatch.setattr(setup, "_load", AsyncMock(return_value=interview))

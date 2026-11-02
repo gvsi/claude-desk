@@ -13,8 +13,9 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 const ABOUT_MOTION_TESTS = 'src/about/**/*.motion.browser.test.tsx';
 
 /**
- * Every browser test sees the dark theme, the base the signed boards draw: a test browser prefers
- * light by default, which would turn on the light theme. A test of the light theme asks for it itself.
+ * Every browser test's system prefers dark, as the signed boards draw: a test browser prefers light
+ * by default, which would turn on the light theme for a test that chooses System. A test of the light
+ * theme asks for it itself.
  */
 const DARK = { colorScheme: 'dark' } as const;
 

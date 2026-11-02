@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef } from 'react';
 
 import type { RuleCard } from '../api/contracts.ts';
 import { ownerErrorCopy, request } from '../api/http.ts';
-import type { BusinessToolDef, SetupState, ToolRow } from '../api/views.ts';
+import type { BusinessToolDef, SetupMessage, SetupState, ToolRow } from '../api/views.ts';
 import {
   Button,
   ConnectorReview,
@@ -74,6 +74,35 @@ export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewTool
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };
+}
+
+/** Whether two values from the API hold the same data, whatever order an object's keys come in. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => sameData(item, b[index]));
+  }
+  if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null) {
+    const one = a as Record<string, unknown>;
+    const other = b as Record<string, unknown>;
+    const keys = Object.keys(one);
+    return keys.length === Object.keys(other).length && keys.every((key) => Object.hasOwn(other, key) && sameData(one[key], other[key]));
+  }
+  return a === b;
+}
+
+/**
+ * The owner's own accepted choice for one of the Desk's own jobs, read from setup's conversation:
+ * the `autonomy` of the card the job was made from (setup publishes each accepted job's title and
+ * setup as its definition, so it is the card with both), when the owner accepted it themselves
+ * (`owner_decided`, as Rules drafting counts it). Null when no such card matches, or two that match
+ * disagree: a card "Use your suggestions" accepted for them was never their choice. It changes only
+ * words on the review: the job's own rule comes from the card the owner confirms at the Rules step.
+ */
+export function acceptedAutonomy(def: BusinessToolDef, messages: readonly SetupMessage[]): 'auto' | 'ask' | null {
+  const choices = new Set(messages.flatMap(({ card, owner_decided: decided }) =>
+    decided === true && card?.state === 'accepted' && card.job?.config && card.job.title === def.title && sameData(card.job.config, def.config)
+      ? [card.job.autonomy] : []));
+  return choices.size === 1 ? [...choices][0] ?? null : null;
 }
 
 /** Setup supports new jobs at their listed hash; changed, delisted and turned-off jobs stay out. */
@@ -158,6 +187,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       row.addEventListener('blur', () => row.removeAttribute('tabindex'), { once: true });
       row.focus({ preventScroll: true });
     }
+    row.scrollIntoView({ block: 'nearest' });
   }, [viewKey, reviewReady]);
   const open = (key: Parameters<typeof flow.open>[0]) => {
     returnTo.current = key;
@@ -218,11 +248,18 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       const tool = reviewTool(job, cards);
       const glyph = businessGlyph(job.business.config);
       if (glyph === null) return null;
+      // The owner chose to let the job run on its own, but its own rule comes from the card they
+      // confirm at the Rules step: until then it asks first, and the review says so. Words only.
+      // Only a booking card shows the owner that choice, so only a booking job (the typed_booking
+      // block, made only from schedule cards) says they made it.
+      const booking = job.business.config.block === 'typed_booking';
+      const chosenOnItsOwn = booking && tool.mode === 'ask' && acceptedAutonomy(job.business, state.messages) === 'auto';
+      const shown = chosenOnItsOwn ? { ...tool, uncoveredLine: copy.chosenOnItsOwn } : tool;
       return (
         <ConnectorReview
           titleRef={titleRef}
           job={{ title: tool.name, glyph, rows: businessRows(job.business, tool.mode) }}
-          tools={[tool]}
+          tools={[shown]}
           onTurnOn={() => void flow.turnOn(view.key, [job])}
           onCancel={flow.cancel}
           pending={turningOn}

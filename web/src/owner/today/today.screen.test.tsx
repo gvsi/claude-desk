@@ -401,6 +401,32 @@ describe('Today', () => {
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
   });
 
+  it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
+    // The greeting says the owner's first name after the time of day. An owner who gave no name has
+    // setup's fallback, "Owner", in its place, and a blank name is none either: the greeting then
+    // names no one, rather than greeting them as "Owner" or ending on a comma.
+    const greeting = (screen: RenderResult) => screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening)/ });
+    const seen = [];
+
+    const { screen: named } = await renderRoute(TODAY);
+    await expect.element(greeting(named)).toBeVisible();
+    seen.push(greeting(named).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+    await cleanup();
+
+    const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const { screen: fallback } = await renderRoute(`/app/${deskId}/today`);
+    await expect.element(greeting(fallback)).toBeVisible();
+    seen.push(greeting(fallback).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+    await cleanup();
+
+    await injectToday((today) => ({ ...today, greeting_name: '  ' }));
+    const { screen: empty } = await renderRoute(TODAY);
+    await expect.element(greeting(empty)).toBeVisible();
+    seen.push(greeting(empty).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
+
+    expect(seen).toEqual(['Good …, Mike', 'Good …', 'Good …']);
+  });
+
   it('reload_opens_today_drawn', async () => {
     // Opened at Today's address, as a reload does, the owner's loading page stays until what Today
     // first shows is read too, and Today then opens drawn: one loading step, never the frame with
@@ -1995,9 +2021,10 @@ describe('Today', () => {
     await userEvent.keyboard('{Enter}');
     await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
     expect(document.activeElement).toBe(live.element());
-    // The Today line above loses "held 1 for you" and may take a row less on a phone, which the
-    // browser's scroll anchoring takes off the column's scroll; the focus scrolls nothing itself.
+    // Callbacks aren't counted in the Today line, so marking one done leaves its height and the
+    // column's scroll unchanged; the focus scrolls nothing itself.
     const shrunk = lineBefore - todayLine();
+    expect(shrunk).toBe(0);
     expect(column.scrollTop).toBe(before.column - shrunk);
     expect(window.scrollY).toBe(before.window);
   });
@@ -2958,16 +2985,42 @@ describe("Today's How your Desk works", () => {
     expectNoHorizontalScroll();
   });
 
-  it('how_your_desk_works_counts_today_from_the_briefing', async () => {
-    // Handled is the night's answers and bookings; held, what needs the owner; turned down, the
-    // requests refused. All from the one Today read, each a link to where they are.
+  it('how_your_desk_works_counts_only_held_requests_like_safety', async () => {
+    openCallback();
+    openCallback('ses-visitor-web');
+    const items = await needsYouRead();
+    const seeded = items.find((item) => item.decision != null);
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const newer: NeedsYouItem = {
+      ...seeded,
+      decision: { ...seeded.decision, decision_id: 'dec-newer', reason_plain: 'A visitor asked to book Sunday at 10:00 pm.' },
+      held_at: new Date().toISOString(),
+    };
+    // Two held requests and two callbacks: the aggregate remains four Needs you cards.
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [newer, ...items] });
+    await injectToday((t) => ({ ...t, needs_you_count: 4 }));
+    const { screen, router } = await renderRoute(TODAY);
+    const how = region(screen, 'How your Desk works');
+    const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
+    await expect.element(held).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
+    await expect.element(held).toHaveAttribute('href', `${TODAY}#request-${seeded.decision.decision_id}`);
+    await held.click();
+    await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
+    await router.navigate(`${DESK}/safety`);
+    await expect.element(screen.getByRole('link', { name: '2 held for you', exact: true })).toBeVisible();
+  });
+
+  it('how_your_desk_works_counts_handled_and_refused_from_the_briefing', async () => {
+    // Handled is the night's answers and bookings; turned down, the requests refused. Held comes
+    // from Needs you's requests, even when Today's aggregate differs. Each links to where it is.
     await injectToday((t) => ({ ...t, needs_you_count: 4, briefing: { ...t.briefing, answers: 3, bookings: 2, turned_down: 1 } }));
     const { screen } = await renderRoute(TODAY);
     const how = region(screen, 'How your Desk works');
     const line = () => how.element().querySelector<HTMLElement>('.cd-how__today');
     await vi.waitFor(() => expect(line()).not.toBeNull());
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    expect(line()!.textContent).toBe('Today, Claude handled 5 on its own held 4 for you turned down 1 request');
+    expect(line()!.textContent).toBe('Today, Claude handled 5 on its own held 1 for you turned down 1 request');
     const outcomes = [...line()!.querySelectorAll('.cd-how__outcome')];
     expect(outcomes.map((o) => o.querySelector('.cd-status-dot')?.className)).toEqual([
       'cd-status-dot cd-status-dot--handled',
@@ -2975,7 +3028,7 @@ describe("Today's How your Desk works", () => {
       'cd-status-dot cd-status-dot--refused',
     ]);
     const links = outcomes.map((o) => o.querySelector('a'));
-    expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 4 for you', 'turned down 1 request']);
+    expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 1 for you', 'turned down 1 request']);
     expect(links.map((a) => a?.getAttribute('href'))).toEqual([
       `/app/${RIVERA.deskId}/conversations`,
       `/app/${RIVERA.deskId}/today#request-${seededHold().decision_id}`,
@@ -2993,28 +3046,41 @@ describe("Today's How your Desk works", () => {
     expectComputed(count, { fontWeight: '600', fontVariantNumeric: 'tabular-nums' });
     expect(getComputedStyle(count).color).not.toBe(getComputedStyle(line()!).color);
 
-    // "held 4 for you" brings the oldest held request into focus in Needs you.
-    await how.getByRole('link', { name: 'held 4 for you', exact: true }).click();
+    // "held 1 for you" brings the oldest held request into focus in Needs you.
+    await how.getByRole('link', { name: 'held 1 for you', exact: true }).click();
     await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
   });
 
-  it('how_your_desk_works_links_to_needs_you_when_only_a_callback_waits', async () => {
+  it('how_your_desk_works_omits_held_when_only_callbacks_wait', async () => {
+    openCallback();
+    openCallback('ses-visitor-web');
+    const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
+    await injectToday((t) => ({ ...t, needs_you_count: 2 }));
+    const { screen, router } = await renderRoute(TODAY);
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    expect(how.element().querySelector('.cd-how__today')?.textContent).toBe('Today, Claude handled 2 on its own');
+    expect(how.element().querySelector('.cd-how__outcome .cd-status-dot--held')).toBeNull();
+    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
+    await router.navigate(`${DESK}/safety`);
+    await expect.element(screen.getByRole('heading', { name: 'Safety', exact: true })).toBeVisible();
+    expect(screen.getByRole('link', { name: /held for you/ }).elements()).toHaveLength(0);
+  });
+
+  it('how_your_desk_works_draws_no_quiet_line_when_a_callback_waits', async () => {
     openCallback();
     const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
     mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
-    await injectToday((t) => ({ ...t, needs_you_count: 1 }));
-    const { screen, router } = await renderRoute(TODAY);
-    const how = region(screen, 'How your Desk works');
-    const link = how.getByRole('link', { name: 'held 1 for you', exact: true });
-    await expect.element(link).toBeVisible();
-    await expect.element(link).toHaveAttribute('href', `${TODAY}#needs-you`);
-    await link.click();
-    await vi.waitFor(() => expect(document.activeElement).toBe(region(screen, 'Needs you').element()));
-    expect(router.state.location.hash).toBe('#needs-you');
+    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
+    const { screen } = await renderRoute(TODAY);
+    await expect.element(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
+    expect(region(screen, 'How your Desk works').element().querySelector('.cd-how__today')).toBeNull();
   });
 
   it('how_your_desk_works_says_a_quiet_day_and_waits_for_the_answers', async () => {
     // A quiet day: one quiet line in place of the outcomes, with no dots or links.
+    mockStore.reset('rivera_quiet');
     await injectToday((t) => ({ ...t, needs_you_count: 0, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
     const quiet = await renderRoute(TODAY);
     const how = region(quiet.screen, 'How your Desk works');
@@ -3044,6 +3110,56 @@ describe("Today's How your Desk works", () => {
     const how = region(screen, 'How your Desk works');
     expect(how.getByRole('listitem').elements()).toHaveLength(3);
     expect(how.element().querySelector('.cd-how__today')).toBeNull();
+  });
+
+  it('how_your_desk_works_keeps_counts_hidden_until_the_reconnected_read_succeeds', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    const read = holdReads(needsYouPath);
+    onTestFinished(() => onlineManager.setOnline(true));
+    onlineManager.setOnline(false);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.world.decisions.clear();
+    onlineManager.setOnline(true);
+    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('fetching'));
+    await nextFrames();
+    expect(how.element().querySelector('.cd-how__today')).toBeNull();
+    read.release();
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0);
+
+    // An ordinary refresh keeps the current line while its response is pending.
+    const poll = holdReads(needsYouPath);
+    const refresh = queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(poll.held()).toBeGreaterThan(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    poll.release();
+    await refresh;
+  });
+
+  it('how_your_desk_works_hides_and_recovers_counts_after_a_needs_you_refresh_fails', async () => {
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+    const how = region(screen, 'How your Desk works');
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
+
+    mockStore.reset('rivera');
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
+    await allowTheSeededRequest(screen);
+    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
+    await vi.waitFor(() => expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0));
+    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
   });
 
   it('how_your_desk_works_hides_kept_counts_when_a_refresh_fails', async () => {

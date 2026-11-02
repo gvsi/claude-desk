@@ -3252,6 +3252,127 @@
         }
       }
     },
+    "/api/owner/setup/{id}/reopen": {
+      "post": {
+        "summary": "Setup Reopen",
+        "description": "\"Change something\": take setup back to its chat from a step after the questions (`tools`, `rules`,\n`situations`, `safety_check` or `preview`), with the owner's message as the next owner turn. The interview\nreturns to `questions`, and what was drafted from the answers is dropped: the rules draft, the situations and the\nsafety check are drafted again on the way forward, and the rules can't be confirmed until the safety check has run\nagain. Answered as `/answer` is: 200 with the landed state, or 202 `SetupState` with `busy: true` past the wait.\n\nEach send carries an `idempotency_key`. A repeat with the same key and text answers the interview as it stands and\nruns nothing; the same key with other text is 409 `conflict`. 409 `conflict` while a turn runs, at the questions\nstep, and once the Desk is live (changes are then made in the owner app). A turn that fails or is abandoned\nleaves the interview at the step it was at, so the same send can be tried again. 503 `model_unavailable` when\nClaude couldn't answer.",
+        "operationId": "owner_setup_reopen",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 64,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "cards",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Cards"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupReopenIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            }
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Unprocessable Content"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/api/owner/setup/{id}/suggestions": {
       "post": {
         "summary": "Setup Suggestions",
@@ -3376,7 +3497,7 @@
     "/api/owner/setup/{id}/tools": {
       "get": {
         "summary": "Setup Tools",
-        "description": "The new Desk's tools, and the mock payments server while it isn't connected.",
+        "description": "The new Desk's tools, and the mock payments server while it isn't connected. The payment tools of a Stripe\nconnection \"Change something\" took away are switched off first, when publishing the plan couldn't: 503 when the\nkernel can't do it now, so a retry tries again.",
         "operationId": "owner_setup_tools",
         "parameters": [
           {
@@ -13453,6 +13574,11 @@
                 "type": "null"
               }
             ]
+          },
+          "owner_decided": {
+            "type": "boolean",
+            "title": "Owner Decided",
+            "default": false
           }
         },
         "type": "object",
@@ -13461,7 +13587,7 @@
           "text"
         ],
         "title": "SetupMessage",
-        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text."
+        "description": "One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the\nowner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs\nonly to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided\nthemselves, by a click or a typed answer; a card setup settled for them (as \"Use your suggestions\" does) stays\nfalse. Read-only: it only says what happened."
       },
       "SetupProposalIn": {
         "properties": {
@@ -13761,6 +13887,31 @@
           "items"
         ],
         "title": "SetupPublicPrices"
+      },
+      "SetupReopenIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+            "title": "Idempotency Key"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "idempotency_key"
+        ],
+        "title": "SetupReopenIn",
+        "description": "`POST /api/owner/setup/{id}/reopen`: \"Change something\", the owner's message to Claude from a step after the\nquestions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),\nmakes a repeat answer the interview as the first left it instead of sending the message twice."
       },
       "SetupStartIn": {
         "properties": {

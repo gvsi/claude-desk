@@ -35,7 +35,7 @@ Run `agent-browser skills get core` once per session before first use.
 ## 3. QA checks
 
 - Check every changed screen at 1440x900 and 390x844 (`agent-browser set viewport 1440 900`), with no horizontal scroll or clipped text at either size.
-- Capture in the dark theme: a headless browser prefers light, which turns the light theme on. Set `agent-browser set media dark`, or `localStorage['claude-desk.theme']='dark'` before loading, and capture the light theme only on purpose, labelled as light.
+- Capture in the dark theme, the app's default whatever the browser prefers. Capture the light theme only on purpose, labelled as light: choose it in Settings › General › Appearance, or set `localStorage['claude-desk.theme']='light'` before loading.
 - The mock store runs inside the Vite dev server, so a change under `web/src/mocks/` shows only after restarting `npx vite --mode mock`; reloading the page keeps the old mock.
 - Consoles are read-only: look, never change settings, resources or data there. A change goes through code, or to the project owner when it needs sign-off (`AGENTS.md`).
 

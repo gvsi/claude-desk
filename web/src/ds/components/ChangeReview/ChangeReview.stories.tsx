@@ -14,7 +14,7 @@ const turnOnPayments: ChangeRowView[] = [
   {
     key: 'native.payment_link',
     change: 'turned_on',
-    title: 'Payment link',
+    title: { titles: ['Payment link'] },
     connector: chen.connectors.views.payments,
     before: null,
     after: { mode: 'ask', reason: DEFAULT_REASON, words: [{ field: 'who', text: 'Anyone' }] },
@@ -23,7 +23,7 @@ const turnOnPayments: ChangeRowView[] = [
   {
     key: 'native.charge_mandate',
     change: 'turned_on',
-    title: 'Charge within a signed limit',
+    title: { titles: ['Charge within a signed limit'] },
     connector: chen.connectors.views.payments,
     before: null,
     after: { mode: 'ask', reason: DEFAULT_REASON, words: [{ field: 'who', text: 'Signed agents' }] },
@@ -37,7 +37,7 @@ const raiseDiscount: ChangeRowView[] = [
   {
     key: 'rv-quote',
     change: 'changed',
-    title: 'Quote',
+    title: { titles: ['Quote'] },
     connector: rivera.connectors.views.quotes,
     before: {
       mode: 'auto',
@@ -65,7 +65,7 @@ const addAndRemove: ChangeRowView[] = [
   {
     key: 'rv-book-sun',
     change: 'added',
-    title: 'Book a visit',
+    title: { titles: ['Book a visit'] },
     connector: rivera.connectors.views.bookings,
     before: null,
     after: {
@@ -81,7 +81,7 @@ const addAndRemove: ChangeRowView[] = [
   {
     key: saturday.card_id,
     change: 'removed',
-    title: 'Book a visit',
+    title: { titles: ['Book a visit'] },
     connector: rivera.connectors.views.bookings,
     before: { mode: saturday.mode, reason: saturday.reason, words: rivera.ruleWords['rv-book-sat'] },
     after: null,
@@ -95,7 +95,7 @@ const turnBackOnRefund: ChangeRowView[] = [
   {
     key: 'payments.create_refund',
     change: 'turned_on',
-    title: 'Refund',
+    title: { titles: ['Refund'] },
     connector: rivera.connectors.views.stripe,
     before: null,
     after: { mode: refund.mode, reason: refund.reason, words: rivera.ruleWords['rv-refund'] },
@@ -110,7 +110,7 @@ const bookAutomatically: ChangeRowView[] = [
   {
     key: 'rv-book',
     change: 'changed',
-    title: 'Book a visit',
+    title: { titles: ['Book a visit'] },
     connector: rivera.connectors.views.bookings,
     before: { mode: 'ask', reason: BOOK_REASON, words: [{ field: 'who', text: 'Anyone' }] },
     after: { mode: 'auto', reason: BOOK_REASON, words: [{ field: 'who', text: 'Anyone' }] },
@@ -292,7 +292,7 @@ export const ChecksFailed: Story = {
       {
         key: 'rv-charges-anyone',
         change: 'added',
-        title: 'See charges',
+        title: { titles: ['See charges'] },
         connector: rivera.connectors.views.stripe,
         before: null,
         after: { mode: 'auto', reason: 'Anyone can see charges.', words: [{ field: 'who', text: 'Anyone' }] },
@@ -436,9 +436,9 @@ const widenScope: ChangeRowView[] = [
   {
     key: link.card_id,
     change: 'changed',
-    title: 'Payment link',
+    title: { titles: ['Payment link'] },
     connector: rivera.connectors.views.payments,
-    before: { appliesTo: 'Payment link', mode: 'auto', limit: '$300', reason: link.reason, words: rivera.ruleWords['rv-link'] },
+    before: { appliesTo: { titles: ['Payment link'] }, mode: 'auto', limit: '$300', reason: link.reason, words: rivera.ruleWords['rv-link'] },
     after: {
       appliesTo: 'Every tool that charges money',
       mode: 'auto',
@@ -550,7 +550,7 @@ const ceiling: ChangeRowView[] = [
   {
     key: 'rv-big-links',
     change: 'added',
-    title: 'Payment link',
+    title: { titles: ['Payment link'] },
     connector: rivera.connectors.views.payments,
     before: null,
     after: {
@@ -567,7 +567,7 @@ const ceiling: ChangeRowView[] = [
   {
     key: link.card_id,
     change: 'changed',
-    title: 'Payment link',
+    title: { titles: ['Payment link'] },
     connector: rivera.connectors.views.payments,
     before: { mode: 'auto', limit: '$300', reason: link.reason, words: rivera.ruleWords['rv-link'] },
     after: {
@@ -697,7 +697,7 @@ const personalRule: ChangeRowView[] = [
   {
     key: 'rv-dana-refunds',
     change: 'removed',
-    title: 'Refund',
+    title: { titles: ['Refund'] },
     connector: rivera.connectors.views.stripe,
     before: {
       mode: 'auto',

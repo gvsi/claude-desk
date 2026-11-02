@@ -24,7 +24,7 @@ import type { CancelReason, RulesDraft } from './views.ts';
 export const TIMEOUT_MS = { default: 10_000, model: 45_000, proving: 30_000 } as const;
 
 /** The consultant client opts in once for all setup state reads and mutations, including rereads. */
-const SETUP_CARD_ROUTES: ReadonlySet<RouteKey> = new Set(['setup', 'setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions']);
+const SETUP_CARD_ROUTES: ReadonlySet<RouteKey> = new Set(['setup', 'setupConsent', 'setupAnswer', 'setupProposal', 'setupSuggestions', 'setupReopen']);
 
 /** A proving route's 202 is retried this often, and given up this long after the first send. */
 export const PROVING_RETRY_MS = 3_000;
