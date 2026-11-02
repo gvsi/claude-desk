@@ -180,10 +180,25 @@ it('the_phone_source_list_keeps_its_skeleton_until_knowledge_arrives', async () 
   const known = screen.container.querySelector('.cd-knowledge__known')!;
   const add = screen.getByRole('region', { name: 'Add something', exact: true }).element();
   const pendingTop = add.getBoundingClientRect().top;
-  expect(known.querySelectorAll('.cd-knowledge-list__row')).toHaveLength(6);
+  const pendingRows = [...known.querySelectorAll('.cd-knowledge-list__row')];
+  expect(pendingRows).toHaveLength(6);
+  const pillPlace = (row: Element) => {
+    const words = row.querySelector('.cd-knowledge-list__words')!.getBoundingClientRect();
+    const pill = row.lastElementChild!.getBoundingClientRect();
+    return { left: pill.left - words.left, gap: pill.top - words.bottom };
+  };
+  const pendingPills = pendingRows.map(pillPlace);
+  expect(pendingPills).toEqual(Array.from({ length: 6 }, () => ({ left: 0, gap: 8 })));
   release();
   await expect.element(screen.getByRole('list', { name: 'What Claude knows' })).toBeVisible();
   const loadedTop = add.getBoundingClientRect().top;
+  expect([...known.querySelectorAll('.cd-knowledge-list__row')].map(pillPlace)).toEqual(pendingPills);
+  // Untiled previews keep their pill at the right on phones.
+  const more = screen.getByRole('region', { name: 'More sources' }).element();
+  for (const row of more.querySelectorAll('.cd-knowledge-list__row')) {
+    const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
+    expect(Math.round(row.getBoundingClientRect().right - pill.right)).toBe(16);
+  }
   // The unknown rows can be taller than their shapes, but the source list never collapses to a line.
   expect(Math.abs(loadedTop - pendingTop)).toBeLessThan(250);
 });
