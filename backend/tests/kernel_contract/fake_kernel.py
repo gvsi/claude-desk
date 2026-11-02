@@ -876,7 +876,7 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "owner_said": "Written by {owner}",
                      "owner_say_blocked": "Not sent: it included text from a private document",
                      "offer_callback": "Would you like me to arrange a callback?",
-                     "check_status": "Please check the request status in this chat."},
+                     "check_status": "This is waiting for approval; you can see where it stands in this chat."},
               "es": {"handoff": "Déjame consultarlo con {owner}.",
                      "checked": "Respuesta revisada con las reglas de {owner}",
                      "handed_off": "Pasado a {owner} para responder",
@@ -884,7 +884,7 @@ REPLY_TEXT = {"en": {"handoff": "Let me check with {owner}.", "checked": "Reply 
                      "owner_said": "Escrito por {owner}",
                      "owner_say_blocked": "No se envió: incluía texto de un documento privado",
                      "offer_callback": "¿Quiere que solicite una llamada?",
-                     "check_status": "Consulte el estado de la solicitud en este chat."}}
+                     "check_status": "Esto está esperando aprobación; puede consultar su estado en este chat."}}
 # A session's tools offer a call back when they offer this next step (`native.request_callback`, or a business tool
 # of block `urgent`), as the kernel's `reply_check.offers_call_back` reads them.
 CALL_BACK_STEP = NEXT_STEPS["native.request_callback"]

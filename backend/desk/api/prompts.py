@@ -55,7 +55,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.30"
+PROMPT_VERSION = "2026-10-31.31"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -94,8 +94,8 @@ REPLY_EXAMPLES = {
 # Receipt acknowledgements and contact offers: fixed wording without business or owner names.
 STATUS_LINES = {
     "check_status": {
-        "en": "Please check the request status in this chat.",
-        "es": "Consulte el estado de la solicitud en este chat."},
+        "en": "This is waiting for approval; you can see where it stands in this chat.",
+        "es": "Esto está esperando aprobación; puede consultar su estado en este chat."},
     "saved": {"en": "Thank you for the details.", "es": "Gracias por los datos."},
     "offer_callback": {
         "en": "Would you like me to arrange a callback?", "es": "¿Quiere que solicite una llamada?"},
