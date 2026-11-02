@@ -132,6 +132,13 @@ export const Phone: Story = {
   parameters: { canvas: 'N-R2-TakeOver-A-390-EN' },
   play: async ({ canvasElement, userEvent }) => {
     await expectMariaInTheChat(canvasElement, userEvent, [390, 844]);
+    // The chat scrolls here, so its end is kept as the page keeps it: the last row 24 px above the
+    // composer area, the room the public chat leaves under the conversation.
+    const rows = canvasElement.querySelectorAll<HTMLElement>('.cd-public-shell__conversation .cd-transcript-row');
+    const last = rows[rows.length - 1];
+    if (!last) throw new Error('no rows in the conversation');
+    const area = one(canvasElement, '.cd-public-shell__composer');
+    await expect(Math.round(area.getBoundingClientRect().top - last.getBoundingClientRect().bottom)).toBe(24);
     // Nothing reaches past the phone's edge: the head's line wraps inside it.
     for (const el of canvasElement.querySelectorAll('.cd-public-shell *')) {
       await expect(el.getBoundingClientRect().right).toBeLessThanOrEqual(390.5);

@@ -937,6 +937,13 @@ export const OwnerInChatPhone: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(window.innerWidth).toBe(PHONE);
     await expectOwnerInChat(canvas.getByRole('main'), 'en');
+    // The chat scrolls here, so its end is kept as the page keeps it: the last row 24 px above the
+    // composer area, the room the public chat leaves under the conversation.
+    const rows = canvasElement.querySelectorAll<HTMLElement>('.cd-public-shell__conversation .cd-transcript-row');
+    const last = rows[rows.length - 1];
+    const area = canvasElement.querySelector<HTMLElement>('.cd-public-shell__composer');
+    if (!last || !area) throw new Error('no rows in the conversation, or no composer area');
+    await expect(Math.round(area.getBoundingClientRect().top - last.getBoundingClientRect().bottom)).toBe(24);
     // No sideways scroll: nothing reaches past the phone's width, the paused line wraps inside it.
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(PHONE);
     for (const el of canvasElement.querySelectorAll('.cd-public-shell *')) {
