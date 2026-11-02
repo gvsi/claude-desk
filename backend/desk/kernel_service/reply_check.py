@@ -78,9 +78,10 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    Mike Turner to approve (this card states ...)"), and each request that has left `held` since
    Claude's latest reply in the session that passed, in ledger order ("Quote request: Cancelled",
    when the visitor's booking closed a held discount). A receipt backs what it says and nothing
-   more: never another request, a follow-up, an outcome, a time or an approval it doesn't state. They are read without a lock, in a savepoint, and a read that fails adds none. A
-   receipt only restates a status the chat already shows and updates, so unlike the handoff's card
-   it isn't checked again in step 7: a change while the model reads leaves the reply true to what
+   more: never another request, a follow-up, an outcome, a time or an approval it doesn't state.
+   They are read without a lock, in a savepoint, and a read that fails adds none. A receipt only
+   restates a status the chat already shows and updates, so unlike the handoff's card it isn't
+   checked again in step 7: a change while the model reads leaves the reply true to what
    the chat showed moments before, an accepted race. When configured,
    TypeSafe Jev evaluates the same prose, labelled cards and fixed next steps concurrently, within
    three seconds of Sonnet's eight-second window.
@@ -148,6 +149,7 @@ from desk.public_contact import contact_endpoints as public_contact_endpoints
 from desk.contracts import (Claim, Clause, Fact, Label, LedgerEvent, OwnerMessageResult, RenderedBlock, ReplyDraft,
                             ReplyVerdict, ToolProfile, Violation, is_business_tool)
 from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, LedgerHead, Person, Tool
+from desk.db.models import Action as ActionRow
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.db.models import LedgerEntry as LedgerRow
@@ -1566,7 +1568,7 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     `_last_passed_reply`). A hold past its expiry that no read has expired yet is neither, and so is a
     request whose tool names no subject (`_receipt_asked`)."""
     rows = (await ctx.db.execute(ctx.repo.scoped(select(
-        DecisionRow.tool, DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at,
+        DecisionRow.tool, DecisionRow.action_id, DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at,
         DecisionRow.ledger_seq).where(
         DecisionRow.session_id == session_row.session_id, DecisionRow.outcome == "hold")
         .order_by(DecisionRow.created_at, DecisionRow.decision_id)))).all()
@@ -1575,31 +1577,40 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     now = ctx.clock.now()
     shown = [row for row in rows
              if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
-    asked = await _receipt_asked(ctx, session_row, {row.tool for row in shown})
-    return [(asked[row.tool], row.visitor_plain) for row in shown if row.tool in asked]
+    asked = await _receipt_asked(ctx, session_row, shown)
+    return [(key, row.visitor_plain) for row, key in zip(shown, asked, strict=True) if key is not None]
 
 
-async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, tools: set[str]) -> dict[str, str]:
-    """What each of `tools` asks for, as its key in `render.RECEIPT_SUBJECTS`: a native or payments tool
-    by itself, and a business tool by its block (`block:<name>`), read from the Desk's tool row without a
-    lock. A tool named in neither, or a business tool with no such row, has none."""
+async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, rows: Sequence) -> list[str | None]:
+    """What each request of `rows` asked for, as its key in `render.RECEIPT_SUBJECTS`, or None: a native or
+    payments tool by itself, and a business tool by its block (`block:<name>`) when the Desk's tool row
+    still holds the profile the request was decided with (its action's `profile_sha256`), both read without
+    a lock. A tool named in neither, a business tool with no such row, and one the owner has replaced since
+    (an intake made a typed booking would rename the request) have none."""
     named = render.RECEIPT_SUBJECTS["en"]
-    asked = {tool: tool for tool in tools if tool in named}
-    business = sorted(tool for tool in tools if is_business_tool(tool))
+    business = [row for row in rows if is_business_tool(row.tool) and row.action_id is not None]
+    blocks: dict[str, str] = {}
     if business:
-        for tool, profile in (await ctx.db.execute(ctx.repo.scoped(select(Tool.tool, Tool.profile).where(
-                Tool.desk_id == session_row.desk_id, Tool.tool.in_(business))))).all():
-            block = profile.business.config.block if profile is not None and profile.business is not None else None
-            if f"block:{block}" in named:
-                asked[tool] = f"block:{block}"
-    return asked
+        actions = sorted({row.action_id for row in business})
+        decided = dict((await ctx.db.execute(ctx.repo.scoped(select(ActionRow.action_id, ActionRow.profile_sha256)
+                                                              .where(ActionRow.action_id.in_(actions))))).all())
+        current = {tool: (profile, sha) for tool, profile, sha in (await ctx.db.execute(ctx.repo.scoped(select(
+            Tool.tool, Tool.profile, Tool.profile_sha256).where(
+            Tool.desk_id == session_row.desk_id, Tool.tool.in_(sorted({row.tool for row in business})))))).all()}
+        for row in business:
+            profile, sha = current.get(row.tool, (None, None))
+            if profile is not None and profile.business is not None and sha == decided.get(row.action_id):
+                blocks[row.action_id] = f"block:{profile.business.config.block}"
+    return [row.tool if row.tool in named else blocks.get(row.action_id) if is_business_tool(row.tool) else None
+            for row in rows]
 
 
 async def request_receipts(ctx: KernelCtx, session_row: SessionRow, language: render.Language) -> list[str]:
     """The session's request receipts as the soft checks read them (`render.receipt_check_text`), what was
-    asked for and the status-only note in the reply's `language`, never another session's: backing the reply doesn't show again and cites no fact for, as an open handoff's
-    card is. A read that fails adds none, in a savepoint of its own, so the transaction goes on: the
-    receipts only widen what backs a reply, so not knowing fails toward the stricter check."""
+    asked for and the status-only note in the reply's `language`, never another session's: backing the
+    reply doesn't show again and cites no fact for, as an open handoff's card is. A read that fails adds
+    none, in a savepoint of its own, so the transaction goes on: the receipts only widen what backs a
+    reply, so not knowing fails toward the stricter check."""
     try:
         async with ctx.db.begin_nested():
             found = await _request_receipts(ctx, session_row)
