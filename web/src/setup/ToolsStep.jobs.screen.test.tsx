@@ -104,6 +104,45 @@ it.each([1440, 390])('at %i px, a job the owner let run on its own says so, and 
   expectNoHorizontalScroll();
 });
 
+it.each([
+  { width: 1440, answersAtOnce: false },
+  { width: 390, answersAtOnce: true },
+])('at $width px, says so after the owner presses "Set it up" on the booking card in the streamed chat (202 at once: $answersAtOnce)', async ({ width, answersAtOnce }) => {
+  const started = await mockStore.dispatch('startSetup', { body: {
+    description: 'Chen & Co. CPA. I am Linda, a CPA in San Jose.', timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
+  } });
+  if ('network' in started || started.status !== 201) throw new Error('The mock starts setup');
+  const id = (started.body as SetupState).interview_id;
+  await mockStore.dispatch('setupConsent', { params: { id }, query: { cards: '1' }, body: { allow: true } });
+  const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+  // Every setup turn streams, as in the dev server's mock app: a decision's request answers once its
+  // turn lands, or 202 busy at once, as the API does once a turn outlasts its wait, while the step
+  // reads the busy interview and follows the turn.
+  mockStore.streamSetupTurns(true, { answersAtOnce });
+  await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
+  // The walk the owner takes: each card's own button, pressed once it is waiting.
+  for (const [card, action] of [
+    ['Google Calendar', 'Connect'],
+    ['Book a free intro call', 'Set it up'],
+    ['Ask new clients three questions', 'Set it up'],
+    ['Stripe', 'Not now'],
+    ['Send a retainer link', 'Not now'],
+    ['Answer “Where’s my return?”', 'Set it up'],
+  ] as const) {
+    const article = screen.getByRole('article', { name: card, exact: true });
+    await article.getByRole('button', { name: action, exact: true }).click();
+    await expect.poll(() => article.getByRole('button').elements().length).toBe(0);
+  }
+  await screen.getByRole('button', { name: 'Ask me before every payment', exact: true }).click();
+  await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+  expect(mockStore.requests.filter((r) => r.key === 'setupProposal').map((r) => r.body)).toContainEqual({ accept: true });
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
+  const tools = screen.getByRole('region', { name: 'Tools', exact: true });
+  await expect.poll(() => coverage(tools)).toEqual([CHOSE_ON_ITS_OWN]);
+  await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
+});
+
 it("keeps today's line for a job the owner accepted as asking first", async () => {
   const { state } = await interviewWithBooking('ask');
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
