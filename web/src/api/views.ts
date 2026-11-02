@@ -79,6 +79,11 @@ export interface ConversationSummary {
   /** The verified person's name, else the session's lead's, else null. Untrusted. */
   display_name: string | null;
   verified: boolean;
+  /**
+   * The person on record a visitor's chat was verified as, which their page under People lists it
+   * by; null for an unverified visitor, an agent and the owner's preview. Absent is null.
+   */
+  person_id?: string | null;
   mode: SessionMode;
   last_activity: string;
   outcome_counts: Partial<Record<DecisionState, number>>;

@@ -1666,6 +1666,39 @@ async def test_conversations_carry_the_visitors_latest_words(scene, clock):
     assert {session_id: live[session_id]["latest_visitor_text"] for session_id in expected} == expected
 
 
+async def test_conversations_name_a_verified_visitors_person(scene, clock):
+    """A verified visitor's conversation carries the person on record it was verified as, which their page under
+    People lists it by. An unverified visitor's carries none, nor does an agent's or the owner's own preview, even
+    once one of those is verified as someone on record."""
+    at = local(2026, 10, 30, 8, 57)
+    dana = await scene.visitor(at)
+    await scene.text(dana, at, "It's Dana, about my drain clearing invoice.")
+    scene.fake.verify(dana.session_id, "dana")
+    stranger = await scene.visitor(at)
+    await scene.text(stranger, at)
+    preview = await scene.visitor(at, preview=True)
+    await scene.text(preview, at, "Testing my own Desk")
+    scene.fake.verify(preview.session_id, "bob")
+    scene.fake.now = at
+    agent, _ = scene.fake._new_session(scene.owner.copy_id, scene.owner.desk_id, "agent")
+    scene.fake.verify(agent.session_id, "bob")
+    agent_ids = Ids(copy_id=scene.owner.copy_id, desk_id=scene.owner.desk_id, session_id=agent.session_id)
+    await write(scene.engine, scene.admin, agent_ids, "agent_text", at, text="Book the earliest visit for Bob.")
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = {summary["session_id"]: summary
+              for summary in (await owner.get(f"desks/{owner.desk_id}/conversations")).json()}
+    live = {summary["session_id"]: summary
+            for summary in (await owner.get(f"desks/{owner.desk_id}/today")).json()["live"]}
+
+    danas = scene.fake.sessions[dana.session_id].person_id
+    assert danas is not None and scene.fake.sessions[preview.session_id].person_id is not None
+    expected = {dana.session_id: danas, stranger.session_id: None, preview.session_id: None, agent.session_id: None}
+    assert {session_id: listed[session_id]["person_id"] for session_id in expected} == expected
+    assert {session_id: live[session_id]["person_id"] for session_id in expected} == expected
+
+
 async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     # Two quotes a second apart, then a booking: the second quote backs it.
     two_quotes = await scene.visitor(local(2026, 10, 29, 10))

@@ -134,6 +134,14 @@ class People:
             return None
         return self._verified.get(session_id) or self._leads.get(session_id)
 
+    def person(self, session_id: str) -> str | None:
+        """The person on record a visitor's session was verified as, else None: never an agent's or the owner's own
+        preview, even one verified as someone on record."""
+        row = self.sessions.get(session_id)
+        if row is None or row["kind"] != "visitor" or row["preview"] or not row["verified"]:
+            return None
+        return row["person_id"]
+
     def brief(self, session_id: str) -> NeedsYouSession | None:
         row = self.sessions.get(session_id)
         if row is None:
@@ -1304,7 +1312,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
         outcome = outcomes.get(session_id, Outcome())
         found.append(ConversationSummary(
             session_id=session_id, kind=row["kind"], display_name=who.name(session_id), verified=row["verified"],
-            mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
+            person_id=who.person(session_id), mode=row["mode"], last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
             latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcome.outcome,
             latest_outcome_starts_at=outcome.starts_at, latest_outcome_cents=outcome.cents,
