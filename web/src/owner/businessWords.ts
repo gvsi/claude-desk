@@ -51,8 +51,9 @@ export const BUSINESS_WORDS: Readonly<Record<DeskSummary['business_type'], Busin
 };
 
 /**
- * The words for `desk`. Every Desk of the sample business keeps Turner’s, as its other sample content
- * goes by the business. Any other Desk takes those of the business type setup stored for it.
+ * The words for `desk`. Every Desk of the sample business keeps Turner’s, chosen by business name as
+ * Alerts and the Rules chips already were (the API's type says `other` for a Desk it added). Any other
+ * Desk takes those of the business type setup stored for it.
  */
 export function businessWords(desk: Pick<DeskSummary, 'business_name' | 'business_type'>): BusinessWords {
   return BUSINESS_WORDS[desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? 'rivera' : desk.business_type];
