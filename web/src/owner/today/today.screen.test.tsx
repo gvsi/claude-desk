@@ -1292,7 +1292,15 @@ describe('Today', () => {
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
     // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
     // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.
-    const { screen } = await renderRoute(TODAY, { viewport });
+    // The seed's booking comes under a minute before the copy opens, so a fresh copy opens at a fixed
+    // afternoon on the Desk's clock: in the first minute after midnight, it would fall on yesterday's bar.
+    // Only Date is faked: the page's timers and polling stay real.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const { screen } = await renderRoute(TODAY, { viewport, seed: 'rivera' });
     const list = region(screen, 'Last 7 days').getByRole('list', { name: 'Bookings per day' });
     await expect.element(list).toBeVisible();
     const box = list.element().getBoundingClientRect();
@@ -1747,7 +1755,9 @@ describe('Today', () => {
     const live = region(screen, 'Live now');
     const column = await focusMarkDoneAtTheFoot(screen, live.element());
     const before = { column: column.scrollTop, window: window.scrollY };
-    const todayLine = () => document.querySelector('.cd-how__today')!.getBoundingClientRect().height;
+    // The page's own line: Today's loading shapes, while they fade out, draw one of their own.
+    const howToday = region(screen, 'How your Desk works').element();
+    const todayLine = () => howToday.querySelector('.cd-how__today')!.getBoundingClientRect().height;
     const lineBefore = todayLine();
 
     await userEvent.keyboard('{Enter}');
@@ -2405,6 +2415,15 @@ describe('Today', () => {
 /** The box of an element on the page. */
 const box = (el: Element) => el.getBoundingClientRect();
 
+/**
+ * Waits until Today's loading shapes have left the page. They fade out over the page once it has
+ * drawn, with a band and a greeting of their own, so a query for those finds the shapes until then.
+ */
+async function skeletonGone(): Promise<void> {
+  // The fade's own fallback takes the shapes away within a second, so allow that and more.
+  await expect.poll(() => document.querySelector('.cd-today--skeleton'), { timeout: 2_000 }).toBeNull();
+}
+
 /** The controls in `root` that a pointer or Tab can reach now (drawn, not hidden). */
 function drawnControls(root: Element): HTMLElement[] {
   return [...root.querySelectorAll<HTMLElement>('a[href], button')].filter((el) => el.getClientRects().length > 0);
@@ -2422,6 +2441,7 @@ describe("Today's top band", () => {
     const things = region(screen, 'Things to try');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(things.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await skeletonGone();
     const band = document.querySelector('.cd-today__band');
     const main = document.querySelector('.cd-today__main');
     const aside = document.querySelector('.cd-today-aside');
@@ -2527,6 +2547,7 @@ describe("Today's top band", () => {
     const things = region(screen, 'Things to try');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(screen.getByText('One person is talking to your Desk right now.')).toBeVisible();
+    await skeletonGone();
 
     // Title, presence line, link pill, then "Chat as a customer", down the page from one left edge.
     const title = box(screen.getByRole('heading', { level: 1 }).element());
@@ -2637,6 +2658,7 @@ describe("Today's How your Desk works", () => {
     const { screen } = await renderRoute(TODAY);
     const how = region(screen, 'How your Desk works');
     await expect.element(how).toBeVisible();
+    await skeletonGone();
     await expect.element(how.getByRole('heading', { level: 2, name: 'How your Desk works', exact: true })).toBeVisible();
     // Three numbered steps, the second naming the business as the Desk knows it.
     expect(how.getByRole('list').elements()).toHaveLength(1);
