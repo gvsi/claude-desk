@@ -600,7 +600,7 @@ def test_setup_says_when_a_question_takes_several_answers():
         assert "false when one answer is expected" in line
         assert "false without choices" in line
     for system in (SETUP_TURN_SYSTEM, SETUP_NEXT_SYSTEM, SETUP_CARD_ANSWER_SYSTEM):
-        assert "which channels customers use" in system
+        assert "which services customers ask about most" in system and "channels" not in system
         assert "a yes or no, or a pick of one setting" in system
 
 

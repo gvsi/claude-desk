@@ -2569,7 +2569,7 @@ async def _ensure_answerable(owner: OwnerCtx, engine: AsyncEngine, model: ModelC
                                                         and follow_up.next.topic not in LIMIT_CHOICES)
             if question and fitting and (reply is None or question != reply.text.strip()):
                 asked = _claudes_ask(interview, key, question, follow_up.choices,
-                                     follow_up.next.kind == "topic" and follow_up.next.several)
+                                     follow_up.next.kind == "topic" and getattr(follow_up.next, "several", False))
                 reason = "turn_question"
     else:
         added = {card.proposal_id for entry in interview.transcript[since:] for card in entry.planned}
@@ -2625,7 +2625,7 @@ async def _advance_ask(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient,
         fitting = source is not None and source.next.kind == "topic" and source.next.topic == asked
         interview.transcript.append(_ask(interview, asked) if asked in LIMIT_CHOICES or not fitting else
                                     _claudes_ask(interview, asked, source.question, source.choices,
-                                                 source.next.several))
+                                                 getattr(source.next, "several", False)))
     elif isinstance(asked, ProposalCard):
         fitting = _names_card(source, asked)
         if fitting and source.question.strip():

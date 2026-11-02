@@ -431,7 +431,7 @@ async def test_a_change_to_a_limit_is_asked_on_the_limits_own_question(app, brow
     # limit's own question again, in its words and with its choices. The limit comes only from that answer.
     owner, state = await ready(app, browser, kernel_http, model)
     await at_step(owner, model, state, "situations")
-    model.add(turn("I'll ask you about that.", next={"kind": "topic", "topic": "quote_limit", "several": False}))
+    model.add(turn("I'll ask you about that.", next={"kind": "topic", "topic": "quote_limit"}))
     changed = await reopen(owner, state, "Quotes up to $1,000 can go out without asking me.")
     assert changed.status_code == 200, changed.text
     body = changed.json()
@@ -458,7 +458,7 @@ async def test_only_the_change_itself_can_ask_a_finished_topic_again(app, browse
     changed = await reopen(owner, state)
     assert changed.status_code == 200 and changed.json()["question"] == setup.REOPEN_TOPIC, changed.text
     reply = await answer(owner, model, state["interview_id"], "Yes, the same as before.",
-                         turn(next={"kind": "topic", "topic": "quote_limit", "several": False}))
+                         turn(next={"kind": "topic", "topic": "quote_limit"}))
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools"
     assert setup.SETUP_REOPEN_LINE not in request_text(model.requests[-1])     # the turn after the change
@@ -914,7 +914,7 @@ async def test_a_change_naming_a_fact_and_a_limit_asks_both(app, browser, kernel
     # question Claude named, in code's words with its choices, and the owner's choice there lands.
     owner, state = await ready(app, browser, kernel_http, model)
     model.add(turn("Brooklyn too, and quotes will wait for you.", service_area=NEW_AREA,
-                   next={"kind": "topic", "topic": "quote_limit", "several": False}))
+                   next={"kind": "topic", "topic": "quote_limit"}))
     changed = await reopen(owner, state, "We cover Brooklyn now, and ask me before quotes go out.")
     assert changed.status_code == 200, changed.text
     assert (changed.json()["step"], changed.json()["question"]) == ("questions", "hours_and_area")

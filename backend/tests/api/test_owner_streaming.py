@@ -817,7 +817,7 @@ async def test_a_reply_before_a_limit_question_streams_nothing(app, browser, ker
     owner, interview_id, path = await answered_up_to(app, browser, kernel_http, model, "hours_and_area")
     reply = "Got it: weekdays 8 to 6 around Oakland, from what your site says."
     raw = answer_turn(setup.SETUP_TURNS["hours_and_area"], reply).model_dump_json()
-    assert json.loads(raw)["next"] == {"kind": "topic", "topic": "quote_limit", "several": False}
+    assert json.loads(raw)["next"] == {"kind": "topic", "topic": "quote_limit"}
     release, entered, given = asyncio.Event(), asyncio.Event(), []
     model.add(writing(raw, release, entered, given))
     monkeypatch.setattr(setup, "TURN_WAIT_S", 0)

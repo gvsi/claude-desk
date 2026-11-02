@@ -166,7 +166,10 @@ def blank(output: type[BaseModel]) -> dict:
 
 
 def next_ask(topic: str, *, several: bool = False) -> dict:
-    return {"kind": "done"} if topic == "done" else {"kind": "topic", "topic": topic, "several": several}
+    """`next` asking `topic`; `several` only where the output takes it (the next step and a typed card answer)."""
+    if topic == "done":
+        return {"kind": "done"}
+    return {"kind": "topic", "topic": topic, **({"several": True} if several else {})}
 
 
 def next_key(key: str) -> str:
@@ -921,24 +924,28 @@ async def test_the_understandings_several_reaches_its_opening_question(
 
 @pytest.mark.parametrize("several,choices,expected", [(True, CHANNELS, True), (False, CHANNELS, False),
                                                       (True, CHANNELS[:1], False)])
-async def test_a_fact_turns_several_reaches_the_question_it_asks(
+async def test_a_next_steps_several_reaches_the_question_it_asks(
     app, browser, kernel_http, model, engine, several, choices, expected,
 ):
+    # The consultant's next step says whether its topic's choices can be picked together; a fact turn's `next` can't
+    # (test_schema_budget.py), so a fact turn's question always takes one answer.
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
     path = f"/api/owner/setup/{state['interview_id']}"
     await consent(owner, state["interview_id"], False, model)
-    reply = await answer(owner, model, state["interview_id"], "We fix leaks.",
-                         turn(next=next_ask("hours_and_area", several=several),
-                              question="How do customers reach you?", choices=choices))
+    await answer(owner, model, state["interview_id"], "Ask about quotes.", turn(next=next_ask("quote_limit")))
+    reply = await answer(owner, model, state["interview_id"], "Ask me first.", turn(),
+                         next_step("quote_limit", next=next_ask("contact_and_after_hours", several=several),
+                                   question="How do customers reach you?", choices=choices,
+                                   skip=["money_limit", "discounts"]))
     assert reply.status_code == 200, reply.text
     asked = (await owner.browser.get(path)).json()["messages"][-1]
     # Several applies only to a question with choices: a single choice is dropped, and the flag with it.
-    assert (asked["text"], asked["choices"], asked["several"]) == (
-        "How do customers reach you?", choices if len(choices) > 1 else [], expected)
+    assert (asked["text"], asked["several"]) == ("How do customers reach you?", expected)
+    assert len(asked["choices"]) == (len(choices) if len(choices) > 1 else 0)
     assert reply.json()["messages"][-1] == asked
     row = await stored(engine, state["interview_id"])
-    assert row["transcript"][-1]["question"] == "hours_and_area"
+    assert row["transcript"][-1]["question"] == "contact_and_after_hours"
     assert row["transcript"][-1].get("several", False) is expected
 
 
@@ -4266,13 +4273,14 @@ async def test_a_limit_question_never_takes_several_answers(app, browser, kernel
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, business_type="office")
     await consent(owner, state["interview_id"], False, model)
-    reply = await answer(owner, model, state["interview_id"], "We prepare tax returns.",
-                         turn(next=next_ask("money_limit", several=True), question="How much can I take?",
-                              choices=CHANNELS))
+    await answer(owner, model, state["interview_id"], "We prepare tax returns.", turn(next=next_ask("quote_limit")))
+    reply = await answer(owner, model, state["interview_id"], "Ask me first.", turn(),
+                         next_step("quote_limit", next=next_ask("discounts", several=True), question="How much off?",
+                                   choices=CHANNELS))
     assert reply.status_code == 200, reply.text
     asked = reply.json()["messages"][-1]
     assert (reply.json()["question"], asked["text"], asked["several"]) == (
-        "money_limit", question_text("money_limit", "office"), False)
+        "discounts", question_text("discounts", "office"), False)
     row = await stored(engine, state["interview_id"])
     assert "several" not in row["transcript"][-1]
 
@@ -4287,11 +4295,13 @@ def test_picks_and_a_typed_answer_read_as_one_answer_in_the_questions_order():
 
 
 async def several_question(owner: Owner, model: ScriptedModel, interview_id: str, *, several: bool = True) -> dict:
-    """Answer the first question, the turn asking `hours_and_area` next with three choices (`CHANNELS`) and
-    `several`; the state it lands."""
-    reply = await answer(owner, model, interview_id, "We fix leaks.",
-                         turn(next=next_ask("hours_and_area", several=several),
-                              question="How do customers reach you?", choices=CHANNELS))
+    """Answer the first question and the quote limit, the next step asking `hours_and_area` with three choices
+    (`CHANNELS`) and `several` (a fact turn's `next` can't say several); the state it lands."""
+    await answer(owner, model, interview_id, "Ask about quotes.", turn(next=next_ask("quote_limit")))
+    reply = await answer(owner, model, interview_id, "Ask me first.", turn(),
+                         next_step("quote_limit", next=next_ask("hours_and_area", several=several),
+                                   question="How do customers reach you?", choices=CHANNELS,
+                                   skip=["money_limit", "discounts"]))
     assert reply.status_code == 200, reply.text
     assert reply.json()["question"] == "hours_and_area"
     return reply.json()
