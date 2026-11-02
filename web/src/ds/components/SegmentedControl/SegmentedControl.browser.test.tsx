@@ -1,6 +1,10 @@
 /** Touch targets keep the track, labels and inline baseline exactly where they were. */
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { userEvent } from 'vitest/browser';
+import { render } from 'vitest-browser-react';
+import { chooseTheme } from '../../test/theme.ts';
+import { pairContrast } from '../../contrast.ts';
 import { expect, it } from 'vitest';
 
 import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
@@ -60,5 +64,34 @@ it('touch_segments_reach_44_px_and_cap_their_shared_gap_without_moving', async (
   } finally {
     act(() => root.unmount());
     host.remove();
+  }
+});
+
+
+it.each(['dark', 'light'] as const)('the_selected_thumb_has_a_visible_edge_in_%s', async (theme) => {
+  chooseTheme(theme);
+  const screen = await render(<SegmentedControl label="Appearance" options={[{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]} value="dark" onChange={() => {}} />);
+  try {
+    const selected = screen.getByRole('radio', { name: 'Dark' }).element() as HTMLElement;
+    const track = selected.parentElement!;
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--line-focus)';
+    track.append(probe);
+    const edge = getComputedStyle(probe).color;
+    probe.remove();
+    const style = () => getComputedStyle(selected);
+    const bounds = selected.getBoundingClientRect().toJSON();
+    expect(style().boxShadow).toBe(`${edge} 0px 0px 0px 1px inset`);
+    expect(pairContrast({ fg: edge, fgGround: style().backgroundColor, ground: getComputedStyle(track).backgroundColor, over: getComputedStyle(document.body).backgroundColor })).toBeGreaterThanOrEqual(3);
+    await userEvent.hover(selected);
+    expect(style().boxShadow).toBe(`${edge} 0px 0px 0px 1px inset`);
+    await userEvent.keyboard('{Tab}');
+    selected.focus();
+    expect(selected.matches(':focus-visible')).toBe(true);
+    expect(style().boxShadow).toBe(`${edge} 0px 0px 0px 2px inset`);
+    expect(selected.getBoundingClientRect().toJSON()).toEqual(bounds);
+  } finally {
+    await screen.unmount();
+    chooseTheme('dark');
   }
 });

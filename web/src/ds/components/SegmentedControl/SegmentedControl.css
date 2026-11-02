@@ -42,7 +42,13 @@
 .cd-segmented__option[aria-checked='true'],
 .cd-segmented__option[aria-checked='true']:hover {
   background: var(--bg-selected);
+  box-shadow: inset 0 0 0 1px var(--line-focus);
   color: var(--text-primary);
+}
+
+/* Selection has an edge too, so keyboard focus strengthens it without moving the thumb. */
+.cd-segmented__option[aria-checked='true']:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--line-focus);
 }
 
 /* The unseen target reaches size-touch without changing the track or the inline baseline.
