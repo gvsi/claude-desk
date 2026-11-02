@@ -118,6 +118,66 @@
   color: var(--text-secondary);
 }
 
+/* Under the rules, 28 px down as Customers spaces its sections: the chats they had once verified,
+   "Conversations" 8 px over them, as the rules sit under theirs. The chats are grouped by day as the
+   Conversations list groups them: each day in the caption type in the tertiary ink with a hairline
+   to its right, its rows 8 px under it and 4 px apart, the next day 16 px on. With none, one quiet
+   line, as the rules say they have none. */
+.cd-person__conversations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+  margin-top: calc(var(--space-28) - var(--space-16));
+}
+
+.cd-person__day-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.cd-person__day-group + .cd-person__day-group {
+  margin-top: var(--space-8);
+}
+
+.cd-person__day {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0 var(--space-8);
+  color: var(--text-tertiary);
+  font-weight: 520;
+}
+
+.cd-person__day::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-right: calc(-1 * var(--space-8));
+  background: var(--line-hairline);
+}
+
+.cd-person__chats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-person__chats > li {
+  min-width: 0;
+}
+
+.cd-person__none {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
 @media (max-width: 1023.98px) {
   .cd-person__columns {
     grid-template-columns: minmax(0, 1fr);

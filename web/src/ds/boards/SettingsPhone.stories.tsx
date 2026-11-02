@@ -60,9 +60,9 @@ export const Board: Story = {
     await expect(top(answering) - bottom(nav)).toBe(16);
     await expect(page.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
     const switchRow = within(answering).getByRole('switch', { name: 'Claude acts for you' });
-    await expect(Math.round(answering.getBoundingClientRect().height)).toBe(91);
-    await expect(top(switchRow) - top(answering)).toBe(21);
-    await expect(bottom(answering) - bottom(switchRow)).toBe(21);
+    await expect(Math.round(answering.getBoundingClientRect().height)).toBe(71);
+    await expect(top(switchRow) - top(answering)).toBe(11);
+    await expect(bottom(answering) - bottom(switchRow)).toBe(11);
 
     // Delete this Desk 16 px under: the heading, the line 8 px under it, and the red button 8 px under that, at the left.
     const remove = page.getByRole('region', { name: 'Delete this Desk' });

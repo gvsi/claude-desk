@@ -484,6 +484,24 @@ describe('Today', () => {
     expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
   });
 
+  it('held_row_quotes_its_rule_after_a_colon_with_one_full_stop', async () => {
+    // "Answer a held request" names the rule after a colon, as the owner's words, and adds a full
+    // stop only when the rule has none. A hold with no rule keeps the plain line.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision) throw new Error('the seed holds a request');
+    const heldBy = (rule: string | null) => () => mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [{ ...seeded, held_by: rule }] });
+
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy('Quotes at list price') });
+    const line = region(screen, 'Things to try').getByText('A request is waiting for your answer: Quotes at list price.', { exact: true });
+    await expect.element(line).toBeVisible();
+    expect([...line.element().querySelectorAll('[data-copy="user"]')].map((span) => span.textContent)).toEqual(['Quotes at list price']);
+
+    const { screen: none } = await renderRoute(TODAY, { seed: 'rivera', beforeRender: heldBy(null) });
+    const plain = region(none, 'Things to try').getByText('A request is waiting for your answer.', { exact: true });
+    await expect.element(plain).toBeVisible();
+    expect(plain.element().querySelector('[data-copy="user"]')).toBeNull();
+  });
+
   it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
     // The greeting says the owner's first name after the time of day. An owner who gave no name has
     // setup's fallback, "Owner", in its place, and a blank name is none either: the greeting then
@@ -933,6 +951,93 @@ describe('Today', () => {
     expect(sawFailure()).toBe(true);
     expect(requests('today').length).toBeGreaterThan(2);
     expect(requests('needsYou').length).toBeGreaterThan(2);
+  });
+
+  it.each(['Since last night', 'Last 7 days', 'Needs you'])('retry_keeps_keyboard_order_after_recovery_in_%s', async (name) => {
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const section = region(screen, name);
+    const next = name === 'Needs you' ? section.getByRole('button', { name: 'Allow this time' }) : section.getByRole('link').first();
+    await expect.element(next).toBeVisible();
+    const route = name === 'Needs you' ? 'needsYou' : 'today';
+    mockStore.inject({ route, status: 503, times: 10_000 });
+    const retry = section.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+
+    // A retry that still fails keeps the same button and its keyboard focus. The failing read is held,
+    // so its busy state shows however fast the failure would come back.
+    const path = ROUTES[route].path.replace('{desk_id}', RIVERA.deskId);
+    const failing = holdReads(path);
+    (retry.element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    failing.release();
+    await expect.element(retry).not.toHaveAttribute('aria-busy');
+    await expect.element(retry).toHaveFocus();
+
+    const read = holdReads(path);
+    (retry.element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    await expect.element(retry).toHaveFocus();
+    mockStore.reset('rivera');
+    read.release();
+
+    await expect.element(retry).not.toBeInTheDocument();
+    await expect.element(section.getByRole('heading', { name, exact: true })).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+    await userEvent.tab();
+    await expect.element(next).toHaveFocus();
+  });
+
+  it.each(['Since last night', 'Last 7 days', 'Needs you'].flatMap((name) => [
+    { name, keyboard: false },
+    { name, keyboard: true },
+  ]))('retry_recovery_leaves_focus_elsewhere in $name (keyboard: $keyboard)', async ({ name, keyboard }) => {
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const section = region(screen, name);
+    await expect.element(section).toBeVisible();
+    const route = name === 'Needs you' ? 'needsYou' : 'today';
+    mockStore.inject({ route, status: 503, times: 10_000 });
+    const retry = section.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    const elsewhere = screen.getByRole('button', { name: 'Copy your Desk link' });
+    const read = holdReads(ROUTES[route].path.replace('{desk_id}', RIVERA.deskId));
+
+    if (keyboard) {
+      (retry.element() as HTMLElement).focus();
+      await userEvent.keyboard('{Enter}');
+    } else {
+      // A programmatic retry starts the read without giving the button focus.
+      (elsewhere.element() as HTMLElement).focus({ preventScroll: true });
+      (retry.element() as HTMLElement).click();
+    }
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    (elsewhere.element() as HTMLElement).focus({ preventScroll: true });
+    mockStore.reset('rivera');
+    read.release();
+
+    await expect.element(retry).not.toBeInTheDocument();
+    await expect.element(elsewhere).toHaveFocus();
+  });
+
+  it('retry_recovery_with_nothing_needing_the_owner_focuses_the_next_section', async () => {
+    mockStore.reset('rivera_quiet');
+    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
+    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const needs = region(screen, 'Needs you');
+    const retry = needs.getByRole('button', { name: 'Try again' });
+    await expect.element(retry).toBeVisible();
+    const read = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    (retry.element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(retry).toHaveAttribute('aria-busy', 'true');
+    mockStore.reset('rivera_quiet');
+    read.release();
+
+    await expect.element(needs).not.toBeInTheDocument();
+    await expect.element(region(screen, 'Since last night').getByRole('heading', { name: 'Since last night', exact: true })).toHaveFocus();
+    await userEvent.tab();
+    await expect.element(region(screen, 'Last 7 days').getByRole('link', { name: 'Open Safety' })).toHaveFocus();
   });
 
   it('needs_you_read_failure_says_so', async () => {

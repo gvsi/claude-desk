@@ -1,4 +1,5 @@
 import type { KnowledgeRowView } from '../../ds/index.ts';
+import { BUSINESS_WORDS, type BusinessWords } from '../businessWords.ts';
 
 /**
  * Display samples shared by the live app and mock API screens. They never enter the knowledge API.
@@ -43,11 +44,17 @@ export const MOCK_SOURCES: readonly KnowledgeRowView[] = [
   },
 ];
 
-export const SAMPLE_QUESTIONS: readonly KnowledgeRowView[] = [
-  { id: 'softeners', title: 'Do you install water softeners?', detail: 'Asked 3 times this week', readers: [], pill: null },
-  { id: 'sunday', title: 'Can you come out on a Sunday for a burst pipe?', detail: 'Asked twice this week', readers: [], pill: null },
-  { id: 'cards', title: 'Do you take credit cards on site?', detail: 'Asked once, on Friday', readers: [], pill: null },
-];
+/** A business’s sample "Questions Claude couldn’t answer", as rows: how often each was asked is the same for every business. */
+export function sampleQuestions({ questions: [first, second, third] }: BusinessWords): readonly KnowledgeRowView[] {
+  return [
+    { id: 'question-1', title: first, detail: 'Asked 3 times this week', readers: [], pill: null },
+    { id: 'question-2', title: second, detail: 'Asked twice this week', readers: [], pill: null },
+    { id: 'question-3', title: third, detail: 'Asked once, on Friday', readers: [], pill: null },
+  ];
+}
+
+/** Turner Plumbing’s, as the Knowledge board shows them. */
+export const SAMPLE_QUESTIONS: readonly KnowledgeRowView[] = sampleQuestions(BUSINESS_WORDS.rivera);
 
 export const MORE_SOURCES: readonly KnowledgeRowView[] = [
   { id: 'drive', title: 'Google Drive', detail: 'Docs and PDFs you pick, read again when they change.', readers: [], pill: 'Coming later' },

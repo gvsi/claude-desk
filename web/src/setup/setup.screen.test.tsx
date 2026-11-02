@@ -4335,7 +4335,7 @@ describe('consultant setup', () => {
     await expect.element(other).toBeVisible();
     const row = other.element().closest<HTMLElement>('.cd-setup-q3__row--other');
     if (!row) throw new Error('the "Something else" input sits in its row');
-    const edge = tokenColor('--line-field-focus');
+    const edge = tokenColor('--line-focus');
     expect(getComputedStyle(row).boxShadow).not.toContain(edge);
     await other.click();
     expect(getComputedStyle(row).boxShadow).toContain(edge);

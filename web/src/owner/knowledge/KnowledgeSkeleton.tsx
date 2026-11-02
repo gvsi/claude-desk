@@ -32,7 +32,7 @@ export function KnowledgeListSkeleton() {
 }
 
 /** The source list, Add something column and static previews in the page’s responsive order. */
-export function KnowledgeSkeleton({ showSampleQuestions = true }: { showSampleQuestions?: boolean } = {}) {
+export function KnowledgeSkeleton() {
   return (
     <>
       <PageHeaderSkeleton subtitleLines={1} />
@@ -53,7 +53,7 @@ export function KnowledgeSkeleton({ showSampleQuestions = true }: { showSampleQu
           <Skeleton shape="line" text="caption" />
         </div>
         <div className="cd-knowledge__previews">
-          {showSampleQuestions ? <ListShape rows={3} /> : null}
+          <ListShape rows={3} />
           <ListShape rows={3} />
         </div>
       </div>

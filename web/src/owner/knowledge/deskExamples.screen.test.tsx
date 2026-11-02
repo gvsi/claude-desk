@@ -14,8 +14,14 @@ const WEBSITE_NOTE = 'Claude doesn’t read websites you add in this prototype y
 /** The note's example on the plumbing demo, and the hint under the note on every Desk. */
 const NOTE_EXAMPLE = "We don't work on gas lines or septic tanks.";
 const NOTE_HINT = 'Up to a few paragraphs. Only you can see it until you make it public.';
+const OTHER_QUESTIONS = ['Do you sell gift cards?', 'Is there parking nearby?', 'Do you take credit cards?'];
 
-it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_starting_desk_%s', async (viewport) => {
+/** A preview list's question titles, in order. */
+function titles(list: Element): (string | null | undefined)[] {
+  return [...list.querySelectorAll('li')].map((row) => row.querySelector('.cd-knowledge-list__title')?.textContent);
+}
+
+it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_to_their_business_%s', async (viewport) => {
   const starting = await renderRoute(`/app/${RIVERA.deskId}/knowledge`, { viewport, pollScale: 100 });
   const questions = starting.screen.getByRole('region', { name: QUESTIONS, exact: true });
   await expect.element(questions).toBeVisible();
@@ -36,11 +42,11 @@ it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_st
 
   const salon = await liveSetupDeskIds('A hair salon in Oakland');
   const { screen } = await renderRoute(`/app/${salon.deskId}/knowledge`, { viewport, pollScale: 100 });
+  // A salon's Desk shows its own business type's sample questions, never the plumber's.
   const salonQuestions = screen.getByRole('region', { name: QUESTIONS, exact: true });
   await expect.element(screen.getByRole('textbox', { name: 'A website', exact: true })).toBeVisible();
-  expect.soft(salonQuestions.query()).toBeNull();
-  expect.soft(screen.getByRole('heading', { name: QUESTIONS, exact: true }).query()).toBeNull();
-  expect.soft(screen.getByText(QUESTION_NOTE, { exact: true }).query()).toBeNull();
+  await expect.element(salonQuestions.getByText(QUESTION_NOTE, { exact: true })).toBeVisible();
+  expect(titles(salonQuestions.element())).toEqual(OTHER_QUESTIONS);
   expect.soft(screen.getByRole('textbox', { name: 'A website', exact: true }).element().hasAttribute('placeholder')).toBe(false);
   const salonNote = screen.getByRole('textbox', { name: 'A note', exact: true });
   expect.soft(salonNote.element().hasAttribute('placeholder')).toBe(false);
@@ -71,8 +77,8 @@ it('deleting_the_starting_desk_and_reloading_keeps_samples_off_other_businesses'
   const website = screen.getByRole('textbox', { name: 'A website', exact: true });
   await expect.element(website).toBeVisible();
   await expect.element(screen.getByRole('status', { name: 'Loading what I know', exact: true })).not.toBeInTheDocument();
-  expect.soft(screen.getByRole('region', { name: QUESTIONS, exact: true }).query()).toBeNull();
-  expect.soft(screen.getByText(QUESTION_NOTE, { exact: true }).query()).toBeNull();
+  await expect.element(screen.getByRole('region', { name: QUESTIONS, exact: true })).toBeVisible();
+  expect(titles(screen.getByRole('region', { name: QUESTIONS, exact: true }).element())).toEqual(OTHER_QUESTIONS);
   for (const sample of MOCK_SOURCES) expect.soft(screen.getByText(sample.title!, { exact: true }).query()).toBeNull();
   expect.soft(website.element().hasAttribute('placeholder')).toBe(false);
   expect.soft(screen.getByRole('main').getByText('Mock', { exact: true }).elements()).toHaveLength(0);
