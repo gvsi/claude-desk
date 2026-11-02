@@ -403,7 +403,7 @@ describe('Today', () => {
 
   it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
     // The greeting says the owner's first name after the time of day. An owner who gave no name has
-    // setup's fallback, "Owner", in its place, and an empty name is none either: the greeting then
+    // setup's fallback, "Owner", in its place, and a blank name is none either: the greeting then
     // names no one, rather than greeting them as "Owner" or ending on a comma.
     const greeting = (screen: RenderResult) => screen.getByRole('heading', { level: 1, name: /^Good (morning|afternoon|evening)/ });
     const seen = [];
@@ -419,7 +419,7 @@ describe('Today', () => {
     seen.push(greeting(fallback).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));
     await cleanup();
 
-    await injectToday((today) => ({ ...today, greeting_name: '' }));
+    await injectToday((today) => ({ ...today, greeting_name: '  ' }));
     const { screen: empty } = await renderRoute(TODAY);
     await expect.element(greeting(empty)).toBeVisible();
     seen.push(greeting(empty).element().textContent?.replace(/^Good (morning|afternoon|evening)/, 'Good …'));

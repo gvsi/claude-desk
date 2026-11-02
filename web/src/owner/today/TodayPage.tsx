@@ -5,7 +5,7 @@ import { useLocation, useNavigate } from 'react-router';
 import { Button, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { OWNER_NAME_FALLBACK } from '../../public/brand.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
@@ -99,7 +99,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
 
   // The owner's first name, or '' when they gave none: setup's fallback ("Owner") stands in for a
   // name then, and the greeting names no one rather than greet them by it.
-  const name = business.owner_display_name === OWNER_NAME_FALLBACK ? '' : (today.data?.greeting_name ?? firstName(business.owner_display_name)).trim();
+  const given = givenOwnerName(business.owner_display_name);
+  const name = given === null ? '' : (today.data?.greeting_name ?? firstName(given)).trim();
   const greeting = greetingFor(new Date(), business.timezone);
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
   // and for a Desk listed without it (an API from before it).
