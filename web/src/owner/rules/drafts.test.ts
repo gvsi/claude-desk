@@ -11,11 +11,15 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { formatHours } from '../../lib/format.ts';
 import { PRESETS, RIVERA_HOURS, presetCards } from '../../mocks/seed.ts';
 import { connectorByKey } from '../connectors/catalog.ts';
-import { DEFAULT_SIDE, cancelsLinksFor, changeRows } from './changeRows.ts';
+import { rowWords } from '../../test/changeRowWords.ts';
+import { DEFAULT_SIDE, cancelsLinksFor, changeRows as changeRowViews } from './changeRows.ts';
 import { checkStatus } from './checkStatus.ts';
 import { capOf, draftFromAnswer, draftFromDiff, draftFromVersion, moneyCapChange } from './drafts.ts';
 import { hubSections } from './hub.ts';
 import { PAYMENT_MAX_CENTS, moneyCapWords, moneyLimitHint, moneyLimitLine, ruleWords, type AgentNames } from './ruleWords.ts';
+
+/** The review's rows as they read: titles and targets in words (`rowWords`). */
+const changeRows = (...args: Parameters<typeof changeRowViews>) => changeRowViews(...args).map(rowWords);
 
 const { ruleCards } = rivera;
 const DANA = rivera.people.dana;
