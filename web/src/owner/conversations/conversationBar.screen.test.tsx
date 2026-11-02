@@ -11,7 +11,7 @@ import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { ROUTES } from '../../api/routes.ts';
-import type { OwnerTranscript } from '../../api/views.ts';
+import type { DemoVisitorRun, OwnerTranscript } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { loadWebFonts } from '../../ds/test/fonts.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -21,7 +21,7 @@ import { holdReads } from '../../test/holdReads.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, nextFrames, tokenColor } from '../../test/screen.ts';
 import { SKELETON_TOLERANCE_PX } from '../../test/skeleton.ts';
-import { TRANSCRIPT_NOTE } from './copy.ts';
+import { DEMO_VISITOR_NOTE, DEMO_VISITOR_PILL, TRANSCRIPT_NOTE } from './copy.ts';
 import { CHANGED_WHILE_ACTING } from './useTakeOver.ts';
 
 beforeAll(loadWebFonts);
@@ -59,15 +59,32 @@ function lengthen(chat: SessionRecord, count = 30): string {
   return last;
 }
 
-/** Every read of the seeded hold's chat says `words` happened last: its newest line of the kernel's. */
-async function withLatest(words: string): Promise<void> {
+/**
+ * Every read of the seeded hold's chat says `words` happened last: its newest line of the kernel's.
+ * With `demo`, the chat is that demo visitor run's, and every read of the run answers it as it
+ * stands when read, so a test can end it.
+ */
+async function withLatest(words: string, demo?: DemoVisitorRun): Promise<void> {
   const answer = await mockStore.dispatch('conversation', { params: { session_id: SEEDED_HOLD } });
   if ('network' in answer || answer.status !== 200) throw new Error('the mock reads the held chat');
   const read = answer.body as OwnerTranscript;
   const newest = [...read.items].sort((a, b) => b.n - a.n).find((item) => item.event !== null && 'visitor_plain' in item.event);
   if (newest === undefined) throw new Error('the held chat has a line of the kernel\'s');
   const items = read.items.map((item) => (item === newest ? { ...item, event: { ...item.event!, visitor_plain: words } } : item));
-  mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, items } });
+  const marked = demo === undefined ? {} : { demo_visitor: true, demo_visitor_run_id: demo.run_id };
+  mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, items, ...marked } });
+  if (demo !== undefined) mockStore.inject({ route: 'demoVisitorRun', status: 200, times: 10_000, body: demo });
+}
+
+/** A demo visitor run in the seeded hold's chat: running, or ended as `ended` says. */
+function demoRun(ended: DemoVisitorRun['ended'] = null): DemoVisitorRun {
+  const state = ended === null ? 'running' : ended === 'stopped_by_owner' ? 'stopped' : 'done';
+  return { run_id: 'visitor-bar', desk_id: RIVERA.deskId, first_name: 'Riley', session_id: SEEDED_HOLD, state, messages_sent: 2, ended };
+}
+
+/** The demo visitor's note in the open chat, as it reads `line`. */
+function demoNote(screen: RenderResult, line: string) {
+  return screen.getByRole('status').filter({ hasText: line });
 }
 
 /** The page's own part, never its loading shape: the shapes use the same classes. */
@@ -542,5 +559,117 @@ describe('the open conversation bar', () => {
     expect(Math.abs(rect(name).left - before.name.left), 'the name lands on its shape').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     expect(Math.abs(middle(name) - (before.name.top + before.name.bottom) / 2), 'the name lands on its shape\'s line').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     expectNoHorizontalScroll();
+  });
+});
+
+describe("a demo visitor's chat in the bar", () => {
+  it.each(SIZES)('shows_the_demo_visitor_pill_after_the_level_pill_at_%sx%s', async (width, height) => {
+    await withLatest(LONG_LATEST, demoRun());
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
+    const bar = await opened(screen, 'Visitor');
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.running)).toBeInTheDocument();
+    expectTheBarAcrossThePane(bar, landed('.cd-conversations__open'));
+    const name = screen.getByRole('heading', { level: 2, name: 'Visitor' }).element();
+    const pills = [...bar.querySelectorAll<HTMLElement>('.cd-pill')];
+    expect(pills.map((pill) => pill.textContent)).toEqual(['Public', DEMO_VISITOR_PILL]);
+    const [level, demo] = pills as [HTMLElement, HTMLElement];
+    // Right after the level pill, with the name: 8 px on, on the name's middle.
+    expect(level.nextElementSibling).toBe(demo);
+    expect(demo.parentElement).toBe(name.parentElement);
+    expect(rect(demo).left - rect(level).right).toBeCloseTo(8, 0);
+    expect(Math.abs(middle(demo) - middle(name))).toBeLessThanOrEqual(1);
+    const takeOver = screen.getByRole('button', { name: 'Take over' }).element();
+    expect(bar.contains(takeOver)).toBe(true);
+    expect(rect(takeOver).left).toBeGreaterThanOrEqual(rect(demo).right);
+    // The bar keeps its shape: one line of 56 px on a laptop, Latest after the pills; two of 69 on a phone, Latest under them.
+    const latest = bar.querySelector<HTMLElement>('.cd-conversation__latest')!;
+    expectCutShort(latest);
+    if (width >= 1024) {
+      expect(rect(bar).height).toBe(56);
+      expect(rect(latest).left).toBeGreaterThanOrEqual(rect(demo).right);
+    } else {
+      expect(rect(bar).height).toBe(69);
+      expect(Math.abs(middle(takeOver) - middle(name))).toBeLessThanOrEqual(1);
+      expect(rect(latest).top).toBeGreaterThanOrEqual(rect(demo).bottom);
+    }
+    expectNoHorizontalScroll();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it.each(SIZES)('puts_the_demo_visitor_note_at_the_top_of_the_transcript_not_in_the_bar_at_%sx%s', async (width, height) => {
+    const last = lengthen(mockStore.world.sessions.get(SEEDED_HOLD)!);
+    await withLatest(LONG_LATEST, demoRun());
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
+    const bar = await opened(screen, 'Visitor');
+    const note = demoNote(screen, DEMO_VISITOR_NOTE.running);
+    await expect.element(note).toBeInTheDocument();
+    await expect.element(note.getByRole('button', { name: DEMO_VISITOR_NOTE.stop, exact: true })).toBeInTheDocument();
+    // In the transcript's region, right over the log and its opening lines: never in the bar.
+    const box = note.element().closest<HTMLElement>('.cd-conversation__demo')!;
+    const log = screen.getByRole('log').element();
+    expect(bar.contains(box)).toBe(false);
+    expect(landed('.cd-conversation__scroll').contains(box)).toBe(true);
+    expect(box.nextElementSibling).toBe(log);
+
+    // Opened at the chat's end, the note has gone up under the bar with the opening lines.
+    await expect.element(screen.getByRole('log').getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
+    expect(rect(box).bottom).toBeLessThanOrEqual(rect(bar).bottom);
+    // Back at the top: 16 px under the bar, and the opening lines 16 px under the note.
+    scrollerOf(log).scrollTop = 0;
+    await nextFrames();
+    const header = log.querySelector('.cd-transcript-header')!;
+    expect(rect(box).top - rect(bar).bottom).toBeCloseTo(16, 0);
+    expect(rect(header).top - rect(box).bottom).toBeCloseTo(16, 0);
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expectNoHorizontalScroll();
+    expectNoWindowScroll();
+  });
+
+  it.each(SIZES)('offers_no_take_over_once_the_demo_visitor_has_ended_and_claude_has_the_chat_at_%sx%s', async (width, height) => {
+    await withLatest(LONG_LATEST, demoRun('finished'));
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
+    const bar = await opened(screen, 'Visitor');
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.finished)).toBeInTheDocument();
+    // Nobody is left to answer: the bar has no Take over, and the foot nothing at all.
+    await expect.element(screen.getByRole('button', { name: 'Take over' })).not.toBeInTheDocument();
+    expect(bar.querySelector('button')).toBeNull();
+    expect(document.querySelector('.cd-conversation__controls')).toBeNull();
+    expect([...bar.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Public', DEMO_VISITOR_PILL]);
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expectNoHorizontalScroll();
+  });
+
+  it.each(SIZES)('keeps_hand_back_at_the_foot_of_an_ended_demo_chat_the_owner_holds_at_%sx%s', async (width, height) => {
+    const chat = mockStore.world.sessions.get(SEEDED_HOLD)!;
+    const taken = await mockStore.dispatch('takeover', { params: { session_id: SEEDED_HOLD }, body: { generation: chat.state.generation } });
+    expect('network' in taken ? 0 : taken.status).toBe(200);
+    await withLatest(LONG_LATEST, demoRun('stopped_by_owner'));
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
+    const bar = await opened(screen, 'Visitor');
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.stopped)).toBeInTheDocument();
+    // The chat is still hers: Hand back stays at the foot, with nothing to write to a visitor who has gone, and the bar has no Take over.
+    const handBack = screen.getByRole('button', { name: 'Hand back to Claude' });
+    await expect.element(handBack).toBeVisible();
+    expect(landed('.cd-conversation__controls').contains(handBack.element())).toBe(true);
+    expect(bar.querySelector('button')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Write to them' }).elements()).toHaveLength(0);
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expectNoHorizontalScroll();
+  });
+
+  it('a_demo_visitor_ending_while_take_over_has_focus_hands_focus_to_the_name', async () => {
+    const run = demoRun();
+    await withLatest(LONG_LATEST, run);
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    await opened(screen, 'Visitor');
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.running)).toBeInTheDocument();
+    const takeOver = screen.getByRole('button', { name: 'Take over' });
+    (takeOver.element() as HTMLElement).focus();
+    // It finishes while she is on Take over: Take over goes with nothing left at the foot, and focus
+    // goes to the conversation's name rather than falling to the page.
+    Object.assign(run, { state: 'done', ended: 'finished' } satisfies Partial<DemoVisitorRun>);
+    await expect.element(demoNote(screen, DEMO_VISITOR_NOTE.finished)).toBeInTheDocument();
+    await expect.element(takeOver).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor' })).toHaveFocus();
   });
 });

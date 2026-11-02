@@ -1,5 +1,5 @@
 /**
- * The note over a demo visitor's conversation: an AI the owner started plays the customer. While its
+ * The note at the top of a demo visitor's conversation: an AI the owner started plays the customer. While its
  * run is going, the note says so, with "Stop the demo visitor"; once it has ended, how it ended, with
  * no button.
  *
@@ -74,9 +74,9 @@ export interface DemoVisitorNoteProps {
 }
 
 /**
- * The note itself, an info `Notice` placed like the recorded note, 8 px under the conversation's
- * head. Stop is a ghost inline button; it ends the run at once and the note says so. A Stop that
- * fails says why under the note, and the button stays.
+ * The note itself, an info `Notice` at the top of the conversation's transcript, over its opening
+ * lines, never in the pinned bar. Stop is a ghost inline button; it ends the run at once and the
+ * note says so. A Stop that fails says why under the note, and the button stays.
  */
 export function DemoVisitorNote({ deskId, phase, onStopped }: DemoVisitorNoteProps) {
   const queryClient = useQueryClient();
