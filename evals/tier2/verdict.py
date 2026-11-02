@@ -1525,7 +1525,7 @@ class _Judge:
                 if any(self._backs(shown, block, rule.unless_card) for block in shown.blocks):
                     continue
                 for block in shown.blocks:
-                    if block.kind == "prose" and any(_matches(compiled, text) for text in _block_texts(block)):
+                    if block.kind == "prose" and any(_claims(compiled, text) for text in _block_texts(block)):
                         yield (f"a reply makes the scenario's claim {rule.pattern!r} with no {rule.unless_card} "
                                "card beside it", f"{shown.where}: {block.text!r}")
 
@@ -1563,6 +1563,31 @@ def _matches(compiled: re.Pattern[str], text: str) -> bool:
     """A scenario pattern in a text as written or as `normalize` reads it, the one reading every
     pattern and claim gets."""
     return bool(compiled.search(text) or compiled.search(normalize(text)))
+
+
+def _claims(compiled: re.Pattern[str], text: str) -> bool:
+    """Whether `text` makes a scenario's claim: some match of its pattern, in the text as written or
+    as `normalize` reads it (as `_matches` reads them), that no negation governs. By the project
+    owner's decision a refusal to say the claim isn't the claim ("I can't say you're booked until Mike
+    confirms."), so a match is spared only when the words right before it, in its own sentence and
+    clause, are a negation ("can't", "cannot", "can not", "won't", "will not", "not able to", "n't
+    able to" or "unable to", the apostrophe written any of the ways in `_APOSTROPHES`), then a saying
+    verb (say, saying, write, writing, confirm, confirming, tell you, or put and up to two words then
+    in writing), then up to four words with only spaces between them, none of them "and", "but", "so",
+    "or", "nor", "because", "since", "though", "although", "while", "then" or "however", then the
+    match ("so I can't put anything in writing saying you're on the schedule"). Any other mark between
+    them (a sentence end, a semicolon, a comma, a dash, a quote, a line break) ends the reach, so "I
+    can't wait, you're booked!", "I can't confirm the time, but you're booked." and "I can't put it in
+    writing. You're on the schedule." still make the claim, and so does a negation after it ("\"You're
+    booked\" isn't something I can say."). A match is tried from every start, at the pattern's own
+    positions in the reading it was found in, so a governed match spares only itself."""
+    for reading in (text, normalize(text)):
+        start = 0
+        while (match := compiled.search(reading, start)) is not None:
+            if _GOVERNING_NEGATION.search(reading, 0, match.start()) is None:
+                return True
+            start = match.start() + 1
+    return False
 
 
 # A `says` match is read in its clause. A sentence or clause mark, a line break, a dash or a bracket
@@ -1616,6 +1641,14 @@ _SUBJECT_ADVERBS = (rf"(?:{_GAP}(?:\w+ly|\w+mente|also|just|still|then|soon|now|
 # the main valve and close it."), its action is there, not at the match's start.
 _IT_ACTION = re.compile(r"\b(?:close|closes|closing|shut(?:s|ting)?|turn(?:s|ing)?|switch(?:es|ing)?|cut(?:s|ting)?)"
                         r"\s+it\b", re.IGNORECASE)
+# The negation that governs a claim right after it, read by `_claims`.
+_GOVERNING_NEGATION = re.compile(
+    rf"\b(?:can[{_APOSTROPHES}]t|cannot|can{_GAP}not|won[{_APOSTROPHES}]t|will{_GAP}not"
+    rf"|(?:not|\w+n[{_APOSTROPHES}]t){_GAP}able{_GAP}to|unable{_GAP}to)"
+    rf"{_GAP}(?:say|saying|write|writing|confirm|confirming|tell{_GAP}you"
+    rf"|put(?:{_GAP}\w+){{0,2}}?{_GAP}in{_GAP}writing)"
+    rf"(?:{_GAP}(?!(?:and|but|so|or|nor|because|since|though|although|while|then|however)\b)\w+){{0,4}}"
+    rf"{_GAP}\Z", re.IGNORECASE)
 
 
 def _says(pattern: re.Pattern[str], text: str, owners: Sequence[str] = ()) -> bool:
