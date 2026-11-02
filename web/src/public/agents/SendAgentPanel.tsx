@@ -26,7 +26,7 @@
  * whitespace and cuts them to 280 characters, so a long model message can't flood the page.
  * Anything else an agent turn holds is ignored. The Desk's turns are its checked replies, shown as
  * they came, each with its receipts' `visitor_plain` under it, read-only, except that a payment
- * link paid or cancelled loses "Open payment page", as in the visitor's chat and the owner's
+ * link paid, cancelled or expired loses "Open payment page", as in the visitor's chat and the owner's
  * transcript (`usePaymentLinks`). They are in English, the
  * language the built-in agent writes in, so their cards' chrome is too.
  */
