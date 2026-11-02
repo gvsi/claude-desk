@@ -2763,7 +2763,8 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
             interview.cover([key])
         if not any(entry is reply for entry in interview.transcript):
             interview.transcript.append(reply)
-        _record_plan(interview, turn, reply)
+        # A limit question's turn has no plan of its own (its planning call is `_next_step`, skipped here).
+        _record_plan(interview, turn if key not in LIMIT_CHOICES else None, reply)
         asked = _ask(interview, homes[0])
         asked.asks_after = homes[1:]
         replies.before(asked.question)

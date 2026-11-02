@@ -18,7 +18,7 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import proving, setup
-from desk.api.prompts import QUESTIONS, DraftedSituations, JobDraft, JobProposal, question_text
+from desk.api.prompts import QUESTIONS, DraftedSituations, JobDraft, JobProposal, PriceAnswer, question_text
 from tests.api.fakes import gated, unavailable
 from tests.api.test_setup_questions import Owner, answer, next_step, stored as stored_questions, structured, turn, until
 from tests.api.test_setup_rules import (  # noqa: F401  (the app and model fixtures)
@@ -855,3 +855,23 @@ async def test_payment_tools_a_change_left_on_are_switched_off_when_the_tools_ar
     failed = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}/tools")
     assert failed.status_code >= 500, failed.text
     assert await payment_tools_on(owner, state) == []
+
+
+
+async def test_a_limit_question_from_the_facts_still_to_ask_takes_its_choice(app, browser, kernel_http, model, engine):
+    # The owner's answer on the summary's question names a new price in words, which that question can't record: the
+    # quote question is asked next, the service area's still waiting, and a choice there lands like any limit answer.
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(turn("Noted, both of those.", summary=NEW_SUMMARY, service_area=NEW_AREA, next={"kind": "done"}))
+    assert (await reopen(owner, state, TWO_FACTS)).status_code == 200
+    priced = await answer(owner, model, state["interview_id"], "We install softeners now. And leak repair is one eighty.",
+                          turn(summary=NEW_SUMMARY, price_items=[PriceAnswer(title="Leak repair", unit_cents=18_000)],
+                               next={"kind": "done"}))
+    assert priced.status_code == 200, priced.text
+    assert (priced.json()["step"], priced.json()["question"]) == ("questions", "quote_limit")
+
+    chose = await answer(owner, model, state["interview_id"], "Always ask me first", turn())
+    assert chose.status_code == 200, chose.text
+    assert (chose.json()["step"], chose.json()["question"]) == ("questions", "hours_and_area")
+    assert (await stored(engine, state["interview_id"]))["answers"]["quote_auto_max_cents"] == 0
+
