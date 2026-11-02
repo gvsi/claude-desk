@@ -35,8 +35,9 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
-import { TRANSCRIPT_NOTE } from './copy.ts';
+import { DEMO_VISITOR_PILL, TRANSCRIPT_NOTE } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
+import { DemoVisitorNote, useDemoVisitorRun } from './DemoVisitorNote.tsx';
 import { latestOf } from './latest.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { whoLabel } from './status.ts';
@@ -55,6 +56,8 @@ export interface ConversationDetailProps {
   listRead: boolean;
   /** A line the page that opened it left, such as why joining the chat didn't go through. */
   notice: string | null;
+  /** The demo visitor run the page that opened it started in this chat, if it did. */
+  demoVisitorRun?: string | null;
 }
 
 /** Who the chat is with when the list hasn't named them yet: what the session says they are. */
@@ -135,7 +138,7 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
   return `${when}, web chat from ${publicLink(slug).replace(/^https?:\/\//, '')}`;
 }
 
-export function ConversationDetail({ sessionId, summary, listRead, notice }: ConversationDetailProps) {
+export function ConversationDetail({ sessionId, summary, listRead, notice, demoVisitorRun = null }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
   const titleId = useId();
@@ -172,6 +175,9 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
     reveal(handoffCards);
   }, [ready, handoffCards, sessionId, reveal]);
   const mode = chat.data?.state.mode;
+  // A demo visitor's chat, by its transcript or the list's row: its note reads its run.
+  const demo = chat.data?.demo_visitor === true || summary?.demo_visitor === true;
+  const demoRun = useDemoVisitorRun(deskId, sessionId, demo, demoVisitorRun);
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
   // nothing new while a message is on its way, so they never replace words typed after them.
@@ -311,6 +317,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
             Signed
           </Pill>
         ) : null}
+        {demo ? <Pill>{DEMO_VISITOR_PILL}</Pill> : null}
         {state.assurance === 'demo_code' ? <span className="cd-conversation__quiet cd-type-caption">Simulated verification</span> : null}
         {latest !== null ? <p className="cd-conversation__latest cd-type-meta">Latest: {latest}</p> : null}
       </header>
@@ -319,6 +326,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
           <RecordedNote />
         </div>
       ) : null}
+      {demo ? <DemoVisitorNote deskId={deskId} phase={demoRun} onStopped={() => nameRef.current?.focus({ preventScroll: true })} /> : null}
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}

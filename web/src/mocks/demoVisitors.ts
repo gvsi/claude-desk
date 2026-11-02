@@ -10,6 +10,20 @@
  * answers the run it started, as the API's routes do.
  */
 import type { DemoVisitorRun } from '../api/views.ts';
+
+/** How a run ended, as the API's `DemoVisitorRun.ended` says it. */
+export type DemoVisitorEnded = NonNullable<DemoVisitorRun['ended']>;
+
+/** The run's state once it ended so, as the API's runner sets it. */
+const ENDED_STATE: Record<DemoVisitorEnded, DemoVisitorRun['state']> = {
+  finished: 'done',
+  limit: 'done',
+  owner_silent: 'done',
+  stopped_by_owner: 'stopped',
+  chat_ended: 'stopped',
+  budget: 'failed',
+  failed: 'failed',
+};
 import type { DeskRecord, MockWorld, SessionRecord } from './world.ts';
 
 /** The persona's first name: Riley Morgan, who names the chat in the owner's lists. */
@@ -101,6 +115,14 @@ export class DemoVisitorRuns {
     return { ...held.run };
   }
 
+  /** Ends a running run as the API's can end, for a test: it says nothing more. Null when there is none by that ID. */
+  endRun(runId: string, how: DemoVisitorEnded): DemoVisitorRun | null {
+    const held = this.runs.get(runId);
+    if (held === undefined) return null;
+    if (held.run.state === 'running') this.end(held, how);
+    return { ...held.run };
+  }
+
   /** Stops every run's next step and forgets them, as a fresh copy has none. */
   stop(): void {
     for (const held of this.runs.values()) if (held.timer !== null) clearTimeout(held.timer);
@@ -112,10 +134,10 @@ export class DemoVisitorRuns {
     return [...this.runs.values()].find((held) => held.run.state === 'running')?.run ?? null;
   }
 
-  private end(held: Held, how: 'finished' | 'stopped_by_owner' | 'chat_ended'): void {
+  private end(held: Held, how: DemoVisitorEnded): void {
     if (held.timer !== null) clearTimeout(held.timer);
     held.timer = null;
-    held.run.state = how === 'finished' ? 'done' : 'stopped';
+    held.run.state = ENDED_STATE[how];
     held.run.ended = how;
   }
 

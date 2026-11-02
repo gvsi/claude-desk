@@ -17,6 +17,11 @@ const TODAY = `/app/${RIVERA.deskId}/today`;
 const CARD_TITLE = 'Watch a demo visitor';
 const CARD_DETAIL = 'An AI plays a customer on your Desk. Take over or whisper to Claude while it chats.';
 const START_FAILED = 'The demo visitor couldn’t start. Try again in a few minutes.';
+const NOTE = 'A demo visitor, played by an AI. Take over or whisper to see how Claude responds.';
+const STOP = 'Stop the demo visitor';
+const FINISHED = 'The demo visitor finished.';
+const STOPPED = 'You stopped the demo visitor.';
+const LIST = `/app/${RIVERA.deskId}/conversations`;
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -30,6 +35,18 @@ function startControl(things: Locator, viewport: Viewport): Locator {
   return viewport === 'phone'
     ? things.getByRole('button', { name: CARD_TITLE, exact: true })
     : things.getByRole('button', { name: 'Start a demo visitor', exact: true });
+}
+
+/** Starts the demo visitor through the owner's route, as a click on the card would: its start answer. */
+async function startOne(key: string): Promise<{ run_id: string; desk_id: string; session_id: string }> {
+  const started = await mockStore.dispatch('startDemoVisitor', { params: { desk_id: RIVERA.deskId }, body: { idempotency_key: key } });
+  if ('network' in started || started.status !== 202) throw new Error('the demo visitor starts');
+  return started.body as { run_id: string; desk_id: string; session_id: string };
+}
+
+/** The note over the open conversation that says it's a demo visitor's. */
+function demoNote(screen: RenderResult): Locator {
+  return screen.getByRole('status').filter({ hasText: /demo visitor/ });
 }
 
 /** The demo visitor's chats in the mock copy, newest last. */
@@ -152,5 +169,108 @@ describe('Demo visitor', () => {
     expect(card.querySelector('.cd-things__done')?.getAttribute('aria-hidden')).toBeNull();
     expect(card.textContent).toContain(CARD_DETAIL);
     expect(card.querySelector('button, a'), 'no next step once done').toBeNull();
+  });
+
+  it.each(['desktop', 'phone'] as const)('its_row_and_its_head_say_demo_visitor_on_%s', async (viewport: Viewport) => {
+    const { session_id: sessionId } = await startOne('row-and-head');
+    const { screen, router } = await renderRoute(LIST, { viewport });
+    // The row: the persona's first name, then the pill right after it on the row's top line.
+    const row = screen.getByRole('link', { name: /^Riley Demo visitor/ });
+    await expect.element(row).toBeVisible();
+    const top = row.element().querySelector('.cd-conversation-item__top')!;
+    const name = top.querySelector('.cd-conversation-item__name')!;
+    const pill = top.querySelector('.cd-pill')!;
+    expect(pill.textContent).toBe('Demo visitor');
+    expect(name.nextElementSibling).toBe(pill);
+    expect(pill.getBoundingClientRect().left - name.getBoundingClientRect().right).toBeCloseTo(8, 0);
+    // A real visitor's row has none.
+    expect(document.querySelectorAll('.cd-conversation-item .cd-pill')).toHaveLength(1);
+    expectNoHorizontalScroll();
+
+    // Its conversation's head: the name, "Public", then "Demo visitor".
+    await router.navigate(`${LIST}/${sessionId}`);
+    const head = screen.getByRole('heading', { level: 2, name: 'Riley' });
+    await expect.element(head).toBeVisible();
+    const pills = [...head.element().closest('header')!.querySelectorAll('.cd-pill')].map((el) => el.textContent);
+    expect(pills).toEqual(['Public', 'Demo visitor']);
+    expectNoHorizontalScroll();
+  });
+
+  it.each(['desktop', 'phone'] as const)('the_note_says_who_plays_it_and_stop_ends_it_on_%s', async (viewport: Viewport) => {
+    const { screen, router } = await renderRoute(TODAY, { viewport });
+    await startControl(region(screen, 'Things to try'), viewport).click();
+    await expect.poll(() => router.state.location.pathname).toContain('/conversations/');
+    const note = demoNote(screen);
+    await expect.element(note).toMatchTextContent(NOTE);
+    // 8 px under the head, over the transcript.
+    const head = screen.getByRole('heading', { level: 2, name: 'Riley' }).element().closest('header')!;
+    expect(note.element().getBoundingClientRect().top - head.getBoundingClientRect().bottom).toBeCloseTo(8, 0);
+    expect(note.element().querySelector('.cd-status-dot--info'), 'its hollow dot').not.toBeNull();
+    const stop = note.getByRole('button', { name: STOP, exact: true });
+    await expect.element(stop).toBeVisible();
+    expectNoHorizontalScroll();
+
+    // Its typing shows as anyone's does, and its words arrive.
+    await expect.poll(() => demoChats()[0]!.items.filter((item) => item.kind === 'visitor_text').length, { timeout: 5_000 }).toBeGreaterThan(0);
+
+    await stop.click();
+    await expect.poll(() => requests('stopDemoVisitor').length).toBe(1);
+    const [stopped] = requests('stopDemoVisitor');
+    expect(stopped?.path).toMatch(/\/demo_visitor\/visitor-[^/]+\/stop$/);
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    expect(demoNote(screen).getByRole('button').elements()).toHaveLength(0);
+    // Focus doesn't fall to the page as Stop goes: it goes to the conversation's name.
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Riley' })).toHaveFocus();
+    // Nothing more comes from it.
+    const said = demoChats()[0]!.items.filter((item) => item.kind === 'visitor_text').length;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(demoChats()[0]!.items.filter((item) => item.kind === 'visitor_text')).toHaveLength(said);
+    expectNoHorizontalScroll();
+  });
+
+  it.each(['finished', 'owner_silent', 'limit', 'chat_ended', 'failed', 'budget'] as const)('the_note_says_the_demo_visitor_finished_when_it_ended_%s', async (ended) => {
+    const { session_id: sessionId, run_id: runId } = await startOne(`ended-${ended}`);
+    const opened = await renderRoute(`${LIST}/${sessionId}`);
+    await expect.element(demoNote(opened.screen)).toMatchTextContent(NOTE);
+    // It ended on its own, or for any reason but Stop: the same line, with no button.
+    mockStore.demoVisitors.endRun(runId, ended);
+    await expect.element(demoNote(opened.screen)).toHaveTextContent(FINISHED);
+    expect(demoNote(opened.screen).getByRole('button').elements()).toHaveLength(0);
+    // The row keeps its tag.
+    await expect.element(opened.screen.getByRole('link', { name: /^Riley Demo visitor/ })).toBeVisible();
+  });
+
+  it('an_older_conversation_keeps_its_own_ending', async () => {
+    // The first demo visitor is stopped; a second one runs on the Desk now.
+    const first = await startOne('first');
+    await mockStore.dispatch('stopDemoVisitor', { params: { desk_id: RIVERA.deskId, run_id: first.run_id } });
+    const { screen, router } = await renderRoute(`${LIST}/${first.session_id}`);
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    const second = await startOne('second');
+    await router.navigate(`${LIST}/${second.session_id}`);
+    await expect.element(demoNote(screen)).toMatchTextContent(NOTE);
+    // Back on the first, it still says how it ended, read by its own run.
+    await router.navigate(`${LIST}/${first.session_id}`);
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    expect(requests('demoVisitorRun').some((r) => r.path.endsWith(`/demo_visitor/${first.run_id}`))).toBe(true);
+  });
+
+  it.each(['desktop', 'phone'] as const)('needs_you_tags_the_demo_visitors_held_request_on_%s', async (viewport: Viewport) => {
+    const { session_id: sessionId } = await startOne('needs-you');
+    // Its discount ask is held for the owner.
+    await expect
+      .poll(() => [...mockStore.world.decisions.values()].some(({ decision }) => decision.session_id === sessionId && decision.state === 'held'), { timeout: 8_000 })
+      .toBe(true);
+    const { screen } = await renderRoute(TODAY, { viewport });
+    const needsYou = screen.getByRole('region', { name: 'Needs you' });
+    const cards = needsYou.getByRole('article');
+    await expect.poll(() => cards.elements().length).toBe(2);
+    const tagged = cards.elements().filter((card) => card.querySelector('.cd-pill')?.textContent === 'Demo visitor');
+    // Only the demo visitor's request, beside where it came from; the seeded visitor's has none.
+    expect(tagged).toHaveLength(1);
+    const pill = tagged[0]!.querySelector('.cd-pill')!;
+    expect(pill.closest('.cd-approval-card__top')).not.toBeNull();
+    expect(tagged[0]!.textContent).toContain('Could I get 10% off as a returning customer?');
+    expectNoHorizontalScroll();
   });
 });

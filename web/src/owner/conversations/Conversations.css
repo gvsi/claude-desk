@@ -302,6 +302,15 @@
   margin-top: calc(var(--space-8) - var(--space-16));
 }
 
+/* A demo visitor's note, placed as the recorded note is: 8 px under the head. A Stop that failed
+   says why under it. */
+.cd-conversation__demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: calc(var(--space-8) - var(--space-16));
+}
+
 /* A held request's card, and a receipt's full trace, in the conversation's column. */
 .cd-conversation__held,
 .cd-conversation__trace {
