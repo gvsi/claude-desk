@@ -934,9 +934,9 @@ describe('public chat page', () => {
     await expect.element(screen.getByText(UNREACHABLE_COPY.en, { exact: true })).not.toBeInTheDocument();
   });
 
-  it('deleted_desk_ends_the_chat', async () => {
+  it.each(['desktop', 'phone'] as const)('deleted_desk_ends_the_chat_on_%s', async (viewport) => {
     // The owner deletes the Desk the moment Claude starts writing a reply.
-    const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
+    const { screen } = await renderRoute(PAGE, { seed: 'rivera', viewport });
     await ready(screen);
     const deleted: Promise<unknown>[] = [];
     const stop = mockStore.listen(RIVERA.slug, chatEvents().length, (_seq, ev) => {
@@ -952,6 +952,17 @@ describe('public chat page', () => {
     await expect.element(screen.getByText('Claude is writing')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).element()).toBeDisabled();
     expect(messagesOf(chatEvents())).toEqual([]);
+
+    const ask = screen.getByRole('button', { name: 'Ask for Mike Turner', exact: true });
+    const send = screen.getByRole('button', { name: 'Send', exact: true });
+    await expect.element(send).toBeDisabled();
+    await expect.element(ask).toBeDisabled();
+    expect(ask.element().hasAttribute('disabled')).toBe(true);
+    const before = requests('sendMessage').length;
+    (ask.element() as HTMLButtonElement).click();
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).not.toBe(ask.element());
+    expect(requests('sendMessage')).toHaveLength(before);
 
     // A new chat finds the Desk gone.
     await screen.getByRole('button', { name: NEW_CHAT_LABEL.en }).click();
