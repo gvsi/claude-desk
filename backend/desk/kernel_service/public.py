@@ -10,8 +10,12 @@ bookings or documents. `agent_card` is what a visiting agent can do on the Desk,
 writes (`render.agent_card`): one block for each tool an agent session may be given on this Desk now
 (its enabled tools with an adapter, of those an agent declares, kept to lead capture and callbacks
 while Answering is off), by plain label, none when there are none, and a block carrying a canary is
-left out. It names no one: the page shows the AI disclosure, and the API's code-built card where to
-send requests and how to sign them.
+left out. Each block carries its outcome for an agent with no standing of its own, `allowed`,
+`asks_first` or `never`, read from the active version's cards for anyone alone
+(`compiler.outcome_for`), and the kernel's fixed words for it: no card's ID, reason, limit,
+hours or discount reaches the page, and nothing of a card for a person or an agent key. With no
+active version, or when reading it fails, the blocks claim no outcome. It names no one: the page
+shows the AI disclosure, and the API's code-built card where to send requests and how to sign them.
 
 `open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
 fact in the business's time zone on the kernel's clock (`desks.open_window_status`), with its text
@@ -43,7 +47,7 @@ but that alert, so it has no ledger entry.
 
 import logging
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any
@@ -53,12 +57,13 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from desk.public_contact import valid_public_contact
-from desk.contracts import Clause, Fact, HoursWindow, RenderedBlock, effective_brand
+from desk.contracts import Clause, Fact, HoursWindow, RenderedBlock, ToolProfile, effective_brand
 from desk.db.models import Business, Desk
 from desk.db.models import DemoInboxEntry as DemoInboxRow
 from desk.db.models import Fact as FactRow
-from desk.kernel_api import OpenStatus, PublicDesk
-from desk.kernel_service import adapters, decide, demo_inbox, desks, labels, render, reply_check, repo
+from desk.kernel_api import AgentOutcome, OpenStatus, PublicDesk
+from desk.kernel_service import (activation, adapters, compiler, decide, demo_inbox, desks, labels, render,
+                                 reply_check, repo)
 from desk.kernel_service.render.cards import DeskInfo, NothingToShow, hours_windows
 from desk.kernel_service.repo import Ctx, KernelCtx, KernelFailure
 
@@ -171,6 +176,32 @@ def _starters(rows: Sequence[FactRow], canaries: Mapping[str, str], now: datetim
         return []
 
 
+AGENT_OUTCOME: dict[str, AgentOutcome] = {"auto": "allowed", "ask": "asks_first", "never": "never"}   # by card mode
+# The abilities whose label names a verified customer ("Receive a verified customer's own documents"): their outcome
+# is read for that customer, so cards for verified people and record owners count beside those for anyone. They name
+# no one; every other ability reads the cards for anyone alone (`compiler.ANYONE`).
+STANDING: dict[str, frozenset[str]] = {"native.release_document": compiler.VERIFIED_OWNER,
+                                       "payments.list_charges": compiler.VERIFIED_OWNER}
+
+
+async def _agent_outcomes(ctx: KernelCtx, desk_id: str, tools: Collection[str],
+                          profiles: Sequence[ToolProfile]) -> dict[str, AgentOutcome]:
+    """Each of `tools`' outcome for an agent with no standing of its own, by the Desk's active
+    version's cards for anyone (`compiler.outcome_for`), among the enabled `profiles`. Only
+    the outcome's key leaves here: no card ID, reason, limit, or anything of a card for a person or
+    an agent key. With no active version, or when reading one fails (logged naming only the
+    error's type), none: the card then claims no outcome rather than guess one."""
+    try:
+        version = await activation.active_version(ctx, desk_id)
+        if version is None:
+            return {}
+        return {tool: AGENT_OUTCOME[compiler.outcome_for(tool, version.cards, profiles, STANDING.get(tool, compiler.ANYONE))]
+                for tool in tools}
+    except Exception as error:
+        log.warning("agent_outcomes_failed error=%s", type(error).__name__)
+        return {}
+
+
 async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> PublicDesk:
     """The Desk `slug` names, as anyone may read it, its charter cards in `lang`."""
     copy_id = await repo.copy_of_desk_slug(ctx, slug) if SLUG.fullmatch(slug) else None
@@ -216,10 +247,12 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     charter = [block for block in charter if block.fact_id not in failing]
     while refused := reply_check.policy_card_rules("", charter):
         charter = [block for block in charter if block.fact_id not in refused]
-    tools = set(await decide.enabled_tools(ctx, desk.desk_id)) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
+    enabled = await decide.enabled_tools(ctx, desk.desk_id)
+    tools = set(enabled) & decide.declared_tools("agent") & set(adapters.ADAPTERS)
     if not desk.answering:
         tools &= decide.ANSWERING_OFF_TOOLS
-    card = render.agent_card(lang, tools)
+    card = render.agent_card(lang, tools, await _agent_outcomes(ctx, desk.desk_id, tools, desks.enabled_of(
+        enabled.values())))
     return PublicDesk(**header, charter=charter,
                       agent_card=[block for block in card if not reply_check.carries(block, canaries)],
                       open_status=_open_status(facts, info, now, lang), starters=_starters(rows, canaries, now, lang))

@@ -292,3 +292,6 @@ AGENT_TOOLS: dict[str, str] = {
     "native.release_document": "Recibir los documentos propios de un cliente verificado",
     "payments.list_charges": "Ver los cargos propios de un cliente verificado",
 }
+
+# Lo que pasa cuando un agente pide cada cosa de la tarjeta (`render.agent_card`), clave por clave con `en`.
+AGENT_OUTCOMES: dict[str, str] = {"allowed": "Permitido", "asks_first": "Pregunta primero", "never": "Nunca"}

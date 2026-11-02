@@ -306,23 +306,32 @@ def with_defaults(cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) ->
     return sorted([*owned, *defaults], key=lambda c: c.card_id)
 
 
-def outcome_for_anyone(tool: str, cards: Iterable[RuleCard], profiles: Iterable[ToolProfile]) -> Literal[
-        "auto", "ask", "never"]:
-    """How the compiled `cards` decide `tool` among the enabled `profiles` for a caller with no
-    standing of its own, before an auto card's limits, hours and reviewer: from the cards for
-    anyone alone (with the always-on cards a set lacks, as `with_defaults` adds them), so no card
-    for any other standing, a person's or an agent key's among them, is read. `never` when a never
-    card covers the tool (`F` always wins); `auto` when an auto card or joint combination covers
-    it and no ask card at its specificity or above does (its permit's `unless`); else `ask`, by an
-    ask card or the tool's default."""
+# The standings `outcome_for` reads cards for: a caller with no standing of its own, and the
+# verified owner of a record. Neither names anyone, so no card for a person or an agent key counts.
+ANYONE: frozenset[str] = frozenset({"anyone"})
+VERIFIED_OWNER: frozenset[str] = frozenset({"anyone", "verified", "record_owner"})
+
+
+def outcome_for(tool: str, cards: Iterable[RuleCard], profiles: Iterable[ToolProfile],
+                who: frozenset[str] = ANYONE) -> Literal["auto", "ask", "never"]:
+    """How the compiled `cards` decide `tool` among the enabled `profiles` for a caller whose
+    standing matches the cards for `who` (`ANYONE`, or `VERIFIED_OWNER`), before an auto card's
+    limits, hours and reviewer: from those cards alone (with the always-on cards a set lacks, as
+    `with_defaults` adds them), so no card for a person or an agent key is ever read, and `who`
+    naming either standing raises ValueError. `never` when a never card covers the tool (`F`
+    always wins); `auto` when an auto card or joint combination covers it and no ask card at its
+    specificity or above does (its permit's `unless`); else `ask`, by an ask card or the tool's
+    default."""
+    if not who <= VERIFIED_OWNER:
+        raise ValueError("an outcome is read for standings that name no one")
     profiles = list(profiles)
     effects = _tool_effects(profiles)
-    anyone = [c for c in with_defaults(cards, profiles) if c.who == "anyone" and not c.is_default]
-    if any(c.mode == "never" and tool in _carried(c, effects) for c in anyone):
+    read = [c for c in with_defaults(cards, profiles) if c.who in who and not c.is_default]
+    if any(c.mode == "never" and tool in _carried(c, effects) for c in read):
         return "never"
-    asks = [c for c in anyone if c.mode == "ask" and tool in _carried(c, effects)]
+    asks = [c for c in read if c.mode == "ask" and tool in _carried(c, effects)]
     if any(tool in unit.tools and all(specificity(c) < unit.specificity for c in asks)
-           for unit in _autos(anyone, effects)):
+           for unit in _autos(read, effects)):
         return "auto"
     return "ask"
 

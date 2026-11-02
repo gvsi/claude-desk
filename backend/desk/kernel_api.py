@@ -384,13 +384,27 @@ class OpenStatus(BaseModel):              # PublicDesk's header line: computed f
             raise ValueError("refresh_at is at or before the boundary")
         return self
 
+# What happens when an agent with no standing of its own asks for an ability on the Agent Card, by the active version's
+# cards for anyone (`compiler.outcome_for`): an auto card allows it, a never card refuses it, else it asks first.
+AgentOutcome = Literal["allowed", "asks_first", "never"]
+
+class AgentAbility(RenderedBlock):        # one Agent Card block: the kernel's prose for an ability, with its outcome
+    outcome: AgentOutcome | None          # None with no active version or one that can't be read: no outcome is claimed
+    outcome_text: str | None              # the kernel's fixed words for `outcome` in ?lang= (they name no one); None with it
+
+    @model_validator(mode="after")
+    def _words_with_the_outcome(self) -> Self:
+        if (self.outcome is None) != (self.outcome_text is None):
+            raise ValueError("an ability's outcome and its words come together")
+        return self
+
 class PublicDesk(BaseModel):              # GET /public/{desk_slug}: public-labelled fields only, kernel-rendered (?lang=)
     business_name: str
     desk_name: str
     owner_display_name: str
     brand: dict[str, str]
     charter: list[RenderedBlock]
-    agent_card: list[RenderedBlock]
+    agent_card: list[AgentAbility]
     open_status: OpenStatus | None = None   # None without charter:hours or with no windows in it, or when computing it fails
     starters: list[str] = []               # the Desk's seed-only starter questions, rendered in ?lang=; [] when it has none
 

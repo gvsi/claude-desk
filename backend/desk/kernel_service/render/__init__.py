@@ -46,12 +46,13 @@ check awaits once the cited fact has passed its checks, and passes to `render_cl
 and the `href` is the only field of the card that carries it.
 """
 
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, get_args
 
 from desk.contracts import BusinessToolDef, CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
+from desk.kernel_api import AgentAbility, AgentOutcome
 from desk.kernel_service.render import en, es
 from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow, shown_owner
 
@@ -95,6 +96,8 @@ if any(set(lines) != set(en.EXECUTED) for lines in EXECUTED.values()):
     raise RuntimeError("every language has an executed line for the same tools")
 if set(es.AGENT_TOOLS) != set(en.AGENT_TOOLS):
     raise RuntimeError("every language has a label for every agent tool")
+if any(set(words) != set(get_args(AgentOutcome)) for words in (en.AGENT_OUTCOMES, es.AGENT_OUTCOMES)):
+    raise RuntimeError("every language has words for every outcome an agent card shows")
 
 
 def language(last_language: str | None) -> Language:
@@ -139,14 +142,19 @@ def owner_line(key: str) -> str:
     return OWNER_STATUS[OWNER_LANGUAGE][key]
 
 
-def agent_card(lang: str, tools: Collection[str]) -> list[RenderedBlock]:
+def agent_card(lang: str, tools: Collection[str],
+               outcomes: Mapping[str, AgentOutcome] | None = None) -> list[AgentAbility]:
     """The Agent Card of a Desk in `lang`: one prose block for each of `tools` an agent can ask
     for, by its plain label, in the order the card lists them; none when there is nothing yet, so
-    the page says so in its own words. A tool without a label is left out rather than named; no
-    block carries an amount, a key or a name. Where to send requests and how to sign them is the
-    API's card, not this one."""
+    the page says so in its own words. Each carries its outcome from `outcomes` and the fixed words
+    for it (`AGENT_OUTCOMES`), or neither when `outcomes` has none for the tool. A tool without a
+    label is left out rather than named; no block carries an amount, a key or a name. Where to send
+    requests and how to sign them is the API's card, not this one."""
     module = en if lang == "en" else es
-    return [RenderedBlock(kind="prose", text=label) for tool, label in module.AGENT_TOOLS.items() if tool in tools]
+    outcomes = outcomes or {}
+    return [AgentAbility(kind="prose", text=label, outcome=outcomes.get(tool),
+                         outcome_text=module.AGENT_OUTCOMES[outcomes[tool]] if tool in outcomes else None)
+            for tool, label in module.AGENT_TOOLS.items() if tool in tools]
 
 
 def owner_preview(kind: str) -> str:

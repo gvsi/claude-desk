@@ -8408,6 +8408,136 @@
         "title": "AboveMoneyCap",
         "description": "422 from a drafting route: a new or changed card would take or pay out more on its own than the Desk's money\ncap, `cap_cents` (0 when unset), so nothing was drafted (\"That's above your limit of $X. Raise the limit\nfirst.\")."
       },
+      "AgentAbility": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "prose",
+              "card"
+            ],
+            "title": "Kind"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "quote",
+                  "booking_options",
+                  "booking_confirmed",
+                  "payment_link",
+                  "document_link",
+                  "hours",
+                  "policy",
+                  "contact",
+                  "handoff",
+                  "verify_prompt",
+                  "owner_said",
+                  "charges",
+                  "refund_issued",
+                  "charge_confirmed",
+                  "callback_confirmed",
+                  "payment_confirmed",
+                  "link_cancelled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "fact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fact Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lines",
+            "default": []
+          },
+          "href": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Href"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/CardOption"
+            },
+            "type": "array",
+            "title": "Options",
+            "default": []
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "allowed",
+                  "asks_first",
+                  "never"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "outcome_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "text",
+          "outcome",
+          "outcome_text"
+        ],
+        "title": "AgentAbility"
+      },
       "AgentCardOut": {
         "properties": {
           "endpoint": {
@@ -13162,7 +13292,7 @@
           },
           "agent_card": {
             "items": {
-              "$ref": "#/components/schemas/RenderedBlock"
+              "$ref": "#/components/schemas/AgentAbility"
             },
             "type": "array",
             "title": "Agent Card"

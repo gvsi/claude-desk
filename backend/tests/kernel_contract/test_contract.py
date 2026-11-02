@@ -1308,6 +1308,48 @@ async def test_public_desk_carries_the_agent_card(kernel, ro_read):
     assert await card("es") == ["Dejar datos de contacto", "Pedir que te devuelvan la llamada"]
 
 
+AGENT_OUTCOME_WORDS = {"en": {"allowed": "Allowed", "asks_first": "Asks first", "never": "Never"},
+                       "es": {"allowed": "Permitido", "asks_first": "Pregunta primero", "never": "Nunca"}}
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_public_agent_card_carries_each_abilitys_outcome_for_anyone(kernel, ro_read):
+    """Each Agent Card block carries what happens when an agent with no standing of its own asks for it, by the active
+    version's cards for anyone: `allowed` (an auto card), `never` (a never card on the tool or its effect) or
+    `asks_first` (anything else), with the kernel's fixed words for it in the language asked for. The two abilities
+    whose label names a verified customer (their own documents and charges) read cards for verified people and
+    record owners too. A card for one person changes nothing there, and nothing of it reaches the page."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id, slug = http.owner(copy.owner_token), copy.desk_ids[0], desk_slug(ro_read, ro_schema, copy)
+    seeded = ["allowed"] * 10      # the record owners' cards allow a verified customer's documents and charges
+    for lang in ("en", "es"):
+        blocks = (await public_page(http, slug, lang)).agent_card
+        assert [(block.outcome, block.outcome_text) for block in blocks] == [
+            (outcome, AGENT_OUTCOME_WORDS[lang][outcome]) for outcome in seeded]
+
+    (dana,) = ro_read(ro_schema, copy.copy_id, "SELECT person_id FROM {ro}.people WHERE desk_id = %s"
+                                               " AND display_name = 'Dana Whitfield'", (desk_id,))
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    # without the record owners' documents card, so documents ask first and Dana's own card would flip them if read
+    cards = [*(card for card in owner_cards(active) if card.applies_to != "native.release_document"),
+             RuleCard(card_id="card-no-book", applies_to="native.book", mode="never", who="anyone",
+                      reason="No bookings this week."),
+             RuleCard(card_id="card-dana-docs", applies_to="native.release_document", mode="auto", who="person",
+                      person_id=dana["person_id"], reason="Dana Whitfield gets her documents.")]
+    drafted = await draft(owner, desk_id, cards, active["version"])
+    proved_or_skip(drafted)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=drafted.version))
+    for lang in ("en", "es"):
+        page = await public_page(http, slug, lang)
+        assert [block.outcome for block in page.agent_card] == [         # "Book a visit", then documents
+            {2: "never", 8: "asks_first"}.get(index, outcome) for index, outcome in enumerate(seeded)]
+        assert page.agent_card[2].outcome_text == AGENT_OUTCOME_WORDS[lang]["never"]
+        served = page.model_dump_json()
+        for private in ("card-dana-docs", "Dana", dana["person_id"], "card-no-book", "No bookings"):
+            assert private not in served, (lang, private)
+
+
 @pytest.mark.kernel_plan("01a")
 async def test_context_starts_with_the_desks_catalog(kernel, ro_read):
     """A session's `/context` facts start with the public `catalog`: one text claim per price item, its item_id and

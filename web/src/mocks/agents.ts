@@ -7,7 +7,7 @@
  * the Desk's checked replies and their receipts. The seed replays one run into history, so a fresh
  * copy has an agent's chat.
  */
-import type { DemoAgentIssued, RenderedBlock } from '../api/contracts.ts';
+import type { AgentAbility, AgentOutcome, DemoAgentIssued, RenderedBlock } from '../api/contracts.ts';
 import type { AgentCardOut, AgentTurn, DemoAgentRun } from '../api/views.ts';
 import { placeholderHex, proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { DECISIONS, TOOLS_WHILE_NOT_ANSWERING, handoffBlock, type DecisionSpec, type Language } from './script.ts';
@@ -17,35 +17,56 @@ import { isoTime, type DeskRecord, type MockWorld, type SessionRecord } from './
 export const MOCK_PUBLIC_ORIGIN = 'https://desk.example';
 
 /**
+ * What happens when an agent asks for each ability, in the kernel's words beside it (`render.en`,
+ * `render.es` `AGENT_OUTCOMES`), by the outcome's key.
+ */
+export const AGENT_OUTCOME_WORDS: Readonly<Record<Language, Readonly<Record<AgentOutcome, string>>>> = {
+  en: { allowed: 'Allowed', asks_first: 'Asks first', never: 'Never' },
+  es: { allowed: 'Permitido', asks_first: 'Pregunta primero', never: 'Nunca' },
+};
+
+/** An Agent Card block: the kernel's plain label for an ability, with its outcome and the words for it. */
+function ability(language: Language, text: string, outcome: AgentOutcome): AgentAbility {
+  return { ...proseBlock(text), outcome, outcome_text: AGENT_OUTCOME_WORDS[language][outcome] };
+}
+
+/**
  * What agents can do at Turner's Desk, as the kernel renders the Agent Card's blocks (kernel plan
  * 01c): one prose block for each tool an agent may be given there, by its plain label, with no
- * amount and nothing about the protocol, which `agentCardOut` carries.
+ * amount and nothing about the protocol, which `agentCardOut` carries. Each carries its outcome
+ * (`test_public_agent_card_carries_each_abilitys_outcome_for_anyone`): the seed's cards for anyone
+ * allow the first eight, and its cards for record owners a verified customer's documents and charges.
  */
-export const AGENT_CARD_BLOCKS: Readonly<Record<Language, readonly RenderedBlock[]>> = {
+const ABILITIES: Readonly<Record<Language, readonly string[]>> = {
   en: [
-    proseBlock('Get a quote from the price list'),
-    proseBlock('Find open times'),
-    proseBlock('Book a visit'),
-    proseBlock('Get a payment link for a quote'),
-    proseBlock('Pay for a quote within the limit of a signed mandate'),
-    proseBlock('Leave contact details'),
-    proseBlock('Ask for a callback'),
-    proseBlock('Verify a customer with a code sent to their contact on record'),
-    proseBlock("Receive a verified customer's own documents"),
-    proseBlock("List a verified customer's own charges"),
+    'Get a quote from the price list',
+    'Find open times',
+    'Book a visit',
+    'Get a payment link for a quote',
+    'Pay for a quote within the limit of a signed mandate',
+    'Leave contact details',
+    'Ask for a callback',
+    'Verify a customer with a code sent to their contact on record',
+    "Receive a verified customer's own documents",
+    "List a verified customer's own charges",
   ],
   es: [
-    proseBlock('Pedir una cotización de la lista de precios'),
-    proseBlock('Buscar horarios libres'),
-    proseBlock('Reservar una visita'),
-    proseBlock('Pedir un enlace de pago para una cotización'),
-    proseBlock('Pagar una cotización dentro del límite de un mandato firmado'),
-    proseBlock('Dejar datos de contacto'),
-    proseBlock('Pedir que te devuelvan la llamada'),
-    proseBlock('Verificar a un cliente con un código enviado a su contacto registrado'),
-    proseBlock('Recibir los documentos propios de un cliente verificado'),
-    proseBlock('Ver los cargos propios de un cliente verificado'),
+    'Pedir una cotización de la lista de precios',
+    'Buscar horarios libres',
+    'Reservar una visita',
+    'Pedir un enlace de pago para una cotización',
+    'Pagar una cotización dentro del límite de un mandato firmado',
+    'Dejar datos de contacto',
+    'Pedir que te devuelvan la llamada',
+    'Verificar a un cliente con un código enviado a su contacto registrado',
+    'Recibir los documentos propios de un cliente verificado',
+    'Ver los cargos propios de un cliente verificado',
   ],
+};
+
+export const AGENT_CARD_BLOCKS: Readonly<Record<Language, readonly AgentAbility[]>> = {
+  en: ABILITIES.en.map((text) => ability('en', text, 'allowed')),
+  es: ABILITIES.es.map((text) => ability('es', text, 'allowed')),
 };
 
 /** The headers an agent signs with, as the kernel checks them ("Agent sessions"). */
