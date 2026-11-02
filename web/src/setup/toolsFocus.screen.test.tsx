@@ -89,6 +89,10 @@ it.each([
   const row = screen.getByRole('listitem').filter({ hasText: new RegExp(`^${name}`) });
   await expect.element(row.getByText('On', { exact: true })).toBeVisible();
   await expect.element(row).toHaveFocus();
+  await expect.poll(() => {
+    const bounds = row.element().getBoundingClientRect();
+    return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  }).toBe(true);
   expect(row.element().tabIndex).toBe(-1);
   expect(getComputedStyle(row.element()).boxShadow).toBe('none');
   await expectNoHorizontalScroll();

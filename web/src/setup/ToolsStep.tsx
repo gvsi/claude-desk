@@ -158,6 +158,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       row.addEventListener('blur', () => row.removeAttribute('tabindex'), { once: true });
       row.focus({ preventScroll: true });
     }
+    row.scrollIntoView({ block: 'nearest' });
   }, [viewKey, reviewReady]);
   const open = (key: Parameters<typeof flow.open>[0]) => {
     returnTo.current = key;
