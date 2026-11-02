@@ -40,6 +40,25 @@ function withTool(section: ConnectorSectionProps, name: string, changes: Partial
 /** The selected fill, as the browser computes `--bg-selected`. */
 const SELECTED = 'rgb(60, 57, 47)';
 
+it.each([680, 688])('payment_link_keeps_a_readable_text_column_in_a_%i_px_section', (width) => {
+  const payments = rivera.connectors.sections.find((section) => section.connector.id === 'payments');
+  const paymentLink = payments?.tools.find((tool) => tool.key === 'native.payment_link');
+  if (!payments || !paymentLink) throw new Error('Payments has a payment link');
+  const draw = mount();
+  const el = draw({
+    ...payments,
+    tools: [{ ...paymentLink, href: undefined, summary: 'Anyone · Up to $300 · Checked by the reviewer' }],
+  });
+  el.style.width = `${width}px`;
+  const row = el.querySelector<HTMLElement>('.cd-connector-section__tool')!;
+  const description = row.querySelector<HTMLElement>('.cd-connector-section__tool-description')!;
+  expect(description.getBoundingClientRect().width).toBeGreaterThanOrEqual(200);
+  expect(description.getBoundingClientRect().height).toBeLessThanOrEqual(4 * parseFloat(getComputedStyle(description).lineHeight));
+  for (const part of row.children) {
+    expect(part.getBoundingClientRect().right).toBeLessThanOrEqual(row.getBoundingClientRect().right);
+  }
+});
+
 it('a_landed_row_lights_up_holds_and_lets_go', async () => {
   await motion();
   const draw = mount();
