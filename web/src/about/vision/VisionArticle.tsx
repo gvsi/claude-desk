@@ -19,6 +19,7 @@ import { AboutBar } from '../AboutBar.tsx';
 import { readNext } from '../links.ts';
 import { useNoIndex } from '../useNoIndex.ts';
 import { usePagePlace } from '../usePagePlace.ts';
+import { openedVisionCard, rememberVisionCard } from './cardReturn.ts';
 import {
   ARTICLE,
   PICTURE_CARDS,
@@ -208,21 +209,19 @@ function SectionText({ heading, passages }: Pick<Section, 'heading' | 'passages'
  * "See each one up close": a card for each idea, two by two at every width. Each card is one link to the idea's
  * vision page, named by the idea and its line; the top of the idea's phone above them is decoration.
  */
-const OPENED_CARDS = new WeakMap<object, Map<string, string>>();
-
 function PictureCards() {
   const headingId = useId();
   const cardsRef = useRef<HTMLElement>(null);
   const { navigator } = useContext(UNSAFE_NavigationContext);
-  const { key } = useLocation();
+  const { key, hash, state } = useLocation();
   const navigationType = useNavigationType();
   useLayoutEffect(() => {
-    if (navigationType !== 'POP') return;
-    const href = OPENED_CARDS.get(navigator)?.get(key);
+    const href = navigationType === 'POP' ? openedVisionCard(navigator, key)
+      : hash === '#vision-pages' ? state?.visionCard : undefined;
     const opener = Array.from(cardsRef.current?.querySelectorAll<HTMLAnchorElement>('a.va-card') ?? []).find((link) => link.getAttribute('href') === href);
     // The article restores its scroll separately; focus must leave that place alone.
     opener?.focus({ preventScroll: true });
-  }, [navigator, key, navigationType]);
+  }, [navigator, key, hash, state, navigationType]);
   const { heading, lead, cards } = PICTURE_CARDS;
   return (
     <section ref={cardsRef} id="vision-pages" className="va-body va-cards" aria-labelledby={headingId}>
@@ -233,11 +232,9 @@ function PictureCards() {
       <ul className="va-cards__grid">
         {cards.map(({ screen, name, line, href }) => (
           <li key={href} className="va-cards__item">
-            <Link className="va-card" to={href} state={{ fromVision: true }} onClick={(event) => {
+            <Link className="va-card" to={href} state={{ fromVision: key }} onClick={(event) => {
               if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-              const opened = OPENED_CARDS.get(navigator) ?? new Map<string, string>();
-              opened.set(key, href);
-              OPENED_CARDS.set(navigator, opened);
+              rememberVisionCard(navigator, key, href);
             }}>
               <div className="va-card__top" aria-hidden="true">
                 <Phone screen={screen} decorative />

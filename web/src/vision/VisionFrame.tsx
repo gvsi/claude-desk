@@ -1,7 +1,8 @@
-import type { ReactNode } from 'react';
-import { useLocation, useNavigate } from 'react-router';
+import { useContext, type ReactNode } from 'react';
+import { UNSAFE_NavigationContext, useLocation, useNavigate } from 'react-router';
 
 import { usePagePlace } from '../about/usePagePlace.ts';
+import { openedVisionCard } from '../about/vision/cardReturn.ts';
 import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
@@ -28,18 +29,23 @@ export interface VisionFrameProps {
 export function VisionFrame({ title, children }: VisionFrameProps) {
   const navigate = useNavigate();
   const { pathname, state } = useLocation();
+  const { navigator } = useContext(UNSAFE_NavigationContext);
   usePagePlace(pathname);
 
   useDocumentTitle(title);
 
   return (
     <div className="cd-vision-frame" onClick={followInAppLinks(navigate)} onClickCapture={(event) => {
-      if (state?.fromVision !== true || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
       if (!(link instanceof HTMLAnchorElement) || link.target !== '' || link.getAttribute('href') !== VISION_BACK_HREF) return;
-      // The article opened this page: use its history entry, with the reader's place kept there.
       event.preventDefault();
-      void navigate(-1);
+      if (typeof state?.fromVision === 'string' && openedVisionCard(navigator, state.fromVision) === pathname) {
+        // This router still remembers the article entry and the reader's place there.
+        void navigate(-1);
+      } else {
+        void navigate(VISION_BACK_HREF, { state: { visionCard: pathname } });
+      }
     }}>
       {children(<VisionBar backHref={VISION_BACK_HREF} />)}
     </div>
