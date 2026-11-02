@@ -7,9 +7,9 @@
 // routes.contract.test.ts makes the same checks at run time from openapi.json, and is the only
 // importer of this file.
 
-import type { API_OPERATIONS, SendAgentIn, SetupStartIn } from './openapi.gen.ts';
+import type { API_OPERATIONS, SendAgentIn, SetupReopenIn, SetupStartIn } from './openapi.gen.ts';
 import type { ROUTES, RouteKey } from './routes.ts';
-import type { AgentTaskBody, StartSetupBody } from './views.ts';
+import type { AgentTaskBody, SetupReopenBody, StartSetupBody } from './views.ts';
 
 /**
  * The schema each route's 2xx answer carries, by its name in the API's OpenAPI document (Plan 02's
@@ -91,6 +91,7 @@ export const ROUTE_MODELS = {
   setupAnswer: 'SetupState',
   setupProposal: 'SetupState',
   setupSuggestions: 'SetupState',
+  setupReopen: 'SetupState',
   setupEvents: null,
   setupTools: 'SetupTools',
   setupConnect: 'ToolRow[]',
@@ -313,10 +314,11 @@ type KeyedBodyFits<Body, Model> = [Exclude<keyof Body, keyof Model>] extends [ne
     : false
   : false;
 
-/** The two start bodies that carry a key, against the API's `SendAgentIn` and `SetupStartIn`. */
+/** The bodies that carry a key, against the API's `SendAgentIn`, `SetupStartIn` and `SetupReopenIn`. */
 export type KeyedBodyChecks = [
   Assert<KeyedBodyFits<AgentTaskBody, SendAgentIn>>,
   Assert<KeyedBodyFits<StartSetupBody, SetupStartIn>>,
+  Assert<KeyedBodyFits<SetupReopenBody, SetupReopenIn>>,
   // A body with no key, or with a field the model lacks, doesn't fit.
   Assert<Equal<KeyedBodyFits<{ task: string }, SendAgentIn>, false>>,
   Assert<Equal<KeyedBodyFits<{ task: string; idempotency_key?: string; extra: 1 }, SendAgentIn>, false>>,

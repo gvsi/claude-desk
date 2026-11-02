@@ -1,5 +1,5 @@
-/* ChainStatus: one line over the Safety ledger, a status dot beside the words, the entry count
-   beside them and the signing key at the end. It wraps on a narrow screen. */
+/* ChainStatus: one line over the Safety ledger, a status dot beside the words, the entry count in
+   words beside them and the signing key at the end. It wraps on a narrow screen. */
 
 .cd-chain-status {
   display: flex;
@@ -20,6 +20,12 @@
   gap: var(--space-8);
   min-width: 0;
   color: var(--text-primary);
+}
+
+/* The count: quieter than the line, as the key is. */
+.cd-chain-status__count {
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .cd-chain-status__key {

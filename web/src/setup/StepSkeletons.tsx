@@ -412,6 +412,7 @@ export function SituationsSkeleton() {
         </ul>
       </SkeletonCard>
       <div className="cd-setup-step__actions">
+        <MainButton label={SETUP_COPY.changeSomething} variant="secondary" />
         <MainButton label={SETUP_COPY.situations.looksRight} />
       </div>
     </div>

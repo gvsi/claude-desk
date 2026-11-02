@@ -1359,6 +1359,111 @@ describe('the scripted Desk', () => {
     expect((await read())?.held_by).toBe(defaultAsk.reason);
   });
 
+  it.each([
+    ['seed', 'changed'], ['seed', 'removed'], ['confirmed', 'changed'], ['confirmed', 'removed'],
+  ] as const)('held_by_keeps_the_%s_version_when_the_rule_is_%s', async (start, change) => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    const competing: RuleCard = {
+      card_id: 'a-refund-effect', applies_to: 'effect:pay_out', mode: 'ask', who: 'anyone',
+      reason: 'Payouts ask first.',
+    };
+    if (start === 'confirmed') {
+      const initial = world.draft(main, [competing]);
+      expect(world.confirmDraft(main, initial.version)).toMatchObject({ version: initial.version });
+    } else {
+      world.addActiveRules(main, [competing]);
+      expect(main.versions.size).toBe(0);
+    }
+    const heldVersion = main.policy.version;
+    const refundRule = main.policy.cards.find((card) => card.card_id === 'rv-refund')!;
+    const refund = world.addHeldRefund();
+    // All matching hold cards are stored; the tool card outranks the effect card.
+    refund.card_ids = [competing.card_id, refundRule.card_id];
+    expect(refund.policy_version).toBe(heldVersion);
+    const read = async () =>
+      ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[]).find(
+        (item) => item.decision?.decision_id === refund.decision_id,
+      );
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+
+    const next = world.draftCards(main, main.policy.cards.flatMap((card) =>
+      card.card_id !== refundRule.card_id ? [card] : change === 'removed' ? [] : [{ ...card, reason: 'New refund rule.' }],
+    ));
+    expect(world.confirmDraft(main, next.version)).toMatchObject({ version: heldVersion + 1 });
+
+    expect((await read())?.decision?.state).toBe('held');
+    expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
+    expect(main.versions.has(main.policy.version)).toBe(false);
+  });
+
+  it('keeps_no_archived_versions_after_100_confirms_without_held_decisions', () => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    world.decisions.clear();
+    for (let i = 0; i < 100; i += 1) {
+      const draft = world.draft(main, []);
+      expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+    }
+    expect(main.versions.size).toBe(0);
+  });
+
+  it('held_by_names_no_rule_when_the_deciding_version_is_missing', async () => {
+    const refund = mockStore.world.addHeldRefund();
+    refund.policy_version = 999;
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+      .find((item) => item.decision?.decision_id === refund.decision_id);
+    expect(held?.held_by).toBeNull();
+  });
+
+  it('held_by_reads_an_in_place_edit_of_the_active_cards', async () => {
+    const world = mockStore.world;
+    const main = world.desk(deskId)!;
+    const draft = world.draft(main, []);
+    expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+    const refund = world.addHeldRefund();
+    expect(refund.policy_version).toBe(main.policy.version);
+    const card = main.policy.cards.find((card) => card.card_id === 'rv-refund')!;
+    card.reason = 'The current refund rule asks for your answer.';
+    const held = ((await call('needsYou', { params: { desk_id: deskId } })).body as NeedsYouItem[])
+      .find((item) => item.decision?.decision_id === refund.decision_id);
+    expect(held?.held_by).toBe(card.reason);
+    expect(main.versions.has(main.policy.version)).toBe(false);
+  });
+
+  it.each(['allow', 'deny', 'cancel', 'refuse', 'closed_allow', 'closed_deny'] as const)(
+    'drops_archived_cards_after_the_last_hold_resolves_%s', (resolution) => {
+      const world = mockStore.world;
+      const main = world.desk(deskId)!;
+      world.decisions.clear();
+      const first = world.addHeldRefund();
+      const last = world.addHeldRefund();
+      const version = first.policy_version;
+      const draft = world.draft(main, []);
+      expect(world.confirmDraft(main, draft.version)).toMatchObject({ version: draft.version });
+      expect([...main.versions.keys()]).toEqual([version]);
+
+      world.cancel(world.decisions.get(first.decision_id)!);
+      expect([...main.versions.keys()]).toEqual([version]);
+      const record = world.decisions.get(last.decision_id)!;
+      let state: DecisionState;
+      if (resolution === 'cancel') state = world.cancel(record).state;
+      else if (resolution === 'closed_allow' || resolution === 'closed_deny') {
+        world.deleteDesk(main);
+        state = world.answerClosed(record, resolution === 'closed_allow' ? 'allow_once' : 'deny_once').state;
+      } else {
+        if (resolution === 'refuse') {
+          main.policy.cards = main.policy.cards.map((card) => card.card_id === 'rv-refund' ? { ...card, mode: 'never' } : card);
+        }
+        state = world.answer(record, resolution === 'deny' ? 'deny_once' : 'allow_once').state;
+      }
+      expect(state).toBe(resolution === 'cancel' ? 'cancelled'
+        : resolution === 'refuse' || resolution === 'closed_allow' ? 'refused_at_execution'
+        : resolution === 'deny' || resolution === 'closed_deny' ? 'denied' : 'executed');
+      expect(main.versions.size).toBe(0);
+    },
+  );
+
   it('paused_chat_hands_off_and_opens_the_owner_handoff', async () => {
     // As the API's turn in a chat the breaker paused: no model call and no "writing", only the
     // kernel's handoff, which its check stops as paused (`session_paused`, no attempt anyone made)

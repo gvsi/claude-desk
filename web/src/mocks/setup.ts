@@ -40,7 +40,7 @@ import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { formatHours } from '../lib/format.ts';
 import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
-import { appendBusinessTools } from './businessTools.ts';
+import { replaceBusinessTools } from './businessTools.ts';
 import { playReply, type PlayedRead } from './ownerStreams.ts';
 import type { Language } from './script.ts';
 import { rulesView } from './readModels.ts';
@@ -83,6 +83,12 @@ export const FOLLOW_UP = "That's fine. Give me your best guess, and you can chan
 
 /** What Claude says once the last question is answered. */
 export const QUESTIONS_DONE = "Thanks, that's everything I need. Next, choose what Claude can use.";
+
+/**
+ * Claude's reply to a change sent from a step after the questions ("Change something", `setupReopen`):
+ * the mock's stand-in for the model's answer, asking on the contact question as the API's reopen does.
+ */
+export const REOPEN_REPLY = 'Got it, I’ll change that. Anything else before I set it up again?';
 
 /** The test-client offer at the end of setup's plan, its two choices and Claude's line after a yes: the API's own words. */
 export const TEST_CLIENT_OFFER = 'Want to try your Desk the way a client would? I can add you as a test client, with your own contact, so you can check verification and private answers yourself.';
@@ -131,6 +137,8 @@ interface Interview {
   running: { text: string; ownerStored?: boolean } | null;
   /** Consent runs in the background when a test holds it; its result lands on a later GET. */
   holdConsent: boolean;
+  /** Each "Change something" send by its idempotency key, with its words (`setupReopen`). */
+  reopens: Map<string, string>;
   consentResult: 'landed' | 'failed' | null;
   /**
    * While a streamed turn runs, the interview as reads see it: busy, with the owner's words. The
@@ -769,6 +777,15 @@ function say(interview: Interview, role: SetupMessage['role'], text: string, cho
   interview.state.messages.push({ role, text, choices, card: null });
 }
 
+/**
+ * The owner decided this card themselves, by a click or a typed answer: its message says so, as the
+ * API's does (`owner_decided`). A card setup settles for them, as "Use your suggestions" does, stays unmarked.
+ */
+function markDecided(interview: Interview, proposalId: string): void {
+  const message = interview.state.messages.findLast(({ card }) => card?.proposal_id === proposalId);
+  if (message) message.owner_decided = true;
+}
+
 /** The CPA fixture's proposals, made once so their ids remain stable throughout the interview. */
 const proposalId = () => `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 function consultantProposals(): ProposalCard[] {
@@ -953,7 +970,7 @@ function enterTools(world: MockWorld, interview: Interview): void {
   interview.state.question = null;
   moveTo(interview, 'tools');
   const jobs = interview.proposals.flatMap(({ state, job }) => state === 'accepted' && job ? [job] : []);
-  if (interview.consultant) appendBusinessTools(world.desk(interview.state.desk_id), jobs);
+  if (interview.consultant) replaceBusinessTools(world.desk(interview.state.desk_id), jobs);
   for (const { card } of interview.state.messages) {
     if (card) connectAcceptedProposal(world, interview, card);
   }
@@ -1193,7 +1210,10 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       interview.state.messages.push({ role: 'claude', text: '', choices: [], card: updated });
     } else if (!/[?]/.test(words) && /^(?:yes\b|accept\b|set it up\b|connect\b|no\b|not now\b|skip\b|decline\b)/i.test(words)) {
       const unpriced = payment !== null && (payment.amount_cents === null || payment.amount_cents <= 0);
-      card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words) ? 'declined' : 'accepted';
+      const no = /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words);
+      card.state = unpriced || no ? 'declined' : 'accepted';
+      // As the API's typed decision: a yes can't accept a payment with no amount, so its decline is setup's, not the owner's.
+      if (no || !unpriced) markDecided(interview, card.proposal_id);
       connectAcceptedProposal(world, interview, card);
       nextConsultant(interview);
     } else {
@@ -1460,6 +1480,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
   const desk: DeskRecord = {
     summary: { desk_id: deskId, slug: slugFor(world, business), name: 'Main line', business_name: business, hours: [], answering: false },
     policy: firstVersion(deskId),
+    versions: new Map(),
     ledger: [],
     openStatus: null,
     drafts: new Map(),
@@ -1512,6 +1533,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     decisionDone: null,
     running: null,
     holdConsent: false,
+    reopens: new Map(),
     consentResult: null,
     view: null,
     run: null,
@@ -1707,6 +1729,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     }
     const apply = () => {
       proposal.state = body.accept ? 'accepted' : 'declined';
+      markDecided(interview, proposal.proposal_id);
       if (proposal.job && (body.autonomy === 'auto' || body.autonomy === 'ask')) proposal.job.autonomy = body.autonomy;
       if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
       if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
@@ -1744,6 +1767,35 @@ export const SETUP_ROUTES: ServedRoutes = {
     };
     if (sv.streams.setupTurns) return streamTurn(sv, interview, req, finish);
     finish();
+    return ok(stateOf(interview, req.query));
+  },
+  setupReopen(sv, req) {
+    // "Change something": back to the questions from a later step, the owner's words as the next turn (plan 02b).
+    const found = interviewOf(sv, req);
+    if (isFailure(found)) return found;
+    const body = isRecord(req.body) ? req.body : {};
+    const { text } = body;
+    const key = idempotencyKeyOf(body);
+    if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > ANSWER_MAX || key === false) return INVALID;
+    const { interview } = found;
+    // A repeat answers the interview as it stands; the same key with other words is refused.
+    const held = interview.reopens.get(key);
+    if (held !== undefined) return held === text.trim() ? (busyOf(interview) ? { status: 202, body: stateOf(interview, req.query) } : ok(stateOf(interview, req.query))) : CONFLICT;
+    if (busyOf(interview) || interview.running !== null) return CONFLICT;
+    // Only from a step after the questions, and never once live.
+    if (!atLeast(interview.state.step, 'tools') || interview.state.step === 'live') return CONFLICT;
+    interview.reopens.set(key, text.trim());
+    const reopen = () => {
+      // What was drafted from the answers is gone: the steps after the questions draft it again.
+      interview.state.step = 'questions';
+      interview.draftVersion = null;
+      interview.state.pending_card = null;
+      interview.state.question = 'contact_and_after_hours';
+      say(interview, 'claude', REOPEN_REPLY);
+    };
+    say(interview, 'owner', text.trim());
+    if (sv.streams.setupTurns) return streamTurn(sv, interview, req, reopen);
+    reopen();
     return ok(stateOf(interview, req.query));
   },
   setupEvents(sv, req) {
@@ -1793,6 +1845,8 @@ export const SETUP_ROUTES: ServedRoutes = {
     const { interview, desk } = found;
     // Only at the rules' stages, with a draft (past the safety check is 409, as a confirm sent twice finds it).
     if (!atLeast(interview.state.step, 'rules') || atLeast(interview.state.step, 'preview') || interview.draftVersion === null) return CONFLICT;
+    // After "Change something", only once the safety check has run again on the new draft.
+    if (interview.reopens.size > 0 && interview.state.step !== 'safety_check') return CONFLICT;
     // A draft that isn't proved is never activated.
     const open = desk.drafts.get(interview.draftVersion);
     if (open && !proved(open.draft)) return CONFLICT;
@@ -1800,6 +1854,7 @@ export const SETUP_ROUTES: ServedRoutes = {
     if (confirmed === 'stale' || confirmed === 'not_found' || confirmed === 'conflict') {
       // The rules changed since the draft: the same cards, drafted again at the answered limit on the rules now in force.
       interview.draftVersion = null;
+      if (interview.reopens.size > 0) interview.state.step = 'rules';
       return fail(409, 'rules_changed_since_draft', { draft: setupDraft(sv, interview, desk) });
     }
     // Answering stays off until the owner goes live.

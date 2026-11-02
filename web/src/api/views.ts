@@ -590,6 +590,11 @@ export interface SetupMessage {
   text: string;
   choices: Choice[];
   card: ProposalCard | null;
+  /**
+   * A card the owner decided themselves, by a click or a typed answer; false for one setup settled
+   * for them, as "Use your suggestions" does. Older responses omit it (false).
+   */
+  owner_decided?: boolean;
 }
 
 export interface SetupState {
@@ -914,6 +919,16 @@ export type SetupProposalBody = { accept: boolean; title?: string; amount_cents?
 
 /** Sent as an empty JSON object. */
 export type SetupSuggestionsBody = Record<string, never>;
+
+/**
+ * "Change something": the owner's message to Claude from a step after the questions, which takes
+ * setup back to its chat (`setupReopen`). One key per send (1 to 128 characters, no control
+ * characters), sent again as it is by a retry: a repeat answers the interview as the first left it.
+ */
+export interface SetupReopenBody {
+  text: string;
+  idempotency_key: string;
+}
 
 export interface ConsentBody {
   allow: boolean;
