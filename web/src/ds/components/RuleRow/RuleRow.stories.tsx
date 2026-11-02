@@ -71,8 +71,11 @@ export const Shared: Story = {
     await expect(line).toHaveTextContent(`Shared rule. ${SHARED_APPLIES_TO}`);
     await expect(line).toBeVisible();
     expectComputed(line, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
-    // Each tool's title is its own user-text item among the app's words.
+    // Each tool's title is its own user-text item, set off on a line of its own under the app's words.
     for (const title of rivera.sharedChargeShared.titles) expectUserText(line, title);
+    const titles = [...line.querySelectorAll<HTMLElement>('[data-copy="user"]')];
+    await expect(line.querySelector('br + [data-copy="user"]')).not.toBeNull();
+    for (const title of titles) expectComputed(title, { color: 'rgba(250, 249, 245, 0.92)', fontWeight: '520', unicodeBidi: 'isolate' });
     const icon = canvasElement.querySelector('.cd-rule-row__shared svg');
     await expect(icon).toHaveAttribute('aria-hidden', 'true');
   },

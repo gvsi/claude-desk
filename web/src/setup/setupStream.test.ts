@@ -81,12 +81,12 @@ describe('stepSetupStream', () => {
       shownLabels(
         through([
           ...searches,
-          { type: 'label', run, read: 'web_search', text: 'Searched the web: hair salon deposits and late cancellations' },
+          { type: 'label', run, read: 'web_search', text: 'Searched the web: hair salon color appointment deposits' },
           { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
           { type: 'label', run, read: 'web_search', text: 'Searched the web: salon new client consultation form' },
         ]).growing,
       ),
-    ).toEqual(['Searched your Claude memory', 'Searched the web: hair salon deposits and late cancellations', 'Searched the web: salon new client consultation form']);
+    ).toEqual(['Searched your Claude memory', 'Searched the web: hair salon color appointment deposits', 'Searched the web: salon new client consultation form']);
     // Each failed search says so while the turn runs; the saved turn read back shows the one line it keeps.
     expect(
       shownLabels(

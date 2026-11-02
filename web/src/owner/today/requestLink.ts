@@ -1,6 +1,6 @@
 /**
  * Where a held request opens in the owner app: its card on its Desk's Today, at
- * `/app/<desk>/today#request-<decision id>`. The owner's Demo inbox links a hold's alert there, and
+ * `/app/<desk>/today#request-<decision id>`. The owner's Notifications page links a hold's alert there, and
  * Today brings the card into view and focus when its address names one.
  */
 import { todayPath } from '../useDesks.ts';

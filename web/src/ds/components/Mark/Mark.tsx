@@ -15,8 +15,8 @@ export type MarkProps = {
   | {
       /**
        * The ground under the bell, which has no tile: `dark` (the default, every ground in the app)
-       * draws its ink light; `light` keeps the drawing's dark ink, as on the intro illustration's
-       * light card.
+       * draws its ink light in the dark theme, and dark in the light theme, whose grounds are paper;
+       * `light` keeps the drawing's dark ink, as on the intro illustration's light card.
        */
       ground?: 'dark' | 'light';
       tile?: false;
@@ -91,12 +91,14 @@ const APP_ICON_BELL = { large: 80, compact: 58 } as const;
 /**
  * The Claude Desk app icon (owner, 2026-10-30): the mark on its white tile, centred on a clay field
  * whose corners are a quarter of its size. The About pages show it above the article's title. The
- * field counts as part of the mark, so its clay stays in the mark's own files. Decorative
- * (`aria-hidden`): the top bar above it names the product in words, and the title names the page.
+ * field counts as part of the mark, so its clay stays in the mark's own files, and like the mark's
+ * colors it is the same in every theme: the icon is marked dark, so it keeps the dark theme's clay
+ * where the light theme would darken it. Decorative (`aria-hidden`): the top bar above it names the
+ * product in words, and the title names the page.
  */
 export function MarkAppIcon({ size }: MarkAppIconProps) {
   return (
-    <span className={`cd-mark-app-icon cd-mark-app-icon--${size}`} aria-hidden="true">
+    <span className={`cd-mark-app-icon cd-mark-app-icon--${size}`} data-theme="dark" aria-hidden="true">
       <Mark tile size={APP_ICON_BELL[size]} />
     </span>
   );

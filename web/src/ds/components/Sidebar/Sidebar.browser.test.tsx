@@ -130,7 +130,43 @@ it('connectors_row_only_with_its_href', () => {
   columns.forEach((column) => column.remove());
 });
 
-it('only_connectors_may_be_left_out', () => {
+it('notifications_row_under_safety_only_with_its_href', () => {
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  const column = document.createElement('div');
+  column.style.cssText = 'display: flex; width: 264px; height: 982px;';
+  document.body.append(column);
+  const root = createRoot(column);
+  const hrefs = { ...HREFS, connectors: '#connectors', notifications: '#notifications' };
+  const counts = { notifications: { n: 2, label: '2 unread' } };
+  act(() => root.render(<Sidebar {...PROPS} hrefs={hrefs} counts={counts} current="notifications" />));
+
+  // The owner app's eleven rows: Notifications under Safety, a link like the others, with its bell and count.
+  const rows = [...column.querySelectorAll<HTMLAnchorElement>('.cd-sidebar__nav > a')];
+  expect(rows.map((row) => row.querySelector('.cd-sidebar__label')?.textContent)).toEqual([
+    'Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', NAV_LABELS.notifications, 'Profile', 'Share', 'Knowledge', 'Settings',
+  ]);
+  const notifications = rows[6] as HTMLAnchorElement;
+  expect(notifications.getAttribute('href')).toBe('#notifications');
+  expect(notifications.getAttribute('aria-current')).toBe('page');
+  expect(notifications.querySelector('svg path')?.getAttribute('d')).toBe('M10.268 21a2 2 0 0 0 3.464 0');
+  const pill = notifications.querySelector('.cd-count-pill');
+  expect([pill?.textContent, pill?.getAttribute('aria-label')]).toEqual(['2', '2 unread']);
+  expect(column.querySelectorAll('.cd-count-pill')).toHaveLength(1);
+  // One 38 px row apart, as every row.
+  const tops = rows.map((row) => row.getBoundingClientRect().top);
+  expect(Math.round((tops[6] ?? 0) - (tops[5] ?? 0))).toBe(38);
+  expect(Math.round((tops[7] ?? 0) - (tops[6] ?? 0))).toBe(38);
+
+  // Without its href, no row, and no count with nowhere to go.
+  act(() => root.render(<Sidebar {...PROPS} hrefs={{ ...HREFS, connectors: '#connectors' }} counts={counts} />));
+  expect([...column.querySelectorAll('.cd-sidebar__nav .cd-sidebar__label')].map((label) => label.textContent)).not.toContain('Notifications');
+  expect(column.querySelector('.cd-count-pill')).toBeNull();
+
+  act(() => root.unmount());
+  column.remove();
+});
+
+it('only_connectors_and_notifications_may_be_left_out', () => {
   // Every other page's href is required. One missing anyway, past the types, still draws its row,
   // so a page never disappears from the nav by accident.
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;

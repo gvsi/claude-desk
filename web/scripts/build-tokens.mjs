@@ -16,6 +16,9 @@ const LENGTH = /^-?\d+(?:\.\d+)?px$/;
 // Plain CSS values for the list families: no var(), url() or declarations.
 const PLAIN_VALUE = /^[A-Za-z0-9 #%(),./+_-]{1,200}$/;
 const LIST_FAMILIES = ['spacing', 'radius', 'size', 'motion'];
+// The color themes: dark is the base; light overrides it where it has values.
+const BASE_THEME = 'dark';
+const LIGHT_THEME = 'light';
 // The numeral forms a type style may ask for: tabular figures, for numbers that line up.
 const NUMERIC = new Set(['tabular-nums']);
 // The font styles a type style may ask for: italic, for a reading page's quotations.
@@ -33,21 +36,81 @@ function checkName(name, where) {
   if (typeof name !== 'string' || !NAME.test(name)) fail(`${where} has an invalid name: ${JSON.stringify(name)}`);
 }
 
-function colorDeclarations(color, theme) {
+/**
+ * The color themes: dark, the base every token has a value for, then optionally light, which sets
+ * only the tokens it has a value for.
+ */
+function themeIds(color) {
+  const ids = Array.isArray(color?.themes) ? color.themes.map((theme) => theme?.id) : [];
+  const known = ids[0] === BASE_THEME && (ids.length === 1 || (ids.length === 2 && ids[1] === LIGHT_THEME));
+  if (!known) fail(`expects the color themes ${BASE_THEME}, then optionally ${LIGHT_THEME}; found ${JSON.stringify(ids)}`);
+  return ids;
+}
+
+/**
+ * A themed token's value for `theme`, or undefined when it has none. Dark is required; a value for
+ * a theme that isn't declared is refused, so a misspelt one can't be dropped unnoticed.
+ */
+function themedValue(token, themes, theme) {
+  const values = token.value;
+  if (values === null || typeof values !== 'object' || Array.isArray(values)) fail(`${token.name} has no per-theme values`);
+  for (const key of Object.keys(values)) {
+    if (!themes.includes(key)) fail(`${token.name} has a value for an unknown theme: ${JSON.stringify(key)}`);
+  }
+  const value = values[theme];
+  if (value === undefined && theme !== BASE_THEME) return undefined;
+  if (typeof value !== 'string') fail(`${token.name} has no ${theme} value`);
+  return value;
+}
+
+function colorDeclarations(color, themes, theme) {
   const names = new Set(color.tokens.map((t) => t.name));
-  return color.tokens.map((token) => {
+  return color.tokens.flatMap((token) => {
     checkName(token.name, 'a color token');
-    const value = token.value?.[theme];
-    if (typeof value !== 'string') fail(`${token.name} has no ${theme} value`);
+    const value = themedValue(token, themes, theme);
+    if (value === undefined) return [];
     const alias = ALIAS.exec(value);
     if (alias) {
       const target = alias[1];
       if (target === token.name || !names.has(target)) fail(`${token.name} aliases a missing color: ${value}`);
-      return `  --${token.name}: var(--${target});`;
+      return [`  --${token.name}: var(--${target});`];
     }
     if (!HEX.test(value) && !RGBA.test(value)) fail(`${token.name} has an unsupported color: ${value}`);
-    return `  --${token.name}: ${value};`;
+    return [`  --${token.name}: ${value};`];
   });
+}
+
+function shadowDeclarations(shadows, themes, theme) {
+  return shadows.flatMap((token) => {
+    checkName(token.name, 'a shadow token');
+    const value = themedValue(token, themes, theme);
+    if (value === undefined) return [];
+    if (!PLAIN_VALUE.test(value)) fail(`${token.name} has an unsupported value: ${JSON.stringify(value)}`);
+    return [`  --${token.name}: ${value};`];
+  });
+}
+
+/** The color and shadow declarations for `theme`: every token for dark, those with a value for light. */
+function themedDeclarations(tokens, themes, theme) {
+  return [...colorDeclarations(tokens.color, themes, theme), ...shadowDeclarations(tokens.shadow?.tokens ?? [], themes, theme)];
+}
+
+/**
+ * The theme blocks. Dark is the base, on :root and on anything marked dark. Light is chosen on the
+ * root (data-theme="light"), or by the system while dark isn't chosen, and carries the browser's
+ * own scheme with it, so its scrollbars and form controls follow. A token without a light value
+ * keeps its dark one: an alias resolves against the light values on the same root.
+ */
+function themeBlocks(tokens) {
+  const themes = themeIds(tokens.color);
+  const blocks = [`:root,\n[data-theme="${BASE_THEME}"] {\n${themedDeclarations(tokens, themes, BASE_THEME).join('\n')}\n}`];
+  if (!themes.includes(LIGHT_THEME)) return blocks;
+  const light = [`  color-scheme: ${LIGHT_THEME};`, ...themedDeclarations(tokens, themes, LIGHT_THEME)];
+  blocks.push(`:root[data-theme="${LIGHT_THEME}"] {\n${light.join('\n')}\n}`);
+  blocks.push(
+    `@media (prefers-color-scheme: ${LIGHT_THEME}) {\n  :root:not([data-theme="${BASE_THEME}"]) {\n${light.map((line) => `  ${line}`).join('\n')}\n  }\n}`,
+  );
+  return blocks;
 }
 
 function listDeclarations(family, entries) {
@@ -115,15 +178,7 @@ function typeStyleRule(style, groupFamily, families) {
 
 /** The tokens.css text for a tokens object in the design system's list shape. */
 export function buildTokensCss(tokens) {
-  const themes = tokens?.color?.themes;
-  if (!Array.isArray(themes) || themes.length !== 1) fail('expects exactly one color theme');
-  const theme = themes[0].id;
-  checkName(theme, 'the theme');
-
-  const themed = [
-    ...colorDeclarations(tokens.color, theme),
-    ...listDeclarations('shadow', tokens.shadow?.tokens ?? []),
-  ];
+  const themed = themeBlocks(tokens);
   const plain = [
     ...LIST_FAMILIES.flatMap((family) => listDeclarations(family, tokens[family]?.tokens ?? [])),
     ...fontFamilyDeclarations(tokens.type.families),
@@ -136,8 +191,7 @@ export function buildTokensCss(tokens) {
     `/* ${tokens.name} — generated from tokens.json */`,
     '/* Run `npm run tokens` after changing tokens.json; never edit this file by hand. */',
     '',
-    `:root,\n[data-theme="${theme}"] {\n${themed.join('\n')}\n}`,
-    '',
+    ...themed.flatMap((block) => [block, '']),
     `:root {\n${plain.join('\n')}\n}`,
     '',
     typeRules.join('\n\n'),

@@ -17,6 +17,7 @@ from desk.api.ro import KernelRO
 from desk.api.schemas import NeedsYouItem
 from desk.db.session import API_CONNECT_OPTIONS, database_url
 from desk.kernel_service import seed
+from desk.kernel_service.decide import RULE_LEAD_INS
 from desk.kernel_service.adapters.base import quoted
 
 from .test_adapters import Rivera, rivera
@@ -57,3 +58,19 @@ async def test_a_held_refund_names_the_refund_rule_not_the_default_ask(app, clie
               if item.decision is not None and item.decision.decision_id == held.decision_id]
 
     assert item.held_by == refunds.reason == "Refunds of a customer's own payment ask you first."
+
+
+async def test_a_quote_held_past_an_automatic_rules_limit_names_no_rule(app, client):
+    """The seed's held quote on a new Turner copy: drain clearing at 15% off, past the list-price quote card (an
+    automatic card, `rv-quote`). The decision's headline already quotes that card ("It goes past your rule…"), and the
+    card didn't ask for the hold, so Needs you names no rule ("Held by your rule" is left out)."""
+    copy = await rivera(app, client)
+    [quotes] = [card for card in seed.RIVERA_CARDS if card.card_id == "rv-quote"]
+    assert quotes.mode == "auto"
+
+    [item] = [item for item in await needs_you_of(app, copy)
+              if item.decision is not None and item.decision.call_id == seed.HELD_REQUEST.call_id]
+
+    assert f"{RULE_LEAD_INS['limit']}: {quoted(quotes.reason)}" in item.decision.reason_plain
+    assert "rv-quote" in item.decision.card_ids
+    assert item.held_by is None

@@ -3,6 +3,7 @@ import { expect } from 'storybook/test';
 
 import { chen, rivera } from '../../fixtures';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { expectSetOffName } from '../../test/expectSetOffName.ts';
 import { expectMockBesideExternalNames } from '../../test/expectMockBadges.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { outcomePhrase } from '../OutcomeMenu/outcomeWords.ts';
@@ -44,6 +45,8 @@ export const Quotes: Story = {
     if (!header || !row) throw new Error('Expected the header and one tool row');
     // The header: 14 px 16 px of padding; a tool row: 12 px 16 px, under a hairline.
     expectComputed(header, { paddingTop: '14px', paddingLeft: '16px' });
+    // The tool's title is set off as the business's own words, first in its link.
+    await expectSetOffName(row, quotes.tools[0]?.name ?? '');
     const item = row.closest('li');
     if (item === null) throw new Error('The tool link is not in its row');
     expectComputed(item, { paddingTop: '12px', paddingLeft: '16px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });

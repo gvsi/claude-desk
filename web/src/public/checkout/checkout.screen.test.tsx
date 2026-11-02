@@ -318,6 +318,104 @@ describe('mock checkout', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each([
+    ['en', 'Cancel payment', 'This payment was cancelled. Nothing was charged.', 'Go back to the chat'],
+    ['es', 'Cancelar pago', 'Este pago se canceló. No se cobró nada.', 'Vuelve al chat'],
+  ] as const)('cancelled_line_links_back_to_the_chat_in_%s', async (language, cancel, cancelled, label) => {
+    const token = language === 'en' ? await linkFromTheChat() : issueLink('es');
+    if (language === 'es') recordPayChat(token, CHAT);
+    const { screen } = await renderRoute(`/pay/${token}`, { language: 'en-US' });
+    await screen.getByRole('button', { name: cancel, exact: true }).click();
+    const back = screen.getByRole('link', { name: label, exact: true });
+    await expect.element(back).toBeVisible();
+    expect(back.element().getAttribute('href')).toBe(CHAT);
+    expect(back.element().getAttribute('target')).toBeNull();
+    expect(back.element().closest('[lang]')?.getAttribute('lang')).toBe(language);
+    expect(screen.container.querySelector('.cd-checkout__state')?.textContent).toBe(`${cancelled} ${label}.`);
+    expect(back.element().closest('.cd-checkout__state')).not.toBeNull();
+    expect(requests('cancelPayment')).toHaveLength(1);
+    expect(screen.container.querySelectorAll('button')).toHaveLength(0);
+
+    // A plain click follows the same-tab link normally; stop it only to keep the test loaded.
+    let followed: boolean | null = null;
+    const stop = (event: MouseEvent) => {
+      followed = !event.defaultPrevented;
+      event.preventDefault();
+    };
+    window.addEventListener('click', stop);
+    try {
+      await back.click();
+    } finally {
+      window.removeEventListener('click', stop);
+    }
+    expect(followed).toBe(true);
+    await expectScreenBasics(screen.container, { owner: false });
+
+    // Reopening the cancelled checkout on a phone keeps the return link and fits the screen.
+    const phone = await renderRoute(`/pay/${token}`, { viewport: 'phone' });
+    await expect.element(phone.screen.getByRole('link', { name: label, exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+
+    // With no recorded chat, the original cancelled sentence remains without a return link.
+    const unknown = await renderRoute(`/pay/${issueLink(language)}`);
+    await unknown.screen.getByRole('button', { name: cancel, exact: true }).click();
+    await expect.element(unknown.screen.getByText(cancelled, { exact: true })).toBeVisible();
+    expect(unknown.screen.container.querySelector('.cd-checkout__state a')).toBeNull();
+  });
+
+  it.each([
+    ['en', 'expired', 'the chat', 'This payment link expired. Ask in the chat for a new one.'],
+    ['es', 'expired', 'el chat', 'Este enlace de pago venció. Pide uno nuevo en el chat.'],
+    ['en', 'rules_changed', 'the chat', 'This link was cancelled because the business changed its rules. Nothing was charged. Ask in the chat if you still want to pay.'],
+    ['es', 'rules_changed', 'el chat', 'Este enlace se canceló porque el negocio cambió sus reglas. No se cobró nada. Pregunta en el chat si todavía quieres pagar.'],
+  ] as const)('%s_%s_links_the_chat_words_only_when_the_chat_is_valid', async (language, state, label, line) => {
+    const closedLink = () => {
+      const token = issueLink(language);
+      const link = mockStore.world.links.get(token)!;
+      if (state === 'rules_changed') cancelForRuleChange(token);
+      else link.view = { ...link.view, state: 'expired', customer_name: null };
+      return token;
+    };
+    const token = closedLink();
+    recordPayChat(token, CHAT);
+    const { screen } = await renderRoute(`/pay/${token}`, { language: 'en-US' });
+    const back = screen.getByRole('link', { name: label, exact: true });
+    await expect.element(back).toBeVisible();
+    expect(screen.container.querySelector('.cd-checkout__state')?.textContent).toBe(line);
+    expect(screen.container.querySelectorAll('.cd-checkout__state a')).toHaveLength(1);
+    expect(back.element().getAttribute('href')).toBe(CHAT);
+    expect(back.element().getAttribute('target')).toBeNull();
+    expect(back.element().closest('[lang]')?.getAttribute('lang')).toBe(language);
+    expect(screen.container.querySelectorAll('button')).toHaveLength(0);
+    let followed: boolean | null = null;
+    const stop = (event: MouseEvent) => {
+      followed = !event.defaultPrevented;
+      event.preventDefault();
+    };
+    window.addEventListener('click', stop);
+    try {
+      await back.click();
+    } finally {
+      window.removeEventListener('click', stop);
+    }
+    expect(followed).toBe(true);
+    await expectScreenBasics(screen.container, { owner: false });
+
+    const phone = await renderRoute(`/pay/${token}`, { viewport: 'phone' });
+    await expect.element(phone.screen.getByRole('link', { name: label, exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+
+    for (const path of [undefined, '', 'https://evil.example/d/rivera', '//evil.example', `${CHAT}?preview=${RIVERA.deskId}`, `${CHAT}#about`, `${CHAT}/agents`, '/D/Turner', 'javascript:alert(1)', '/pay/k7Hq2vX9']) {
+      const other = closedLink();
+      if (path !== undefined) localStorage.setItem(PAY_CHATS, JSON.stringify([[payChatKey(other), path]]));
+      const unknown = await renderRoute(`/pay/${other}`);
+      await expect.element(unknown.screen.getByText(line, { exact: true })).toBeVisible();
+      expect(unknown.screen.container.querySelector('.cd-checkout__state a'), path).toBeNull();
+    }
+    expect(requests('completePayment')).toHaveLength(0);
+    expect(requests('cancelPayment')).toHaveLength(0);
+  });
+
   it('paid_line_links_back_in_spanish', async () => {
     // A link in Spanish, from a chat this browser showed: "Vuelve al chat" is the link, whatever
     // the browser's language.
@@ -401,7 +499,7 @@ describe('mock checkout', () => {
     const token = await linkFromTheChat();
     cancelForRuleChange(token);
     const { screen } = await renderRoute(`/pay/${token}`);
-    await expect.element(screen.getByText(RULES_CHANGED)).toBeVisible();
+    await expect.element(screen.getByRole('status')).toHaveTextContent(RULES_CHANGED);
     await expect.element(screen.getByText(CANCELLED)).not.toBeInTheDocument();
     expect(screen.container.querySelectorAll('button')).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: false });
@@ -413,7 +511,7 @@ describe('mock checkout', () => {
     await expect.element(pay).toBeVisible();
     cancelForRuleChange(other);
     await pay.click();
-    await expect.element(open.screen.getByText(RULES_CHANGED)).toBeVisible();
+    await expect.element(open.screen.getByRole('status')).toHaveTextContent(RULES_CHANGED);
     await expect.element(open.screen.getByText(CANCELLED)).not.toBeInTheDocument();
     expect(requests('completePayment')).toHaveLength(1);
 

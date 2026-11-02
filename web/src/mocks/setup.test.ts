@@ -85,7 +85,7 @@ it('failed_async_consent_restores_the_consent_question_and_can_be_answered_again
   });
 });
 
-const CPA = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+const CPA = START_EXAMPLES.en.examples[3]!.description;
 
 async function startState(description = CPA): Promise<SetupState> {
   const answer = await mockStore.dispatch('startSetup', { body: { description, timezone: 'America/Los_Angeles', idempotency_key: `consultant-${++starts}` } });
@@ -133,7 +133,7 @@ describe('setup consultant run and decisions', () => {
   it('does_not_assume_agreement_in_the_cpa_opening', async () => {
     let state = await startState();
     state = await setupState('setupConsent', state.interview_id, { allow: true });
-    expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.');
+    expect(state.messages.find(({ text }) => text.startsWith('Here’s what I’d have your Desk do:'))?.text).toBe('Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link when an engagement starts. Questions like “where’s my return?” can come to you for now.');
   });
 
   it('reconciles_accepted_setup_jobs_after_closing_the_questions_three_times', async () => {
@@ -863,6 +863,8 @@ describe('the owner and the line about the business, from the description', () =
       ['Acme Bakery. My name is Lee. Sourdough and cakes to order.', 'Sourdough and cakes to order.'],
       ["Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks.", 'We fix leaks.'],
       ["Hi! I'm Ana. Ana's Bakery.", null],
+      // Spanish: the introduction and the naming sentence go too.
+      ['Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland. Abrimos de martes a sábado.', 'Abrimos de martes a sábado.'],
     ];
     for (const [description, about] of cases) expect((await started(description)).about, description).toBe(about);
   });
@@ -941,20 +943,20 @@ describe("setup's examples", () => {
   it('each_example_gives_its_business_owner_slug_and_line', async () => {
     // The start step's examples, in English and in Spanish, read as an owner's own description: the
     // business's name from its description, the owner greeted by the first name they give, a
-    // slug from the business's name, and the work as the line on its public page.
+    // slug from the business's name, and the work as the line on its public page. Each starter's
+    // work names a price, so its line stays private before public lines are seeded.
     const expected = {
       en: [
-        ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.'],
+        ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', null],
         ['Turner Plumbing', 'Mike', 'turner-plumbing-setup1', null],
-        ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.'],
-        // The raw description states free and a duration, so it stays private before public lines are seeded.
+        ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', null],
         ['Chen & Co.', 'Linda', 'chen-co-setup1', null],
       ],
       es: [
-        ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', 'Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.'],
+        ['Juniper Hair Studio', 'Priya', 'juniper-hair-studio-setup1', null],
         ['Turner Plumbing', 'Mike', 'turner-plumbing-setup1', null],
-        ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', 'La gente pregunta por unidades disponibles y visitas, los inquilinos reportan problemas de mantenimiento, y yo cobro las cuotas de solicitud y los depósitos.'],
-        ['Chen & Co.', 'Linda', 'chen-co-setup1', 'Los clientes nuevos empiezan con una consulta gratis de 20 minutos, y cotizamos cada trabajo después de ella.'],
+        ['Maple Street Rentals', 'Sam', 'maple-street-rentals-setup1', null],
+        ['Chen & Co.', 'Linda', 'chen-co-setup1', null],
       ],
     } as const;
     for (const language of ['en', 'es'] as const) {
@@ -1028,11 +1030,11 @@ describe('what setup reads once the owner allows it', () => {
     return state.messages.filter(({ role }) => role === 'tool_label').map(({ text }) => text);
   }
 
-  /** Each starter's two web searches, in `START_EXAMPLES`' order: Juniper Hair Studio's as they always were. */
+  /** Each starter's two web searches, in `START_EXAMPLES`' order. */
   const STARTER_SEARCHES = [
-    ['Searched the web: hair salon deposits and late cancellations', 'Searched the web: salon new client consultation form'],
+    ['Searched the web: hair salon color appointment deposits', 'Searched the web: salon new client consultation form'],
     ['Searched the web: emergency plumber call-out fees', 'Searched the web: water heater replacement quotes'],
-    ['Searched the web: rental application fees and deposits', 'Searched the web: tenant maintenance request form'],
+    ['Searched the web: rental viewings and application fees', 'Searched the web: tenant maintenance request form'],
     ['Searched the web: CPA free consultation and engagement letters', 'Searched the web: tax return client intake questions'],
   ];
   /** Descriptions no starter describes, as the situations' words try them. */

@@ -22,12 +22,15 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
 import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.ts';
+import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
+// A phone whose open conversation's pane stays under the single column's 41rem, so the pane scrolls as one.
+const SHORT_PHONE = { width: 390, height: 780 };
 const LA = 'America/Los_Angeles';
 const OWNER = rivera.business.ownerName;
 const DANA = rivera.people.dana.name;
@@ -44,6 +47,9 @@ const SEEDED_HOLD = 'ses-visitor-web';
 const conversation = (sessionId: string) => `${LIST}/${sessionId}`;
 
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
+
+/** The line under the take-over box: what was its placeholder before it gave an example. */
+const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';
 
 /** A held card's slot in the conversation: the card and what follows it there. */
 function slotOf(card: Element): Element {
@@ -407,9 +413,13 @@ describe('Conversations', () => {
       expect(Math.abs((rect.left - paneRect.left) - (paneRect.right - rect.right)), `${name} centred`).toBeLessThanOrEqual(1);
     };
     const transcript = chat.element();
-    for (const selector of ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls']) {
+    for (const selector of ['.cd-transcript-row', '.cd-conversation__controls']) {
       fills(document.querySelector(selector)!, selector);
     }
+    // The bar runs across the whole pane, outside the column.
+    const bar = document.querySelector('.cd-conversation__bar')!.getBoundingClientRect();
+    expect(Math.abs(bar.left - paneRect.left), 'bar left').toBeLessThanOrEqual(1);
+    expect(Math.abs(bar.width - pane.clientWidth), 'bar width').toBeLessThanOrEqual(1);
     fills(transcript, 'transcript');
     fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
     const scroll = transcriptRegion(screen).getBoundingClientRect();
@@ -428,13 +438,79 @@ describe('Conversations', () => {
       expect(p.getBoundingClientRect().width).toBeLessThanOrEqual(640);
       expect(Math.abs(p.getBoundingClientRect().left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
     }
-    // Take over stays at the left, under the note about whispers, with its own line under it.
+    // Take over sits at the bar's right, inside the pane's gutter; the note about whispers stays at
+    // the foot, at the column's left, with nothing beside or under it.
     const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
+    expect(Math.abs(bar.right - Number.parseFloat(style.paddingRight) - takeOver.right)).toBeLessThanOrEqual(1);
     const note = document.querySelector('.cd-conversation__controls .cd-take-over__lead')!.getBoundingClientRect();
-    expect(Math.abs(takeOver.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
-    expect(takeOver.top).toBeGreaterThanOrEqual(note.bottom);
-    const line = document.querySelector('.cd-conversation__controls .cd-take-over__action .cd-take-over__line');
-    if (line) expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(takeOver.bottom);
+    expect(Math.abs(note.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    expect(document.querySelector('.cd-conversation__controls .cd-take-over__action')).toBeNull();
+    expectNoHorizontalScroll();
+  });
+
+  // Board REV-CNVW B: from 1024 px the list grows with the window, 24% of it, between 280 and 400 px.
+  it.each([[1024, 768, 280], [1280, 800, 307.2], [1440, 900, 345.6], [1512, 982, 362.88], [1800, 1009, 400]])(
+    'list_column_is_24_percent_of_the_window_between_280_and_400_at_%sx%s',
+    async (width, height, expected) => {
+      const { screen } = await renderRoute(LIST, { viewport: { width, height } });
+      const list = screen.getByRole('navigation', { name: 'Conversations' });
+      await expect.element(list.getByRole('link').first()).toBeVisible();
+      const listRect = list.element().getBoundingClientRect();
+      expect(Math.abs(listRect.width - expected), 'list width').toBeLessThanOrEqual(0.5);
+      // The pane starts at the list's hairline.
+      const pane = document.querySelector<HTMLElement>('.cd-conversations__open')!.getBoundingClientRect();
+      expect(Math.abs(pane.left - listRect.right)).toBeLessThanOrEqual(0.5);
+      expectNoHorizontalScroll();
+    },
+  );
+
+  // The list loads at the width it lands at: its shapes hold the same column.
+  it.each([[1024, 768], [1440, 900], [1800, 1009]])('list_shapes_hold_the_lists_width_at_%sx%s', async (width, height) => {
+    const hold = holdReads(ROUTES.conversations.path.replace('{desk_id}', RIVERA.deskId));
+    const { screen } = await renderRoute(LIST, { viewport: { width, height } });
+    const list = screen.getByRole('navigation', { name: 'Conversations' });
+    await expect.poll(() => list.element().querySelector('[data-skeleton-anchor="conversation-row-0"]')).not.toBeNull();
+    const loading = list.element().getBoundingClientRect().width;
+    hold.release();
+    await expect.element(list.getByRole('link').first()).toBeVisible();
+    expect(Math.abs(list.element().getBoundingClientRect().width - loading)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(loading - Math.min(400, Math.max(280, width * 0.24)))).toBeLessThanOrEqual(0.5);
+  });
+
+  // With no conversation open, the pane says what opens there, centred in it both ways.
+  it.each([[1024, 768], [1440, 900], [1800, 1009]])('empty_pane_centres_its_empty_state_at_%sx%s', async (width, height) => {
+    const { screen } = await renderRoute(LIST, { viewport: { width, height } });
+    const title = screen.getByText('Choose a conversation to read it.', { exact: true });
+    await expect.element(title).toBeVisible();
+    await expect.element(screen.getByText('Its chat opens here, where you can take over or whisper to Claude.', { exact: true })).toBeVisible();
+    const pane = document.querySelector<HTMLElement>('.cd-conversations__open')!;
+    const empty = pane.querySelector<HTMLElement>('.cd-empty-state')!;
+    expect(empty).not.toBeNull();
+    // No icon, no action: the two lines only.
+    expect(empty.querySelector('svg, button, a')).toBeNull();
+    expect(empty.contains(title.element())).toBe(true);
+    const centre = (rect: DOMRect) => [(rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2] as const;
+    const [paneX, paneY] = centre(pane.getBoundingClientRect());
+    const [boxX, boxY] = centre(empty.getBoundingClientRect());
+    expect(Math.abs(boxX - paneX), 'centred across').toBeLessThanOrEqual(2);
+    expect(Math.abs(boxY - paneY), 'centred down').toBeLessThanOrEqual(2);
+    // Its words, as drawn, are centred too: the box holds them evenly.
+    const range = document.createRange();
+    range.selectNodeContents(empty);
+    const [wordsX, wordsY] = centre(range.getBoundingClientRect());
+    expect(Math.abs(wordsX - paneX), 'words centred across').toBeLessThanOrEqual(2);
+    expect(Math.abs(wordsY - paneY), 'words centred down').toBeLessThanOrEqual(2);
+    // At most 480 px wide, its lines balanced; with the room, the body stays on one line.
+    expect(empty.getBoundingClientRect().width).toBeLessThanOrEqual(480);
+    expect(getComputedStyle(empty).getPropertyValue('text-wrap-style')).toBe('balance');
+    const body = screen.getByText('Its chat opens here, where you can take over or whisper to Claude.', { exact: true }).element();
+    if (width >= 1800) expect(body.getBoundingClientRect().height).toBe(Number.parseFloat(getComputedStyle(body).lineHeight));
+    for (const line of [title.element(), body]) {
+      const lineRange = document.createRange();
+      lineRange.selectNodeContents(line);
+      const [lineX] = centre(lineRange.getBoundingClientRect());
+      expect(Math.abs(lineX - paneX), 'each line centred across').toBeLessThanOrEqual(2);
+    }
     expectNoHorizontalScroll();
   });
 
@@ -518,21 +594,30 @@ describe('Conversations', () => {
     const chat = named(DANA_LIVE, DANA);
     lengthen(chat);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    const { screen } = await renderRoute(LIST, { viewport, pollScale: 100 });
+    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    const { screen } = await renderRoute(LIST, { viewport: viewport === 'phone' ? SHORT_PHONE : viewport, pollScale: 100 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
     await row.click();
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
-    const region = transcriptRegion(screen);
-    await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
+    // On a laptop the transcript scrolls in its own region, opened at its top, where the card is. On
+    // this short phone the pane scrolls as one, and the card stops under the pinned bar.
+    const region = scrollerOf(card.element());
+    const bar = document.querySelector('.cd-conversation__bar')!;
+    const top = () => Math.max(region.getBoundingClientRect().top, viewport === 'phone' ? bar.getBoundingClientRect().bottom : 0);
+    await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(top());
+    expect(card.element().getBoundingClientRect().top - top()).toBeLessThanOrEqual(24);
     expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
     expect(region.scrollHeight).toBeGreaterThan(region.clientHeight);
-    expect(region.scrollTop).toBe(0);
+    expect(region === transcriptRegion(screen)).toBe(viewport === 'desktop');
+    if (viewport === 'desktop') expect(region.scrollTop).toBe(0);
     await card.getByRole('button', { name: 'Mark done' }).click();
     await expect.element(card).not.toBeInTheDocument();
-    await expect.poll(() => document.activeElement).toBe(screen.getByRole('heading', { level: 2, name: DANA }).element());
-    expect(region.scrollTop).toBe(0);
+    const name = screen.getByRole('heading', { level: 2, name: DANA });
+    await expect.poll(() => document.activeElement).toBe(name.element());
+    await expect.element(name).toBeInViewport({ ratio: 1 });
+    if (viewport === 'desktop') expect(region.scrollTop).toBe(0);
   });
 
   it('callback_stays_after_takeover_and_fits_390px', async () => {
@@ -746,12 +831,13 @@ describe('Conversations', () => {
     const rows = links.elements() as HTMLElement[];
 
     // Dana's live conversation as N-Conv-Run1 and N-Conv-TakeOver draw it, at 1440 px: the page
-    // fills the main area, and Tab goes through the list, then the receipts, then the take-over bar.
+    // fills the main area, and Tab goes through the list, then Take over in the conversation's bar
+    // at the top (REV-720 C), then the receipts.
     await expectOwnerBoard(screen.container, {
       current: 'Conversations',
       fill: true,
       transcript: true,
-      tabStops: [...rows, ...(receipts.elements() as HTMLElement[]), takeOver.element() as HTMLElement],
+      tabStops: [...rows, takeOver.element() as HTMLElement, ...(receipts.elements() as HTMLElement[])],
     });
   });
 
@@ -852,11 +938,11 @@ describe('Conversations', () => {
     await expect.element(screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
     const latest = screen.getByText('Latest: Visit booked', { exact: true });
     await expect.element(latest).toBeVisible();
-    // The same line in the same place: the head's meta line in the secondary text color.
+    // The same line in the same place: the bar's meta line in the secondary text color.
     const line = latest.element();
     expect(line.tagName).toBe('P');
     expect(line.className).toBe('cd-conversation__latest cd-type-meta');
-    expect(line.parentElement?.classList.contains('cd-conversation__head')).toBe(true);
+    expect(line.closest('.cd-conversation__bar')).not.toBeNull();
     expect(getComputedStyle(line).color).toBe(tokenColor('--text-secondary'));
     // The booked card and its checks stay under their message.
     await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
@@ -871,6 +957,15 @@ describe('Conversations', () => {
       await expectScreenBasics(other.screen.container, { owner: true });
       expectNoHorizontalScroll();
     }
+  });
+
+  it('the_head_names_the_action_a_reply_came_after', async () => {
+    // Dana asks a price after her visit is booked: the quote that ran is what happened last, in the
+    // kernel's own line for it, where the head said the reply was checked.
+    priceTurn(named(DANA_LIVE, DANA), 'How much is drain clearing?');
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByText("Latest: Quoted from Mike Turner's price list", { exact: true })).toBeVisible();
+    await expect.element(log(screen).getByRole('article', { name: 'Quote' }).last()).toBeVisible();
   });
 
   it('a_reply_in_markdown_shows_bold_and_a_list', async () => {
@@ -913,7 +1008,7 @@ describe('Conversations', () => {
     await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
     firstRead.release();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Agent', exact: true })).toBeVisible();
-    const head = screen.getByRole('heading', { level: 2, name: 'Agent', exact: true }).element().closest('.cd-conversation__head')!;
+    const head = screen.getByRole('heading', { level: 2, name: 'Agent', exact: true }).element().closest('.cd-conversation__bar')!;
     expect([...head.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Signed']);
     await expectScreenBasics(screen.container, { owner: true });
 
@@ -924,7 +1019,7 @@ describe('Conversations', () => {
     await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
     namedRead.release();
     await expect.element(withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
-    const namedHead = withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name, exact: true }).element().closest('.cd-conversation__head')!;
+    const namedHead = withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name, exact: true }).element().closest('.cd-conversation__bar')!;
     expect([...namedHead.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Agent', 'Signed']);
   });
 
@@ -1222,9 +1317,17 @@ describe('Conversations', () => {
       expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
       expectNoWindowScroll();
 
-      // Scrolled back to it, the held request, further up the chat, shows whole.
-      heldHere.element().scrollIntoView({ block: 'start' });
-      await expect.element(heldHere).toBeInViewport({ ratio: 1 });
+      // Scrolled back to it, the held request, further up the chat, reads from just under the pinned
+      // bar: whole in the laptop window, and in the phone's, which has less room under the bar's two
+      // lines than the card is tall, with its answers in view as she reads on.
+      const bar = document.querySelector('.cd-conversation__bar')!;
+      column.scrollTop += heldHere.element().getBoundingClientRect().top - bar.getBoundingClientRect().bottom - 4;
+      await expect.poll(() => heldHere.element().getBoundingClientRect().top - bar.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(0);
+      if (width >= 1024) await expect.element(heldHere).toBeInViewport({ ratio: 1 });
+      const allow = heldHere.getByRole('button', { name: 'Allow', exact: true });
+      allow.element().scrollIntoView({ block: 'nearest' });
+      await expect.element(allow).toBeInViewport({ ratio: 1 });
+      expect(allow.element().getBoundingClientRect().top, 'its answers show under the bar').toBeGreaterThanOrEqual(bar.getBoundingClientRect().bottom);
       expectNoWindowScroll();
     });
   }
@@ -1327,12 +1430,19 @@ describe('Conversations', () => {
     }, { interval: 100 }).toBe(true);
     const on = seen;
 
-    // A message arrives while focus is in the transcript: nothing moves under her. The held cards
-    // now quote her two latest lines, so the one above her can change height; the receipt she's on
-    // stays where it was on screen.
+    // The first held card grows on the next read while focus is on a receipt below it: the receipt
+    // stays where it was on screen, even as a new message arrives at the end of the chat.
+    const firstCard = heldCard(screen, REFUND_REASON).first();
+    const before = firstCard.element().getBoundingClientRect().height;
+    const longer = 'The water heater is still dripping, and the garage floor is getting wet. '.repeat(8).trim();
+    const items = await served<NeedsYouItem[]>('needsYou', { desk_id: RIVERA.deskId });
+    const changed = items.map((item) => (item.decision?.decision_id === first.decision_id
+      ? { ...item, from_the_visitor: longer } : item));
+    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: changed });
     mockStore.world.visitorText(chat, 'Are you still there?');
     await expect.element(log(screen).getByText('Are you still there?', { exact: true })).toBeInTheDocument();
-    await expect.poll(() => heldCard(screen, REFUND_REASON).first().element().textContent).toContain('Are you still there?');
+    await expect.element(firstCard.getByText(longer, { exact: true })).toBeInTheDocument();
+    await expect.poll(() => firstCard.element().getBoundingClientRect().height).toBeGreaterThan(before);
     await readsMore('conversation', 2);
     expect(column.contains(lastReceipt.element())).toBe(true);
     await expect.poll(() => Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
@@ -1402,6 +1512,45 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
+  it('take_over_box_gives_an_example_in_the_owners_first_name_and_keeps_its_warning_under_it', async () => {
+    // In a chat Mike Turner took over, the empty box shows what he might write, as himself; the
+    // warning that was its placeholder stays in sight as the box's helper line, and still describes it.
+    const chat = named(DANA_LIVE, DANA);
+    chat.state = { ...chat.state, mode: 'owner' };
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Mike. What time suits you?");
+    await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
+    await expect.element(box).toHaveAccessibleDescription(TAKE_OVER_HELPER);
+  });
+
+  it('take_over_box_on_a_desk_whose_owner_gave_no_name_speaks_as_the_business', async () => {
+    // Setup gave the Desk its fallback owner, "Owner": the example speaks as the business instead.
+    const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has the new Desk');
+    const chat = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(chat, 'Do you fit sash windows?');
+    chat.state = { ...chat.state, mode: 'owner' };
+    const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
+    const box = screen.getByRole('textbox', { name: 'Write to them', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Hi, it's Fenster & Fenster. What time suits you?");
+    await expect.element(screen.getByText(TAKE_OVER_HELPER, { exact: true })).toBeVisible();
+  });
+
+  it('whisper_box_on_another_desk_asks_what_they_have_tried', async () => {
+    // Off the plumbing demo, the whisper's example is one that fits any business.
+    const { deskId } = await liveSetupDeskIds('A hair salon in Oakland');
+    const desk = mockStore.world.desk(deskId);
+    if (!desk) throw new Error('the copy has the new Desk');
+    const chat = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(chat, 'Can you fix a bad dye job?');
+    const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "Ask what they've tried so far");
+    expect(box.element().hasAttribute('aria-describedby')).toBe(false);
+  });
+
   it('whisper_in_ai_mode', async () => {
     const chat = session(DANA_LIVE);
     const streamed = chat.events.length;
@@ -1409,7 +1558,7 @@ describe('Conversations', () => {
 
     // While Claude answers, the owner's words go to Claude only.
     const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
-    await expect.element(box).toHaveAttribute('placeholder', "Whisper to Claude. They won't see it.");
+    await expect.element(box).toHaveAttribute('placeholder', 'Ask if the leak is under the sink');
     const words = 'mention the Thursday 8 am opening';
     await box.fill(words);
     await userEvent.keyboard('{Enter}');
@@ -1968,6 +2117,12 @@ describe('Conversations', () => {
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
     await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
     const before = quotes().length;
+    const stale = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'conversation', status: 200, times: 1, until, body: stale });
+    await readsMore('conversation', 1);
 
     // The owner goes back to the list, and Dana asks and gets her answer meanwhile. Back on the
     // chat, the page shows the read it had first, then the reply where it belongs, drawn still: it
@@ -1976,6 +2131,8 @@ describe('Conversations', () => {
     await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
     priceTurn(chat, 'How much is drain clearing?');
     await router.navigate(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    release();
     await expect.poll(() => quotes().length).toBe(before + 1);
     await readsMore('conversation', 1);
     expect(landed.rows()).toEqual([]);
@@ -2346,7 +2503,8 @@ describe('Conversations', () => {
   it('conversations_fit_a_phone', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
-    const { screen, router } = await renderRoute(LIST, { viewport: 'phone' });
+    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    const { screen, router } = await renderRoute(LIST, { viewport: SHORT_PHONE });
 
     // The list has the page to itself.
     const list = screen.getByRole('navigation', { name: 'Conversations' });
@@ -2364,19 +2522,22 @@ describe('Conversations', () => {
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
 
-    // Read to its end, the chat scrolls on its own there too: the way back and the chat's head stay
-    // in view above it, and the owner's controls under it.
+    // Read to its end, the conversation scrolls as one on this short phone, under its bar: the bar, with
+    // the chat's name and Take over, stays pinned in view, and the way back scrolls with the chat.
     const latest = log(screen).getByText(last, { exact: true });
     latest.element().scrollIntoView({ block: 'end' });
     await expect.element(latest).toBeInViewport({ ratio: 1 });
-    await expect.element(screen.getByRole('link', { name: 'All conversations' })).toBeInViewport({ ratio: 1 });
     await expect.element(screen.getByRole('heading', { level: 2, name: DANA })).toBeInViewport({ ratio: 1 });
     await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeInViewport({ ratio: 1 });
     const main = screen.getByRole('main').element();
     expect(scrollerOf(latest.element())).not.toBe(main);
+    expect(scrollerOf(latest.element()).contains(screen.getByRole('link', { name: 'All conversations' }).element())).toBe(true);
     expect(main.scrollHeight).toBeLessThanOrEqual(main.clientHeight);
     expectNoWindowScroll();
-    await screen.getByRole('link', { name: 'All conversations' }).click();
+    const back = screen.getByRole('link', { name: 'All conversations' });
+    back.element().scrollIntoView({ block: 'start' });
+    await expect.element(back).toBeInViewport({ ratio: 1 });
+    await back.click();
     await expect.poll(() => router.state.location.pathname).toBe(LIST);
     await expect.element(list).toBeVisible();
   });

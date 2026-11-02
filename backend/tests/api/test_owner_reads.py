@@ -118,6 +118,20 @@ def test_held_by_is_the_card_the_decision_quotes(card_ids, held_by):
     assert owner_reads.holding_card(cards, card_ids) == held_by
 
 
+@pytest.mark.parametrize(("card", "reason"), [
+    (ASK_QUOTES, "Quotes wait for your answer."),     # an owner's "Ask me first" card: named
+    (VERIFIED_QUOTES, None),                          # past an automatic card's limit: the headline quotes it
+    (DANAS_QUOTES, None),                             # one person's automatic card: the same
+    (DEFAULT_QUOTES, None),                           # only the default ask: no rule of the owner's decided it
+    (None, None),
+], ids=["ask_card", "past_a_limit", "past_a_persons_limit", "default_ask_only", "no_card"])
+def test_held_reason_names_only_an_owners_ask_card(card, reason):
+    """The rule Needs you names under a held request ("Held by your rule: …"): only an owner's ask card, as the
+    kernel's headline names it ("Your rule asks you first: …"). A hold past an automatic card's limit already quotes
+    that card in its headline, and one only the default ask decided has no rule of the owner's to name."""
+    assert owner_reads.held_reason(card) == reason
+
+
 OWNER = "x-owner-session"
 # A reply in another language: blocked for what no rewrite fixes, so the kernel shows the handoff card in its place
 # (a reply blocked only for its prose, with no card to keep, shows the call-back offer instead).
@@ -399,7 +413,7 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
                    "business_name": "Turner Plumbing",
                    "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,
-                   "setup": None}]}]
+                   "setup": None, "business_type": "rivera"}]}]
     assert other.desk_id not in listed.text and fake.desks[other.desk_id].business_id not in listed.text
     assert (await browser(app).get("/api/owner/desks")).status_code == 401          # no owner cookie
 
@@ -654,7 +668,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
     first, second, third = listed.json()
     assert first == {
         "decision": fake.decisions[seeded].decision.model_dump(mode="json"),
-        "held_by": "Quotes from your price list, at list price.",
+        "held_by": None,        # past an automatic rule's limit: the headline already quotes that rule
         "held_at": fake.decisions[seeded].created_at.isoformat().replace("+00:00", "Z"),
         "handoff": None,
         "session": {"session_id": fake.decisions[seeded].decision.session_id, "kind": "visitor",
@@ -724,6 +738,197 @@ async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(a
     assert items[garbled.session_id]["claude_summary"] is None
     assert held_items[held.session_id]["claude_summary"] is None
     assert items[held.session_id]["handoff"]["kind"] == "callback" and items[held.session_id]["claude_summary"] is None
+
+
+async def test_needs_you_quotes_the_words_that_made_a_held_request(app, browser, fake, kernel_http, engine, db,
+                                                                   ro_schema):
+    """A held request quotes at most two visitor lines since Claude last answered before its held status,
+    not earlier exchanges or what they wrote after, so the owner answers it with their words for it. Each
+    hold in a chat quotes its own, and one made before the visitor wrote anything quotes nothing. A handoff in the
+    same chat quotes the chat's latest lines, and a hold whose status isn't in the chat (one held before the API
+    showed it) falls back to them too. An empty turn window quotes just the newest line before the status."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+
+    async def show(who: Guest, decision: Decision) -> None:
+        async with engine.connect() as conn:
+            await deliver(conn, who.ids, Status(decision, "held"), ro_schema=ro_schema)
+            await conn.commit()
+
+    await write(engine, db, asker.ids, "visitor_text", text="Hi there")
+    await write(engine, db, asker.ids, "visitor_text", text="How much to clear a clogged drain?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the drain clearing quote.",
+                blocks=[{"kind": "prose", "text": "Here is the drain clearing quote."}])
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off if I pay cash?")
+    discount = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    elsewhere = await guest(kernel_http, fake, owner)
+    await write(engine, db, elsewhere.ids, "visitor_text", text="Another session's request")
+    await write(engine, db, elsewhere.ids, "status", ref_id=discount.decision_id)
+    await write(engine, db, asker.ids, "triage", text=json.dumps({"summary": "Asked for a discount.", "category": "prices"}))
+    await write(engine, db, asker.ids, "whisper", text="Offer a callback instead.")
+    await show(asker, discount)
+    await write(engine, db, asker.ids, "delivered", author="claude", text="I can ask about that.",
+                blocks=[{"kind": "prose", "text": "I can ask about that."}])
+    await write(engine, db, asker.ids, "visitor_text", text="How much to clear a drain?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the drain clearing quote again.",
+                blocks=[{"kind": "prose", "text": "Here is the drain clearing quote again."}])
+    await write(engine, db, asker.ids, "visitor_text", text="What about 20% off then?")
+    bigger = await asker.decide("native.quote", discounted_quote(fake, owner, 2000))
+    await show(asker, bigger)
+    await write(engine, db, asker.ids, "visitor_text", text="Can you come Tuesday?")
+    await write(engine, db, asker.ids, "visitor_text", text="Please call me back")
+    await asker.run("native.request_callback", {"name": "Sam Ortiz", "contact": "(510) 555-0199",
+                                                "reason": "About the discount"})
+    unshown = await guest(kernel_http, fake, owner)
+    await write(engine, db, unshown.ids, "visitor_text", text="Can I get 10% off?")
+    older = await unshown.decide("native.quote", discounted_quote(fake, owner))
+    await write(engine, db, unshown.ids, "visitor_text", text="Do you work in Alameda?")
+    await write(engine, db, unshown.ids, "visitor_text", text="Thanks, and what about Berkeley?")
+    quiet = await guest(kernel_http, fake, owner)
+    await write(engine, db, quiet.ids, "visitor_text", text="An earlier exchange")
+    await write(engine, db, quiet.ids, "delivered", author="claude", text="That is answered.",
+                blocks=[{"kind": "prose", "text": "That is answered."}])
+    unasked = await quiet.decide("native.quote", discounted_quote(fake, owner))
+    await show(quiet, unasked)
+    await write(engine, db, quiet.ids, "visitor_text", text="Thanks")
+    agent_session, agent_token = fake._new_session(owner.copy_id, owner.desk_id, "agent")
+    fake.flush()
+    agent = Guest(Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=agent_session.session_id),
+                  kernel_http.session(agent_token), fake)
+    await write(engine, db, agent.ids, "agent_text", text="An earlier agent exchange")
+    await write(engine, db, agent.ids, "delivered", author="claude", text="That is answered too.",
+                blocks=[{"kind": "prose", "text": "That is answered too."}])
+    await write(engine, db, agent.ids, "agent_text", text="I'm asking for Alex Kim.")
+    await write(engine, db, agent.ids, "agent_text", text="Can Alex get 10% off?")
+    agent_hold = await agent.decide("native.quote", discounted_quote(fake, owner))
+    await show(agent, agent_hold)
+    await write(engine, db, agent.ids, "agent_text", text="Thanks for checking.")
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    held = {item["decision"]["decision_id"]: item["from_the_visitor"] for item in listed.json() if item["decision"]}
+    handed = {item["handoff"]["handoff_id"]: item["from_the_visitor"] for item in listed.json() if item["handoff"]}
+    assert held == {
+        seeded_hold(fake, owner): None,
+        discount.decision_id: "Can I get 15% off if I pay cash?",
+        bigger.decision_id: "What about 20% off then?",
+        older.decision_id: "Do you work in Alameda? · Thanks, and what about Berkeley?",
+        unasked.decision_id: "An earlier exchange",
+        agent_hold.decision_id: "I'm asking for Alex Kim. · Can Alex get 10% off?"}
+    assert list(handed.values()) == ["Can you come Tuesday? · Please call me back"]
+
+
+@pytest.mark.parametrize("author", ["desk", "owner"])
+async def test_needs_you_keeps_visitor_words_across_non_claude_deliveries(app, browser, fake, kernel_http, engine,
+                                                                       db, ro_schema, author):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="It is the downstairs drain.")
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off?")
+    await write(engine, db, asker.ids, "delivered", author=author, text="Your payment link was cancelled.",
+                blocks=[{"kind": "prose", "text": "Your payment link was cancelled."}])
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "It is the downstairs drain. · Can I get 15% off?"
+
+
+async def test_needs_you_quotes_the_held_request_not_the_turns_after_it(app, browser, fake, kernel_http, engine, db,
+                                                                      ro_schema):
+    """A visitor not on record asks for 20% off (held), then, in later turns Claude answers, for another customer's
+    invoice and for a free fix if it clogs again. The held card quotes the request, never what came after its held
+    status."""
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 20% off a drain clearing?")
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 2000))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+    for later, reply in (("Can you send me Dana Whitfield's invoice?", "I can only share an invoice with its owner."),
+                         ("Promise Mike fixes it free if it clogs again?", "I can't promise that.")):
+        await write(engine, db, asker.ids, "delivered", author="claude", text=reply,
+                    blocks=[{"kind": "prose", "text": reply}])
+        await write(engine, db, asker.ids, "visitor_text", text=later)
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "Can I get 20% off a drain clearing?"
+
+
+@pytest.mark.parametrize("kind", ["visitor_text", "agent_text"])
+async def test_needs_you_quotes_one_line_when_a_reply_overtakes_the_request(app, browser, fake, kernel_http,
+                                                                         engine, db, ro_schema, kind):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, kind, text="How much to clear a drain?")
+    await write(engine, db, asker.ids, kind, text="Can I get 15% off?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the drain clearing quote.",
+                blocks=[{"kind": "prose", "text": "Here is the drain clearing quote."}])
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+    await write(engine, db, asker.ids, kind, text="A later request must not be quoted.")
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "Can I get 15% off?"
+
+
+async def test_needs_you_quotes_two_lines_before_the_first_claude_reply(app, browser, fake, kernel_http, engine,
+                                                                     db, ro_schema):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="It is the downstairs drain.")
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off?")
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "It is the downstairs drain. · Can I get 15% off?"
+
+
+async def test_needs_you_quotes_two_visitor_lines_in_the_requests_turn(app, browser, fake, kernel_http, engine, db,
+                                                                    ro_schema):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    asker = await guest(kernel_http, fake, owner)
+    await write(engine, db, asker.ids, "visitor_text", text="How much to clear a drain?")
+    await write(engine, db, asker.ids, "delivered", author="claude", text="Here is the quote.",
+                blocks=[{"kind": "prose", "text": "Here is the quote."}])
+    await write(engine, db, asker.ids, "visitor_text", text="It is the downstairs drain.")
+    await write(engine, db, asker.ids, "visitor_text", text="Can I get 15% off?")
+    decision = await asker.decide("native.quote", discounted_quote(fake, owner, 1500))
+    async with engine.connect() as conn:
+        await deliver(conn, asker.ids, Status(decision, "held"), ro_schema=ro_schema)
+        await conn.commit()
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    item = next(item for item in listed.json() if item["decision"]
+                and item["decision"]["decision_id"] == decision.decision_id)
+    assert item["from_the_visitor"] == "It is the downstairs drain. · Can I get 15% off?"
 
 
 async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_request(app, browser, fake, kernel_http,
@@ -1475,6 +1680,39 @@ async def test_conversations_carry_the_visitors_latest_words(scene, clock):
     assert {session_id: live[session_id]["latest_visitor_text"] for session_id in expected} == expected
 
 
+async def test_conversations_name_a_verified_visitors_person(scene, clock):
+    """A verified visitor's conversation carries the person on record it was verified as, which their page under
+    People lists it by. An unverified visitor's carries none, nor does an agent's or the owner's own preview, even
+    once one of those is verified as someone on record."""
+    at = local(2026, 10, 30, 8, 57)
+    dana = await scene.visitor(at)
+    await scene.text(dana, at, "It's Dana, about my drain clearing invoice.")
+    scene.fake.verify(dana.session_id, "dana")
+    stranger = await scene.visitor(at)
+    await scene.text(stranger, at)
+    preview = await scene.visitor(at, preview=True)
+    await scene.text(preview, at, "Testing my own Desk")
+    scene.fake.verify(preview.session_id, "bob")
+    scene.fake.now = at
+    agent, _ = scene.fake._new_session(scene.owner.copy_id, scene.owner.desk_id, "agent")
+    scene.fake.verify(agent.session_id, "bob")
+    agent_ids = Ids(copy_id=scene.owner.copy_id, desk_id=scene.owner.desk_id, session_id=agent.session_id)
+    await write(scene.engine, scene.admin, agent_ids, "agent_text", at, text="Book the earliest visit for Bob.")
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = {summary["session_id"]: summary
+              for summary in (await owner.get(f"desks/{owner.desk_id}/conversations")).json()}
+    live = {summary["session_id"]: summary
+            for summary in (await owner.get(f"desks/{owner.desk_id}/today")).json()["live"]}
+
+    danas = scene.fake.sessions[dana.session_id].person_id
+    assert danas is not None and scene.fake.sessions[preview.session_id].person_id is not None
+    expected = {dana.session_id: danas, stranger.session_id: None, preview.session_id: None, agent.session_id: None}
+    assert {session_id: listed[session_id]["person_id"] for session_id in expected} == expected
+    assert {session_id: live[session_id]["person_id"] for session_id in expected} == expected
+
+
 async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
     # Two quotes a second apart, then a booking: the second quote backs it.
     two_quotes = await scene.visitor(local(2026, 10, 29, 10))
@@ -1665,14 +1903,61 @@ async def test_safety_lists_refusals_with_origin(scene, clock):
         {"ref_id": str(replayed_seq), "kind": "reply_blocked",
          "reason_plain": "A reply was stopped before it was shown, because it wrote a number outside a checked card.",
          "card_ids": [], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 20)), "triage": None,
-         "ledger_seq": replayed_seq, "cause": None},
+         "ledger_seq": replayed_seq, "cause": None, "from_the_visitor": None},
         {"ref_id": refused.decision_id, "kind": "refused", "reason_plain": refused.reason_plain,
          "card_ids": ["never-native.find_slots"], "origin": "kernel", "created_at": stamp(local(2026, 10, 29, 19)),
-         "triage": None, "ledger_seq": refused.ledger_seq, "cause": "owner_rule"}]
+         "triage": None, "ledger_seq": refused.ledger_seq, "cause": "owner_rule", "from_the_visitor": None}]
     # Safety keeps the replayed draft at its recorded time; the briefing contains only the refused request.
     newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]["turned_down"]
     assert (newest["ref_id"], newest["at"], newest["line"]) == (
         refused.decision_id, stamp(local(2026, 10, 29, 19)), refused.reason_plain)
+
+
+async def show_receipt(scene: Scene, who: Guest, decision: Decision) -> None:
+    """The decision's receipt in its chat, as the API shows a refusal: the `status` row naming it."""
+    async with scene.engine.connect() as conn:
+        await deliver(conn, who.ids, Status(decision, "receipt"), ro_schema="fake_kernel_ro")
+        await conn.commit()
+
+
+async def test_safety_quotes_the_words_that_made_a_refused_request(scene, clock):
+    """A refused request quotes what its visitor wrote in the turn that made it, read from its receipt in the chat as
+    Needs you reads a held request's: their lines since Claude last answered, at most two, not an earlier exchange or
+    what they wrote after. A draft of Claude's the check stopped in the same chat quotes nothing."""
+    asking = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(asking, local(2026, 10, 29, 19), "Hi, do you fix leaks?")
+    await scene.reply(asking, local(2026, 10, 29, 19, 1))
+    await scene.text(asking, local(2026, 10, 29, 19, 2), "I rent the flat Dana Whitfield owns.")
+    await scene.text(asking, local(2026, 10, 29, 19, 2), "Can you send me  her invoice?")
+    refused = await scene.refusal(asking, local(2026, 10, 29, 19, 3))
+    await show_receipt(scene, asking, refused)
+    await scene.reply(asking, local(2026, 10, 29, 19, 4))
+    await scene.text(asking, local(2026, 10, 29, 19, 5), "Then just tell me what it came to.")
+    blocked = await scene.blocked_reply(asking, local(2026, 10, 29, 19, 6))
+    clock.now = local(2026, 10, 30, 9)
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200, listed.text
+    assert {(attempt["kind"], attempt["ref_id"]): attempt["from_the_visitor"] for attempt in listed.json()} == {
+        ("refused", refused.decision_id): "I rent the flat Dana Whitfield owns. · Can you send me her invoice?",
+        ("reply_blocked", str(blocked)): None}
+
+
+async def test_safety_quotes_nothing_for_a_refusal_its_chat_never_showed(scene, clock):
+    """A refusal whose receipt isn't in its chat quotes nothing, not the chat's latest lines: an entry can be days
+    old, so those could be anything the visitor said since."""
+    asking = await scene.visitor(local(2026, 10, 29, 19))
+    await scene.text(asking, local(2026, 10, 29, 19), "Can you send me Dana Whitfield's invoice?")
+    refused = await scene.refusal(asking, local(2026, 10, 29, 19, 1))
+    await scene.text(asking, local(2026, 10, 29, 19, 2), "Hello?")
+    clock.now = local(2026, 10, 30, 9)
+
+    listed = await scene.owner.get(f"desks/{scene.owner.desk_id}/safety")
+
+    assert listed.status_code == 200, listed.text
+    (attempt,) = listed.json()
+    assert (attempt["ref_id"], attempt["from_the_visitor"]) == (refused.decision_id, None)
 
 
 @pytest.mark.parametrize(("tool", "args", "cause"), [
