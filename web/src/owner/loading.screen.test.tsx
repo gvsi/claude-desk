@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { cleanup } from 'vitest-browser-react';
 import { useRef } from 'react';
 import { useTextLines } from '../lib/useTextLines.ts';
+import { readLocal, writeLocal } from '../lib/storage.ts';
 import { page } from 'vitest/browser';
 
 import type { LedgerPage } from '../api/contracts.ts';
@@ -24,7 +25,7 @@ import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSk
 import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { needsYouKey, todayKey } from './useDesks.ts';
+import { DESKS_KEY, needsYouKey, todayKey } from './useDesks.ts';
 import { publicLink } from './customerLink.ts';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
 import { settled } from '../ds/test/settled.ts';
@@ -299,34 +300,108 @@ it.each([
   await expectSetupCardLands(width, height, 'navigation');
 });
 
-it('reload_opens_today_without_waiting_for_the_demo_inbox', async () => {
-  // The Demo inbox is the demo bar's: Today opens with its read still out, the bar draws no inbox
-  // button meanwhile (nor a line that it is opening), then draws it once the read is in.
+it.each([
+  [390, 844],
+  [1440, 900],
+])('a_reload_draws_the_setup_card_before_the_desks_are_read_again at %i by %i', async (width, height) => {
+  // A reload reads the copy's Desks again. For a Desk this browser has seen unfinished, the loading
+  // page draws the "Not live yet" card's shape from its first frame, so nothing under it drops when
+  // the Desks arrive; the card then lands where its shape was.
+  const state = await deskLeftAtRules();
+  const today = `/app/${state.desk_id}/today`;
+  // A Desk this browser saw that the copy no longer has is dropped as the unfinished one is kept.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
+  const first = await renderRoute(today, { viewport: { width, height } });
+  await expect.element(first.screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true })).toBeVisible();
+  expect(JSON.parse(readLocal('todaySetup') ?? '{}'), 'only the unfinished Desk is remembered').toEqual({
+    [state.desk_id]: { step: 'rules', answering: expect.any(Boolean), business: 'Okafor Plumbing' },
+  });
+  await cleanup();
+
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  const tops = watchTop(() => document.querySelector(`${FRAME_LAYER} .cd-how`) ?? landedElement('.cd-how'));
+  const { screen } = await renderRoute(today, { viewport: { width, height } });
+  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+  await document.fonts.ready;
+  await nextFrames();
+  // Drawn from the loading page's first frame, before it is shown, while the Desks are still out.
+  expect(setupShapeIn('.cd-owner-opening > .cd-skeleton-screen__body > .cd-skeleton-screen__layer'), 'the first frame draws the card').not.toBeNull();
+  await vi.waitFor(() => expect(setupShapeIn(FRAME_LAYER)).not.toBeNull());
+  expect(desks.held(), 'the Desks are still being read').toBeGreaterThan(0);
+  await nextFrames();
+  const shape = setupShapeIn(FRAME_LAYER);
+  expect(shape, "the card's shape is drawn while the Desks are read").not.toBeNull();
+  const shapeTop = shape!.getBoundingClientRect().top;
+
+  desks.release();
+  const card = screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true });
+  await expect.element(card).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await nextFrames();
+  expect(Math.abs(card.element().getBoundingClientRect().top - shapeTop), "the card lands at its shape's top").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  const howTops = tops();
+  expect(Math.max(...howTops) - Math.min(...howTops), 'How your Desk works never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+});
+
+it('a_desk_no_longer_in_the_copy_is_forgotten_once_the_desks_are_read', async () => {
+  // A Desk deleted, or from an earlier copy, leaves the record when a read of the Desks doesn't list it;
+  // an unreadable record is no record at all.
+  writeLocal('todaySetup', JSON.stringify({ 'desk-gone': { step: 'rules', answering: false, business: 'Old Plumbing' } }));
+  const gone = await renderRoute('/app/desk-gone/today');
+  await expect.element(gone.screen.getByRole('heading', { level: 1 })).toBeVisible();
+  await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+  await cleanup();
+  for (const bad of ['not json', '[1]', JSON.stringify({ [RIVERA.deskId]: { step: 'live', answering: true, business: 'x' } })]) {
+    writeLocal('todaySetup', bad);
+    // While the Desks are read, an unreadable record draws no card on the loading page.
+    const desks = holdReads(ROUTES.desks.path);
+    onTestFinished(desks.release);
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+    await nextFrames();
+    expect(document.querySelector('.cd-owner-opening'), bad).not.toBeNull();
+    expect(document.querySelector('.cd-owner-opening .cd-continue-setup'), bad).toBeNull();
+    desks.release();
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+    expect(document.querySelector('.cd-continue-setup'), bad).toBeNull();
+    await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+    await cleanup();
+  }
+});
+
+it('a_desk_that_went_live_is_forgotten_and_draws_no_card_on_a_reload', async () => {
+  // A Desk remembered unfinished that is live when the Desks are read leaves the record.
+  writeLocal('todaySetup', JSON.stringify({ [RIVERA.deskId]: { step: 'rules', answering: true, business: 'Turner Plumbing' } }));
+  const { screen } = await renderRoute(TODAY);
+  await expect.element(screen.getByRole('heading', { level: 2, name: 'Things to try' })).toBeVisible();
+  await vi.waitFor(() => expect(readLocal('todaySetup')).toBeNull());
+  expect(document.querySelector('.cd-continue-setup')).toBeNull();
+});
+
+it('reload_opens_today_without_waiting_for_the_notifications', async () => {
+  // The notifications are the sidebar's count: Today opens with their read still out, the sidebar
+  // counts none meanwhile, then counts them once the read is in.
   const inbox = holdReads(ROUTES.ownerInbox.path);
   onTestFinished(inbox.release);
   const { screen } = await renderRoute(TODAY, { pollScale: 100 });
   await vi.waitFor(() => expect(inbox.held()).toBe(1));
   await expect.element(screen.getByRole('heading', { name: 'Needs you', exact: true })).toBeVisible();
-  expect(document.querySelector('.cd-reviewer-bar .cd-owner-inbox')).toBeNull();
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
+  const nav = screen.getByRole('navigation', { name: 'Main' });
+  await expect.element(nav.getByRole('link', { name: 'Notifications', exact: true })).toBeVisible();
   inbox.release();
-  const button = screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true });
-  await expect.element(button).toBeVisible();
-  expect(button.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
+  await expect.element(nav.getByRole('link', { name: 'Notifications 1 unread', exact: true })).toBeVisible();
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
-/** The demo bar's Demo inbox, which the frame's shapes draw before Start over. */
-const INBOX_ANCHOR: SkeletonAnchor = { name: 'inbox', page: '.cd-reviewer-bar .cd-owner-inbox > .cd-button', size: true };
-
-it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_shape at %s', async (viewport) => {
-  // The inbox is read with the Desks, so once it is in before them, the bar draws it with the frame,
-  // where the frame's shapes drew it.
+it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_desks at %s', async (viewport) => {
+  // The notifications are read with the Desks, so once they are in before them, the frame lands
+  // where its shapes drew it, the demo bar with Reset demo alone, and reads them only the once.
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
-    anchors: [...(viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS), INBOX_ANCHOR],
+    anchors: viewport === 'phone' ? PHONE_ANCHORS : WIDE_ANCHORS,
     open: async () => {
       await renderRoute(TODAY, { viewport, pollScale: 100 });
       await vi.waitFor(() => expect(desks.held()).toBe(1));
@@ -335,6 +410,7 @@ it.each(['desktop', 'phone'] as const)('reload_lands_the_demo_inbox_in_the_bars_
     },
     release: desks.release,
   });
+  expect([...document.querySelectorAll('.cd-reviewer-bar button')].map((button) => button.textContent)).toEqual(['Reset demo']);
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
@@ -351,11 +427,11 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
   { name: 'thing-tile-0', page: '.cd-things__item:first-child .cd-things__icon' },
-  { name: 'thing-tile-3', page: '.cd-things__item:last-child .cd-things__icon' },
+  { name: 'thing-tile-4', page: '.cd-things__item:last-child .cd-things__icon' },
   { name: 'things-hide', page: '.cd-things__hide > .cd-button', size: true },
-  ...[0, 1, 2, 3].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
+  ...[0, 1, 2, 3, 4].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
   // A phone row's chevron (not drawn from 640 px, as the cards' buttons aren't on a phone).
-  ...[0, 1, 2, 3].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
+  ...[0, 1, 2, 3, 4].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
   { name: 'needs-title', page: '.cd-today__section[tabindex] .cd-section-header__heading' },
   { name: 'held-card', page: '.cd-needs-you .cd-card', dimensions: ['width'] },
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
@@ -507,8 +583,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
-  // Each card's line wraps in its quarter of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 3, 3, 3] : [2, 4, 4, 3]).forEach((count, i) => {
+  // Each card's line wraps in its third of the band on a laptop; each row's beside its tile and chevron on a phone.
+  (viewport === 'phone' ? [2, 2, 3, 1, 3] : [2, 2, 2, 1, 2]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -518,7 +594,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
-  lines('.cd-today-skeleton__rule .cd-skeleton-line', '.cd-today-skeleton__rule', viewport === 'phone' ? ['100%', '75%'] : ['100%']);
+  // The seed's hold went past an automatic rule's limit, so its card names no rule.
+  expect(today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__held-by')).toBeNull();
   lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
   lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
   for (const child of [1, 2]) {
@@ -536,6 +613,19 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-week__part:nth-child(2) .cd-skeleton-line--meta', '.cd-week__part:nth-child(2)', ['100%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
+
+  // "Answer a held request" is fourth, after "Watch a demo visitor".
+  const heldRow = '.cd-things__item:nth-child(4)';
+  const skeletonHeight = today.querySelector(heldRow)!.getBoundingClientRect().height;
+  desks.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const landed = landedElement(heldRow)!;
+  const detail = landed.querySelector('.cd-things__detail')!;
+  const words = document.createRange();
+  words.selectNodeContents(detail.querySelector('.cd-things__detail-now') ?? detail);
+  // One line in its row on a phone, and in its third of the band on a laptop.
+  expect(new Set([...words.getClientRects()].map((rect) => rect.top)).size, 'the landed waiting line').toBe(1);
+  expect(Math.abs(landed.getBoundingClientRect().height - skeletonHeight), 'the held row lands at its skeleton height').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });
 
 it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
@@ -576,7 +666,7 @@ const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'si
 const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'week-title', 'week-bar-0'];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
-  const ticked = ['thing-tile-3', 'thing-action-3', 'thing-go-3'];
+  const ticked = ['thing-tile-4', 'thing-action-4', 'thing-go-4'];
   // From 640 px the cards of a row share its height, so the ticked card moves nothing.
   if (!phone) return TODAY_CONTENT_ANCHORS.filter(({ name }) => !ticked.includes(name));
   const under = new Set(UNDER_THINGS_ON_A_PHONE);
@@ -667,7 +757,7 @@ const WIDE_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'sidebar-mark', page: '.cd-sidebar__brand .cd-mark' },
   { name: 'business-row', page: '.cd-sidebar__business' },
   { name: 'page-row-0', page: '.cd-sidebar__nav > a:first-child' },
-  ...Array.from({ length: 8 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
+  ...Array.from({ length: 9 }, (_, i) => ({ name: `page-row-${i + 1}`, page: `.cd-sidebar__nav > a:nth-child(${i + 2})` })),
   { name: 'owner-avatar', page: '.cd-sidebar__avatar' },
 ];
 const PHONE_ANCHORS: readonly SkeletonAnchor[] = [
@@ -1054,28 +1144,68 @@ it('desks_failure_ends_the_skeleton', async () => {
   await expectScreenBasics(document.body, { owner: true });
 });
 
-it('failed_demo_inbox_read_says_so_in_its_sheet', async () => {
-  // The first read fails, and so does its one retry: the bar draws the inbox's button with no count,
-  // and its sheet holds the line with Try again, never an inbox that looks empty.
+it('desk_gate_hides_the_old_error_while_retrying_a_missing_desk', async () => {
+  const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+  onTestFinished(() => mounted.mockRestore());
+  const { screen, router } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
+  const client = mounted.mock.contexts.at(-1) as QueryClient;
+  await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
+  const main = mockStore.world.desk(RIVERA.deskId)!;
+  mockStore.world.addDesk({ desk_id: 'desk-rivera-new', slug: 'rivera-new', name: 'Weekends', hours: main.summary.hours, openStatus: main.openStatus });
+  // The cached list holds the first Desk but lacks the new one. Its failed re-read keeps that data.
+  mockStore.inject({ route: 'desks', status: 'network', times: 4 });
+  await router.navigate('/app/desk-rivera-new/today');
+  const error = screen.getByRole('alert').getByText("We couldn't reach Claude Desk. Check your connection, then try again.", { exact: true });
+  await expect.element(error).toBeVisible();
+
+  const desks = holdReads(ROUTES.desks.path);
+  onlineManager.setOnline(false);
+  onTestFinished(() => onlineManager.setOnline(true));
+  await screen.getByRole('button', { name: 'Try again' }).click();
+  await vi.waitFor(() => expect(client.getQueryState(DESKS_KEY)?.fetchStatus).toBe('paused'));
+  await expect.element(error).toBeVisible();
+  expect(desks.held()).toBe(0);
+  onlineManager.setOnline(true);
+  await vi.waitFor(() => expect(desks.held()).toBe(1));
+  await expect.element(error).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Desk' })).toBeVisible();
+
+  desks.release();
+  await expect.element(error).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Try again' })).toHaveFocus();
+
+  const retriedDesks = holdReads(ROUTES.desks.path);
+  await screen.getByRole('button', { name: 'Try again' }).click();
+  await vi.waitFor(() => expect(retriedDesks.held()).toBe(1));
+  await expect.element(error).not.toBeInTheDocument();
+  await expect.element(screen.getByRole('status').filter({ hasText: 'Opening your Desk' })).toBeVisible();
+  retriedDesks.release();
+  await expect.element(screen.getByRole('button', { name: 'Switch Desk, current: Weekends' })).toBeVisible();
+  await expect.element(error).not.toBeInTheDocument();
+});
+
+it('failed_notifications_read_says_so_on_their_page', async () => {
+  // The first read fails, and so does its one retry: the sidebar counts nothing, and Notifications
+  // holds the line with Try again, never a page that looks empty.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
   const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-  const button = screen.getByRole('button', { name: 'Demo inbox', exact: true });
-  await expect.element(button).toBeVisible();
+  const nav = screen.getByRole('navigation', { name: 'Main' });
+  const row = nav.getByRole('link', { name: 'Notifications', exact: true });
+  await expect.element(row).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
-  expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2);
+  await vi.waitFor(() => expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(2));
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
-  expect(document.body.textContent).not.toContain('Opening your Demo inbox');
-  // The sheet's own read as it opens fails too.
+  // The page's own read as it opens fails too.
   mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
-  await button.click();
-  const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-  await expect.element(sheet.getByRole('alert').getByText(/^Couldn't open your Demo inbox\./), { timeout: 4_000 }).toBeVisible();
-  expect(sheet.element().querySelector('.cd-demo-inbox__empty')).toBeNull();
-  await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
-  await expect.element(sheet.getByRole('alert')).not.toBeInTheDocument();
-  await expect.element(sheet.getByRole('list')).toBeVisible();
-  await sheet.getByRole('button', { name: 'Close' }).click();
-  await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+  await row.click();
+  const page = screen.getByRole('main');
+  await expect.element(page.getByRole('alert').getByText(/^Couldn't open your notifications\./), { timeout: 4_000 }).toBeVisible();
+  expect(page.element().querySelector('.cd-empty-state')).toBeNull();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+  await expect.element(page.getByRole('list')).toBeVisible();
+  // Shown, the entry is seen: the sidebar counts none.
+  await expect.element(row).toBeVisible();
 });
 
 it('screen_helper_selects_the_region_by_its_status', async () => {
@@ -1404,6 +1534,7 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
 
 /** Each part of the fresh copy's held chat, by the shape that stands for it and the part itself. */
 const CHAT_PARTS = {
+  bar: { name: 'conversation-bar', page: '.cd-conversation__bar', size: true },
   name: { name: 'conversation-name', page: '.cd-conversation__name', dimensions: ['height', 'bottom'] },
   head: { name: 'transcript-head', page: '.cd-conversation .cd-transcript > .cd-transcript-header', dimensions: ['height', 'bottom'] },
   visitor: { name: 'first-message', page: '.cd-conversation .cd-transcript .cd-visitor-message', dimensions: ['height', 'bottom'] },
@@ -1419,6 +1550,7 @@ const CHAT_PARTS = {
  * is anchored to its shape.
  */
 const PANE_ANCHORS: readonly SkeletonAnchor[] = [
+  CHAT_PARTS.bar,
   CHAT_PARTS.name,
   CHAT_PARTS.head,
   CHAT_PARTS.visitor,
@@ -1434,6 +1566,15 @@ const PANE_ANCHORS: readonly SkeletonAnchor[] = [
  * request, each anchored to its shape by its top and bottom.
  */
 const PHONE_PANE_ANCHORS: readonly SkeletonAnchor[] = [CHAT_PARTS.name, CHAT_PARTS.reply, CHAT_PARTS.receipt0, CHAT_PARTS.receipt1, CHAT_PARTS.held];
+
+/**
+ * The phone's anchors as the shapes fade. There the open conversation scrolls as one, under its
+ * bar pinned at the top of the pane; the fading layer clips its shapes in a box of its own, where
+ * their bar no longer pins, and the page's bar lies over them. So the name is checked against its
+ * shape as the shapes show and once the chat has landed (`expectSkeletonLoad`), not frame by frame
+ * as they fade.
+ */
+const PHONE_LANDING_ANCHORS: readonly SkeletonAnchor[] = PHONE_PANE_ANCHORS.filter((anchor) => anchor !== CHAT_PARTS.name);
 
 /**
  * From the moment the pane's shapes start to leave, each anchored part of the chat, every frame
@@ -1514,7 +1655,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   // at its latest on a phone, over the owner's controls.
   const chat = holdReads(conversationRead(SEEDED_HOLD));
   const anchors = viewport === 'desktop' ? PANE_ANCHORS : PHONE_PANE_ANCHORS;
-  const inView = watchPaneLanding(anchors);
+  const inView = watchPaneLanding(viewport === 'desktop' ? PANE_ANCHORS : PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors,
@@ -1545,7 +1686,11 @@ it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_ma
     const rect = document.querySelector(selector)!.getBoundingClientRect();
     return { left: rect.left, right: rect.right, width: rect.width };
   };
-  const before = ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].map(part => {
+  // The bar runs across the whole pane; the transcript's rows and the controls fill the column.
+  const shapeBar = bounds(`${shape} .cd-conversation__bar`);
+  expect(Math.abs(shapeBar.left - pane.left), 'bar shape left').toBeLessThanOrEqual(1);
+  expect(Math.abs(shapeBar.width - pane.width), 'bar shape width').toBeLessThanOrEqual(1);
+  const before = ['.cd-transcript-row', '.cd-conversation__controls'].map(part => {
     const rect = bounds(`${shape} ${part}`);
     expect(Math.abs(rect.width - expectedWidth), `${part} shape width`).toBeLessThanOrEqual(1);
     expect(Math.abs((rect.left - pane.left) - (pane.right - rect.right)), `${part} shape centred`).toBeLessThanOrEqual(1);
@@ -1554,7 +1699,9 @@ it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_ma
   chat.release();
   await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector(shape)).toBeNull());
-  ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
+  const bar = bounds('.cd-conversation-pane .cd-conversation__bar');
+  for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(bar[edge] - shapeBar[edge]), `bar ${edge}`).toBeLessThanOrEqual(1);
+  ['.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
     const rect = bounds(`.cd-conversation-pane ${part}`);
     for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(rect[edge] - before[i]![edge]), `${part} ${edge}`).toBeLessThanOrEqual(1);
   });
@@ -1568,7 +1715,7 @@ it('conversation_shapes_follow_the_answer_buttons_height', async () => {
   document.head.append(style);
   onTestFinished(() => style.remove());
   const chat = holdReads(conversationRead(SEEDED_HOLD));
-  const landing = watchPaneLanding(PHONE_PANE_ANCHORS);
+  const landing = watchPaneLanding(PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors: PHONE_PANE_ANCHORS,
@@ -1600,7 +1747,7 @@ async function openChatWithOneReadHeld(key: 'needsYou' | 'conversations', path: 
     await vi.waitFor(() => expect(others.every((route) => served(route) > 0)).toBe(true));
     await vi.waitFor(() => expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
     await nextFrames();
-    expect(landedElement('.cd-conversation__head'), `the chat waits for ${key}`).toBeNull();
+    expect(landedElement('.cd-conversation__bar'), `the chat waits for ${key}`).toBeNull();
     expect(document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown');
   };
   return { ...rendered, held, open };
@@ -1681,7 +1828,7 @@ it('conversation_reload_hands_off at 390', async () => {
   // The fresh copy's held chat, which on a phone opens at its latest.
   const desks = holdReads(ROUTES.desks.path);
   const chat = holdReads(conversationRead(SEEDED_HOLD));
-  const gaps = watchSkeletonGaps('.cd-conversation__head');
+  const gaps = watchSkeletonGaps('.cd-conversation__bar');
   const { screen } = await renderRoute(`${CONVERSATIONS}/${SEEDED_HOLD}`, { viewport: 'phone', pollScale: 100 });
   // From the loading page's first commit, which keeps the frame's hidden heading.
   const headings = watchTopHeadings();
@@ -1691,7 +1838,7 @@ it('conversation_reload_hands_off at 390', async () => {
   expect(document.querySelector(`${FULL_LAYER} .cd-conversations--open .cd-conversations__back`)).not.toBeNull();
   const names = PHONE_PANE_ANCHORS.map(({ name }) => name);
   const before = fullPageShapes(names);
-  const inView = watchPaneLanding(PHONE_PANE_ANCHORS);
+  const inView = watchPaneLanding(PHONE_LANDING_ANCHORS);
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     continues: true,
@@ -1923,7 +2070,9 @@ const SAFETY_ANCHORS: readonly SkeletonAnchor[] = [
     ['safety-detail-status', '.cd-attempt__status'], ['safety-detail-title', '.cd-attempt__reason'],
     ['safety-claim', '.cd-attempt__claim'], ['safety-origin', '.cd-attempt__origin'],
     ['safety-replayed', '.cd-attempt__what .cd-attempt__origin:last-child'],
-    ['safety-summary-label', '.cd-attempt__label'], ['safety-summary', '.cd-attempt__summary'],
+    // Claude's summary label, not the visitor's words' label above it on a refused request.
+    ['safety-summary-label', '.cd-attempt__part:has(> .cd-attempt__summary) > .cd-attempt__label'],
+    ['safety-summary', '.cd-attempt__summary'],
     ['safety-toggle-0', '.cd-attempt__toggle:first-child'], ['safety-toggle-1', '.cd-attempt__toggle:nth-of-type(2)'],
     ['safety-conversation', '.cd-attempt__conversation'],
   ].map(([name, page]) => ({ name: name!, page: page!, dimensions: ['bottom', 'height'] as const })),
@@ -2141,7 +2290,7 @@ it('conversations_paused_first_read_lands_its_error_and_stays_open_on_reconnect'
 it('conversation_paused_first_read_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: ['conversation', SEEDED_HOLD], readPath: conversationRead(SEEDED_HOLD),
-    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
+    region: '.cd-conversation-pane', landed: '.cd-conversation__bar',
     prime: CONVERSATIONS, primeLanded: '.cd-conversations__items',
   });
 });
@@ -2149,8 +2298,8 @@ it('conversation_paused_first_read_lands_its_error_and_stays_open_on_reconnect',
 it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: `${CONVERSATIONS}/${SEEDED_HOLD}`, queryKey: needsYouKey(RIVERA.deskId), readPath: NEEDS_YOU_READ,
-    region: '.cd-conversation-pane', landed: '.cd-conversation__head',
-    prime: `${CONVERSATIONS}/${SEEDED_HOLD}`, primeLanded: '.cd-conversation__head',
+    region: '.cd-conversation-pane', landed: '.cd-conversation__bar',
+    prime: `${CONVERSATIONS}/${SEEDED_HOLD}`, primeLanded: '.cd-conversation__bar',
   });
 });
 

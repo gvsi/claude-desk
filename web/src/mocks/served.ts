@@ -12,6 +12,7 @@ import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../ap
 import type {
   AgentRunStarted,
   AgentTasks,
+  DemoVisitorStarted,
   ApprovalAnswerOut,
   CancelAccepted,
   CancelReason,
@@ -24,6 +25,8 @@ import type {
   VisitorSession,
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
+import { deskJobTools } from './businessTools.ts';
+import { DemoVisitorRuns, type DemoVisitorHost } from './demoVisitors.ts';
 import { idempotencyKeyOf } from './keys.ts';
 import { OWNER_LANGUAGE, loweredReason } from './moneyCap.ts';
 import {
@@ -32,6 +35,7 @@ import {
   businessOut,
   conversationSummary,
   copyOut,
+  decidingCard,
   HEALTH,
   ledgerPage,
   needsYou,
@@ -63,7 +67,6 @@ import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
 import {
   SETUP_ROUTES,
   setupPublicDesk,
-  setupTaskSet,
   stopSetupRuns,
   withSetupBusinesses,
   withSetupBusinessName,
@@ -280,6 +283,9 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
+/** Chats whose visitor confirmed a code while the owner had the chat: the API's wake that waits for the hand-back. */
+const VERIFIED_WHILE_TAKEN_OVER = new WeakSet<SessionRecord>();
+
 /**
  * The visitor's or visiting agent's latest line when nothing answered it after, as the API's hand-back
  * looks for one: mode markers, whispers and annotations aren't answers.
@@ -307,10 +313,12 @@ export interface CopyNaming {
 }
 
 /** The API's side of one copy: the copy itself and the turns in progress. */
-export class Server {
+export class Server implements DemoVisitorHost {
   world: MockWorld;
   /** The built-in agent's runs in this copy. */
   readonly agents = new AgentRuns();
+  /** The demo visitor's runs in this copy. */
+  readonly demoVisitors = new DemoVisitorRuns();
   /** How this copy's owner-chat streams are written; a test may change whether setup's turns stream. */
   readonly streams: StreamSettings;
   /** Streams a test planned, each taken by the next stream of its kind. */
@@ -358,6 +366,7 @@ export class Server {
     for (const turn of this.turns.values()) if (turn.timer !== null) clearTimeout(turn.timer);
     this.turns.clear();
     this.agents.stop();
+    this.demoVisitors.stop();
     stopSetupRuns(this.world);
   }
 
@@ -379,6 +388,29 @@ export class Server {
       session.listeners.clear();
     }
     this.world.deleteDesk(desk);
+  }
+
+  /** How long the demo visitor reads before it types, and types before it sends. */
+  get paceMs(): number {
+    return this.streams.demoVisitorMs;
+  }
+
+  /** Whether Claude's turn in the chat is going: a step waits, or more are queued. */
+  turnGoing(sessionId: string): boolean {
+    const turn = this.turns.get(sessionId);
+    return turn !== undefined && (turn.timer !== null || turn.queue.length > 0);
+  }
+
+  /**
+   * The visitor's message in their chat, as their own route sends it: Claude's turn follows in a
+   * chat Claude has, and the kernel's handoff in a paused one; in a chat the owner has, nothing.
+   */
+  visitorSays(session: SessionRecord, text: string): void {
+    this.world.visitorText(session, text);
+    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
+    if (session.state.mode === 'ai') this.runVisitorTurn(session, text);
+    // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
+    else if (session.state.mode === 'paused') this.runTurn(session, PAUSED_TURN, session.language, text);
   }
 
   /** The session the request's visitor cookie names for `slug`, or why there is none. */
@@ -630,10 +662,18 @@ const SERVED: ServedRoutes = {
     if (isFailure(session)) return session;
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
     const state = sv.world.handBack(session);
-    // A line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and an
-    // agent's on its next request, the only time an agent's turn runs.
+    // A code the visitor confirmed while the owner had the chat has Claude go on with what they asked for,
+    // as the API's note tells it to, whatever they wrote since. It's used up once that turn starts: a
+    // take-over before then fences the turn off and leaves the code for the next hand-back. Otherwise a
+    // line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and
+    // an agent's on its next request, the only time an agent's turn runs.
     const waiting = waitingLine(session);
-    if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
+    if (VERIFIED_WHILE_TAKEN_OVER.has(session)) {
+      sv.runTurn(session, () => {
+        VERIFIED_WHILE_TAKEN_OVER.delete(session);
+        return afterVerify(hasAllTools(sv.world, session));
+      }, session.language, '');
+    } else if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
     return ok(state);
   },
   resume(sv, req) {
@@ -673,6 +713,35 @@ const SERVED: ServedRoutes = {
     if (!record) return NOT_FOUND;
     return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(record.decision);
   },
+  startDemoVisitor(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const key = idempotencyKeyOf(req.body);
+    if (req.malformed || key === false) return INVALID;
+    const run = sv.demoVisitors.start(sv, desk, key);
+    if ('refused' in run) return run.refused === 'conflict' ? failWith(409, 'conflict') : failWith(429, 'rate_limited', { retry_after: run.retryAfter });
+    if (run.session_id === null) return failWith(503, 'demo_visitor_unavailable');
+    return ok({ run_id: run.run_id, desk_id: run.desk_id, session_id: run.session_id } satisfies DemoVisitorStarted, 202);
+  },
+  demoVisitor(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const run = sv.demoVisitors.newest(desk.summary.desk_id);
+    return run === null ? NOT_FOUND : ok(run);
+  },
+  demoVisitorRun(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const run = sv.demoVisitors.read(req.params.run_id);
+    return run !== null && run.desk_id === desk.summary.desk_id ? ok(run) : NOT_FOUND;
+  },
+  stopDemoVisitor(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const run = sv.demoVisitors.read(req.params.run_id);
+    const stopped = run === null || run.desk_id !== desk.summary.desk_id ? null : sv.demoVisitors.stopRun(run.run_id);
+    return stopped === null ? NOT_FOUND : ok(stopped);
+  },
   ownerInbox(sv, req) {
     // Everything the copy's Demo inbox holds, as the kernel's owner form answers.
     return req.cookies.owner ? ok(sv.world.inbox.map((record) => record.entry)) : NO_OWNER;
@@ -705,7 +774,8 @@ const SERVED: ServedRoutes = {
     const text = isRecord(req.body) ? req.body.text : undefined;
     if (req.malformed || typeof text !== 'string' || text.trim() === '' || text.length > MESSAGE_MAX) return INVALID;
     // Claude's answer, and the change it drafts when the owner asked for one, merged into the active
-    // rules. Claude reads the Desk's held requests too, newest first, as Needs you lists them.
+    // rules. Claude reads the Desk's held requests too, newest first, as Needs you lists them, each with
+    // the card that decided it (Needs you's `held_by` names only an ask card).
     const cap = desk.policy.auto_money_cap_cents ?? 0;
     const held = needsYou(sv.world, desk)
       .flatMap((item) => {
@@ -713,7 +783,7 @@ const SERVED: ServedRoutes = {
         if (!item.decision || !action) return [];
         const money = action.effects.some((effect) => MONEY_EFFECTS.has(effect));
         const aboveLimit = money && action.amount_cents != null && action.amount_cents > cap;
-        return [{ tool: action.tool, reasonPlain: item.decision.reason_plain, heldBy: item.held_by, aboveLimit }];
+        return [{ tool: action.tool, reasonPlain: item.decision.reason_plain, heldBy: decidingCard(desk, item.decision)?.reason ?? null, aboveLimit }];
       })
       .reverse();
     const reply = ruleChatReply(text, desk.policy.cards, held);
@@ -739,9 +809,12 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const preset = isRecord(req.body) ? req.body.preset : undefined;
     if (req.malformed || !isPreset(preset)) return INVALID;
-    // The preset's cards for the Desk's hours in place of every owner card, personal ones included:
-    // its diff lists each one it removes.
-    return ok(sv.world.draftCards(desk, presetCards(preset, desk.summary.hours)));
+    // Keep eligible non-money job cards unchanged; preset IDs always belong to the preset.
+    const jobs = deskJobTools(rulesView(desk).tools);
+    const cards = presetCards(preset, desk.summary.hours);
+    const presetIds = new Set(cards.map((card) => card.card_id));
+    const kept = desk.policy.cards.filter((card) => !card.is_default && jobs.has(card.applies_to) && !presetIds.has(card.card_id));
+    return ok(sv.world.draftCards(desk, [...cards, ...kept]));
   },
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -849,12 +922,7 @@ const SERVED: ServedRoutes = {
     if (isFailure(visitor)) return visitor;
     const text = isRecord(req.body) ? req.body.text : undefined;
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
-    const { session } = visitor;
-    sv.world.visitorText(session, text);
-    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runVisitorTurn(session, text);
-    // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
-    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
+    sv.visitorSays(visitor.session, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   visitorTyping(sv, req) {
@@ -882,8 +950,12 @@ const SERVED: ServedRoutes = {
     const { session } = visitor;
     // One answer for a wrong, expired or used-up code, so a refusal never says which.
     if (!sv.world.checkCode(session, code)) return failWith(422, 'kernel', { code: 'invalid' });
-    // The API wakes Claude, which goes on with what the visitor asked for.
-    sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    // The API notes the code and wakes Claude, which goes on with what the visitor asked for. As for a
+    // message, a paused chat's turn is the kernel's handoff, and while the owner has the chat Claude
+    // stays quiet: the note waits for the hand-back, which wakes it then (`handback`).
+    if (session.state.mode === 'ai') sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, '');
+    else VERIFIED_WHILE_TAKEN_OVER.add(session);
     return ok({ state: session.state } satisfies VerifyChecked);
   },
   visitorInbox(sv, req) {
@@ -904,17 +976,16 @@ const SERVED: ServedRoutes = {
     return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
   },
   agentTasks(sv, req) {
-    // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
-    // Turner's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    // The Desk's set, read with this browser's chat: its summary's business type, the one key the API reads for
+    // the agent and the owner's list (`agents.demo_task_sets`). That is its setup business type, Turner's on the
+    // copy's first Desk, and `other` on any other Desk setup didn't make.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
-    const deskId = visitor.desk.summary.desk_id;
-    const own = sv.world.desks[0]?.summary.desk_id === deskId;
     const payments = visitor.desk.tools.some((row) => row.status === 'enabled'
       && (row.tool === 'native.payment_link' || row.tool === 'native.charge_mandate'));
     return ok({
-      task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other'),
-      tasks: payments ? ['book_visit', 'quote_and_deposit', 'push_the_limit'] : ['book_visit'],
+      task_set: visitor.desk.summary.business_type,
+      tasks: payments ? ['book_visit', 'ask_question', 'quote_and_deposit', 'push_the_limit'] : ['book_visit', 'ask_question'],
     } satisfies AgentTasks);
   },
   sendAgent(sv, req) {
@@ -944,13 +1015,18 @@ const SERVED: ServedRoutes = {
   },
   // The payment link's token is the only credential the checkout carries: no cookie is read.
   paymentLink(sv, req) {
-    const link = sv.world.links.get(req.params.token ?? '');
-    return link ? ok(withSetupBusinessName(sv.world, link, paymentLinkOut(link))) : NOT_FOUND;
+    const token = req.params.token ?? '';
+    const link = sv.world.links.get(token);
+    if (!link) return NOT_FOUND;
+    // A read settles the link first, as the kernel's does: one whose quote was paid another way is cancelled.
+    sv.world.settleLink(token, link);
+    return ok(withSetupBusinessName(sv.world, link, paymentLinkOut(link)));
   },
   completePayment(sv, req) {
     const token = req.params.token ?? '';
     const link = sv.world.links.get(token);
     if (!link) return NOT_FOUND;
+    sv.world.settleLink(token, link);
     // The kernel completes a link only while it is open, so a second payment is refused.
     if (link.view.state !== 'issued') return linkClosed(link);
     const verdict = sv.world.payLink(token, link);

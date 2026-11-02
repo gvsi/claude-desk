@@ -664,6 +664,10 @@ async def test_agent_link_keeps_its_reservation_through_an_activation(desk_prove
     assert spend_of(copy_id, mandate_id) == (10_000, 0)
 
 
+def reply_entries(entries) -> list[dict]:
+    return [e.event.summary for e in entries if e.event.kind == "reply"]
+
+
 def payment_entries(entries, link: PaymentLink) -> list[dict]:
     return [e.event.summary for e in entries if e.event.kind == "payment" and e.event.summary["link_id"] == link.link_id]
 
@@ -976,3 +980,104 @@ async def test_a_charge_and_a_link_completion_of_one_quote_pay_once(desk_prove, 
         assert [(key, amount) for key, amount, _ in charges(setup.desk)] == [(f"{link.action_id}:charge", 2_000)]
     assert mandate_spend(copy_id) == [(2_000, 0)]
     assert await quote_status(app, copy_id, quote_id) == "paid"
+
+
+async def link_and_charge(app: FastAPI, client: httpx.AsyncClient, setup: AgentDesk,
+                          signed: SignedTurn) -> tuple[PaymentLink, Decision]:
+    """An issued agent link to a new deposit quote, and an allowed charge of the same quote: the
+    link's row, and the charge's decision, not yet executed."""
+    quote_id = await quoted(client, signed)
+    issuing = await asked(client, signed, LINK, quote_id, call_id="call-link")
+    assert issuing.outcome == "allow", issuing.reason_plain
+    assert (await executed(client, signed, issuing)).state == "succeeded"
+    [link] = await rows_of(app, setup.desk.copy_id, select(PaymentLink))
+    charging = await asked(client, signed, CHARGE, quote_id, call_id="call-charge")
+    assert charging.outcome == "allow", charging.reason_plain
+    return link, charging
+
+
+@pytest.mark.solver
+async def test_a_link_whose_quote_a_charge_paid_reads_as_cancelled(desk_prove, app, client, frozen_clock,
+                                                                    monkeypatch):
+    """A link is open only while its quote can still be paid. The agent has an open link to its
+    deposit quote, then pays the same quote within its mandate: the next read of the link (the
+    checkout's, or a chat's) finds the quote paid, so the link is `cancelled` (no `cancel_reason`),
+    ledgered `quote_paid` as a completion's refusal is, and its $20 released, with nothing asked of
+    the provider; a second read moves nothing. A link to another quote, still unpaid, stays open, and
+    completing the cancelled link is refused, with nothing sent."""
+    setup = await agent_desk(app, client, frozen_clock)
+    copy_id = setup.desk.copy_id
+    signed = setup.turn()
+    link, charging = await link_and_charge(app, client, setup, signed)
+    other = await agent_link(app, client, setup, signed, 2)
+    assert (await executed(client, signed, charging)).state == "succeeded"
+    assert await quote_status(app, copy_id, link.quote_id) == "paid"
+
+    asked_provider: list[str] = []
+
+    def no_provider(ctx):
+        asked_provider.append("provider")
+        raise AssertionError("a link whose quote is paid needs nothing from the provider")
+
+    monkeypatch.setattr(payments, "provider", no_provider)
+    replies = reply_entries(await ledger_rows(app, setup.desk))
+    seen = await view(client, link.token)
+    # no rule change cancelled it, so the checkout gives no reason, and the chat gets no card for it
+    assert (seen.state, seen.cancel_reason) == ("cancelled", None)
+    entries = payment_entries(await ledger_rows(app, setup.desk), link)
+    assert entries[-1] == {"link_id": link.link_id, "state": "cancelled", "reason": "quote_paid"}
+    assert reply_entries(await ledger_rows(app, setup.desk)) == replies
+    assert await cancelled_links(client, setup.desk, charging.policy_version) == []
+    assert await link_state(app, setup, link) == ("cancelled", None, (2_000, "released"))
+    assert (await view(client, link.token)).state == "cancelled"                # a second read moves nothing
+    assert payment_entries(await ledger_rows(app, setup.desk), link) == entries
+    assert (await view(client, other.token)).state == "issued"                 # its quote is still unpaid
+    assert await link_state(app, setup, other) == ("issued", None, (2_000, "reserved"))
+    assert asked_provider == []
+
+    response = await client.post(f"/payment_links/{link.token}/complete", json={})
+    assert (response.status_code, response.json()) == (409, {"code": "conflict"})
+    assert payment_entries(await ledger_rows(app, setup.desk), link)[-1] == {
+        "link_id": link.link_id, "refused": True, "state": "cancelled", "reason": "cancelled"}
+    assert asked_provider == []
+    assert [(key, amount) for key, amount, _ in charges(setup.desk)] == [(charging.action.action_id, 2_000)]
+    assert mandate_spend(copy_id) == [(2_000, 2_000)]                          # the charge, and the other link's hold
+
+
+@pytest.mark.solver
+async def test_a_link_whose_quote_is_still_being_paid_stays_open(desk_prove, app, client, frozen_clock,
+                                                                 monkeypatch):
+    """Only a paid quote closes its open links. A charge of the link's quote whose kernel died right
+    after its intent may or may not have reached the provider, so the quote is being paid
+    (`quote_paying`), not paid: a read leaves the link open, its $20 still held, until that charge
+    is settled."""
+    setup = await agent_desk(app, client, frozen_clock)
+    signed = setup.turn()
+    link, charging = await link_and_charge(app, client, setup, signed)
+    with monkeypatch.context() as patch:
+        patch.setattr(execute, "_after_intent", crash)
+        with pytest.raises(Crash):
+            await post_execute(client, signed, charging)
+    assert (await view(client, link.token)).state == "issued"
+    assert await link_state(app, setup, link) == ("issued", None, (2_000, "reserved"))
+    assert [entry["state"] for entry in payment_entries(await ledger_rows(app, setup.desk), link)] == ["issued"]
+
+
+@pytest.mark.solver
+async def test_a_read_never_waits_for_a_paid_quotes_row(desk_prove, app, client, frozen_clock):
+    """A read doesn't wait for the row of a quote another transaction holds (a payment of it, here a
+    test's lock): it leaves the link as it is and answers at once, and the next read, once the row is
+    free, cancels the link of the quote the charge paid."""
+    setup = await agent_desk(app, client, frozen_clock)
+    signed = setup.turn()
+    link, charging = await link_and_charge(app, client, setup, signed)
+    assert (await executed(client, signed, charging)).state == "succeeded"
+    with psycopg.connect(libpq_url(database_url("ADMIN"))) as holding:
+        holding.execute("SELECT quote_id FROM kernel.quotes WHERE quote_id = %s FOR UPDATE",
+                        (charging.action.resource.id,))
+        started = time.monotonic()
+        assert (await asyncio.wait_for(view(client, link.token), 5)).state == "issued"
+        assert time.monotonic() - started < 2
+        holding.rollback()
+    assert (await view(client, link.token)).state == "cancelled"
+    assert await link_state(app, setup, link) == ("cancelled", None, (2_000, "released"))

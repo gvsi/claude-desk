@@ -29,7 +29,7 @@ from desk.db.models import Mandate as MandateRow
 from desk.db.session import database_url, libpq_url
 from desk.db.tables import KERNEL_TABLES
 from desk.kernel_api import PublicDesk, VerifyStarted, WhoAmI
-from desk.kernel_service import agents
+from desk.kernel_service import agents, render
 from desk.kernel_service.auth import Named
 from desk.kernel_service.clock import signed_time
 from desk.kernel_service.desks import mask_contact
@@ -724,9 +724,17 @@ async def test_verify_routes_accept_agent_sessions(app, client, frozen_clock, mo
         ("agent_auth", route, "replayed") for route in routes]
 
 
-AGENT_TOOL_LABELS = {   # Turner Plumbing's agent tools today, by the plain label the card gives each
-    "en": ["get a quote from the price list", "find open times", "book a visit"],
-    "es": ["pedir una cotización de la lista de precios", "buscar horarios libres", "reservar una visita"],
+AGENT_TOOL_LABELS = {   # Turner Plumbing's agent tools today, one block each by the plain label the card gives it
+    "en": ["Get a quote from the price list", "Find open times", "Book a visit", "Get a payment link for a quote",
+           "Pay for a quote within the limit of a signed mandate", "Leave contact details", "Ask for a callback",
+           "Verify a customer with a code sent to their contact on record",
+           "Receive a verified customer's own documents", "List a verified customer's own charges"],
+    "es": ["Pedir una cotización de la lista de precios", "Buscar horarios libres", "Reservar una visita",
+           "Pedir un enlace de pago para una cotización",
+           "Pagar una cotización dentro del límite de un mandato firmado", "Dejar datos de contacto",
+           "Pedir que te devuelvan la llamada", "Verificar a un cliente con un código enviado a su contacto registrado",
+           "Recibir los documentos propios de un cliente verificado",
+           "Ver los cargos propios de un cliente verificado"],
 }
 
 
@@ -735,21 +743,20 @@ async def test_public_agent_card_is_kernel_rendered(app, client, frozen_clock):
     [wallet] = await rows_of(app, copy.copy_id, select(DemoWalletKey))
     [key] = await rows_of(app, copy.copy_id, select(AgentKey))
     canaries = [row.canary for row in await rows_of(app, copy.copy_id, select(Document))]
-    for lang, disclosure in (("en", "an AI"), ("es", "una IA")):
+    for lang in ("en", "es"):
         response = await client.get(f"/public/{copy.slug}", params={"lang": lang})
         assert response.status_code == 200, response.text
         card = PublicDesk.model_validate(response.json()).agent_card
         # prose blocks the kernel writes from its own templates: no clause, template or fact behind them
         assert card and all((b.kind, b.template, b.fact_id, b.title, b.lines, b.href, b.options) == (
             "prose", None, None, None, [], None, []) for b in card)
+        # one block for each thing an agent can do here, and nothing else: the page says who answers, and the API's
+        # code-built card where to send requests and how to sign them
+        assert [block.text for block in card] == AGENT_TOOL_LABELS[lang]
         text = "\n".join(block.text for block in card)
-        for expected in (*AGENT_TOOL_LABELS[lang], copy.slug, f"/api/a2a/{copy.slug}", "X-Agent-Key-Id",
-                         "X-Agent-Ts", "X-Agent-Nonce", "X-Agent-Sig", "desk_slug, ts, nonce", "body_sha256",
-                         "Ed25519", "RFC 8785", "5 minut", disclosure, "Claude", "Mike Turner"):
-            assert expected in text, (lang, expected)
-        assert ("not business credentials" if lang == "en" else "No son credenciales del negocio") in text
-        # no amount, key, mandate or private field
-        for private in ("$", "20.00", "100", "2000", "10000", "Dana", "Bob", "example.com", "510", "Invoice",
+        # no endpoint, header, name, amount, key, mandate or private field
+        for private in ("/api/a2a", copy.slug, "X-Agent-", "Ed25519", "RFC 8785", "Turner Plumbing", "Mike Turner",
+                        "$", "20.00", "100", "2000", "10000", "Dana", "Bob", "example.com", "510", "Invoice",
                         wallet.public_key_hex, key.public_key_hex, agent.key_id, agent.issued.agent_private_key_hex,
                         agent.issued.mandate.mandate_id, agent.issued.mandate.nonce, created.state.session_id,
                         copy.copy_id, copy.desk_id, "native.", "payments.", *canaries):
@@ -759,8 +766,16 @@ async def test_public_agent_card_is_kernel_rendered(app, client, frozen_clock):
         ctx.bind(copy.copy_id)
         tool = (await ctx.db.scalars(ctx.repo.scoped(select(Tool).where(Tool.tool == "native.book")))).one()
         tool.status = "disabled"
-    text = "\n".join(b.text for b in PublicDesk.model_validate((await client.get(f"/public/{copy.slug}")).json()).agent_card)
-    assert "find open times" in text and "book a visit" not in text
+    card = PublicDesk.model_validate((await client.get(f"/public/{copy.slug}")).json()).agent_card
+    assert [block.text for block in card] == [label for label in AGENT_TOOL_LABELS["en"] if label != "Book a visit"]
+
+
+def test_an_agent_card_with_nothing_to_offer_is_empty():
+    # a Desk with no tool an agent may be given yet has no blocks, so the page shows its own empty line
+    for lang in ("en", "es"):
+        assert render.agent_card(lang, set()) == []
+    # a tool with no label for agents is left out rather than named
+    assert [block.text for block in render.agent_card("en", {"native.web_search", "native.book"})] == ["Book a visit"]
 
 
 @pytest.mark.parametrize("kind", ["canary", "unsupported_language", "session_paused", "check_unavailable",

@@ -20,6 +20,7 @@ it.each(['desktop', 'phone'] as const)('profile_is_a_main_page_%s', async (viewp
     'Customers',
     'Rules',
     'Safety',
+    'Notifications',
     'Profile',
     'Share',
     'Knowledge',

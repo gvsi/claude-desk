@@ -1,7 +1,0 @@
-/* OwnerInbox: in the demo bar, the Demo inbox sheet's quiet button; the sheet itself opens over the
-   page at the right. */
-
-.cd-owner-inbox {
-  display: flex;
-  flex: none;
-}

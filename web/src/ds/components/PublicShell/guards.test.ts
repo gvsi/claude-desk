@@ -59,7 +59,7 @@ describe('PublicShell guards', () => {
     expectTypeOf<PublicShellProps>().not.toHaveProperty('statusLine');
     expectTypeOf<PublicShellProps['openStatus']>().toEqualTypeOf<PublicDesk['open_status'] | undefined>();
     const base: PublicShellProps = {
-      brand: { name: 'Turner Plumbing', tagline: 'Main line', monogram: 'T', field: '#1F4E4A', ink: '#ffffff', inkSecondary: '#e6e6e6', accent: '#B87333' },
+      brand: { name: 'Turner Plumbing', tagline: 'Main line', monogram: 'T', field: '#1F4E4A', ink: '#ffffff', inkSecondary: '#e6e6e6', statusHandled: '#6fa859', accent: '#B87333' },
       ownerName: 'Mike Turner',
       language: 'en',
       onAskForOwner: () => {},

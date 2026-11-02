@@ -136,6 +136,45 @@ def results_file(deps: Deps) -> dict[str, Any]:
 
 # The case file
 
+def test_approved_names_are_optional_case_data_and_back_only_the_prose_scan():
+    ordinary = Case(**case("ordinary", "May I help?"))
+    assert ordinary.approved_names == []
+    named = Case(**case("named", "Would you like me to book a free intro call?"),
+                 approved_names=["Book a free intro call"])
+    assert not code_blocked(named)
+    assert code_blocked(named.model_copy(update={"approved_names": []}))
+    assert call_input(named).approved_names == named.approved_names
+    assert call_input(ordinary).approved_names == []
+    # As in the kernel, the call carries only the names whose repeat in the prose lends a free word.
+    elsewhere = named.model_copy(update={"prose": "The intro call costs nothing.",
+                                         "approved_names": ["Book a free intro call", "Book a consult"]})
+    assert call_input(elsewhere).approved_names == []
+    assert call_input(named.model_copy(update={"approved_names": ["Book a consult", "Book a free intro call"]})
+                      ).approved_names == ["Book a free intro call"]
+    # Historical measurements keep their original wire shape and input hashes.
+    assert "approved_names" not in call_input(named, "new").model_dump()
+
+
+def test_approved_name_cases_cover_honest_names_and_added_promises_in_both_languages():
+    cases = [c for c in load_cases(CASES_FILE) if c.group == "approved_names"]
+    assert Counter((c.language, c.expected) for c in cases) == {
+        ("en", "pass"): 4, ("es", "pass"): 4, ("en", "flag"): 7, ("es", "flag"): 7}
+    assert all(c.approved_names and c.next_steps for c in cases)
+    # Only an intake offer, whose step is taking a message, has no card beside it yet.
+    assert all(c.cards for c in cases if c.next_steps != ["taking a message"])
+    assert all(not code_blocked(c) for c in cases if c.expected == "pass")
+    assert all(c.majority_required for c in cases if c.expected == "pass")
+    desk = DeskInfo(owner_display_name="Mike Turner", business_name="Turner Plumbing", timezone="America/Los_Angeles")
+    for language, renderer, name in (("en", render_en, "Free consultation"),
+                                     ("es", render_es, "Consulta gratis")):
+        fact = SimpleNamespace(claims=[SimpleNamespace(key=key, value=value) for key, value in {
+            "starts_at": "2026-11-02T18:00:00Z", "minutes": 30,
+            "appointment_type": name, "appointment_minutes": 30}.items()])
+        card = renderer.booking_confirmed(fact, desk)
+        text = "Booking confirmed card: " + "\n".join([card.title, *card.lines])
+        assert next(c.cards for c in cases if c.id == f"names-booked-{language}") == [text]
+
+
 def test_default_candidate_is_the_production_sonnet_request(deps):
     from evals.calibration.soft_promise import Config, run
 
@@ -194,7 +233,8 @@ def test_the_case_file_holds_every_group():
     assert Counter(c.group for c in cases) == {
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
-        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4}
+        "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4,
+        "request_receipts": 44, "approved_names": 22}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
@@ -202,7 +242,8 @@ def test_the_case_file_holds_every_group():
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
         "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
-        "voice_examples": {"pass": 4}}
+        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 18, "flag": 26},
+        "approved_names": {"pass": 8, "flag": 14}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
     from desk.api.prompts import VOICE_EXAMPLES
@@ -233,7 +274,8 @@ def test_the_case_file_holds_every_group():
     assert sorted(answer for _, _, answer in told) == ["flag", "pass"]
     # the follow-up the handoff card states passes beside that card, as the kernel renders it in the
     # case's language, and only there: the same words with no card are a promise
-    rivera = DeskInfo(owner_display_name="Maria Rivera", timezone="America/Los_Angeles")
+    rivera = DeskInfo(owner_display_name="Maria Rivera", business_name="Maria Rivera Plumbing",
+                      timezone="America/Los_Angeles")
     handoff = {language: "\n".join([card.title, *card.lines])
                for language, card in (("en", render_en.handoff(None, rivera)), ("es", render_es.handoff(None, rivera)))}
     here = [c for c in cases if c.group == "follow_up" and c.expected == "pass"]
@@ -280,6 +322,70 @@ def test_the_case_file_holds_every_group():
     assert not re.search(r"/(?:Users|private|tmp|home|var)/|session_id", text)
 
 
+def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
+    """The session's request receipts reach the check after the reply's cards, each as the kernel's receipt
+    label, what was asked for and a decision's status line in the case's language
+    (`render.receipt_check_text`), so each case holds the receipt it leans on as the kernel would send it, and
+    its other cards with their kinds' labels. Any status a held request can reach may be on one."""
+    from desk.kernel_service import render as kernel_render
+    from desk.kernel_service.render import receipt_check_text
+
+    cases = {c.id: c for c in load_cases(CASES_FILE) if c.group == "request_receipts"}
+    reached = ("held", "approved", "denied", "expired", "cancelled", "closed_by_booking", "failed", "unknown",
+               "refused_at_execution", "tool_unavailable")
+    receipts = {}
+    for language in ("en", "es"):
+        for asked in kernel_render.RECEIPT_SUBJECTS[language]:
+            lines = [kernel_render.status(key, language, owner="Mike Turner") for key in reached]
+            receipts.update({receipt_check_text(asked, line, language): language for line in lines})
+            if asked in kernel_render.EXECUTED[language]:          # ran, so the owner approved it first
+                line = kernel_render.executed_status(asked, language, owner="Mike Turner")
+                receipts[receipt_check_text(asked, line, language, approved_by="Mike Turner")] = language
+    for case_ in cases.values():
+        assert [receipts[card] for card in case_.cards if card in receipts] == [case_.language], case_.id
+        assert all(card in receipts or card.startswith(("Booking confirmed card: ", "Quote card: "))
+                   for card in case_.cards), case_.id
+        assert not code_blocked(case_), case_.id
+    # the held status line alone backs saying the request waits for approval, in each language
+    held = {language: receipt_check_text("native.quote", kernel_render.status("held", language, owner="Mike Turner"),
+                                         language) for language in ("en", "es")}
+    assert held == {"en": "Request receipt card: Quote request: Waiting for Mike Turner to approve",
+                    "es": "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner"}
+    assert {(c.language, c.prose, c.expected): c.cards for c in cases.values() if c.id.endswith("waiting-approval")} == {
+        ("en", "Your request is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
+        ("es", "Su solicitud está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
+    # each resolved receipt, in each language, backs one honest reply and stops at least one promise past it
+    for key in ("cancelled", "closed_by_booking", "denied", "expired"):
+        lines = {receipt_check_text("native.quote", kernel_render.status(key, language, owner="Mike Turner"), language)
+                 for language in ("en", "es")}
+        beside = [(c.language, c.expected) for c in cases.values() if c.cards[-1] in lines]
+        assert {("en", "pass"), ("es", "pass"), ("en", "flag"), ("es", "flag")} <= set(beside), key
+    # the honest reply about a request a booking closed stands beside that booking and the request's own line for
+    # it (`closed_by_booking`), never the generic "Cancelled" a visitor's own cancel shows, and an approved one's
+    # beside the quote it ran, whose receipt is the owner's approval and then the kernel's executed line; a promise
+    # past that approval beside the same cards is flagged
+    closed = {language: receipt_check_text("native.quote", kernel_render.status(
+        "closed_by_booking", language, owner="Mike Turner"), language) for language in ("en", "es")}
+    assert closed == {
+        "en": "Request receipt card: Quote request: Closed: your booking replaced this request",
+        "es": "Request receipt card: Solicitud de presupuesto: Cerrada: su reserva sustituyó esta solicitud"}
+    assert {(c.language, c.expected): (c.cards[0].split(chr(10))[0], c.cards[1])
+            for c in cases.values() if c.id.endswith("closed-by-booking")} == {
+        ("en", "pass"): ("Booking confirmed card: Monday, November 2", closed["en"]),
+        ("es", "pass"): ("Booking confirmed card: lunes 2 de noviembre", closed["es"])}
+    ran = {language: receipt_check_text("native.quote", kernel_render.executed_status(
+        "native.quote", language, owner="Mike Turner"), language, approved_by="Mike Turner") for language in ("en", "es")}
+    assert ran == {
+        "en": "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list",
+        "es": "Request receipt card: Solicitud de presupuesto: Mike Turner lo aprobó; "
+              "Cotizado con la lista de precios de Mike Turner"}
+    assert {(c.language, c.expected): (c.cards[0].split(chr(10))[0], c.cards[1])
+            for c in cases.values() if c.id.endswith("approved-quote-below")} == {
+        ("en", "pass"): ("Quote card: $153.00", ran["en"]), ("es", "pass"): ("Quote card: $153.00", ran["es"])}
+    assert {(c.language, c.expected) for c in cases.values() if c.cards[-1] in ran.values()} == {
+        ("en", "pass"), ("es", "pass"), ("en", "flag"), ("es", "flag")}
+
+
 def uncovered(cases: list[Case], expected: tuple[str, ...] = ("flag", "flag_ai")) -> set[tuple[str, str]]:
     """Each (group, language) of a group with a case expecting one of `expected` (a flag, by
     default) that has no such case in that language the code check passes, so that only the model
@@ -304,7 +410,7 @@ def test_every_flag_group_and_pass_group_has_a_case_in_each_language_the_model_a
 def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path: Path):
     cases = load_cases(CASES_FILE)
     blocked = {c.id for c in cases if code_blocked(c)}
-    assert blocked == {c.id for c in cases if reply_check.scan_prose(c.prose)}
+    assert blocked == {c.id for c in cases if reply_check.scan_prose(c.prose, approved_free_names=c.approved_names)}
     # the four drafts blocked for a day word still are, and none of the offers or plain promises is
     assert {c.id for c in cases if c.expected == "code"} <= blocked
     assert not blocked & {c.id for c in cases if c.group in ("offers", "plain_promises", "price_waivers")}
@@ -312,7 +418,7 @@ def test_whether_the_code_check_blocks_a_case_is_computed_never_written(tmp_path
     # retain their exact words even when the code check would block those too.
     original = [c for c in cases if c.group not in {
         "available_steps", "unavailable_steps", "added_promises", "completed_steps", "underway_steps",
-        "refund_rules", "voice", "voice_ai"}]
+        "refund_rules", "voice", "voice_ai", "approved_names"}]
     assert blocked & {c.id for c in original} == {c.id for c in original if c.expected == "code"} | {"claim-es-booked"}
     # a case can't state it, nor anything else the runner doesn't read
     with pytest.raises(Refused, match="code_blocked"):

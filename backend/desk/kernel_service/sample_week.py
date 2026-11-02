@@ -128,7 +128,8 @@ class _Desk:
 
     @property
     def info(self) -> DeskInfo:
-        return DeskInfo(owner_display_name=self.business.owner_display_name, timezone=self.business.timezone)
+        return DeskInfo(owner_display_name=self.business.owner_display_name, business_name=self.business.name,
+                        timezone=self.business.timezone)
 
     @property
     def cap(self) -> int:
@@ -330,7 +331,7 @@ async def _call(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session
         review=evaluation.review if evaluation else None,
         reason_plain=decide._reason_plain(sample_call, outcome, reason, evaluation),
         visitor_plain=decide.status_line(state, tool=call.tool, session=session,
-                                         owner=desk.business.owner_display_name, business=profile.profile.business),
+                                         owner=desk.info.owner, business=profile.profile.business),
         owner_plain=None, expires_at=at + decide.LIFETIME[outcome], ledger_seq=0, created_at=at, updated_at=final_at,
         action_id=action.action_id if action else None)
     written.rows.append(row)
@@ -607,7 +608,7 @@ def _reply(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session: Ses
     blocks = [*([RenderedBlock(kind="prose", text=prose)] if prose else []), *cards]
     fact_ids = [card.fact_id for card in cards]
     message_id = new_id("msg")
-    visitor_plain = render.status("reply_checked", LANGUAGE, owner=desk.business.owner_display_name)
+    visitor_plain = render.status("reply_checked", LANGUAGE, owner=desk.info.owner)
     sealed: dict[str, int] = {}
 
     def recorded(seq: int) -> None:

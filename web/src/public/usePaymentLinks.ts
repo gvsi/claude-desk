@@ -20,8 +20,8 @@ function tokenOf(block: RenderedBlock): string | undefined {
  * The visitor's chat and the owner's transcript both read it, so a link paid or cancelled loses
  * "Open payment page" in each alike.
  * With `chatPath` (the chat's own `/d/<slug>`, when the chat is the page), each payment link card
- * the chat shows notes its token, as a digest, against that path in this browser, so the paid
- * checkout can link back here (`payChats.ts`).
+ * the chat shows notes its token, as a digest, against that path in this browser, so the closed
+ * checkout can link back to it (`payChats.ts`).
  */
 export function usePaymentLinks(
   messages: readonly LinkMessage[],
@@ -41,8 +41,11 @@ export function usePaymentLinks(
     }
   }, [cards, chatPath]);
   const cancellations = cards.filter((card) => card.template === 'link_cancelled');
+  // A card that may have closed a link: its payment, its cancellation, or a mandate charge, which
+  // may have paid the link's quote another way (the kernel then reads the link as cancelled).
   const refreshIds = messages.flatMap((ev) => ev.blocks.some(
-    (block) => block.template === 'payment_confirmed' || block.template === 'link_cancelled',
+    (block) => block.template === 'payment_confirmed' || block.template === 'charge_confirmed'
+      || block.template === 'link_cancelled',
   ) ? [ev.message_id] : []);
   const [, redraw] = useState(0);
   const closed = (card: RenderedBlock) => paymentLinkClosed(card, cancellations, undefined) || memory.closed.has(tokenOf(card) ?? '');

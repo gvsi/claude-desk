@@ -18,7 +18,6 @@ import { mockStore } from '../mocks/store.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { aPollPasses, closedInboxReads, expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
-import { watchFor } from '../test/watch.ts';
 
 const PAGE = `/d/${RIVERA.slug}`;
 
@@ -37,8 +36,8 @@ const INBOX_FAILED = 'Couldn’t open the Demo inbox, where your code arrives.';
 /** What the visitor's Demo inbox stands for, under its title. */
 const VISITOR_SUBTITLE = 'Stands in for a phone or email inbox. Nothing is really sent.';
 
-/** What the owner's Demo inbox stands for, under its title. */
-const OWNER_SUBTITLE = 'What Claude would have sent you by text or email. Nothing is really sent.';
+/** What the owner's notifications stand for, under their page's title. */
+const OWNER_SUBTITLE = 'What Claude would have sent you and your customers by text or email. Nothing is really sent.';
 
 /** The owner's line for a read the server failed. */
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';
@@ -595,96 +594,90 @@ describe('Demo inbox', () => {
     await expect.element(after.screen.getByRole('region', { name: 'Demo inbox' })).not.toBeInTheDocument();
   });
 
-  it('owner_inbox_shows_alerts', async () => {
+  it('owner_notifications_show_alerts', async () => {
     // The seeded hold alerted the owner: the kernel's line for it, word for word.
     const alert = mockStore.world.inbox.find((record) => record.entry.kind === 'alert')?.entry;
     if (!alert) throw new Error('the seed holds a request, which alerts the owner');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`);
-    // In the demo bar, read once as the frame opens, so its button counts what is there, and not
-    // again while it is closed.
-    const open = screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
-    await expect.element(open).toBeVisible();
-    expect(open.element().closest('.cd-reviewer-bar__actions')).not.toBeNull();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    const closedReads = closedInboxReads(sheet);
+    // Under Safety in the sidebar, read once as the frame opens, so its count is what is unread
+    // there, and not again while the page is shut.
+    const nav = screen.getByRole('navigation', { name: 'Main' });
+    const row = nav.getByRole('link', { name: /^Notifications \d+ unread$/ });
+    await expect.element(row).toBeVisible();
+    const heading = screen.getByRole('heading', { level: 1, name: 'Notifications' });
+    const closedReads = closedInboxReads(heading);
     expect(requests('ownerInbox')).toHaveLength(1);
     await aPollPasses();
     expect(closedReads()).toBe(0);
 
-    // It opens as a sheet at the right, over Today, focus on Close.
-    await open.click();
-    await expect.element(sheet.getByText(alert.body)).toBeVisible();
-    await expect.element(sheet.getByText('Alert', { exact: true }).first()).toBeVisible();
-    await expect.element(sheet.getByText('To owner').first()).toBeVisible();
-    await expect.element(sheet.getByText(OWNER_SUBTITLE)).toBeVisible();
-    await expect.element(sheet.getByRole('button', { name: 'Close' })).toHaveFocus();
-    const box = sheet.element().getBoundingClientRect();
-    expect([Math.round(box.right), Math.round(box.width), Math.round(box.top), Math.round(box.height)]).toEqual([1440, 400, 0, 900]);
-    // When it came, on the business's clock.
-    expect(sheet.element().querySelector('.cd-demo-inbox__time')?.textContent).toMatch(/^(?:Today|[A-Z][a-z]{2} \d{1,2}), \d{1,2}:\d{2} (?:am|pm)$/);
+    // Its page: the alert, headed by its title, and no word of who it went to, the owner's own.
+    await row.click();
+    await expect.element(heading).toBeVisible();
+    const page = screen.getByRole('main');
+    await expect.element(page.getByText(alert.body)).toBeVisible();
+    // Unread as the page opened, so a screen reader hears that before its heading: the alert's
+    // title, the kernel's fixed line for a request held for the owner.
+    expect([...page.element().querySelectorAll('.cd-notifications__kind')].map((kind) => kind.textContent)).toContain('Unread: A request needs your answer');
+    expect(page.getByText('To owner').elements()).toHaveLength(0);
+    await expect.element(page.getByText(OWNER_SUBTITLE)).toBeVisible();
+    // When it came, on the business's clock, under its day.
+    expect(page.element().querySelector('.cd-notifications__time')?.textContent).toMatch(/^\d{1,2}:\d{2} (?:am|pm)$/);
     await expectScreenBasics(screen.container, { owner: true });
 
-    // It reads again while open, and stops once closed; focus goes back to its button.
+    // It reads again while open, and stops once left.
     await vi.waitFor(() => expect(requests('ownerInbox').length).toBeGreaterThanOrEqual(3));
-    await userEvent.keyboard('{Escape}');
-    await expect.element(sheet).not.toBeInTheDocument();
-    await expect.element(open).toHaveFocus();
+    await nav.getByRole('link', { name: 'Today' }).click();
+    await expect.element(heading).not.toBeInTheDocument();
     await aPollPasses();
     expect(closedReads()).toBe(0);
-    // Its own codes stay the visitor's: the owner's inbox never calls the visitor's read.
+    // Its own codes stay the visitor's: the owner's notifications never call the visitor's read.
     expect(requests('visitorInbox')).toEqual([]);
   });
 
-  it('owner_inbox_that_cant_be_read_says_so', async () => {
-    // The demo bar reads the inbox as the frame opens, on any page. When that read and its retry
-    // fail, the bar draws the inbox's button with no count, never a line saying it is opening, and
-    // its sheet says it couldn't be opened, with "Try again", never that it's empty.
+  it('owner_notifications_that_cant_be_read_say_so', async () => {
+    // The frame reads the notifications as it opens, on any page. When that read and its retry
+    // fail, the sidebar counts none, and the page says they couldn't be opened, with "Try again",
+    // never that there are none.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 4 });
-    const sawItOpening = watchFor('Opening your Demo inbox');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`, { retryScale: 0 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    const open = screen.getByRole('button', { name: 'Demo inbox', exact: true });
-    await expect.element(open).toBeVisible();
-    expect(requests('ownerInbox')).toHaveLength(2);
-    expect(sawItOpening()).toBe(false);
-    expect(screen.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true }).elements()).toHaveLength(0);
+    const row = screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Notifications', exact: true });
+    await expect.element(row).toBeVisible();
+    await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(2));
+    expect(screen.getByText(`Couldn't open your notifications. ${UNAVAILABLE}`, { exact: true }).elements()).toHaveLength(0);
 
-    // The read as the sheet opens fails too: the line, inside the sheet, alone.
-    await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    const line = sheet.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    // The read as the page opens fails too: the line, alone.
+    await row.click();
+    const page = screen.getByRole('main');
+    const line = page.getByText(`Couldn't open your notifications. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
-    expect(sheet.element().querySelector('.cd-demo-inbox__empty')).toBeNull();
-    await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
+    expect(page.element().querySelector('.cd-empty-state')).toBeNull();
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(line).not.toBeInTheDocument();
-    await expect.element(sheet.getByRole('list')).toBeVisible();
-    await userEvent.keyboard('{Escape}');
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    await expect.element(page.getByRole('list')).toBeVisible();
   });
 
-  it('owner_inbox_that_cant_be_read_on_a_reload_holds_nothing', async () => {
-    // Reloaded, Today opens without waiting for the inbox; its slow read and retry fail, and the bar
-    // then draws the inbox's button with no count, without sending the read again.
+  it('owner_notifications_that_cant_be_read_on_a_reload_hold_nothing', async () => {
+    // Reloaded, Today opens without waiting for the notifications; their slow read and retry fail,
+    // and the sidebar counts none, without sending the read again.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2, delayMs: 300 });
-    const sawItOpening = watchFor('Opening your Demo inbox');
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0 });
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Demo inbox', exact: true })).toBeVisible();
+    await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(2));
+    await expect.element(screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Notifications', exact: true })).toBeVisible();
     // Time for a read on mount to go out, had anything sent the failed one again.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(requests('ownerInbox')).toHaveLength(2);
-    expect(sawItOpening()).toBe(false);
   });
 
-  it('owner_inbox_that_failed_is_read_again_as_its_sheet_opens', async () => {
-    // A failed read isn't sent again as the owner moves between pages, where the bar stays; the
-    // sheet reads it again as it opens, and once that read works the inbox shows. Under StrictMode,
-    // as the app runs, so every render and effect runs twice on mount.
+  it('owner_notifications_that_failed_are_read_again_as_their_page_opens', async () => {
+    // A failed read isn't sent again as the owner moves between pages; the page reads it again as
+    // it opens, and once that read works the entries show. Under StrictMode, as the app runs, so
+    // every render and effect runs twice on mount.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { retryScale: 0, strict: true });
-    const open = screen.getByRole('button', { name: 'Demo inbox', exact: true });
-    await expect.element(open).toBeVisible();
-    expect(requests('ownerInbox')).toHaveLength(2);
+    await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
+    await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(2));
 
     const nav = screen.getByRole('navigation', { name: 'Main' });
     await nav.getByRole('link', { name: 'Rules' }).click();
@@ -693,37 +686,34 @@ describe('Demo inbox', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(2);
 
-    await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet.getByRole('list')).toBeVisible();
-    await userEvent.keyboard('{Escape}');
-    await expect.element(screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ })).toBeVisible();
+    await nav.getByRole('link', { name: 'Notifications', exact: true }).click();
+    await expect.element(screen.getByRole('main').getByRole('list')).toBeVisible();
     expect(requests('ownerInbox').length).toBeGreaterThanOrEqual(3);
   });
 
-  it('owner_inbox_refresh_that_fails_says_so', async () => {
-    // Once the inbox has been read, a later read that fails says so inside the sheet, with "Try
+  it('owner_notifications_refresh_that_fails_says_so', async () => {
+    // Once the notifications have been read, a later read that fails says so on the page, with "Try
     // again", over the entries read before, so they never pass for current. Polls far apart, so only
     // the reads this test makes go out.
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/today`, { pollScale: 100 });
-    const open = screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
-    await expect.element(open).toBeVisible();
+    const row = screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Notifications \d+ unread$/ });
+    await expect.element(row).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(1);
 
-    // The read as the sheet opens fails, and so does its retry.
+    // The read as the page opens fails, and so does its retry.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 2 });
-    await open.click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    const line = sheet.getByText(`Couldn't open your Demo inbox. ${UNAVAILABLE}`, { exact: true });
+    await row.click();
+    const page = screen.getByRole('main');
+    const line = page.getByText(`Couldn't open your notifications. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
-    await expect.element(sheet.getByRole('list')).toBeVisible();
-    expect(line.element().compareDocumentPosition(sheet.getByRole('list').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await expect.element(page.getByRole('list')).toBeVisible();
+    expect(line.element().compareDocumentPosition(page.getByRole('list').element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await expectScreenBasics(screen.container, { owner: true });
 
     // "Try again" reads it again, and the line goes.
-    await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
+    await page.getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(line).not.toBeInTheDocument();
-    await expect.element(sheet).toBeVisible();
+    await expect.element(page.getByRole('heading', { level: 1, name: 'Notifications' })).toBeVisible();
   });
 });
 

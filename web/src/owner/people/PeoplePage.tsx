@@ -9,15 +9,16 @@ import { useNavigate } from 'react-router';
 
 import type { PeopleOut } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, EmptyState, LeadRow, Notice, PageHeader, PersonRow, RecordedHistoryLink, SectionHeader, SkeletonScreen } from '../../ds/index.ts';
+import { Button, EmptyState, LeadRow, PageHeader, PersonRow, RecordedHistoryLink, SectionHeader, SkeletonScreen } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { ReadFailed } from '../ReadFailed.tsx';
 import { peopleQuery } from '../rules/RuleDraftReview.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
-import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
+import { useReadFailure } from '../useReadFailure.ts';
 import { PEOPLE_SUBTITLE } from './copy.ts';
 import { PeopleSkeleton } from './PeopleSkeleton.tsx';
 
@@ -48,23 +49,6 @@ const byName = (a: Person, b: Person) => a.display_name.localeCompare(b.display_
 const newestFirst = (a: Lead, b: Lead) => Date.parse(b.created_at) - Date.parse(a.created_at);
 
 const counted = (n: number, one: string, many: string) => ({ n, label: `${n} ${n === 1 ? one : many}` });
-
-/** The latest read failed: what went wrong and the way to read it again, over what was read before. */
-export function ReadFailed({ failure }: { failure: ReadFailure | null }) {
-  if (failure === null) return null;
-  return (
-    <Notice
-      tone="error"
-      action={
-        <Button variant="secondary" busy={failure.retrying} onClick={failure.retry}>
-          Try again
-        </Button>
-      }
-    >
-      {failure.line}
-    </Notice>
-  );
-}
 
 export function PeoplePage() {
   const { business, desk } = useOwnerDesk();
@@ -134,6 +118,7 @@ export function PeoplePage() {
                     time={formatWhen(lead.created_at, business.timezone, now)}
                     note={lead.note ?? ''}
                     recorded={lead.replayed === true}
+                    demoVisitor={lead.demo_visitor === true}
                   />
                 </li>
               ))}

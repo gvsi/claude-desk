@@ -4,7 +4,7 @@ import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
-import { THINGS_TO_TRY } from '../arrival/ideas.ts';
+import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
@@ -31,10 +31,16 @@ const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control
 // A different Desk's names, request, rule or recorded activity may land with one accepted move.
 const DETAILS = [
   TODAY_COPY.chatDetail,
-  `${TODAY_COPY.breakBeforeOwner}${rivera.business.ownerName.split(' ')[0]}${TODAY_COPY.breakAfterOwner}`,
-  `${TODAY_COPY.waiting} ${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`,
+  DEMO_VISITOR_THING.detail,
+  TODAY_COPY.breakDetail,
+  // The seed's hold went past an automatic rule's limit, so no rule is named (`owner_reads._held_by`).
+  TODAY_COPY.waiting,
   TODAY_COPY.createDetail,
 ] as const;
+
+/** The things' titles in the list's order: the intro dialog's four, with "Watch a demo visitor" second. */
+const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
+const THING_TITLES = [CHAT.title, DEMO_VISITOR_THING.title, BREAK.title, ANSWER.title, CREATE.title] as const;
 
 /** The fresh copy's night (Decision 15): three conversations, Dana's booking and the agent's answer. */
 const FRESH_NIGHT = sinceLastNightLine({ conversations: 3, bookings: 1, answers: 1, turned_down: 0 }) ?? '';
@@ -392,16 +398,22 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
           </div>
           <SkeletonCard padding={16} anchor="things-card">
             <div className="cd-things__list">
-              {['Open your public page', 'Show me ideas', 'Open the request', 'Start a Desk'].map((label, i) => (
+              {['Open your public page', DEMO_VISITOR_THING.start, 'Show me ideas', 'Open the request', 'Start a Desk'].map((label, i) => (
                 <div key={i} className={`cd-things__item cd-today-skeleton__thing-${i}`}>
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
-                    <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
-                    <TextLines words={DETAILS[i]!} className="cd-things__detail" />
+                    <TextLines words={THING_TITLES[i]!} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
+                    {label === 'Open the request' ? (
+                      <span className="cd-things__detail cd-type-meta" data-room={ANSWER_ROOM}>
+                        <span className="cd-things__detail-now">
+                          <TextLines words={DETAILS[i]!} probeClassName="cd-things__detail" />
+                        </span>
+                      </span>
+                    ) : <TextLines words={DETAILS[i]!} className="cd-things__detail" />}
                   </div>
                   {/* From 640 px each card's button at its foot; on a phone each row's chevron. */}
                   <div className="cd-things__action">
-                    <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 3 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
+                    <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 4 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
                   </div>
                   <span className="cd-things__go">
                     <Skeleton shape="block" width={16} height={16} anchor={`thing-go-${i}`} />
@@ -420,10 +432,6 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
             <ApprovalTop />
             <TextLines words={rivera.decisions.held.reason_plain} text="summary" className="cd-approval-card__reason" lastWidth="var(--cd-today-approval-last-width)" />
             <TextLines words={`From the visitor: “${rivera.conversations.visitor.turns.find((turn) => turn.kind === 'visitor')?.text ?? ''}”`} className="cd-approval-card__context" />
-            <div className="cd-approval-card__held-by">
-              <Skeleton shape="block" width={16} height={16} />
-              <TextLines words={`${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`} className="cd-today-skeleton__rule" lastWidth="var(--cd-today-approval-last-width)" />
-            </div>
             <div className="cd-approval-card__answers">
               <ApprovalAnswers />
             </div>

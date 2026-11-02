@@ -6,6 +6,8 @@
   box-sizing: border-box;
 }
 
+/* The browser's own scheme (scrollbars, form controls) follows the theme: dark here, and light where
+   tokens.css's light blocks set the light theme, chosen on the root or by the system. */
 html {
   color-scheme: dark;
   -webkit-text-size-adjust: 100%;
@@ -61,23 +63,20 @@ a:not([class]):focus-visible {
   text-decoration-color: var(--text-primary);
 }
 
-/* Text entry (a text field, a text area, a composer's text box) with focus, by pointer or keyboard,
-   shows its caret and its own edge one step stronger (below, and Composer.css), never a ring and no
-   focus edge of its own (owner, 2026-11-01, WCAG 2.4.7). Browsers match :focus-visible on a text field
-   even when it was clicked, so the edge is turned off here. Only a field that can be typed in
-   (`:read-write`) has a caret: a held, read-only field, and every checkbox, radio, range or button
-   input, shows the focus edge. */
+/* The composer and borderless text entry draw their edge on their surrounding box. */
 :is(input, textarea):read-write:focus-visible {
   outline: none;
   outline-offset: 0;
   box-shadow: none;
 }
 
-/* Its edge one step stronger: a field's own border (TextField, the intro's passcode, the verify code,
-   the checkout's name) takes line-field-focus. A box that draws its edge another way, as the composer
-   does, says so in its own stylesheet. */
-:is(input, textarea):read-write:focus {
-  border-color: var(--line-field-focus);
+/* Fields show the same 2 px edge by pointer or keyboard: the existing 1 px border plus a
+   1 px inset edge, both line-focus. Held fields share it. Nothing changes size; the composer
+   and setup's borderless answer keep their own box's edge. */
+:is(input, textarea):is(:read-write, [readonly]):not(.cd-composer__input):not(.cd-setup-q3__row--other input):focus {
+  outline: none;
+  border-color: var(--line-focus);
+  box-shadow: inset 0 0 0 1px var(--line-focus);
 }
 
 ::placeholder {

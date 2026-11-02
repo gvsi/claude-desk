@@ -1,1 +1,28 @@
-{"history": []}
+{
+  "history": [
+    {
+      "run_id": "20261102-193659-72c3a2",
+      "recorded_at": "2026-11-02T20:31:36.128557Z",
+      "completion_point": 0.972,
+      "completion_lower_95": 0.904,
+      "trials": 72,
+      "heldout_sha256": "799bdfd3a8371a8e286b5340403b6b4c4ae3e1df9daf7550df89b8dfbec4a999",
+      "provider": "anthropic",
+      "model_ids": {
+        "api": "claude-opus-5-5",
+        "simulator": "claude-sonnet-5-5",
+        "conversation": "claude-opus-5-5",
+        "triage": "claude-haiku-5-5",
+        "translation": "claude-haiku-5-5",
+        "reviewer": "claude-sonnet-5-5",
+        "soft_promise": "claude-sonnet-5-5",
+        "attacker": "claude-opus-5-5",
+        "visitor": "claude-sonnet-5-5"
+      },
+      "report": "evals/reports/2026-11-02-20261102-193659-72c3a2.md",
+      "reason": "The final tier 2 pass on the combined gated change: 70 of 72 held-out legitimate runs; recorded on the project owner's yes, 2026-11-02 (2 waived, signed by Giovanni Alcantara)",
+      "signed_off_by": "Giovanni Alcantara",
+      "lowered": false
+    }
+  ]
+}

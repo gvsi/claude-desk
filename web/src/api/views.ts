@@ -79,6 +79,11 @@ export interface ConversationSummary {
   /** The verified person's name, else the session's lead's, else null. Untrusted. */
   display_name: string | null;
   verified: boolean;
+  /**
+   * The person on record a visitor's chat was verified as, which their page under People lists it
+   * by; null for an unverified visitor, an agent and the owner's preview. Absent is null.
+   */
+  person_id?: string | null;
   mode: SessionMode;
   last_activity: string;
   outcome_counts: Partial<Record<DecisionState, number>>;
@@ -102,6 +107,13 @@ export interface ConversationSummary {
   latest_outcome_starts_at?: string | null;
   latest_outcome_cents?: number | null;
   latest_outcome_cause?: RefusalCause | null;
+  /**
+   * A demo visitor's chat: an AI the owner started plays the customer (`owner_reads.demo_visitors`).
+   * With no verified or lead name, `display_name` is its persona's first name. Absent is false.
+   */
+  demo_visitor?: boolean;
+  /** The demo visitor run that opened the chat (`GET …/demo_visitor/{run_id}`); null or absent when none is named. */
+  demo_visitor_run_id?: string | null;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
@@ -124,6 +136,8 @@ export interface BriefingItem {
   line: string | null;
   /** Why a `turned_down` request was refused, as a closed code; null for the other kinds and for a refusal the API can't place. */
   cause: RefusalCause | null;
+  /** It happened in a demo visitor's chat, whose persona then names it if the chat gave no name. Absent is false. */
+  demo_visitor?: boolean;
 }
 
 /** "Since last night": from 18:00 yesterday in the business's time zone, to now. */
@@ -234,17 +248,23 @@ export interface Handoff {
 export interface NeedsYouSession {
   session_id: string;
   kind: ActorKind;
+  /** The verified person's name, else the session's lead's, else a demo visitor's persona's, else null. Untrusted. */
   display_name: string | null;
   verified: boolean;
   assurance: Assurance;
+  /** A demo visitor's chat, so Needs you never passes it off as a real customer's. Absent is false. */
+  demo_visitor?: boolean;
 }
 
 interface NeedsYouBase {
   session: NeedsYouSession;
   /**
-   * What the visitor (or visiting agent) wrote most recently, labelled: their previous and last
-   * messages, oldest first, each with whitespace collapsed and, past 200 characters, cut to 199 and "…",
-   * joined with " · "; just the last when there's one. Untrusted.
+   * What the visitor (or visiting agent) wrote, labelled: at most two messages; a held request quotes
+   * only the visitor's lines since Claude's last reply before its held status (a request whose status
+   * isn't in the chat quotes the chat's latest). If that window is empty, it quotes the newest visitor
+   * line before the status. A handoff quotes the chat's latest; oldest first,
+   * each with whitespace collapsed and, past 200
+   * characters, cut to 199 and "…", joined with " · "; just the last when there's one. Untrusted.
    */
   from_the_visitor: string | null;
   /**
@@ -264,7 +284,7 @@ export type NeedsYouItem =
   | (NeedsYouBase & {
       decision: Decision;
       handoff: null;
-      /** The reason of the rule card that held it. */
+      /** The reason of the owner's ask card that held it; null past an automatic card's limit or for the default ask alone. */
       held_by: string | null;
       held_at: string;
     })
@@ -320,6 +340,10 @@ export interface OwnerTranscript {
   typing_until?: string | null;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+  /** A demo visitor's chat: an AI the owner started plays the customer. Absent is false. */
+  demo_visitor?: boolean;
+  /** The demo visitor run that opened the chat (`GET …/demo_visitor/{run_id}`); null or absent when none is named. */
+  demo_visitor_run_id?: string | null;
 }
 
 /** An item of the owner's transcript: a visitor's kinds, and where the reply check stopped a draft of Claude's. */
@@ -362,6 +386,14 @@ export interface Attempt {
    * refusal the API can't place. The API sends it on every entry, and only a refused one may have one.
    */
   cause: RefusalCause | null;
+  /**
+   * What the visitor (or visiting agent) wrote in the turn that made a refused request: at most two
+   * of their lines since Claude's last reply before the refusal's receipt in the chat, each with
+   * whitespace collapsed and, past 200 characters, cut to 199 and "…", joined with " · "; if that
+   * window is empty, the newest line before the receipt. Null for a held request, a stopped draft,
+   * and a refusal whose receipt isn't in the chat. Untrusted.
+   */
+  from_the_visitor: string | null;
 }
 
 /** `GET /api/health`. */
@@ -376,9 +408,10 @@ export interface PeopleOut {
   people: { person_id: string; display_name: string; masked_contact: string }[];
   /**
    * The name and note as the visitor typed them (untrusted; the API types either as missing);
-   * `replayed`: replayed from the recorded history into this copy (plan 02b), absent is false.
+   * `replayed`: replayed from the recorded history into this copy (plan 02b), absent is false;
+   * `demo_visitor`: left in a demo visitor's chat, absent is false.
    */
-  leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean }[];
+  leads: { lead_id: string; display_name: string | null; note: string | null; created_at: string; replayed?: boolean; demo_visitor?: boolean }[];
 }
 
 /**
@@ -718,7 +751,7 @@ export interface VerifyChecked {
   state: SessionState;
 }
 
-/** The static, code-built half of the Agent Card (skills and disclosure are `PublicDesk`'s). */
+/** The static, code-built half of the Agent Card (what agents can do is `PublicDesk.agent_card`). */
 export interface AgentCardOut {
   endpoint: string;
   signing: {
@@ -772,6 +805,13 @@ export interface DemoAgentRun {
   state: 'running' | 'done' | 'failed';
   turns: AgentTurn[];
 }
+
+/**
+ * A demo visitor, an AI the owner starts to play a customer on one of the copy's Desks: the start's
+ * body (one key per click), its answer (the run and its open visitor session) and its run as it
+ * stands.
+ */
+export type { DemoVisitorIn, DemoVisitorRun, DemoVisitorStarted } from './openapi.gen.ts';
 
 // Tokens
 

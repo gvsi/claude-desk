@@ -81,7 +81,7 @@ async def test_a_slow_answer_answers_202_busy_and_lands_later(
         busy = reply.json()
         assert busy["busy"] is True and busy["question"] is None
         assert busy["messages"][-1] == {"role": "owner", "text": "We repair water heaters.", "choices": [], "card": None,
-                                        "owner_decided": False}
+                                        "several": False, "owner_decided": False}
         current = db.execute("SELECT answers FROM app.setup_interviews WHERE interview_id = %s",
                              (interview_id,)).fetchone()
         assert current == before
@@ -360,7 +360,7 @@ async def test_consent_answers_202_at_once_while_its_turn_runs(
         busy = reply.json()
         assert busy["busy"] is True and busy["consent"] is allow and busy["question"] is None
         assert busy["messages"][-1] == {
-            "role": "owner", "text": setup.CONSENT_ANSWERS[allow], "choices": [], "card": None, "owner_decided": False}
+            "role": "owner", "text": setup.CONSENT_ANSWERS[allow], "choices": [], "card": None, "several": False, "owner_decided": False}
         assert app.state.runtime.turn_runs.holds(interview_id)
         assert (await owner.browser.get(path)).json() == busy
         repeat = await asyncio.wait_for(owner.browser.post(path + "/consent", json={"allow": not allow}), 2)
@@ -408,9 +408,9 @@ async def test_an_empty_model_reply_never_leaves_the_interview_busy(
     answered = reply.json()
     assert answered["messages"][-1] == {
         "role": "claude", "text": setup.question_text("what_you_do", "trade"), "choices": [], "card": None,
-        "owner_decided": False}
+        "several": False, "owner_decided": False}
     assert answered["messages"][-2] == {
-        "role": "owner", "text": "We repair water heaters.", "choices": [], "card": None, "owner_decided": False}
+        "role": "owner", "text": "We repair water heaters.", "choices": [], "card": None, "several": False, "owner_decided": False}
     assert answered["busy"] is False
     db.execute("UPDATE app.setup_interviews SET updated_at = now() - make_interval(secs => %s)"
                " WHERE interview_id = %s", (setup.TURN_ABANDONED_S + 10, interview_id))
@@ -484,7 +484,7 @@ async def test_a_slow_consent_answers_202_busy_and_lands_later(
         busy = reply.json()
         assert busy["busy"] is True and busy["consent"] is True and busy["question"] is None
         assert busy["messages"][-1] == {
-            "role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None, "owner_decided": False}
+            "role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None, "several": False, "owner_decided": False}
         assert (await owner.browser.get(path)).json() == busy
     finally:
         release.set()
@@ -990,7 +990,7 @@ async def test_a_failed_busy_commit_preserves_another_runs_identical_consent(
     current = (await owner.browser.get(path)).json()
     assert current["busy"] is True and current["consent"] is True
     assert current["messages"][-1] == {
-        "role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None, "owner_decided": False}
+        "role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None, "several": False, "owner_decided": False}
     assert fake.called("POST /execute") == []
     assert interview_id not in setup._RUNNING and not app.state.runtime.turn_runs.holds(interview_id)
 
@@ -1055,7 +1055,7 @@ async def test_two_fresh_consents_store_only_one_owner_answer(
     current = await landed_state(owner, state["interview_id"])
     assert asked.count("setup_turn") == 1 and len(fake.called("POST /execute")) == 1
     assert [message for message in current["messages"] if message["role"] == "owner"] == [
-        {"role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None, "owner_decided": False}]
+        {"role": "owner", "text": setup.CONSENT_ANSWERS[True], "choices": [], "card": None, "several": False, "owner_decided": False}]
 
 
 async def test_a_competing_consent_cannot_take_the_guard_during_handoff(

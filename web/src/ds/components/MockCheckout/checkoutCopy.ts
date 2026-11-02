@@ -40,16 +40,17 @@ export interface CheckoutCopy {
   /** Each final state's line, which says where to go next. */
   final: Readonly<Record<FinalPaymentState, string>>;
   /**
-   * The paid line (`final.paid`) in its three parts: the words before the way back to the chat, the
-   * way back itself, a link when the page knows the visitor's chat, and the words after it.
+   * Lines with a way back to the chat in three parts: the words before the link, the link's
+   * words and the words after it. A checkout cancelled for any reason but a rule change uses
+   * the paid line's same `back` words. `rules_changed` is a cancel reason, not a state.
    */
-  paid: PaidLine;
+  returnLine: Readonly<Partial<Record<FinalPaymentState | 'rules_changed', ReturnLine>>>;
   /** A cancelled link that a change to the business's rules cancelled. */
   cancelledRulesChanged: string;
 }
 
 /** A line with a way back to the chat inside it. */
-export interface PaidLine {
+export interface ReturnLine {
   before: string;
   back: string;
   after: string;
@@ -59,9 +60,32 @@ export interface PaidLine {
 const PAID = {
   en: { before: 'Paid. ', back: 'Go back to the chat', after: ' to see it there.' },
   es: { before: 'Pagado. ', back: 'Vuelve al chat', after: ' para verlo allí.' },
-} as const satisfies Record<CopyLanguage, PaidLine>;
+} as const satisfies Record<CopyLanguage, ReturnLine>;
 
-const joined = ({ before, back, after }: PaidLine) => `${before}${back}${after}`;
+const CANCELLED = {
+  en: 'This payment was cancelled. Nothing was charged.',
+  es: 'Este pago se canceló. No se cobró nada.',
+} as const;
+
+const EXPIRED = {
+  en: { before: 'This payment link expired. Ask in ', back: 'the chat', after: ' for a new one.' },
+  es: { before: 'Este enlace de pago venció. Pide uno nuevo en ', back: 'el chat', after: '.' },
+} as const satisfies Record<CopyLanguage, ReturnLine>;
+
+const RULES_CHANGED = {
+  en: {
+    before: 'This link was cancelled because the business changed its rules. Nothing was charged. Ask in ',
+    back: 'the chat',
+    after: ' if you still want to pay.',
+  },
+  es: {
+    before: 'Este enlace se canceló porque el negocio cambió sus reglas. No se cobró nada. Pregunta en ',
+    back: 'el chat',
+    after: ' si todavía quieres pagar.',
+  },
+} as const satisfies Record<CopyLanguage, ReturnLine>;
+
+const joined = ({ before, back, after }: ReturnLine) => `${before}${back}${after}`;
 
 /** The test card every checkout shows, filled in and locked. */
 export const TEST_CARD = {
@@ -87,13 +111,17 @@ export const CHECKOUT_COPY = {
     error: 'That didn’t go through. Reload this page to see where the payment stands.',
     final: {
       paid: joined(PAID.en),
-      expired: 'This payment link expired. Ask in the chat for a new one.',
-      cancelled: 'This payment was cancelled. Nothing was charged.',
+      expired: joined(EXPIRED.en),
+      cancelled: CANCELLED.en,
       unknown: 'This payment is still being confirmed. The chat will show the result.',
     },
-    paid: PAID.en,
-    cancelledRulesChanged:
-      'This link was cancelled because the business changed its rules. Nothing was charged. Ask in the chat if you still want to pay.',
+    returnLine: {
+      paid: PAID.en,
+      expired: EXPIRED.en,
+      cancelled: { before: `${CANCELLED.en} `, back: PAID.en.back, after: '.' },
+      rules_changed: RULES_CHANGED.en,
+    },
+    cancelledRulesChanged: joined(RULES_CHANGED.en),
   },
   es: {
     testMode: 'Modo de prueba',
@@ -111,12 +139,16 @@ export const CHECKOUT_COPY = {
     error: 'No se pudo completar. Recarga esta página para ver el estado del pago.',
     final: {
       paid: joined(PAID.es),
-      expired: 'Este enlace de pago venció. Pide uno nuevo en el chat.',
-      cancelled: 'Este pago se canceló. No se cobró nada.',
+      expired: joined(EXPIRED.es),
+      cancelled: CANCELLED.es,
       unknown: 'Este pago aún se está confirmando. El chat mostrará el resultado.',
     },
-    paid: PAID.es,
-    cancelledRulesChanged:
-      'Este enlace se canceló porque el negocio cambió sus reglas. No se cobró nada. Pregunta en el chat si todavía quieres pagar.',
+    returnLine: {
+      paid: PAID.es,
+      expired: EXPIRED.es,
+      cancelled: { before: `${CANCELLED.es} `, back: PAID.es.back, after: '.' },
+      rules_changed: RULES_CHANGED.es,
+    },
+    cancelledRulesChanged: joined(RULES_CHANGED.es),
   },
 } as const satisfies Record<CopyLanguage, CheckoutCopy>;

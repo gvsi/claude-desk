@@ -10,7 +10,7 @@ from desk.kernel_service import adapters
 
 MAIN_PROFILE_HASHES = {
     # The described, 200-character owner-only booking note deliberately changes the schema and pin.
-    'native.book': 'a42aea22caaa2953da85b6b29b1a80a4d76b9e5822695bbbf2e663603bfe3ce9',
+    'native.book': '43a34c4bbff83950b0ccdb3b7228d7846bf9ee518100c13967cf85b677a9a828',
     'native.capture_lead': '66c63000c5faecd60ab73ab6778097085ce248360a261ff0770183caa4fb1b13',
     'native.charge_mandate': '6ee1189c8d00aad5eac9fa882ec6395bec3c449508e93ef809fd468b0020e1d1',
     'native.fetch_website': '247265c3628112de0713def8c4f04b4213574c38f32216310eb4458dec6a94fd',

@@ -18,6 +18,7 @@ from desk.api.ratelimit import LIMITS, Limit
 from desk.api.store import Ids, append_message
 from desk.contracts import BRAND_PALETTE, CopyCreated, Decision, ExecResult, ToolCall
 from desk.kernel_api import CreateCopyRequest, CreateSessionRequest, DecideRequest, ExecuteRequest
+from tests.api.test_demo_agent import setup_row
 from tests.kernel_contract.fake_kernel import NOTIFICATIONS, RIVERA_TZ
 from tests.kernel_contract.ro_tables import mark_replayed
 from tests.kernel_contract.test_contract import (
@@ -94,6 +95,30 @@ async def guest(kernel_http, owner: Owner) -> Guest:
 async def business_id(owner: Owner) -> str:
     (business,) = (await owner.browser.get("/api/owner/desks")).json()
     return business["business_id"]
+
+
+async def test_each_desk_names_the_business_type_setup_stored_for_it(api, browser, fake, kernel_http, clock, engine):
+    # Each of the owner's Desks names the fixed words its pages take, as the built-in agent's task set reads them: the
+    # business type setup stored for the Desk, "rivera" for the copy's own Desk, and "other" for a Desk setup didn't
+    # type. Both the Desk switcher and the copy's own answer say it.
+    fake.now = clock.now
+    owner = await new_owner(api, browser, fake, kernel_http)
+    made = {}
+    for kind in ("office", "untyped", "unset"):
+        clock.advance(1)
+        fake.now = clock.now
+        created = await owner.browser.post("/api/owner/desks", json=new_desk(f"{kind} line", name=f"A {kind} business"))
+        assert created.status_code == 201, created.text
+        made[kind] = created.json()["desk_id"]
+    await setup_row(engine, owner.copy_id, made["office"], "office")
+    await setup_row(engine, owner.copy_id, made["office"], "landlord", created_at="2026-10-29 17:00:00+00")  # older
+    await setup_row(engine, owner.copy_id, made["untyped"], None)
+    listed = {desk["desk_id"]: desk["business_type"]
+              for business in (await owner.browser.get("/api/owner/desks")).json() for desk in business["desks"]}
+    assert listed == {owner.desk_id: "rivera", made["office"]: "office", made["untyped"]: "other",
+                      made["unset"]: "other"}
+    me = (await owner.browser.get("/api/owner/me")).json()
+    assert {desk["desk_id"]: desk["business_type"] for desk in me["desks"]} == listed
 
 
 async def test_new_desks_count_on_the_copys_limit(api, browser, fake, kernel_http, monkeypatch):
@@ -186,7 +211,7 @@ async def test_people_update_passes_the_masked_contact_rejection_through(api, br
     leads = (await owner.browser.get(people_path)).json()["leads"]
     assert [(lead["display_name"], lead["note"]) for lead in leads] == [("Ana Ruiz", None),
                                                                         ("Sam Ortiz", "Leaky tap <b>soon</b>")]
-    assert set(leads[0]) == {"lead_id", "display_name", "note", "created_at", "replayed"}
+    assert set(leads[0]) == {"lead_id", "display_name", "note", "created_at", "replayed", "demo_visitor"}
     assert [lead["replayed"] for lead in leads] == [False, False]           # left in a live conversation
 
     # Another copy's Desk is 404, and nothing is sent to the kernel for it.
@@ -313,7 +338,7 @@ async def test_reports_count_bookings_payments_and_who_handled(api, browser, fak
         await write(engine, db, owner, who.session_id, "visitor_text", at, "Hi, can you come this week?")
         if book:
             slot = max(slot.slot_id for slot in rivera.slots.values() if slot.slot_id not in rivera.booked)
-            await who.run("native.book", {"slot_id": slot})
+            await who.run("native.book", {"slot_id": slot, "name": "Jane Doe", "contact": "jane@example.com"})
         if pay:
             token, _ = await issue_payment_link(who.kernel, who.session_id, "deposit", next(_CALL_IDS))
             assert (await checkout(kernel_http, "POST /payment_links/{token}/complete", token)).state == "paid"

@@ -13,9 +13,11 @@
 | --- | --- | --- | --- |
 | `ai` | "{visitorName} never sees whispers. Whispers steer Claude, and your rules still apply." | secondary "Take over" | "{visitorName} sees “{ownerName} joined the chat.”" |
 | `owner` | "You're in this chat", "Claude won't send anything here until you hand it back." | secondary "Hand back to Claude" | "{visitorName} sees “Claude is helping again.”" |
-| `paused` | The held dot and "Claude paused this chat after repeated blocked attempts." | primary "Resume Claude", secondary "Take over" | None |
+| `paused` | The held dot and "Claude paused this chat after repeated blocked attempts." | primary "Resume Claude", secondary "Take over" (left out when `offerTakeOver` is `false`) | None |
 
 A mode this build doesn't know shows the `ai` bar, which offers only Take over. `agent` drops the line about what the visitor sees: agents never receive it.
+
+With `takeOverAbove`, the screen draws Take over itself, in the bar at the top of the owner's open conversation (board REV-720 C): while Claude answers, this bar keeps only its line about whispers, with no button and no line about what the visitor sees. The screen spins its Take over only for its own press; other pending changes leave it waiting. When that button goes while focused, the screen moves focus to `.cd-take-over__first`. After its own press ends, the screen brings the alert into view on failure, or, when the mode is now `owner` and focus hasn't reached the controls, brings `.cd-take-over__first` into view instantly with `scrollIntoView({ block: 'nearest' })`. The owner and paused bars are unchanged.
 
 ## What the consumer provides
 
@@ -33,10 +35,12 @@ A mode this build doesn't know shows the `ai` bar, which offers only Take over. 
 | `visitorName` | `string` | Required. |
 | `ownerName` | `string` | Required. `owner_display_name`. |
 | `agent` | `boolean` | An agent's session. |
+| `takeOverAbove` | `boolean` | The `ai` bar keeps only its line. The screen owns Take over above: spin only for its own press, move focus to `.cd-take-over__first` when the focused button goes, and reveal the alert or owner's first line after its press as described above. |
+| `offerTakeOver` | `boolean` | Defaults to `true`. Set to `false` for an ended demo visitor: the paused bar keeps only Resume Claude. |
 | `onTakeOver` | `() => void` | Required. |
 | `onHandBack` | `() => void` | Required. |
 | `onResume` | `() => void` | Required. |
 | `pending` | `boolean` | Every control waits; only the one pressed here spins. |
 | `error` | `string` | The screen's line. |
 
-The lead lines take at most `size-reading`. In the owner’s open conversation, the bar fills the centred `size-conversation` column and its controls sit below the lead at the left. Elsewhere, the controls start at `size-margin` beside the lead and grow into the available width; below the two columns' width they wrap under the lines and fill the row. The visitor hint uses that width instead of staying in a narrow column, so it stays on one line wherever its words fit and wraps naturally on a phone. `AvailableWidth` shows it at the 640 px composer width. The buttons are `size-control-main`. When the mode changes under a button that had focus, focus moves to the bar's first line, and a button never turns into the opposite one under focus.
+The lead lines take at most `size-reading`. In the owner’s open conversation, the bar fills the centred `size-conversation` column and its controls sit below the lead at the left; Take over itself sits in the conversation's bar at the top (`takeOverAbove`). Elsewhere, the controls start at `size-margin` beside the lead and grow into the available width; below the two columns' width they wrap under the lines and fill the row. The visitor hint uses that width instead of staying in a narrow column, so it stays on one line wherever its words fit and wraps naturally on a phone. `AvailableWidth` shows it at the 640 px composer width. The buttons are `size-control-main`. When a press here changes the mode and the button that had focus goes with it, focus moves to the bar's first line, and a button never turns into the opposite one under focus. `offerTakeOver` turning `false` takes the paused bar's Take over away without a mode change, and the bar moves no focus then: if Take over had focus, focus falls to the page unless the screen moves it.

@@ -126,7 +126,7 @@ it('touch_hit_areas_of_neighbours_never_overlap', async () => {
           Share your Desk
         </Button>
         <Button variant="ghost" size="inline">
-          Start over
+          Reset demo
         </Button>
       </div>
     </div>,

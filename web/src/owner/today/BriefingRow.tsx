@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react';
 
 import type { BriefingItem, BriefingKind } from '../../api/views.ts';
-import { StatusLabel, type StatusTone } from '../../ds/index.ts';
+import { Pill, StatusLabel, type StatusTone } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import { DEMO_VISITOR_PILL } from '../conversations/copy.ts';
 import { conversationPath } from '../conversations/status.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { causeLabel } from '../safety/copy.ts';
@@ -30,6 +31,19 @@ function Name({ children }: { children: string }) {
   );
 }
 
+/**
+ * Who it was: the name they gave, as their own text, else "Visitor"; a demo visitor's with its pill
+ * beside the name, so it's never taken for a real customer's.
+ */
+function Who({ item, name }: { item: BriefingItem; name: string | null }) {
+  return (
+    <span className="cd-briefing-row__who">
+      {name !== null ? <Name>{name}</Name> : 'Visitor'}
+      {item.demo_visitor === true ? <Pill>{DEMO_VISITOR_PILL}</Pill> : null}
+    </span>
+  );
+}
+
 /** The row's words: what happened, in the signed cause labels, the kernel's words or the visitor's own. */
 function words(item: BriefingItem): ReactNode {
   const name = item.display_name?.trim() ? item.display_name : null;
@@ -38,19 +52,26 @@ function words(item: BriefingItem): ReactNode {
       // Why it was turned down, in the owner's signed words for its cause. With no cause this build
       // has words for, the kernel's reason when there is one, else nothing beside the kind's word.
       const why = causeLabel({ kind: 'refused', cause: item.cause }) ?? item.line;
-      return why ? <span className="cd-briefing-row__line">{why}</span> : null;
+      const tag = item.demo_visitor === true ? <Pill>{DEMO_VISITOR_PILL}</Pill> : null;
+      if (!why) return tag === null ? null : <span className="cd-briefing-row__line">{tag}</span>;
+      return (
+        <span className="cd-briefing-row__line">
+          {why}
+          {tag}
+        </span>
+      );
     }
     case 'booking':
       return (
         <>
-          <span className="cd-briefing-row__who">{name !== null ? <Name>{name}</Name> : 'Visitor'}</span>
+          <Who item={item} name={name} />
           {item.line ? <span className="cd-briefing-row__line">{item.line}</span> : null}
         </>
       );
     case 'lead':
       return (
         <>
-          <span className="cd-briefing-row__who">{name !== null ? <Name>{name}</Name> : 'Visitor'}</span>
+          <Who item={item} name={name} />
           {item.line ? (
             <span className="cd-briefing-row__line" data-copy="user">
               {item.line}
@@ -59,7 +80,12 @@ function words(item: BriefingItem): ReactNode {
         </>
       );
     case 'answer':
-      return <span className="cd-briefing-row__line">Claude answered {name !== null ? <Name>{name}</Name> : 'a visitor'}.</span>;
+      return (
+        <span className="cd-briefing-row__line">
+          Claude answered {name !== null ? <Name>{name}</Name> : 'a visitor'}.
+          {item.demo_visitor === true ? <Pill>{DEMO_VISITOR_PILL}</Pill> : null}
+        </span>
+      );
   }
 }
 

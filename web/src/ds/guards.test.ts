@@ -3,8 +3,8 @@
  * sources, icons, the package index, base styles and the artifact's own files. Stories, tests,
  * fixtures, references, foundations, the token sources and contrast tables are exempt, because
  * they are where raw values and sample data are meant to live. Some guards read further:
- * `no_invisible_characters_in_any_file` reads every text file, `danger_only_for_refusing_answers`
- * every file but the docs, so a story or fixture can't show the red look on anything but a refusal,
+ * `no_invisible_characters_in_any_file` reads every text file, `danger_only_for_refusals_and_irreversible_deletes`
+ * every file but the docs, so only refusals and deletes that cannot be undone show the red look,
  * `caps_badge_only_in_the_lockup` every file but the docs too, so nothing but the lockup's badge
  * draws capitals, the clay and mark guards the canvas boards too, `no_positive_dash_offsets`
  * every stylesheet, and the two focus guards every stylesheet in the web app.
@@ -120,9 +120,9 @@ function rawColors(text: string, file: string): string[] {
   return [...matches(RAW_COLOR)(text), ...(file.endsWith('.css') ? namedColorsInCss(text) : [])];
 }
 
-// Clay: its token, its hex and its RGB triplet. The mark's
+// Clay: its token, and its dark and light themes' hex and RGB triplets. The mark's
 // own clay is guarded with its other fixed colors (MARK_COLOR).
-const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104/gi;
+const CLAY = /--clay\b|#e08968\b|224\s*,\s*137\s*,\s*104|#c4673f\b|196\s*,\s*103\s*,\s*63/gi;
 
 // The only folders that may use clay: the field behind the first-visit intro's illustration, and the
 // field of the About pages' app icon in the mark's folder, which counts as part of the mark (owner,
@@ -145,7 +145,7 @@ function mayUseMarkColors(file: string): boolean {
 }
 
 // The danger buttons' tokens, as custom properties or by name: "--button-danger-fill",
-// 'button-danger-text'. The red look is only for answers that refuse.
+// 'button-danger-text'. Red marks refusals and deletes that cannot be undone.
 const DANGER_TOKEN = /(?<![\w-])(?:--)?button-danger(?:-[a-z0-9]+)*(?!\w)/g;
 
 // The only files that may name them: Button's styles, ApprovalCard's styles (the red words of Deny's
@@ -159,12 +159,21 @@ const DANGER_TOKEN_FILES: readonly string[] = [
   'tokens.test.ts',
 ];
 
-// A danger button asked for as a `variant` prop or key, by the name only a Button variant has, or by its class.
-const DANGER_VARIANT = /\bvariant\s*[:=]\s*\{?\s*(['"`])danger(?:-ghost)?\1|(['"`])danger-ghost\2|\bcd-button--danger(?:-ghost)?\b/g;
+// A danger button asked for as a `variant` or Dialog `confirmVariant` prop or key, by name or class.
+const DANGER_VARIANT = /\b(?:variant|confirmVariant)\s*[:=]\s*\{?\s*(['"`])danger(?:-ghost)?\1|(['"`])danger-ghost\2|\bcd-button--danger(?:-ghost)?\b/g;
 const DANGER_LITERAL = /(['"`])danger\1/g;
 
-// The only folders that may ask for one: Button itself, and ApprovalCard's Deny.
+// Button itself and ApprovalCard’s Deny, plus the exact Dialog and Settings examples of deletion.
 const DANGER_VARIANT_FOLDERS = ['components/Button/', 'components/ApprovalCard/'] as const;
+const DANGER_VARIANT_MATCHES: Readonly<Record<string, readonly string[]>> = {
+  'boards/parts.tsx': ['variant="danger"'],
+  'boards/SettingsDeleteDesk.stories.tsx': ['confirmVariant="danger"'],
+  'components/Dialog/Dialog.stories.tsx': [
+    'variant="danger"',
+    "confirmVariant: 'danger'",
+    'cd-button--danger',
+  ],
+};
 
 function mayUseDangerTokens(file: string): boolean {
   return DANGER_TOKEN_FILES.includes(file);
@@ -177,7 +186,7 @@ function mayUseDangerVariants(file: string): boolean {
 /**
  * Each place a source asks for a danger button. A file that types values as `ButtonVariant` can
  * also pick one through a map or a variable, so there a bare 'danger' counts too; elsewhere it is
- * another component's word, such as Dialog's danger tone, which keeps its buttons neutral.
+ * another component's word, such as Dialog's danger tone, independent of its confirm variant.
  */
 function dangerVariants(text: string): string[] {
   const asked = [...text.matchAll(DANGER_VARIANT)];
@@ -187,6 +196,12 @@ function dangerVariants(text: string): string[] {
     for (const m of text.matchAll(DANGER_LITERAL)) if (!counted(m.index)) hits.push(m[0]);
   }
   return hits;
+}
+
+function expectAllowedDangerVariants(sources: Source[]): void {
+  for (const { file, text } of sources) {
+    if (!mayUseDangerVariants(file)) expect(dangerVariants(text), file).toEqual(DANGER_VARIANT_MATCHES[file] ?? []);
+  }
 }
 
 // The lockup's Preview badge, the product's one all-caps label (owner, 2026-10-30): its type style,
@@ -524,6 +539,8 @@ describe('design system source guards', () => {
     // A token derived from clay ("--clay-soft") counts as clay; an unrelated name doesn't.
     expect(matches(CLAY)('color: var(--clay-soft)')).toEqual(['--clay']);
     expect(matches(CLAY)('--clayton: 1')).toEqual([]);
+    // The light theme's clay is clay too, as hex and as RGB.
+    expect(matches(CLAY)('color: #C4673F; fill: rgb(196, 103, 63)')).toHaveLength(2);
     // The allowlist is whole folders: a sibling whose name only starts the same way is outside it.
     expect(mayUseClay('components/IntroDialog/IntroDialog.css')).toBe(true);
     expect(mayUseClay('components/IntroDialogBanner/IntroDialogBanner.css')).toBe(false);
@@ -538,10 +555,12 @@ describe('design system source guards', () => {
     const planted: Source[] = [
       { file: 'components/Sidebar/Sidebar.css', text: '.cd-sidebar__brand { background: var(--clay); }' },
       { file: 'boards/boards.css', text: '.board-hero { background: var(--clay); }' },
+      { file: 'components/Card/Card.stories.tsx', text: "const field = 'rgb(196, 103, 63)';" },
     ];
     expect(findAll(planted.filter(({ file }) => !mayUseClay(file)), matches(CLAY))).toEqual([
       'components/Sidebar/Sidebar.css: --clay',
       'boards/boards.css: --clay',
+      'components/Card/Card.stories.tsx: 196, 103, 63',
     ]);
     // The canvas boards are drawn screens, so they're held to it too.
     const scanned = [...sources, ...boardSources()];
@@ -576,7 +595,16 @@ describe('design system source guards', () => {
     expect(findAll(outsideTheMark, matches(MARK_COLOR))).toEqual([]);
   });
 
-  it('danger_only_for_refusing_answers', () => {
+  it('danger_variant_allowances_reject_an_extra_delete_button', () => {
+    const parts = '<Button variant="danger">Delete this Desk</Button>';
+    expect(() => expectAllowedDangerVariants([{ file: 'boards/parts.tsx', text: parts }])).not.toThrow();
+    expect(() => expectAllowedDangerVariants([{
+      file: 'boards/parts.tsx',
+      text: `${parts}<Button variant="danger">Save</Button>`,
+    }])).toThrow();
+  });
+
+  it('danger_only_for_refusals_and_irreversible_deletes', () => {
     // The tokens by custom property or by name; Button's class and longer names that only contain the words aren't tokens.
     expect(matches(DANGER_TOKEN)('background: var(--button-danger-fill); color: var(--button-danger-text);')).toEqual([
       '--button-danger-fill',
@@ -592,12 +620,19 @@ describe('design system source guards', () => {
     expect(dangerVariants("const quiet = 'danger-ghost';")).toEqual(["'danger-ghost'"]);
     expect(dangerVariants("const look: ButtonVariant = 'danger';")).toEqual(["'danger'"]);
     expect(dangerVariants("const look: ButtonVariant = 'secondary'; <Button variant='danger' />")).toEqual(["variant='danger'"]);
-    // Dialog's danger tone adds a refused dot and keeps its buttons neutral: not a danger button.
+    expect(dangerVariants('<Dialog confirmVariant="danger" />')).toEqual(['confirmVariant="danger"']);
+    expect(dangerVariants("args: { confirmVariant: 'danger' }")).toEqual(["confirmVariant: 'danger'"]);
+    // Dialog's danger tone adds a refused dot independently of its confirm variant.
     expect(dangerVariants("tone?: 'default' | 'danger'; {tone === 'danger' ? <StatusDot tone=\"refused\" /> : null}")).toEqual([]);
-    // The allowlists: two whole folders for the buttons, six files for the tokens.
+    // The allowlists keep red tokens inside their existing files and allow only the exact delete examples.
     expect(mayUseDangerVariants('components/ApprovalCard/ApprovalCard.stories.tsx')).toBe(true);
     expect(mayUseDangerVariants('components/ButtonGroup/ButtonGroup.tsx')).toBe(false);
     expect(mayUseDangerVariants('components/Dialog/Dialog.tsx')).toBe(false);
+    expect(mayUseDangerVariants('components/Dialog/Dialog.stories.tsx')).toBe(false);
+    expect(mayUseDangerVariants('boards/parts.tsx')).toBe(false);
+    expect(mayUseDangerVariants('boards/SettingsDeleteDesk.stories.tsx')).toBe(false);
+    expect(mayUseDangerVariants('boards/SettingsBilling.stories.tsx')).toBe(false);
+    expect(mayUseDangerVariants('components/Dialog/Other.stories.tsx')).toBe(false);
     expect(mayUseDangerTokens('components/Button/Button.css')).toBe(true);
     expect(mayUseDangerTokens('components/Button/Button.tsx')).toBe(false);
     // ApprovalCard's styles name the red words for Deny's menu items, and nothing else of its may.
@@ -612,7 +647,17 @@ describe('design system source guards', () => {
     expect(findAll(code.filter(({ file }) => mayUseDangerTokens(file)), matches(DANGER_TOKEN)).length).toBeGreaterThan(0);
     expect(findAll(code.filter(({ file }) => mayUseDangerVariants(file)), dangerVariants).length).toBeGreaterThan(0);
     expect(findAll(code.filter(({ file }) => !mayUseDangerTokens(file)), matches(DANGER_TOKEN))).toEqual([]);
-    expect(findAll(code.filter(({ file }) => !mayUseDangerVariants(file)), dangerVariants)).toEqual([]);
+    expectAllowedDangerVariants(code);
+    // Each pinned example must exist, even if a file is removed or renamed.
+    for (const file of Object.keys(DANGER_VARIANT_MATCHES)) expect(code.map((source) => source.file)).toContain(file);
+    // Dialog forwards the caller's confirm variant; it never asks Button for danger itself.
+    const dialog = code.find(({ file }) => file === 'components/Dialog/Dialog.tsx')!;
+    const dialogCode = withoutComments(dialog.text);
+    expect(matches(/<Button\b[^>]*\bvariant=(?:"[^"]*"|\{[^}]*\})/g)(dialogCode)).toEqual([
+      '<Button variant="secondary"',
+      '<Button variant={confirmVariant}',
+    ]);
+    expect(dangerVariants(dialogCode)).toEqual([]);
   });
 
   it('no_button_on_the_selected_ground', () => {

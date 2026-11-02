@@ -24,7 +24,7 @@ const hrefs = {
   share: '#share',
   knowledge: '#knowledge',
   settings: '#settings',
-} satisfies Record<NavKey, string>;
+} satisfies Record<Exclude<NavKey, 'notifications'>, string>;
 
 /**
  * The sidebar as the owner layout holds it: the Claude acts for you switch and the Desk picker show what the
@@ -284,16 +284,50 @@ export const OnConnectors: Story = {
   },
 };
 
-const TEAM = { id: 'desk-rivera-team', name: 'Team' };
+/** The owner app's sidebar since REV-NOTIF: Notifications under Safety, with its bell and the unread count. */
+export const WithNotifications: Story = {
+  args: {
+    current: 'notifications',
+    desks: [MAIN_LINE],
+    hrefs: { ...hrefs, notifications: '#notifications' },
+    counts: { conversations: { n: 1, label: '1 live conversation' }, notifications: { n: 1, label: '1 unread' } },
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote:
+      'REV-NOTIF (in review, 2026-11-02) puts Notifications under Safety with Lucide’s bell and a count of the unread ones; the owner’s Demo inbox became this page. Nearest reference board: N-Today-Run1.',
+  },
+  play: async ({ canvasElement }) => {
+    // Notifications is the seventh of eleven rows, under Safety, and the current page.
+    const rows = navRows(canvasElement);
+    await expect(rows.map((row) => row.text)).toEqual([
+      'Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Notifications', 'Profile', 'Share', 'Knowledge', 'Settings',
+    ]);
+    const notifications = rows[6]?.link as HTMLElement;
+    await expect(notifications).toHaveAttribute('href', '#notifications');
+    await expect(notifications).toHaveAttribute('aria-current', 'page');
+    expectComputed(notifications, { height: '36px', backgroundColor: 'rgb(60, 57, 47)', borderRadius: '8px' });
+    await expect(within(notifications).getByRole('img', { name: '1 unread' })).toHaveTextContent('1');
+    const icon = notifications.querySelector('svg');
+    await expect(icon).toHaveAttribute('aria-hidden', 'true');
+    await expect(icon).toHaveAttribute('width', '20');
+    const tops = rows.map((row) => row.link.getBoundingClientRect().top);
+    await expect(tops.slice(1).map((top, index) => Math.round(top - (tops[index] ?? 0)))).toEqual([38, 38, 38, 38, 38, 38, 38, 38, 38, 38]);
+  },
+};
+
+const TEAM = { id: 'desk-lumen-sam', name: 'Sam Patel' };
 
 /** A team Desk, as N-R2-Vision-TeamDesk draws it: its own people's word, and Claude acts for you in the team's words. */
 export const TeamDesk: Story = {
   args: {
-    desks: [MAIN_LINE, TEAM],
+    business: 'Lumen Labs',
+    owner: { name: 'Sam Patel', status: 'Available for chats' },
+    desks: [{ id: 'desk-lumen-priya', name: 'Priya Nair' }, TEAM],
     currentDeskId: TEAM.id,
     current: 'conversations',
-    peopleLabel: 'Teammates',
-    counts: { conversations: { n: 12, label: '12 team conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
+    peopleLabel: 'Colleagues',
+    counts: { conversations: { n: 7, label: '7 colleague conversations today' }, safety: { n: 1, label: '1 attempt stopped today' } },
     answeringDescription: 'Within your rules',
   },
   parameters: { canvas: 'N-R2-Vision-TeamDesk' },
@@ -302,11 +336,14 @@ export const TeamDesk: Story = {
     const answering = canvas.getByRole('switch', { name: 'Claude acts for you' });
     await expect(answering).toHaveAccessibleDescription('Within your rules');
     await expect(canvas.getByText('Within your rules')).toBeVisible();
-    await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Team' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: 'Switch Desk, current: Sam Patel' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: 'Switch business, current: Lumen Labs' })).toBeVisible();
+    await expect(canvas.getAllByText('Sam Patel', { exact: true })).toHaveLength(2);
+    await expect(canvas.getByRole('link', { name: 'Conversations 7 colleague conversations today' })).toBeVisible();
     await expect(navRows(canvasElement).map((row) => row.text)).toEqual([
       'Today',
       'Conversations',
-      'Teammates',
+      'Colleagues',
       'Rules',
       'Connectors',
       'Safety',

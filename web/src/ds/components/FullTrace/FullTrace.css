@@ -59,32 +59,17 @@
   overflow-wrap: anywhere;
 }
 
-/* What was recorded: the raw summary, closed under its label until it's asked for, so the trace
-   opens on its plain line, the record's fields and the chain. The label reads as the fields' do,
-   with the chevron Safety's own toggles use. */
-.cd-full-trace__record {
+/* The recorded summary takes the full width under its label. */
+.cd-full-trace__field--block > .cd-full-trace__label,
+.cd-full-trace__field--block > .cd-full-trace__value {
+  grid-column: 1 / -1;
+}
+
+.cd-full-trace__field--block > .cd-full-trace__label {
   margin-top: var(--space-8);
-  padding-right: var(--space-6);
-}
-
-.cd-full-trace__record-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-4);
-  min-height: var(--size-control);
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.cd-full-trace__record-toggle[aria-expanded='false'] .cd-full-trace__chevron {
-  transform: rotate(-90deg);
 }
 
 .cd-full-trace__summary {
-  margin-top: var(--space-4);
   padding-left: var(--space-12);
   border-left: 1px solid var(--line-hairline);
   white-space: pre-wrap;

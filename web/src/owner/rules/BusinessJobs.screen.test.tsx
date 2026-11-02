@@ -200,9 +200,10 @@ it('shows a job title that reads like the app’s own words only as user text on
     expectUserText(screen.container, title);
     const shared = [...screen.container.querySelectorAll('.cd-rule-row__shared')];
     expect(shared.length).toBeGreaterThan(0);
-    // The line reads word for word as it did: the app's words, then the tools it covers, one period.
+    // The app's words end in a colon, and the tools it covers start a line of their own under them.
     for (const line of shared) {
-      expect(line.textContent).toBe(`Shared rule. Applies to every tool that changes something: ${CHANGE_TOOLS}.`);
+      expect(line.textContent).toBe(`Shared rule. Applies to every tool that changes something:${CHANGE_TOOLS}`);
+      expect(line.querySelector('br + [data-copy="user"]')).not.toBeNull();
       expect([...line.querySelectorAll('[data-copy="user"]')].map((el) => el.textContent)).toEqual(CHANGE_TOOL_TITLES);
     }
     await expectScreenBasics(screen.container, { owner: true });
