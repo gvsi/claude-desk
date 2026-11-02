@@ -7,7 +7,7 @@ import type { BusinessOut, DeskSummary } from '../../api/views.ts';
 import { Card, Notice } from '../../ds/index.ts';
 import { brandFrom } from '../../public/brand.ts';
 import { PALETTE_KEYS, PALETTE_NAMES, paletteBrand, paletteKey } from '../../public/palette.ts';
-import { DESKS_KEY, desksQuery, useDesks } from '../useDesks.ts';
+import { DESKS_KEY, confirmDesks, useDesks } from '../useDesks.ts';
 
 /** The signed SET-02 card: a palette pick saves on tap and previews before the answer arrives. */
 export function HeaderColourCard({ business, desk }: { business: BusinessOut; desk: DeskSummary }) {
@@ -40,7 +40,7 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
       if (uncertainSave.current) {
         // A lost response can follow a committed write. Only a fresh read can confirm a rollback.
         await queryClient.cancelQueries({ queryKey: DESKS_KEY });
-        const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+        const read = await confirmDesks(queryClient);
         if (pick !== pickCounter.current) return;
         if (read === null) {
           unconfirmed.current = true;
@@ -125,7 +125,16 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
           className="cd-header-colour__preview"
           role="group"
           aria-label="Header preview"
-          style={{ backgroundColor: brand.field, borderBottomColor: brand.accent, color: brand.ink }}
+          // The public header's own field and inks: paper ink on the owner's colour in both themes,
+          // the theme's on the panel.
+          style={
+            {
+              backgroundColor: brand.field,
+              borderBottomColor: brand.accent,
+              color: brand.ink,
+              '--cd-header-colour-ink-secondary': brand.inkSecondary,
+            } as CSSProperties
+          }
         >
           <span className="cd-header-colour__monogram cd-type-wordmark" aria-hidden="true">{brand.monogram}</span>
           <div className="cd-header-colour__names" data-copy="user">

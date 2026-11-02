@@ -37,6 +37,7 @@ export function PublicBrandHeader({ brand, language, openStatus, landmark = true
     '--brand-field': brandColor(brand.field, 'var(--bg-panel)'),
     '--brand-ink': brandColor(brand.ink, 'var(--text-primary)'),
     '--brand-ink-secondary': brandColor(brand.inkSecondary, 'var(--text-secondary)'),
+    '--brand-status-handled': brandColor(brand.statusHandled, 'var(--status-handled)'),
     '--brand-accent': brandColor(brand.accent, 'var(--line-hairline)'),
   } as CSSProperties;
   const Header = landmark ? 'header' : 'div';

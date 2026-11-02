@@ -25,7 +25,8 @@ const BUILT_IN = {
 
 /**
  * Each third-party connector's own mark on the 24-unit grid, filled in its brand color token: Stripe's
- * in white on the dark grounds, as Stripe's guidelines allow, and Google Calendar's in its own blue.
+ * in white on the dark grounds, as Stripe's guidelines allow, and in Stripe's own purple on the light
+ * theme's paper; Google Calendar's in its own blue.
  * The path data is Simple Icons' (https://simpleicons.org), released under CC0.
  */
 const BRAND = {
