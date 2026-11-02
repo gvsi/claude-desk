@@ -131,6 +131,8 @@ it('tool_titles_in_a_rows_title_and_its_targets_are_user_text', () => {
     // An added rule and a tool turned on: each names its tools once, in its title.
     { key: 'added', change: 'added', title: { titles: [TITLE] }, before: null, after: { ...side, appliesTo: { titles: [TITLE] } }, changed: [] },
     { key: 'on', change: 'turned_on', title: { titles: [TITLE] }, before: null, after: side, changed: [] },
+    // A removed rule whose tools aren't its title's: its side still names them, once.
+    { key: 'other', change: 'removed', title: { titles: ['Quote', 'Refund'] }, before: { ...side, appliesTo: { titles: ['Refund'] } }, after: null, changed: [] },
     // A group's words are the app's own, so they stay plain.
     { key: 'group', change: 'added', title: 'Every tool that charges money', shared: true, before: null, after: { ...side, appliesTo: 'Every tool that charges money' }, changed: [] },
   ];
@@ -138,11 +140,11 @@ it('tool_titles_in_a_rows_title_and_its_targets_are_user_text', () => {
   expect(expectUserText(container, TITLE)).toBe(4);
   expectUserText(container, 'Quote');
   const titles = [...container.querySelectorAll('.cd-change-review__title')].map((el) => el.textContent);
-  expect(titles).toEqual([`Quote and ${TITLE}`, TITLE, TITLE, 'Every tool that charges money']);
+  expect(titles).toEqual([`Quote and ${TITLE}`, TITLE, TITLE, 'Quote and Refund', 'Every tool that charges money']);
   const targets = [...container.querySelectorAll('.cd-change-review__target')].map((el) => el.textContent);
-  expect(targets).toEqual(['Quote', `Quote and ${TITLE} Changed`]);
+  expect(targets).toEqual(['Quote', `Quote and ${TITLE} Changed`, 'Refund']);
   const metas = [...container.querySelectorAll('.cd-change-review__row > .cd-change-review__body > .cd-change-review__meta')].map((el) => el.textContent);
-  expect(metas).toEqual(['Shared rule', 'Anyone', 'Anyone', 'Shared rule · Anyone']);
+  expect(metas).toEqual(['Shared rule', 'Anyone', 'Anyone', 'Anyone', 'Shared rule · Anyone']);
   // Each title starts its line set off as user text, its own isolated run: never mid-line.
   const setOff = [...container.querySelectorAll('[data-copy="user"]')];
   expect(setOff.length).toBeGreaterThan(0);
