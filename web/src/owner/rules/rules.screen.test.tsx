@@ -62,12 +62,7 @@ function renameBusiness(name: string): void {
 function reviewRows(screen: { container: HTMLElement }): { title: string; before: string | null; after: string | null }[] {
   const words = (el: Element | null) => (el === null ? null : (el.textContent?.replace(/\s+/g, ' ').trim() ?? ''));
   return [...screen.container.querySelectorAll('.cd-change-review__row')].map((row) => ({
-    // The title's words without its "Changed" tag: each tool's title, joined as the review joins them.
-    title: [...(row.querySelector('.cd-change-review__title')?.childNodes ?? [])]
-      .filter((node) => !(node instanceof Element && node.classList.contains('cd-change-review__changed')))
-      .map((node) => node.textContent ?? '')
-      .join('')
-      .trim(),
+    title: row.querySelector('.cd-rule-sentence__meta')?.textContent?.split(' · ')[0] ?? '',
     before: words(row.querySelector('[role="group"][aria-label="Before"]')),
     after: words(row.querySelector('[role="group"][aria-label="After"]')),
   }));
@@ -422,7 +417,7 @@ describe('rules page', () => {
       const words = (value: string | null) => value?.replace(/^(Before|After)/, '').replace(/\bChanged\b/g, '').replace(/\s+/g, ' ').trim();
       expect(words(row.after), row.title).not.toBe(words(row.before));
     }
-    await expect.element(screen.getByText('Open times, leads, callbacks and identity checks still run on their own.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Checked against the always-on rules and your other rules before you confirm.', { exact: true })).toBeVisible();
     expect(desk().drafts.get(desk().lastVersion)?.draft.cards).toContainEqual(urgent);
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
@@ -473,10 +468,10 @@ describe('rules page', () => {
 
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
     expect(requests('draftPreset').map((r) => r.body)).toEqual([{ preset: 'ask_first' }]);
-    // A changed row per rule the preset removes, personal ones included, each to "Ask me first".
+    // A removed row per rule the preset removes, personal ones included, with Before alone.
     const rows = reviewRows(screen);
     expect(rows).toHaveLength(owned.length);
-    for (const row of rows) expect(row.after, row.title).toContain('Ask me first');
+    for (const row of rows) expect(row.after, row.title).toBeNull();
     const dana = rows.filter((row) => row.before?.includes('Dana Whitfield'));
     expect(dana).toHaveLength(1);
     expect(dana[0]?.title).toBe('Book a visit');
@@ -510,9 +505,9 @@ describe('rules page', () => {
     await expect.element(log.getByText(/^Here's that change: quotes stay automatic on weekdays/)).toBeVisible();
     expect(requests('ruleChat').map((r) => r.body)).toEqual([{ text: 'Stop quoting on weekends' }]);
     const changes = log.getByRole('region', { name: 'Changes' });
-    await expect.element(changes.getByText('Quote', { exact: true })).toBeVisible();
-    await expect.element(changes.getByRole('group', { name: 'After' }).getByText(/Weekdays, all day/)).toBeVisible();
-    await expect.element(log.getByText('Checked against the always-on rules and your other rules.', { exact: true })).toBeVisible();
+    await expect.element(changes.getByRole('group', { name: 'After' }).getByText('Quote', { exact: true })).toBeVisible();
+    await expect.element(changes.getByRole('group', { name: 'After' }).getByText(/weekdays, all day/)).toBeVisible();
+    await expect.element(log.getByText('Checked against the always-on rules and your other rules before you confirm.', { exact: true })).toBeVisible();
     // The review's buttons in view, and the owner's words too when both fit.
     await expectTurnOpensAtTheOwnersWords(log, 'Stop quoting on weekends', 'from the page');
     // The page beside it keeps its header: "Start from a preset" stays at the right of the title's line (N-Conn-12-Chat).
@@ -934,9 +929,9 @@ describe('rules page', () => {
     const lowered = reviewRows(screen);
     expect(lowered.map((row) => row.title)).toEqual(['Payment link']);
     expect(lowered[0]?.before).toContain('Allow');
-    expect(lowered[0]?.before).toContain('Payment links up to $300, checked by the reviewer.');
+    expect(lowered[0]?.before).toContain('Claude can send payment links up to $300');
     expect(lowered[0]?.after).toContain('Allow');
-    expect(lowered[0]?.after).toContain('Up to $100, your payment limit.');
+    expect(lowered[0]?.after).toContain('Claude can send payment links up to $100');
     expect(lowered[0]?.after).not.toContain('$300');
     expect(screen.getByText('Your rules stay the same.', { exact: true }).elements()).toHaveLength(0);
     expect(desk().policy.auto_money_cap_cents).toBe(50_000);
@@ -971,7 +966,7 @@ describe('rules page', () => {
     expect(asks.map((row) => row.title).sort()).toEqual(['Charge within a signed limit', 'Payment link']);
     for (const row of asks) {
       expect(row.after, row.title).toContain('Ask me first');
-      expect(row.after, row.title).toContain('Your payment limit is $0.');
+      expect(row.after, row.title).toContain('Claude asks you before any');
     }
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();

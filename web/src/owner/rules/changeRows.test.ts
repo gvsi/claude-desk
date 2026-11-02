@@ -20,6 +20,19 @@ function draft(before: RuleCard[], after: RuleCard[], turnedOn: RuleDraft['turne
   return { version: 2, before, after, proof: null, summary: null, moneyCap: null, preset: null, turnedOn };
 }
 
+it('reads changed, new and removed rules as Claude-led sentences', () => {
+  const link = { ...card('link', 'native.payment_link'), max_amount_cents: 30_000 };
+  const refund = card('refund', 'payments.create_refund', 'ask');
+  const quote = card('quote', 'native.quote');
+  const rows = changeRowViews(draft([link, quote], [{ ...link, max_amount_cents: 10_000 }, refund]), null);
+  const changed = rows.find((row) => row.key === 'link');
+  expect(changed?.before?.sentence?.parts.map((part) => part.text).join('')).toBe('Claude can send payment links up to $300');
+  expect(changed?.after?.sentence).toMatchObject({ meta: { tools: { titles: ['Payment link'] }, who: 'Anyone' } });
+  expect(changed?.after?.sentence?.parts.map((part) => part.text).join('')).toBe('Claude can send payment links up to $100');
+  expect(rows.find((row) => row.key === 'refund')).toMatchObject({ change: 'added', before: null, after: { sentence: { parts: [{ text: 'Claude asks you before ' }, { text: 'any refund', key: true }] } } });
+  expect(rows.find((row) => row.key === 'quote')).toMatchObject({ change: 'removed', after: null });
+});
+
 it('names business tools in added rules and shared coverage', () => {
   const intro = card('intro', 'desk.intro-call');
   const shared = card('shared', 'effect:change');
@@ -61,8 +74,8 @@ it('an added rule follows the changed rows of its own tool', () => {
   const link = card('link', 'native.payment_link');
   const rows = changeRows(draft([bookWeekdays, bookSaturday, link], [nineToFive, { ...link, reason: 'Payment links go through.' }]), null);
   expect(rows.map((row) => [row.key, row.change, row.title])).toEqual([
-    ['book-weekdays', 'changed', 'Book a visit'],
-    ['book-saturday', 'changed', 'Book a visit'],
+    ['book-weekdays', 'removed', 'Book a visit'],
+    ['book-saturday', 'removed', 'Book a visit'],
     ['book-nine-to-five', 'added', 'Book a visit'],
     ['link', 'changed', 'Payment link'],
   ]);
@@ -78,6 +91,8 @@ it('names tools by their titles, each apart, and a group of tools in the app’s
     before: { appliesTo: { titles: ['Book a free intro call'] } },
     after: { appliesTo: { titles: ['Book a free intro call', 'New client intake'] } },
   });
+  expect(row?.before?.sentence?.meta?.tools).toEqual({ titles: ['Book a free intro call'] });
+  expect(row?.after?.sentence?.meta?.tools).toEqual({ titles: ['Book a free intro call', 'New client intake'] });
   // A rule moved to a group of tools names the group in the app's words.
   const link = card('link', 'native.payment_link');
   const [moved] = changeRowViews(draft([link], [{ ...link, applies_to: 'effect:charge' }]), null);

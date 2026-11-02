@@ -470,7 +470,7 @@ describe('a preset or a new payment limit', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
     // The tools its review lists by name, each once: its quote and document rules replace Turner's
     // with ones that differ only in their ids, so it lists neither.
-    const listed = [...new Set([...root.querySelectorAll('.cd-change-review__title [data-copy="user"]')].map((title) => title.textContent ?? ''))].sort();
+    const listed = [...new Set([...root.querySelectorAll('.cd-rule-sentence__meta [data-copy="user"]')].map((title) => title.textContent ?? ''))].sort();
     expect(listed.length).toBeGreaterThan(0);
     expect(listed).not.toContain('Quote');
     expect(listed).not.toContain('Share a document');

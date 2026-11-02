@@ -181,3 +181,21 @@
   flex-wrap: wrap;
   gap: var(--space-8);
 }
+
+/* The B3 review keeps the tag in its own column, also on a phone. The sentence component stacks
+   its outcome below its tools and audience when its own column is narrow. */
+.cd-change-review__row--sentence {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.cd-change-review__sentence-sides {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+.cd-change-review__checked {
+  margin: 0;
+  color: var(--text-secondary);
+}
