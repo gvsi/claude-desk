@@ -1292,12 +1292,12 @@ async def test_public_desk_carries_the_agent_card(kernel, ro_read):
 
     assert await card("en") == [
         "Get a quote from the price list", "Find open times", "Book a visit", "Get a payment link for a quote",
-        "Pay for a quote within the limit of a signed mandate", "Leave contact details", "Ask for a callback",
+        "Pay for a quote within a signed limit", "Leave contact details", "Ask for a callback",
         "Verify a customer with a code sent to their contact on record", "Receive a verified customer's own documents",
         "List a verified customer's own charges"]
     assert await card("es") == [
         "Pedir una cotización de la lista de precios", "Buscar horarios libres", "Reservar una visita",
-        "Pedir un enlace de pago para una cotización", "Pagar una cotización dentro del límite de un mandato firmado",
+        "Pedir un enlace de pago para una cotización", "Pagar una cotización dentro de un límite firmado",
         "Dejar datos de contacto", "Pedir que te devuelvan la llamada",
         "Verificar a un cliente con un código enviado a su contacto registrado",
         "Recibir los documentos propios de un cliente verificado", "Ver los cargos propios de un cliente verificado"]
