@@ -288,8 +288,17 @@ def cache_directory() -> Path:
     return Path.home() / ".cache/desk-testbox"
 
 
+# Every lane's uploads queue on one shared connection, and Session Manager carries uploads slowly, so a keepalive
+# reply can wait minutes behind them. Allow ten minutes before giving up. A closed SSM stream still ends the master at
+# once, because the proxy process exits.
+MASTER_OPTIONS = ("ControlPersist=3600", "ConnectTimeout=30", "ServerAliveInterval=30", "ServerAliveCountMax=20")
+
+
 def control_path(cache: Path, region: str, instance: str) -> Path:
-    return cache / (hashlib.sha256(("v2:" + region + instance).encode()).hexdigest()[:20] + ".sock")
+    # A master keeps the settings it was opened with, and callers reuse any live one. Naming the socket after those
+    # settings gives changed ones their own master, while callers on older code keep theirs.
+    key = "v2:" + region + instance + ":" + ",".join(MASTER_OPTIONS)
+    return cache / (hashlib.sha256(key.encode()).hexdigest()[:20] + ".sock")
 
 
 def warm_instance(cache: Path, region: str) -> str | None:
@@ -332,10 +341,8 @@ def open_connection(cache: Path, region: str, instance: str, api, remember: bool
             subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "desk-testbox-client", "-f", str(key)], check=True)
         control = control_path(cache, region, instance)
         proxy = shlex.join(aws + ["ssm", "start-session", "--target", instance, "--document-name", "AWS-StartSSHSession", "--parameters", "portNumber=%p"])
-        # Every lane's uploads queue on this one connection, and Session Manager carries uploads slowly, so a
-        # keepalive reply can wait minutes behind them. Allow ten minutes before giving up. A closed SSM stream
-        # still ends the master at once, because the proxy process exits.
-        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", "ControlPersist=3600", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes", "-o", "ConnectTimeout=30", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=20", "-i", str(key)]
+        ssh_opts = ["-o", f"ProxyCommand={proxy}", "-o", "ControlMaster=auto", "-o", f"ControlPath={control}", "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={cache / 'known_hosts'}", "-o", "BatchMode=yes"]
+        ssh_opts += [flag for option in MASTER_OPTIONS for flag in ("-o", option)] + ["-i", str(key)]
         host = "ubuntu@" + instance
         check = subprocess.run(["ssh", *ssh_opts, "-O", "check", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if check.returncode:

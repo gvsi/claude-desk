@@ -563,7 +563,8 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     interval = int(re.search(r'ClientAliveInterval (\d+)', block).group(1))
     count = int(re.search(r'ClientAliveCountMax (\d+)', block).group(1))
     assert 600 <= interval * count <= 900
-    assert f"grep -qx 'clientaliveinterval {interval}'" in block                # the check confirms the one in effect
+    assert f"grep -qx 'clientaliveinterval {interval}'" in block                # the check confirms the ones in effect
+    assert f"grep -qx 'clientalivecountmax {count}'" in block
     # On a fresh machine no connection has started ssh.service yet, so the check's runtime directory may be missing.
     assert block.index('install -d -o root -g root -m 0755 /run/sshd') < block.index('sshd -t')
     (tmp_path / 'bin').mkdir()
@@ -582,7 +583,7 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     run = lambda: subprocess.run(['bash', '-e', '-c', commands], env=env, capture_output=True)
     reload = ['sshd -t', 'sshd -T', 'systemctl try-reload-or-restart ssh.service']
 
-    effective.write_text(f'maxsessions 256\nclientaliveinterval {interval}\n')
+    effective.write_text(f'maxsessions 256\nclientaliveinterval {interval}\nclientalivecountmax {count}\n')
     assert run().returncode == 0 and run().returncode == 0
     assert log.read_text().splitlines() == reload                       # installed once, then left alone
     (config / '90-testbox.conf').write_text('old configuration')
@@ -594,4 +595,10 @@ def test_every_lane_on_one_shared_connection_gets_far_more_than_sshds_ten_sessio
     effective.write_text('maxsessions 10\n')                           # another drop-in read first wins
     assert run().returncode != 0
     assert not (config / '90-testbox.conf').exists()                    # so a retry checks again
+    assert 'systemctl try-reload-or-restart ssh.service' not in log.read_text()
+
+    log.write_text('')
+    effective.write_text(f'maxsessions 256\nclientaliveinterval {interval}\nclientalivecountmax 0\n')  # 0 never closes one
+    assert run().returncode != 0
+    assert not (config / '90-testbox.conf').exists()
     assert 'systemctl try-reload-or-restart ssh.service' not in log.read_text()

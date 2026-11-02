@@ -37,7 +37,8 @@ if ! cmp -s /tmp/desk-testbox-sshd.conf /etc/ssh/sshd_config.d/90-testbox.conf; 
   # The check needs sshd's runtime directory, which only a started ssh.service creates (it starts on first connection).
   install -d -o root -g root -m 0755 /run/sshd
   if ! { sshd -t && effective=$(sshd -T) && grep -qx 'maxsessions 256' <<<"$effective" \
-         && grep -qx 'clientaliveinterval 60' <<<"$effective" && systemctl try-reload-or-restart ssh.service; }; then
+         && grep -qx 'clientaliveinterval 60' <<<"$effective" && grep -qx 'clientalivecountmax 10' <<<"$effective" \
+         && systemctl try-reload-or-restart ssh.service; }; then
     rm -f /etc/ssh/sshd_config.d/90-testbox.conf
     echo "testbox bootstrap: sshd rejected or overrode the session limits or keepalive" >&2
     exit 1

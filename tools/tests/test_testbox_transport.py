@@ -419,3 +419,14 @@ def test_the_shared_connection_outlasts_a_long_upload_queue(tmp_path, monkeypatc
     options = client.open_connection(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa', None, remember=False)
     settings = dict(value.split('=', 1) for flag, value in zip(options, options[1:]) if flag == '-o')
     assert int(settings['ServerAliveInterval']) * int(settings['ServerAliveCountMax']) >= 600
+
+
+def test_a_change_to_the_masters_settings_opens_its_own_master(tmp_path, monkeypatch):
+    """A caller reuses any live master on its control socket, and a master keeps the settings it was opened with. A
+    lane on an older branch could otherwise keep a master with the old 45 s limit open while it stays busy, since
+    ControlPersist counts only idle time. The socket's name therefore follows the master's settings."""
+    from desk_tools import testbox_client as client
+
+    current = client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa')
+    monkeypatch.setattr(client, 'MASTER_OPTIONS', ('ServerAliveInterval=15', 'ServerAliveCountMax=3'))
+    assert client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa') != current
