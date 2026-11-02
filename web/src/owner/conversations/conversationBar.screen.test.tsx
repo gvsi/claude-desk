@@ -479,7 +479,10 @@ describe('the open conversation bar', () => {
     [390, 860, false],
     [390, 890, false],
     [430, 858, false],
-    [1024, 700, true],
+    // The desktop footer lives in the sidebar: 700 px now leaves a 620 px pane content box,
+    // above the desktop's 37.5rem (600 px) threshold. At 660 px its 580 px box still scrolls as one.
+    [1024, 660, true],
+    [1024, 700, false],
     [1024, 740, false],
     [1440, 650, true],
     [1440, 740, false],
