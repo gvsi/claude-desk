@@ -17,6 +17,7 @@ from desk.api.ro import KernelRO
 from desk.api.schemas import NeedsYouItem
 from desk.db.session import API_CONNECT_OPTIONS, database_url
 from desk.kernel_service import seed
+from desk.kernel_service.decide import RULE_LEAD_INS
 from desk.kernel_service.adapters.base import quoted
 
 from .test_adapters import Rivera, rivera
@@ -70,6 +71,6 @@ async def test_a_quote_held_past_an_automatic_rules_limit_names_no_rule(app, cli
     [item] = [item for item in await needs_you_of(app, copy)
               if item.decision is not None and item.decision.call_id == seed.HELD_REQUEST.call_id]
 
-    assert quoted(quotes.reason) in item.decision.reason_plain
+    assert f"{RULE_LEAD_INS['limit']}: {quoted(quotes.reason)}" in item.decision.reason_plain
     assert "rv-quote" in item.decision.card_ids
     assert item.held_by is None

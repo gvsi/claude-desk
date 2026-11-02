@@ -1426,9 +1426,10 @@ describe('the scripted Desk', () => {
     record.decision.card_ids = [defaultAsk.card_id, 'rv-refund'];
     expect((await read())?.held_by).toBe(rivera.ruleCards['rv-refund'].reason);
 
-    // Held by the default ask alone, it names the default ask.
+    // Held by the default ask alone, it names no rule: no rule of the owner's decided it, and the
+    // headline already says so.
     record.decision.card_ids = [defaultAsk.card_id];
-    expect((await read())?.held_by).toBe(defaultAsk.reason);
+    expect((await read())?.held_by).toBeNull();
   });
 
   it('held_by_names_no_rule_past_an_automatic_limit', async () => {

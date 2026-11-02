@@ -4,7 +4,7 @@ import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
-import { THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from '../arrival/ideas.ts';
+import { ANSWER_ROOM, THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
@@ -398,8 +398,8 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
                     <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
-                    {i === 2 ? (
-                      <span className="cd-things__detail cd-type-meta" data-room={UNCOUNTED_ANSWER_LINES.failed}>
+                    {label === 'Open the request' ? (
+                      <span className="cd-things__detail cd-type-meta" data-room={ANSWER_ROOM}>
                         <span className="cd-things__detail-now">
                           <TextLines words={DETAILS[i]!} probeClassName="cd-things__detail" />
                         </span>

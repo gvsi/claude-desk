@@ -118,6 +118,20 @@ def test_held_by_is_the_card_the_decision_quotes(card_ids, held_by):
     assert owner_reads.holding_card(cards, card_ids) == held_by
 
 
+@pytest.mark.parametrize(("card", "reason"), [
+    (ASK_QUOTES, "Quotes wait for your answer."),     # an owner's "Ask me first" card: named
+    (VERIFIED_QUOTES, None),                          # past an automatic card's limit: the headline quotes it
+    (DANAS_QUOTES, None),                             # one person's automatic card: the same
+    (DEFAULT_QUOTES, None),                           # only the default ask: no rule of the owner's decided it
+    (None, None),
+], ids=["ask_card", "past_a_limit", "past_a_persons_limit", "default_ask_only", "no_card"])
+def test_held_reason_names_only_an_owners_ask_card(card, reason):
+    """The rule Needs you names under a held request ("Held by your rule: …"): only an owner's ask card, as the
+    kernel's headline names it ("Your rule asks you first: …"). A hold past an automatic card's limit already quotes
+    that card in its headline, and one only the default ask decided has no rule of the owner's to name."""
+    assert owner_reads.held_reason(card) == reason
+
+
 OWNER = "x-owner-session"
 # A reply in another language: blocked for what no rewrite fixes, so the kernel shows the handoff card in its place
 # (a reply blocked only for its prose, with no card to keep, shows the call-back offer instead).

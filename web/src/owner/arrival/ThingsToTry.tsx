@@ -12,7 +12,7 @@ import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, isLive, useToday } from '../useDesks.ts';
 import { TODAY_COPY } from '../today/copy.ts';
 import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
-import { THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
+import { ANSWER_ROOM, THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
 import { useDoneSignals, type Done } from './useDoneSignals.ts';
 
 export interface ThingsToTryProps {
@@ -185,7 +185,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             title={ANSWER.title}
             held={answerWaits}
             detail={answerWaits ? heldLine(firstHeld?.held_by) : TODAY_COPY.heldNone}
-            detailRoom={answerWaits ? UNCOUNTED_ANSWER_LINES.failed : undefined}
+            detailRoom={answerWaits ? ANSWER_ROOM : undefined}
             end={answerEnd}
             step={answerWaits ? { label: 'Open the request', onClick: onFocusRequest } : null}
           />
