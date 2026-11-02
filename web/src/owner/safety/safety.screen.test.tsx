@@ -654,12 +654,12 @@ describe('Safety', () => {
   });
 
   it('a_very_short_window_keeps_the_card_six_controls_tall_and_scrolls_the_page', async () => {
-    // Under about 530 px of window the list and the open entry would show little of either, so they
-    // keep six controls' height and the page scrolls instead.
+    // With the desktop footer in the sidebar, a 480 px window now fits the page. At 460 px the list
+    // and open entry still keep six controls' height, so the page must scroll instead of clipping them.
     injectLedger(ledgerPage(threeEntries()));
     injectAttempts([attempt({ created_at: THIS_MORNING })]);
     await stoppedThisWeek(1);
-    const { screen } = await renderRoute(`${SAFETY}/dec-refund`, { viewport: { width: 1280, height: 480 } });
+    const { screen } = await renderRoute(`${SAFETY}/dec-refund`, { viewport: { width: 1280, height: 460 } });
     const open = detail(screen);
     await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeInTheDocument();
     await frames();
@@ -669,6 +669,15 @@ describe('Safety', () => {
     const main = open.element().closest<HTMLElement>('.cd-app-shell__main');
     if (!main) throw new Error('the owner app scrolls its main area');
     expect(main.scrollHeight).toBeGreaterThan(main.clientHeight);
+    open.element().scrollIntoView({ block: 'end' });
+    await frames();
+    expectInView(open.element(), main);
+    await expect.element(open).toBeInViewport({ ratio: 1 });
+    const fullTrace = open.getByRole('button', { name: 'Full trace' });
+    fullTrace.element().scrollIntoView({ block: 'nearest' });
+    await frames();
+    expectInView(fullTrace.element(), open.element());
+    await expect.element(fullTrace).toBeInViewport({ ratio: 1 });
     expectNoWindowScroll();
   });
 
