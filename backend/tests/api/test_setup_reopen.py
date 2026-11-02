@@ -200,6 +200,142 @@ async def test_a_slow_reopen_answers_202_and_is_polled_or_rolled_back_at_its_dea
         assert read.json()["messages"][-1]["text"] == "Closed on Saturdays, noted. Anything else?"
 
 
+# The safety check, the confirm and going live hold the interview from their first read to their last write: a change
+# sent meanwhile is refused at once, and none of them starts while a change runs.
+TRANSITIONS = [("safety_check", "POST /policy/{version}/probe", "situations", "safety_check"),
+               ("confirm", "POST /policy/confirm", "safety_check", "preview"),
+               ("go_live", "PUT /desks/{id}/answering", "preview", "live")]
+
+
+@pytest.mark.parametrize(("route", "kernel_route", "step", "after"), TRANSITIONS)
+async def test_a_change_sent_while_the_safety_check_confirm_or_go_live_runs_is_refused(
+        app, browser, kernel_http, model, engine, fake, route, kernel_route, step, after):
+    # Held at the kernel, past its checks: the change can't land under it, so old rules are never confirmed or taken
+    # live after the owner reopened the questions.
+    owner, state = await ready(app, browser, kernel_http, model)
+    await at_step(owner, model, state, step)
+    active = fake.desks[state["desk_id"]].policy_version
+    before = len(fake.called(kernel_route))
+    release = fake.gate(kernel_route)
+    running = asyncio.create_task(owner.browser.post(policy(state, route)))
+    await until(lambda: len(fake.called(kernel_route)) > before)
+    calls = len(model.requests)
+    try:
+        refused = await reopen(owner, state)
+        assert (refused.status_code, refused.json()["error"]) == (409, "conflict")
+    finally:
+        release.set()
+    finished = await asyncio.wait_for(running, 10)
+    assert finished.status_code == 200, finished.text
+    assert len(model.requests) == calls
+    row = await stored_questions(engine, state["interview_id"])
+    assert row["step"] == after
+    assert CHANGE not in [entry["text"] for entry in row["transcript"]]
+    if route == "confirm":
+        assert fake.desks[state["desk_id"]].policy_version != active
+    assert fake.desks[state["desk_id"]].answering is (route == "go_live")
+
+    # Once it has landed, the change is taken as usual.
+    if route != "go_live":
+        model.add(turn("Closed on Saturdays, noted. Anything else?", step_done=False))
+        changed = await reopen(owner, state)
+        assert changed.status_code == 200 and changed.json()["step"] == "questions", changed.text
+
+
+@pytest.mark.parametrize(("route", "kernel_route", "step", "after"), TRANSITIONS)
+async def test_the_safety_check_confirm_or_go_live_is_refused_while_a_change_runs(
+        app, browser, kernel_http, model, engine, fake, monkeypatch, route, kernel_route, step, after):
+    # The change is admitted but hasn't stored its busy message yet: this process's guard alone refuses the
+    # transition, before any kernel call.
+    owner, state = await ready(app, browser, kernel_http, model)
+    await at_step(owner, model, state, step)
+    before = await stored(engine, state["interview_id"])
+    called = len(fake.called(kernel_route))
+    held, original = asyncio.Event(), setup._commit
+
+    async def commit(*args, **kwargs):
+        await held.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(setup, "_commit", commit)
+    model.add(turn("Closed on Saturdays, noted. Anything else?", step_done=False))
+    changing = asyncio.create_task(reopen(owner, state))
+    try:
+        await until(lambda: setup._RUNNING)
+        refused = await owner.browser.post(policy(state, route))
+        assert (refused.status_code, refused.json()["error"]) == (409, "conflict")
+        assert len(fake.called(kernel_route)) == called
+        assert await stored(engine, state["interview_id"]) == before
+    finally:
+        held.set()
+    changed = await asyncio.wait_for(changing, 10)
+    assert changed.status_code == 200 and changed.json()["step"] == "questions", changed.text
+    assert fake.desks[state["desk_id"]].answering is False
+
+
+async def test_a_change_landing_from_elsewhere_during_go_live_leaves_the_desk_off(
+        app, browser, kernel_http, model, engine, fake):
+    # Another API process's change lands while Answering is being turned on: the interview isn't marked live, and
+    # Answering goes off again, so the Desk never answers on the rules the owner is changing.
+    owner, state = await ready(app, browser, kernel_http, model)
+    await at_step(owner, model, state, "preview")
+    route = "PUT /desks/{id}/answering"
+    before = len(fake.called(route))
+    release = fake.gate(route)
+    running = asyncio.create_task(owner.browser.post(policy(state, "go_live")))
+    await until(lambda: len(fake.called(route)) > before)
+    try:
+        async with engine.connect() as conn, conn.begin():
+            found = await setup._load(conn, owner.copy_id, state["interview_id"], lock=True)
+            found.step, found.draft_cards, found.draft_version = "questions", [], None
+            found.transcript.append(setup.Entry(role="owner", text=CHANGE, reopen_key="elsewhere",
+                                                reopen_sha256=setup.reopen_sha256(CHANGE)))
+            await setup._save(conn, found)
+    finally:
+        release.set()
+    refused = await asyncio.wait_for(running, 10)
+    assert (refused.status_code, refused.json()["error"]) == (409, "conflict")
+    assert (await stored(engine, state["interview_id"]))["step"] == "questions"
+    assert fake.desks[state["desk_id"]].answering is False
+
+
+async def test_a_safety_check_of_one_draft_never_marks_the_next_one_checked(
+        app, browser, kernel_http, model, engine, fake, monkeypatch):
+    # After a change, the rules are confirmed only once the safety check ran on their draft. A check still running on
+    # the draft before when the rules are drafted again (the rules in force changed, say) answers 409 and leaves the
+    # new draft unchecked.
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(turn(next={"kind": "done"}))
+    model.add(next_step("contact_and_after_hours", next={"kind": "done"}))
+    assert (await reopen(owner, state)).status_code == 200
+    await at_step(owner, model, state, "situations")
+    checked = (await stored(engine, state["interview_id"]))["draft_version"]
+    route = "POST /policy/{version}/probe"
+    before = len(fake.called(route))
+    release = fake.gate(route)
+    checking = asyncio.create_task(owner.browser.post(policy(state, "safety_check")))
+    await until(lambda: len(fake.called(route)) > before)
+    try:
+        fake.never(state["desk_id"], "native.capture_lead")
+        app.state.runtime.proving.forget(state["desk_id"])
+        redrafted = await owner.browser.post(policy(state, "rules"))
+        assert redrafted.status_code == 200, redrafted.text
+        assert redrafted.json()["version"] != checked
+    finally:
+        release.set()
+    stale = await asyncio.wait_for(checking, 10)
+    assert (stale.status_code, stale.json()["error"]) == (409, "conflict")
+    row = await stored(engine, state["interview_id"])
+    assert (row["step"], row["draft_version"]) == ("rules", redrafted.json()["version"])
+    refused = await owner.browser.post(policy(state, "confirm"))
+    assert (refused.status_code, refused.json()["error"]) == (409, "conflict")
+
+    # Its own check, then the confirm.
+    app.state.runtime.proving.forget(state["desk_id"])
+    assert (await owner.browser.post(policy(state, "safety_check"))).status_code == 200
+    assert (await owner.browser.post(policy(state, "confirm"))).status_code == 200
+
+
 @pytest.mark.parametrize("step", ["safety_check", "preview"])
 async def test_moving_forward_after_a_change_drafts_the_rules_situations_and_safety_check_again(
         app, browser, kernel_http, model, engine, fake, step):

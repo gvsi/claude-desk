@@ -734,19 +734,39 @@ async def _commit(engine: AsyncEngine, owner: OwnerCtx, interview: Interview, se
 
 
 _RUNNING: set[str] = set()       # the interviews with a consent or an answer running in this process
+# The interviews with a safety check, a confirm or a go-live running in this process, and how many of each.
+_TRANSITIONS: dict[str, int] = {}
 
 
 @contextlib.contextmanager
 def _turn(interview_id: str) -> Iterator[None]:
     """Hold the interview's one running consent or answer in this process: another sent meanwhile is 409 `conflict` at
-    once, before any model call or read (one in another process is caught when it saves, by `_commit`)."""
-    if interview_id in _RUNNING:
+    once, before any model call or read (one in another process is caught when it saves, by `_commit`). So is one sent
+    while a safety check, a confirm or a go-live runs (`_transition`): a change can't reopen the questions under
+    them."""
+    if interview_id in _RUNNING or interview_id in _TRANSITIONS:
         raise ApiProblem(409, "conflict")
     _RUNNING.add(interview_id)
     try:
         yield
     finally:
         _RUNNING.discard(interview_id)
+
+
+@contextlib.contextmanager
+def _transition(interview_id: str) -> Iterator[None]:
+    """Hold a safety check, a confirm or a go-live from before its first read to after its last write: 409 `conflict`
+    at once while a turn runs on the interview in this process (a reopen, say), and a turn sent meanwhile is 409 too
+    (`_turn`). Transitions don't hold one another; each checks the draft version it read when it writes."""
+    if interview_id in _RUNNING:
+        raise ApiProblem(409, "conflict")
+    _TRANSITIONS[interview_id] = _TRANSITIONS.get(interview_id, 0) + 1
+    try:
+        yield
+    finally:
+        left = _TRANSITIONS.pop(interview_id) - 1
+        if left:
+            _TRANSITIONS[interview_id] = left
 
 
 def _clear_configs(interview: Interview) -> None:
@@ -2674,7 +2694,7 @@ async def reopen(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
             raise ApiProblem(409, "conflict")
         interview.business_tools_enabled = business_tools_enabled
         return render(interview, await _slug(owner, owner.desk(interview.desk_id)))
-    if interview.busy or interview_id in _RUNNING:
+    if interview.busy or interview_id in _RUNNING or interview_id in _TRANSITIONS:
         raise ApiProblem(409, "conflict")
     connect = False
 
@@ -3289,13 +3309,17 @@ def _later(step: SetupStep, than: SetupStep) -> SetupStep:
 
 
 async def _update(engine: AsyncEngine, owner: OwnerCtx, interview_id: str,
-                  change: Callable[[Interview], None], *, reopens: int | None = None) -> Interview:
+                  change: Callable[[Interview], None], *, reopens: int | None = None,
+                  version: int | None = None, steps: tuple[SetupStep, ...] | None = None) -> Interview:
     """Apply `change` to the interview under its row lock and save it, in one transaction. With `reopens` (what the
     work read), 409 `conflict` with nothing saved once "Change something" has reopened the questions since: what the
-    work drafted or tried was about the answers before."""
+    work drafted or tried was about the answers before. So too with `version` (the rules draft the work read) once the
+    draft is another, and with `steps` once the interview has left them."""
     async with engine.connect() as conn, conn.begin():
         interview = await _load(conn, owner.copy_id, interview_id, lock=True)
-        if reopens is not None and interview.reopens != reopens:
+        if ((reopens is not None and interview.reopens != reopens)
+                or (version is not None and interview.draft_version != version)
+                or (steps is not None and interview.step not in steps)):
             raise ApiProblem(409, "conflict")
         change(interview)
         await _save(conn, interview)
@@ -4188,25 +4212,28 @@ def safety_probes(answers: SetupAnswers, prices: dict[str, int]) -> list[tuple[S
 
 async def safety_check(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> SafetyCheck:
     """What a bad actor would try, against the draft: each row's outcome and reason are the kernel's, verbatim, and a
-    row is blocked only by an outcome that stops it and never when it depends on the reviewer."""
-    async with engine.connect() as conn:
-        interview = await _load(conn, owner.copy_id, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    _require_step(interview, RULE_STEPS, drafted=True)
-    listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
-    prices = {row["item_id"]: row["unit_cents"] for row in listed}
-    name = interview.answers.owner_display_name
-    built = safety_probes(owner_rule_answers(interview.answers), prices)
-    started = monotonic()
-    results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
-    seconds = round(monotonic() - started, 1)
-    rows = [SafetyRow(label=spec.label,
-                      tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. "),
-                      result=result,
-                      blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
-            for (spec, _), result in zip(built, results, strict=True)]
-    await _update(engine, owner, interview_id,
-                  lambda found: setattr(found, "step", _later(found.step, "safety_check")), reopens=interview.reopens)
+    row is blocked only by an outcome that stops it and never when it depends on the reviewer. Held against a change
+    (`_transition`), it marks the safety check run only for the draft it tried: 409 `conflict` once the rules were
+    drafted again meanwhile, whose own check is still to run."""
+    with _transition(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        desk_id = owner.desk(interview.desk_id)
+        _require_step(interview, RULE_STEPS, drafted=True)
+        listed = await owner.ro.rows("price_items", desk_id=desk_id, order_by=("item_id",))
+        prices = {row["item_id"]: row["unit_cents"] for row in listed}
+        name = interview.answers.owner_display_name
+        built = safety_probes(owner_rule_answers(interview.answers), prices)
+        started = monotonic()
+        results = await _run_probes(owner, desk_id, interview.draft_version, [probe for _, probe in built])
+        seconds = round(monotonic() - started, 1)
+        rows = [SafetyRow(label=spec.label,
+                          tries=spec.tries.format(owner_intro=f"Hi, it's {name or 'the owner'}. "),
+                          result=result,
+                          blocked=result.outcome in spec.blocked_by and not result.depends_on_review)
+                for (spec, _), result in zip(built, results, strict=True)]
+        await _update(engine, owner, interview_id,
+                      lambda found: setattr(found, "step", _later(found.step, "safety_check")),
+                      reopens=interview.reopens, version=interview.draft_version)
     return SafetyCheck(rows=rows, blocked=sum(row.blocked for row in rows), total=len(rows), seconds=seconds)
 
 
@@ -4219,44 +4246,57 @@ async def confirm(owner: OwnerCtx, engine: AsyncEngine, interview_id: str) -> Po
     (`RulesChangedSinceDraft`) for the owner to confirm instead. A draft the kernel already activated (a confirm
     whose answer was lost) moves setup on without activating anything again; any other draft that isn't proved is
     409 `conflict`. Once "Change something" has reopened the questions, the rules are confirmed only after the safety
-    check has run again on their new draft (step `safety_check`), else 409 `conflict`."""
-    async with engine.connect() as conn:
-        interview = await _load(conn, owner.copy_id, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    _require_step(interview, ("safety_check", "preview") if interview.reopens else RULE_STEPS, drafted=True)
-    reopens = interview.reopens
-    row = await owner.ro.one("policy_versions", desk_id=desk_id, version=interview.draft_version)
-    if row is not None and row["status"] == "active":     # a Desk has one active version: this draft is in force
-        await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"), reopens=reopens)
-        active = version_from_row(row)
-        await tell_cancelled_links(owner, engine, desk_id, active)
-        return active
-    if row is None or row["status"] != "proved":
-        raise ApiProblem(409, "conflict")
-    try:
-        active = await owner.kernel.call("POST /policy/confirm", PolicyConfirmRequest(
-            desk_id=desk_id, version=interview.draft_version))
-    except KernelFailed as refused:
-        if refused.code != "conflict":
-            raise
-        version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
-                                              owner_rule_answers(interview.answers).auto_money_cap_cents))
-        await _drafted(engine, owner, interview_id, version.version, "rules", reopens=reopens)
-        raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
-    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"), reopens=reopens)
+    check has run again on their new draft (step `safety_check`), else 409 `conflict`. Held against a change
+    (`_transition`), it checks the step, the draft and the reopens before the kernel call and again as it writes."""
+    with _transition(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        desk_id = owner.desk(interview.desk_id)
+        steps = ("safety_check", "preview") if interview.reopens else RULE_STEPS
+        _require_step(interview, steps, drafted=True)
+        reopens, drafted = interview.reopens, interview.draft_version
+
+        async def confirmed() -> None:
+            await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "preview"),
+                          reopens=reopens, version=drafted, steps=steps)
+
+        row = await owner.ro.one("policy_versions", desk_id=desk_id, version=drafted)
+        if row is not None and row["status"] == "active":     # a Desk has one active version: this draft is in force
+            await confirmed()
+            active = version_from_row(row)
+            await tell_cancelled_links(owner, engine, desk_id, active)
+            return active
+        if row is None or row["status"] != "proved":
+            raise ApiProblem(409, "conflict")
+        try:
+            active = await owner.kernel.call("POST /policy/confirm", PolicyConfirmRequest(
+                desk_id=desk_id, version=drafted))
+        except KernelFailed as refused:
+            if refused.code != "conflict":
+                raise
+            version = checkable(await _post_draft(owner, desk_id, interview.draft_cards,
+                                                  owner_rule_answers(interview.answers).auto_money_cap_cents))
+            await _drafted(engine, owner, interview_id, version.version, "rules", reopens=reopens)
+            raise RulesChangedSinceDraft(rules_draft(version, version_cap(version))) from None
+        await confirmed()
     await tell_cancelled_links(owner, engine, desk_id, active)
     return active
 
 
 async def go_live(owner: OwnerCtx, engine: AsyncEngine, interview_id: str, public_origin: str) -> WentLive:
     """Turn Answering on once the rules are confirmed (step `preview`, else 409 `conflict`): the Desk answers the
-    public at its address (step `live`)."""
-    async with engine.connect() as conn:
-        interview = await _load(conn, owner.copy_id, interview_id)
-    desk_id = owner.desk(interview.desk_id)
-    _require_step(interview, ("preview",))
-    await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=True), path={"id": desk_id})
-    await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "live"))
+    public at its address (step `live`). Held against a change (`_transition`); one that still lands meanwhile (from
+    another process) is 409 `conflict`, and Answering goes off again, so the Desk never answers on the rules before it."""
+    with _transition(interview_id):
+        interview = await _read(engine, owner, interview_id)
+        desk_id = owner.desk(interview.desk_id)
+        _require_step(interview, ("preview",))
+        await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=True), path={"id": desk_id})
+        try:
+            await _update(engine, owner, interview_id, lambda found: setattr(found, "step", "live"),
+                          reopens=interview.reopens, version=interview.draft_version, steps=("preview",))
+        except ApiProblem:
+            await owner.kernel.call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False), path={"id": desk_id})
+            raise
     slug = await _slug(owner, desk_id)
     return WentLive(public_url=f"{public_origin}/d/{slug}", slug=slug)
 
