@@ -70,3 +70,18 @@ describe.each(['desktop', 'phone'] as const)("payment link cards in the owner's 
     await expect.poll(() => actions(screen)).toEqual([null]);
   });
 });
+
+
+it('returns focus to the owner transcript when its focused payment link closes', async () => {
+  const { chat, tokens } = chatWithLinks(1);
+  const [token] = tokens as [string];
+  const { screen } = await renderRoute(conversation(chat.state.session_id), { pollScale: 0.05 });
+  const log = screen.getByRole('log');
+  const open = log.getByRole('link', { name: 'Open payment page', exact: true });
+  await expect.element(open).toBeVisible();
+  open.element().focus();
+  await expect.element(open).toHaveFocus();
+  mockStore.world.payLink(token, link(token));
+  await expect.element(open).not.toBeInTheDocument();
+  await expect.element(log).toHaveFocus();
+});

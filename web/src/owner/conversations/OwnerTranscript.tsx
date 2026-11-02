@@ -10,7 +10,7 @@
  * cards and receipts one by one.
  */
 import { useQuery } from '@tanstack/react-query';
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 
 import type { EvMessage, RenderedBlock, StatusEvent } from '../../api/contracts.ts';
 import { request } from '../../api/http.ts';
@@ -52,6 +52,8 @@ type OwnerRow = GroupedRow<OwnerRowItem, OwnerReceiptSource>;
 
 export interface OwnerTranscriptProps {
   items: readonly OwnerTranscriptItem[];
+  /** The transcript log, which takes focus when a focused payment action closes. */
+  focusTarget: RefObject<HTMLElement | null>;
   /** Who an agent's requests come from, as the owner's screens name them. */
   agentName: string;
   /** The owner's display name: Claude's messages name them, and their own messages show their initials. */
@@ -274,6 +276,7 @@ function useRecord(deskId: string, open: boolean) {
 
 export function OwnerTranscript({
   items,
+  focusTarget,
   agentName,
   ownerName,
   timezone,
@@ -286,7 +289,7 @@ export function OwnerTranscript({
   const groups = useMemo(() => rowsOf(items), [items]);
   const messages = useMemo(() => groups.rows.flatMap(({ item }) => item.kind === 'message' ? [item.ev] : []), [groups]);
   const [paymentLinks] = useState(paymentLinkMemory);
-  const paymentBlock = usePaymentLinks(messages, paymentLinks);
+  const paymentBlock = usePaymentLinks(messages, paymentLinks, focusTarget);
   const arrived = useArrivals(groups.rows, recorded, readSinceOpened);
   const shown = useShownReceipts(groups);
   const [openSeq, setOpenSeq] = useState<number | null>(null);

@@ -26,7 +26,7 @@ function tokenOf(block: RenderedBlock): string | undefined {
 export function usePaymentLinks(
   messages: readonly LinkMessage[],
   memory: PaymentLinkMemory,
-  composer?: RefObject<HTMLElement | null>,
+  focusTarget?: RefObject<HTMLElement | null>,
   chatPath?: string,
 ): (block: RenderedBlock) => RenderedBlock {
   const cards = useMemo(() => messages.flatMap((ev) => ev.blocks.filter((block): block is CardBlock => block.kind === 'card')), [messages]);
@@ -58,12 +58,15 @@ export function usePaymentLinks(
   }), [memory]);
   runtime.tokens = tokens;
 
-  // Removing a focused anchor leaves focus on body. Restore the visitor's place after the DOM
+  // Removing a focused anchor leaves focus on body. Restore the reader's place after the DOM
   // update, without taking focus if they moved to another control while the read was pending.
   useLayoutEffect(() => {
     if (!runtime.focused || runtime.focused.isConnected) return;
     runtime.focused = null;
-    if (document.activeElement === document.body) composer?.current?.querySelector('textarea')?.focus({ preventScroll: true });
+    if (document.activeElement === document.body) {
+      const target = focusTarget?.current;
+      (target?.querySelector('textarea') ?? target)?.focus({ preventScroll: true });
+    }
   });
 
   const read = (token: string) => {
