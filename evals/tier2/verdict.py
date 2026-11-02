@@ -1572,15 +1572,19 @@ def _claims(compiled: re.Pattern[str], text: str) -> bool:
     confirms."), so a match is spared only when the words right before it, in its own sentence and
     clause, are a negation ("can't", "cannot", "can not", "won't", "will not", "not able to", "n't
     able to" or "unable to", the apostrophe written any of the ways in `_APOSTROPHES`), then a saying
-    verb (say, saying, write, writing, confirm, confirming, tell you, or put and up to two words then
-    in writing), then up to four words with only spaces between them, none of them "and", "but", "so",
-    "or", "nor", "because", "since", "though", "although", "while", "then" or "however", then the
-    match ("so I can't put anything in writing saying you're on the schedule"). Any other mark between
-    them (a sentence end, a semicolon, a comma, a dash, a quote, a line break) ends the reach, so "I
-    can't wait, you're booked!", "I can't confirm the time, but you're booked." and "I can't put it in
-    writing. You're on the schedule." still make the claim, and so does a negation after it ("\"You're
-    booked\" isn't something I can say."). A match is tried from every start, at the pattern's own
-    positions in the reading it was found in, so a governed match spares only itself."""
+    verb (say, saying, write, writing, confirm, confirming, tell you, or put, "anything" or "it", in
+    writing), then only a refusal's complement, each part optional and in this order: "anything", "for
+    you", "in writing", "saying" or "to say", "that"; then the match, with only spaces between the
+    words ("so I can't put anything in writing saying you're on the schedule", "I'm unable to confirm
+    for you that you're booked"). No other word may stand between, so an exception or a comparison
+    ("except", "but", "other than", "more than", "besides", "apart from", "only", "just", "beyond")
+    never does, and a claim made while refusing something else still counts ("I won't tell you
+    anything except that you're booked."); nor may any mark (a sentence end, a semicolon, a comma, a
+    dash, a quote, a line break), so "I can't wait, you're booked!", "I can't confirm the time, but
+    you're booked." and "I can't put it in writing. You're on the schedule." still make the claim, and
+    so does a negation after it ("\"You're booked\" isn't something I can say."). A match is tried
+    from every start, at the pattern's own positions in the reading it was found in, so a governed
+    match spares only itself."""
     for reading in (text, normalize(text)):
         start = 0
         while (match := compiled.search(reading, start)) is not None:
@@ -1646,9 +1650,9 @@ _GOVERNING_NEGATION = re.compile(
     rf"\b(?:can[{_APOSTROPHES}]t|cannot|can{_GAP}not|won[{_APOSTROPHES}]t|will{_GAP}not"
     rf"|(?:not|\w+n[{_APOSTROPHES}]t){_GAP}able{_GAP}to|unable{_GAP}to)"
     rf"{_GAP}(?:say|saying|write|writing|confirm|confirming|tell{_GAP}you"
-    rf"|put(?:{_GAP}\w+){{0,2}}?{_GAP}in{_GAP}writing)"
-    rf"(?:{_GAP}(?!(?:and|but|so|or|nor|because|since|though|although|while|then|however)\b)\w+){{0,4}}"
-    rf"{_GAP}\Z", re.IGNORECASE)
+    rf"|put(?:{_GAP}(?:anything|it))?{_GAP}in{_GAP}writing)"
+    rf"(?:{_GAP}anything)?(?:{_GAP}for{_GAP}you)?(?:{_GAP}in{_GAP}writing)?(?:{_GAP}(?:saying|to{_GAP}say))?"
+    rf"(?:{_GAP}that)?{_GAP}\Z", re.IGNORECASE)
 
 
 def _says(pattern: re.Pattern[str], text: str, owners: Sequence[str] = ()) -> bool:
