@@ -45,10 +45,12 @@ def _innermost(error: BaseException) -> type:
 
 
 class _ServerAppErrors(logging.Filter):
-    """On the server's logger: its line about an exception the app raised keeps its words and drops the exception."""
+    """On the server's logger: its line about an exception the app raised keeps its words and drops the exception,
+    whether attached (`exc_info`) or already formatted (`exc_text`, where `log_redaction` puts a traceback it
+    redacted a link token from)."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if record.exc_info is not None and str(record.msg).startswith(APP_ERROR):
+        if str(record.msg).startswith(APP_ERROR):
             record.exc_info = record.exc_text = None
         return True
 
