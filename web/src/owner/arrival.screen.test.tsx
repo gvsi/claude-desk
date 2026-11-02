@@ -1700,7 +1700,7 @@ describe('Today', () => {
     ]);
     const held = things.getByRole('listitem').nth(2);
     await expect
-      .element(held.getByText('A request is waiting for your answer. Held by your rule: Quotes from your price list, at list price.', { exact: true }))
+      .element(held.getByText('A request is waiting for your answer.', { exact: true }))
       .toBeVisible();
     await expect.element(held.getByRole('button', { name: 'Open the request' })).toBeVisible();
     expect(held.element().querySelector('.cd-status-dot--held')).not.toBeNull();
@@ -1877,8 +1877,8 @@ describe('Things to try ticks off', () => {
     await allow.click();
     const frames = await watching;
 
-    // Needs you holds while the check draws, then glides up once to where the done row's own height puts it.
-    expectHeldThenGlided(frames, row.element() as HTMLElement);
+    // The phone row reserves its end line's room, so Needs you stays still through every frame.
+    expectHeldThenGlided(frames, row.element() as HTMLElement, viewport === 'phone');
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
   });
@@ -2077,7 +2077,7 @@ describe('Things to try ticks off', () => {
     const frames = await watching;
 
     await expect.element(card.getByText(cardLine, { exact: true })).toBeVisible();
-    expectSettledInItsSlot(frames, item);
+    expectSettledInItsSlot(frames, item, viewport === 'phone');
     expect(thingRow(screen, 'Answer a held request').element()).toBe(item);
     await expect.element(row.getByText(rowLine, { exact: true })).toBeVisible();
     // No check, no pill and no button, nor an empty place for one: the card right below has the request.
@@ -2771,11 +2771,11 @@ const TOO_SMALL_TO_EASE = 4;
  * way of places between (when it moved more than a few px), to where the row's own height puts it:
  * the row keeps no least height at the end.
  */
-function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): void {
+function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false): void {
   const from = frames[0]?.below ?? 0;
   const to = frames.at(-1)?.below ?? 0;
-  // A card whose row keeps its height (its open ideas didn't make it the tallest) moves nothing.
-  if (cardsShareTheirRow() && Math.abs(to - from) < 0.5) {
+  // A phone row with its end line's room reserved, or cards sharing their height, move nothing.
+  if (keepsHeight || (cardsShareTheirRow() && Math.abs(to - from) < 0.5)) {
     expect(frames.some((frame) => frame.checkDrawing), 'the check drew').toBe(true);
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
@@ -2804,7 +2804,7 @@ function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement): v
  * its place as the line came in, then moved up one way only, by way of places between, to where the
  * row's own height puts it.
  */
-function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement): void {
+function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false): void {
   expect(frames.every((frame) => frame.drawn), 'the row stayed in the list').toBe(true);
   const top = frames[0]?.rowTop ?? 0;
   expect(frames.every((frame) => Math.abs(frame.rowTop - top) < 0.5), 'the row kept its slot').toBe(true);
@@ -2814,7 +2814,7 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement):
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
-  if (cardsShareTheirRow()) {
+  if (keepsHeight || cardsShareTheirRow()) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
     return;

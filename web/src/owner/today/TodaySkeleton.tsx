@@ -4,7 +4,7 @@ import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
-import { THINGS_TO_TRY } from '../arrival/ideas.ts';
+import { ANSWER_ROOM, THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
@@ -32,7 +32,8 @@ const BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control
 const DETAILS = [
   TODAY_COPY.chatDetail,
   `${TODAY_COPY.breakBeforeOwner}${rivera.business.ownerName.split(' ')[0]}${TODAY_COPY.breakAfterOwner}`,
-  `${TODAY_COPY.waiting} ${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`,
+  // The seed's hold went past an automatic rule's limit, so no rule is named (`owner_reads._held_by`).
+  TODAY_COPY.waiting,
   TODAY_COPY.createDetail,
 ] as const;
 
@@ -397,7 +398,13 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
                     <TextLines words={THINGS_TO_TRY[i]!.title} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
-                    <TextLines words={DETAILS[i]!} className="cd-things__detail" />
+                    {label === 'Open the request' ? (
+                      <span className="cd-things__detail cd-type-meta" data-room={ANSWER_ROOM}>
+                        <span className="cd-things__detail-now">
+                          <TextLines words={DETAILS[i]!} probeClassName="cd-things__detail" />
+                        </span>
+                      </span>
+                    ) : <TextLines words={DETAILS[i]!} className="cd-things__detail" />}
                   </div>
                   {/* From 640 px each card's button at its foot; on a phone each row's chevron. */}
                   <div className="cd-things__action">
@@ -420,10 +427,6 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
             <ApprovalTop />
             <TextLines words={rivera.decisions.held.reason_plain} text="summary" className="cd-approval-card__reason" lastWidth="var(--cd-today-approval-last-width)" />
             <TextLines words={`From the visitor: “${rivera.conversations.visitor.turns.find((turn) => turn.kind === 'visitor')?.text ?? ''}”`} className="cd-approval-card__context" />
-            <div className="cd-approval-card__held-by">
-              <Skeleton shape="block" width={16} height={16} />
-              <TextLines words={`${TODAY_COPY.heldBy}${rivera.ruleCards['rv-quote'].reason}`} className="cd-today-skeleton__rule" lastWidth="var(--cd-today-approval-last-width)" />
-            </div>
             <div className="cd-approval-card__answers">
               <ApprovalAnswers />
             </div>
