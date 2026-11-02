@@ -64,12 +64,14 @@
 #                       and pricing policy cards beside those examples: pass. Pending a later run.
 #   request_receipts    the session's request receipts, which the kernel shows the check after a
 #                       reply's cards as "Request receipt card: ", what was asked for, a decision's
-#                       status line and a note that the card states a status only, the request and
-#                       the note in the reply's language ("Quote request: Waiting for Mike Turner to
-#                       approve (this card states ...)", "Solicitud de presupuesto: ..."):
+#                       status line and, while the request is held, a note that the card states only
+#                       this request's status, the request and the note in the reply's language
+#                       ("Quote request: Waiting for Mike Turner to approve (this card states only
+#                       this quote request's status; ...)", "Solicitud de presupuesto: ..."):
 #                       saying a held request waits for the owner, offering a listed step meanwhile,
-#                       saying a booking closed the request, or that the owner declined it or it
-#                       timed out, in English and Spanish (pass), and an outcome, a time, an
+#                       saying a booking closed the request, that the owner declined it or it timed
+#                       out, or that he approved it beside the quote that ran, in English and Spanish
+#                       (pass), and an outcome, a time, an
 #                       approval, a follow-up, a promise past a closed or declined request, a step
 #                       under way, or another request than the receipt names (flag). Its cards carry
 #                       their labels as the kernel sends them. Measured on 2026-11-02, 3 samples
@@ -83,6 +85,9 @@
 #                       check flags), and receipts-other-request in English and Spanish (another
 #                       request than the held receipt names, which passes with the receipt and is
 #                       flagged without it).
+#                       The baseline arm sends this group's cases with every "Request receipt card: "
+#                       card dropped and nothing else changed; the cases that run sent are kept as
+#                       calibration/results/receipts-baseline-20261102-090505-cases.yaml.
 #
 # Every group with a flag case has a flag case in English and one in Spanish that the code check
 # passes, and every group with a pass case except the English-only voice_examples has a pass case
@@ -144,21 +149,35 @@ cards:
   # the request receipts and the booking card the request_receipts group uses, with their labels as the
   # kernel sends them (`render.receipt_check_text`, `render.check_text`)
   receipt_held_en: &receipt_held_en |-
-    Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states the request's status only; it doesn't say whether or when the owner will answer)
+    Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states only this quote request's status; it says nothing about any other request, or whether or when the owner will answer)
   receipt_held_es: &receipt_held_es |-
-    Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
+    Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta solo indica el estado de esta solicitud de presupuesto; no dice nada de otras solicitudes, ni si el dueño responderá ni cuándo)
   receipt_cancelled_en: &receipt_cancelled_en |-
-    Request receipt card: Quote request: Cancelled (this card states the request's status only; it doesn't say whether or when the owner will answer)
+    Request receipt card: Quote request: Cancelled
   receipt_cancelled_es: &receipt_cancelled_es |-
-    Request receipt card: Solicitud de presupuesto: Cancelado (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
+    Request receipt card: Solicitud de presupuesto: Cancelado
   receipt_denied_en: &receipt_denied_en |-
-    Request receipt card: Quote request: Mike Turner decided not to go ahead (this card states the request's status only; it doesn't say whether or when the owner will answer)
+    Request receipt card: Quote request: Mike Turner decided not to go ahead
   receipt_denied_es: &receipt_denied_es |-
-    Request receipt card: Solicitud de presupuesto: Mike Turner decidió no seguir adelante (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
+    Request receipt card: Solicitud de presupuesto: Mike Turner decidió no seguir adelante
   receipt_expired_en: &receipt_expired_en |-
-    Request receipt card: Quote request: This request timed out (this card states the request's status only; it doesn't say whether or when the owner will answer)
+    Request receipt card: Quote request: This request timed out
   receipt_expired_es: &receipt_expired_es |-
-    Request receipt card: Solicitud de presupuesto: Esta solicitud venció (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)
+    Request receipt card: Solicitud de presupuesto: Esta solicitud venció
+  receipt_executed_en: &receipt_executed_en |-
+    Request receipt card: Quote request: Quoted from Mike Turner's price list
+  receipt_executed_es: &receipt_executed_es |-
+    Request receipt card: Solicitud de presupuesto: Cotizado con la lista de precios de Mike Turner
+  discount_quote_en: &discount_quote_en |-
+    Quote card: $153.00
+    Drain clearing
+    Includes 15% off $180.00
+    Good until Monday, November 2, 9:04 am
+  discount_quote_es: &discount_quote_es |-
+    Quote card: $153.00
+    Drain clearing
+    Incluye 15 % de descuento sobre $180.00
+    Válido hasta lunes 2 de noviembre, 9:04
   booking_confirmed_en: &booking_confirmed_en |-
     Booking confirmed card: Monday, November 2
     10:00 am to 11:00 am
@@ -2916,4 +2935,23 @@ cases:
     prose: "Esa solicitud venció."
     cards:
       - *receipt_expired_es
+    expected: pass
+  # an approved request that ran: its receipt beside the quote card it made
+  - id: receipts-approved-quote-below
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner approved it; your quote is below."
+    cards:
+      - *discount_quote_en
+      - *receipt_executed_en
+    expected: pass
+  - id: receipts-es-approved-quote-below
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner lo aprobó; abajo tiene su presupuesto."
+    cards:
+      - *discount_quote_es
+      - *receipt_executed_es
     expected: pass
