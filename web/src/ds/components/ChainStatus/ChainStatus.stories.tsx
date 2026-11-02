@@ -2,9 +2,12 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect } from 'storybook/test';
 
 import { rivera } from '../../fixtures/index.ts';
+import { expectComputed } from '../../test/expectComputed.ts';
 import { ChainStatus } from './ChainStatus.tsx';
 
 const { verified, broken } = rivera.ledger;
+
+const UNCHANGED = 'No entry has been changed since it was written';
 
 /** The header's one status dot. */
 function dotIn(root: HTMLElement): Element {
@@ -28,7 +31,7 @@ const meta = {
     layout: 'padded',
     canvas: 'N-Safety-Run1',
     canvasNote:
-      "The board has no header for every entry; this one follows the board's status dots and count pills, over the list Plan 04 adds.",
+      "The board has no header for every entry; this one follows the board's status dots, over the list Plan 04 adds. The count is words beside the line (“3 entries”), not a count pill, so it says what it counts.",
   },
 } satisfies Meta<typeof ChainStatus>;
 
@@ -38,11 +41,15 @@ type Story = StoryObj<typeof meta>;
 
 export const Ok: Story = {
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByText('Every entry matches the chain')).toBeVisible();
+    const line = canvas.getByText(UNCHANGED);
+    await expect(line).toBeVisible();
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
-    // The count is a pill that reads as words.
-    const count = canvas.getByRole('img', { name: '3 entries' });
-    await expect(count).toHaveTextContent('3');
+    // The count is words, after the line on its row, quieter than it: caption type in the secondary text.
+    const count = canvas.getByText('3 entries');
+    await expect(count).toBeVisible();
+    await expect(canvasElement.querySelector('.cd-count-pill')).toBeNull();
+    expectComputed(count, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    await expect(count.getBoundingClientRect().left).toBeGreaterThan(line.getBoundingClientRect().right);
     // The signing key sits at the end of the line, apart from the status.
     const key = canvas.getByText('Signed with a development key');
     await expect(key).toBeVisible();
@@ -55,10 +62,10 @@ export const Ok: Story = {
 export const Broken: Story = {
   args: { chainOk: broken.chain_ok, firstBadSeq: broken.first_bad_seq, entries: broken.entries.length, devKey: false },
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByText("Entry 2 doesn't match the chain")).toBeVisible();
-    await expect(canvas.queryByText('Every entry matches the chain')).toBeNull();
+    await expect(canvas.getByText('The record check failed at entry 2')).toBeVisible();
+    await expect(canvas.queryByText(UNCHANGED)).toBeNull();
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--refused');
-    await expect(canvas.getByRole('img', { name: '3 entries' })).toBeVisible();
+    await expect(canvas.getByText('3 entries')).toBeVisible();
     await expect(canvas.queryByText('Signed with a development key')).toBeNull();
   },
 };
@@ -68,6 +75,6 @@ export const NotChecked: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByText('Not checked yet')).toBeVisible();
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--info');
-    await expect(canvas.getByRole('img', { name: '1 entry' })).toHaveTextContent('1');
+    await expect(canvas.getByText('1 entry')).toBeVisible();
   },
 };
