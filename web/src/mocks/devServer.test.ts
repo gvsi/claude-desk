@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { SseEvent } from '../api/contracts.ts';
 import { apiPath } from '../api/routes.ts';
-import type { ApprovalAnswerOut, CopyOut, NeedsYouItem, VisitorSession, VisitorTranscript } from '../api/views.ts';
+import type { ApprovalAnswerOut, CopyOut, NeedsYouItem, SetupState, SetupTools, VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { openChat } from '../public/PublicChatProvider.tsx';
 import { createMockApi, mockApiPlugin, type MockApi } from './devServer.ts';
 import { DEMO_CODE } from './script.ts';
@@ -429,6 +429,47 @@ describe('the dev server mock', () => {
     expect(await status(first, hrefs[0] ?? '')).toBe(200);
     expect(await status(second, hrefs[1] ?? '')).toBe(200);
     expect([await status(first, hrefs[0] ?? ''), await status(second, hrefs[1] ?? '')]).toEqual([404, 404]);
+  });
+
+  it('a_setup_card_the_owner_pressed_reads_as_their_choice_at_the_tools_step', { timeout: 15_000 }, async () => {
+    // Chen's setup as the mock app runs it, every turn streamed (faster than a model writes): each
+    // card's own button pressed as the page sends it, "Not now" on Stripe and the retainer, then the
+    // Tools step's reads, as after a reload. The booking job's card is the owner's own "on its own".
+    const api = createMockApi({ streams: { wordMs: 1, setupTurns: true } });
+    const tab = browserOf(api).tab();
+    await tab.json<CopyOut>('POST', apiPath('copies', {}), { passcode: 'demo' }, 201);
+    const description = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses.";
+    const { interview_id: id } = await tab.json<SetupState>('POST', apiPath('startSetup', {}), { description, timezone: 'America/Los_Angeles', idempotency_key: crypto.randomUUID() }, 201);
+    const cards = { cards: 1 };
+    await tab.json<SetupState>('POST', apiPath('setupConsent', { id }, cards), { allow: true }, 202);
+    let state = await tab.json<SetupState>('GET', apiPath('setup', { id }, cards));
+    for (let reads = 0; state.busy === true && reads < 400; reads += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      state = await tab.json<SetupState>('GET', apiPath('setup', { id }, cards));
+    }
+    state = await tab.json<SetupState>('POST', apiPath('setupAnswer', { id }, cards), { question: state.question, text: 'Both, about evenly' });
+    const pressed: string[] = [];
+    while (state.pending_card) {
+      const card = state.messages.find((message) => message.card?.proposal_id === state.pending_card)?.card;
+      const accept = card?.connector?.app !== 'stripe' && card?.job?.job !== 'payment';
+      pressed.push(`${card?.job?.title ?? card?.connector?.label ?? ''}: ${accept ? 'yes' : 'not now'}`);
+      state = await tab.json<SetupState>('POST', apiPath('setupProposal', { id, proposal_id: state.pending_card }, cards), { accept });
+    }
+    expect(pressed).toEqual([
+      'Google Calendar: yes', 'Book a free intro call: yes', 'Ask new clients three questions: yes',
+      'Stripe: not now', 'Send a retainer link: not now', 'Answer “Where’s my return?”: yes',
+    ]);
+    state = await tab.json<SetupState>('POST', apiPath('setupAnswer', { id }, cards), { question: state.question, text: 'Ask me before every payment' });
+    expect(state.step).toBe('tools');
+    const read = await tab.json<SetupState>('GET', apiPath('setup', { id }, cards));
+    const { tools } = await tab.json<SetupTools>('GET', apiPath('setupTools', { id }));
+    const booking = tools.find((row) => row.source === 'business' && row.business?.config.block === 'typed_booking')?.business;
+    if (!booking) throw new Error('setup made the booking job a business tool');
+    expect(booking.title).toBe('Book a free intro call');
+    // The message the Tools step reads (`acceptedAutonomy`): the accepted card with the job's title and
+    // setup, marked as the owner's own decision.
+    const madeFrom = read.messages.filter(({ card }) => card?.state === 'accepted' && card.job?.title === booking.title);
+    expect(madeFrom.map(({ card, owner_decided: decided }) => [card?.job?.config, decided, card?.job?.autonomy])).toEqual([[booking.config, true, 'auto']]);
   });
 
   it('plugin_is_mock_mode_only', { timeout: 30_000 }, async () => {

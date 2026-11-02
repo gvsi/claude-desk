@@ -85,8 +85,8 @@ function VisitorPhone() {
   const composerLabel = PHONE_CHAT.composer;
   return (
     <PhoneFrame caption={PHONE_PAGE.visitorCaption}>
-      {/* The business's own field, as its public page's header draws it. */}
-      <div className="cd-vision-phone__brand" style={{ background: brand.field }}>
+      {/* The business's own field and inks, as its public page's header draws them. */}
+      <div className="cd-vision-phone__brand" style={{ background: brand.field, color: brand.ink }}>
         <span className="cd-vision-phone__monogram cd-type-control" aria-hidden="true">
           {brand.monogram}
         </span>
@@ -94,7 +94,9 @@ function VisitorPhone() {
           <span className="cd-type-control cd-vision-phone__brand-name" data-copy="user">
             {brand.name}
           </span>
-          <span className="cd-vision-quiet cd-type-caption cd-vision-phone__brand-line">{PHONE_CHAT.disclosureUnderName}</span>
+          <span className="cd-type-caption cd-vision-phone__brand-line" style={{ color: brand.inkSecondary }}>
+            {PHONE_CHAT.disclosureUnderName}
+          </span>
         </span>
       </div>
       <div className="cd-vision-phone__chat">
