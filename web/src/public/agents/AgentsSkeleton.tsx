@@ -6,7 +6,9 @@ import './AgentCardPage.css';
 /**
  * The fresh copy's "What agents can do here": one row for each ability the Turner seed offers an
  * agent, in the order the kernel's Agent Card lists them, each with the lines its words take on a
- * phone; its outcome's line follows. On wider screens every ability is one line.
+ * phone; its outcome's line follows. On wider screens every ability is one line. The signed-limit
+ * ability keeps two: in Hanken Grotesk it fits a 390 px phone's row with about 6 px to spare, but it
+ * wraps on a 375 px phone and in the screen tests' fallback font, which the loading test measures.
  */
 const CAN_DO_ROWS: Readonly<Record<CopyLanguage, readonly number[]>> = {
   en: [1, 1, 1, 1, 2, 1, 1, 2, 1, 1],
