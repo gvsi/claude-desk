@@ -58,9 +58,11 @@ const SIDEBAR_HREFS = {
   today: '#today',
   conversations: '#conversations',
   people: '#customers',
+  knowledge: '#knowledge',
   rules: '#rules',
   connectors: '#connectors',
   safety: '#safety',
+  profile: '#profile',
   share: '#share',
   settings: '#settings',
 };
