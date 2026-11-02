@@ -627,8 +627,10 @@ export interface MoneyCapIn {
  * `GET /api/owner/desks/{desk_id}/needs_you`: a held request (`decision`, as the kernel signed it when read, which
  * applies expiry, with `held_by`, the reason of the rule card that held it, and `held_at`, when it was decided) or
  * an open handoff (`handoff`: a call-back request or the handoff card's), never both; who it came from; what they
- * wrote (`from_the_visitor`: at most two messages, a held request's only since the last Desk delivery before its
- * held status, a handoff's the chat's latest; each
+ * wrote (`from_the_visitor`: at most two messages; a held request quotes only the visitor's lines since Claude's
+ * last reply before its held status (a request whose status isn't in the chat quotes the chat's latest).
+ * If that window is empty, it quotes the newest visitor line before the status. A handoff quotes the chat's
+ * latest. Each is
  * a one-line glimpse of at most 200 characters, joined with " · "; their own untrusted words); and, on a handoff
  * only, the conversation's newest AI-written triage summary (`claude_summary`: what the person asked for and what
  * the Desk did, for the owner alone, shown as "Claude's note on what the Desk stopped: {summary}" and never quoted
