@@ -10,8 +10,10 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { NO_BUSINESS_TOOLS } from '../connectors/catalog.ts';
 import {
   ALWAYS_ON_SENTENCES,
+  canJoin,
   discountHoldSentence,
   holdLine,
+  holdMeta,
   holdSentence,
   moneyCapMeta,
   moneyCapSentence,
@@ -101,9 +103,12 @@ const MONEY_TOOLS: readonly Pick<ToolRow, 'tool' | 'effects'>[] = [
 ];
 
 describe('the C1 rows that join several tools', () => {
-  it('open_times_join_the_weekday_bookings', () => {
-    expect(read(ruleSentence([findSlots, cards['rv-book-wk']], words))).toBe('Claude can book visits on **weekdays, 8:00 am to 6:00 pm**');
-    expect(line(ruleMeta([findSlots, cards['rv-book-wk']], words))).toBe('Find open times and Book a visit · Anyone');
+  it('open_times_join_the_weekday_bookings_in_the_same_hours', () => {
+    const weekdayOpenTimes = { ...findSlots, hours: cards['rv-book-wk'].hours };
+    const row = [weekdayOpenTimes, cards['rv-book-wk']];
+    expect(canJoin(row)).toBe(true);
+    expect(read(ruleSentence(row, words))).toBe('Claude can book visits on **weekdays, 8:00 am to 6:00 pm**');
+    expect(line(ruleMeta(row, words))).toBe('Find open times and Book a visit · Anyone');
   });
 
   it('leads_and_callbacks_urgent_ones_too', () => {
@@ -130,8 +135,10 @@ describe('the C1 rows that ask first', () => {
   it('one_sentence_for_every_limit', () => {
     const limited = [cards['rv-link'], cards['rv-mandate']];
     expect(read(holdSentence([cards['rv-quote'], ...limited]) ?? [])).toBe('Claude asks you before payment links over **$300** or agent payments over **$20**');
-    expect(line(ruleMeta(limited, words))).toBe('Payment link and Charge within a signed limit · Anyone');
+    // Each limit keeps its own amount, and past a limit the owner is asked whoever it is for.
+    expect(line(holdMeta([cards['rv-quote'], ...limited], words) ?? { tools: '', who: '' })).toBe('Payment link and Charge within a signed limit · Anyone');
     expect(holdSentence([cards['rv-quote'], cards['rv-refund']])).toBeNull();
+    expect(holdMeta([cards['rv-quote'], cards['rv-refund']], words)).toBeNull();
     // Under each limited rule on its own, as C4 draws it.
     expect(read(holdLine(cards['rv-link']) ?? [])).toBe('Over **$300**, Claude asks you first');
     expect(holdLine(cards['rv-quote'])).toBeNull();
@@ -203,5 +210,34 @@ describe('any tool', () => {
     const verified = card({ card_id: 'v', applies_to: 'native.book', mode: 'auto', who: 'verified' });
     expect(read(ruleSentence(verified, words))).toBe("Claude can book visits, once they've confirmed it's them");
     expect(line(ruleMeta(verified, words))).toBe('Book a visit · Verified customers');
+  });
+});
+
+describe('cards that read as one rule', () => {
+  const quote = card({ card_id: 'q', applies_to: 'native.quote', mode: 'auto', who: 'anyone' });
+  const book = card({ card_id: 'b', applies_to: 'native.book', mode: 'auto', who: 'anyone' });
+
+  /** Each way a row of cards can't read as one rule, with the cards that differ. */
+  const apart: [string, RuleCard[]][] = [
+    ['differing modes', [quote, { ...book, mode: 'ask' }]],
+    ['differing audiences', [book, { ...cards['rv-docs'] }]],
+    ['one person and another', [{ ...book, who: 'person', person_id: 'p-1' }, { ...quote, who: 'person', person_id: 'p-2' }]],
+    ['anyone and signed agents', [{ ...cards['rv-link'], max_amount_cents: null }, { ...cards['rv-mandate'], max_amount_cents: null }]],
+    ['differing limits', [cards['rv-link'], cards['rv-mandate']]],
+    ['a limit and none', [cards['rv-link'], { ...cards['rv-link'], card_id: 'x', applies_to: 'effect:charge', max_amount_cents: null }]],
+    ['differing discounts', [quote, { ...quote, card_id: 'q2', applies_to: 'desk.intro-call', max_discount_bp: 1000 }]],
+    ['differing hours', [findSlots, cards['rv-book-wk']]],
+  ];
+
+  it.each(apart)('%s_never_join_silently', (_, row) => {
+    expect(canJoin(row)).toBe(false);
+    expect(() => ruleSentence(row, words)).toThrow(/can't read as one rule/);
+    expect(() => ruleMeta(row, words)).toThrow(/can't read as one rule/);
+  });
+
+  it('the_c1_rows_that_join_still_do', () => {
+    expect(canJoin([captureLead, requestCallback, urgent])).toBe(true);
+    expect(canJoin([cards['rv-docs'], cards['rv-charges']])).toBe(true);
+    expect(canJoin([cards['rv-link']])).toBe(true);
   });
 });
