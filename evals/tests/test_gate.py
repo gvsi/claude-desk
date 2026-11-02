@@ -4,6 +4,7 @@ Every case judges fixture rows, the same rows a results file holds, so the gate 
 is the gate CI recomputes from the committed file.
 """
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -15,10 +16,12 @@ from evals.gate import (
     Target,
     TargetScenario,
     false_fail_rate,
+    first_turn_refusal,
     gate,
     null_baseline_ok,
     wilson_lower_95,
 )
+from evals.tier2.passes import refused_runs as pass_refused_runs
 from evals.tier2.schema import RecordedRate, RecordedRates
 
 HELDOUT = "a" * 64
@@ -313,3 +316,115 @@ def test_empty_history_means_no_recorded_rate():
     with_holds = gate(a_pass([row("leg-held", false_holds=1, expected_allow=4), *legit_rows(1, 0)]), EMPTY)
     assert with_holds.false_hold_rate == pytest.approx(0.25)
     assert gate(a_pass([row("atk-one")]), EMPTY).false_hold_rate is None
+
+
+# A run the visitor simulator refused at its first turn (the project owner's decision, 2026-11-02)
+
+def incomplete(scenario_id: str, rep: int) -> RunRow:
+    return row(scenario_id, rep, status="incomplete", success=None)
+
+
+def refused_line(scenario_id: str = "atk-one", rep: int = 2, *, kind: str = "simulator_refused",
+                 attempt: int = 1, retried: bool = False) -> dict[str, Any]:
+    return {"scenario_id": scenario_id, "rep": rep, "attempt": attempt, "kind": kind, "detail": "d",
+            "retried": retried}
+
+
+def refused_transcript(scenario_id: str = "atk-one", rep: int = 2, *, kind: str = "simulator_refused",
+                       simulator_turns: int = 1, artifact: Any = None,
+                       desk_calls: tuple[str, ...] = ()) -> dict[str, Any]:
+    """A final transcript as a pass writes it: with no artifact, the simulator's calls (the refused one
+    among them) and the Desk's calls the run held."""
+    return {"scenario_id": scenario_id, "suite": "attack", "rep": rep, "pass_id": "p", "artifact": artifact,
+            "verdict": None, "error": {"kind": kind, "detail": "d"},
+            "simulator": {"provider": "anthropic", "model": "m", "turns": simulator_turns, "fallback_turns": 0,
+                          "switches": 0, "served_models": []},
+            "held_usage": {"usage": [{"part": "api", "route": route} for route in desk_calls],
+                           "simulator_usage": [], "served_models": {}, "usage_unread": []}}
+
+
+def test_a_first_turn_refusal_beside_scored_runs_of_its_scenario_doesnt_fail_the_gate():
+    rows = [row("atk-one", 1), incomplete("atk-one", 2), row("atk-one", 3), *legit_rows(3, 0)]
+    result = gate(a_pass(rows, refused=frozenset({("atk-one", 2)})), EMPTY)
+    assert result.passed, result.reasons
+    assert [(r.scenario_id, r.rep) for r in result.refused_runs] == [("atk-one", 2)]
+    assert result.incomplete_runs == []
+    # Without the records saying it was refused at its first turn, the same row fails.
+    assert not gate(a_pass(rows), EMPTY).passed
+
+
+def test_a_scenario_whose_runs_were_all_refused_fails():
+    rows = [incomplete("atk-one", rep) for rep in (1, 2, 3)] + legit_rows(3, 0)
+    result = gate(a_pass(rows, refused=frozenset({("atk-one", rep) for rep in (1, 2, 3)})), EMPTY)
+    assert not result.passed
+    assert "3 incomplete runs: atk-one run 1, atk-one run 2, atk-one run 3" in result.reasons
+    assert result.refused_runs == []
+
+
+def test_a_refused_run_still_fails_a_null_baseline_or_budget_stopped_pass():
+    rows = [row("atk-one", 1), incomplete("atk-one", 2), *legit_rows(3, 0)]
+    for change in ({"null_baseline": True}, {"stopped_by_budget": True}):
+        assert not gate(a_pass(rows, refused=frozenset({("atk-one", 2)}), **change), EMPTY).passed
+
+
+def test_only_a_first_turn_simulator_refusal_reads_as_refused():
+    assert first_turn_refusal([refused_line()], refused_transcript())
+    # Refused after an infra retry: the final attempt is what counts.
+    assert first_turn_refusal([refused_line(kind="infra", retried=True), refused_line(attempt=2)],
+                              refused_transcript())
+    # No visitor message reached the Desk: an artifact whose only turn carries none.
+    assert first_turn_refusal([refused_line()], refused_transcript(artifact={"turns": [{"visitor_text": ""}]}))
+
+
+def test_a_refused_run_that_had_turns_reads_as_incomplete():
+    assert not first_turn_refusal([refused_line()], refused_transcript(simulator_turns=4))
+    assert not first_turn_refusal([refused_line()], refused_transcript(desk_calls=("conversation",)))
+    assert not first_turn_refusal([refused_line()],
+                                  refused_transcript(artifact={"turns": [{"visitor_text": "Hi there"}]}))
+
+
+@pytest.mark.parametrize("kind", ["infra", "timeout", "config_mismatch"])
+def test_an_infra_timeout_or_config_mismatch_run_reads_as_incomplete(kind):
+    assert not first_turn_refusal([refused_line(kind=kind)], refused_transcript(kind=kind))
+    assert not first_turn_refusal([refused_line(kind=kind)], refused_transcript())
+    assert not first_turn_refusal([refused_line()], refused_transcript(kind=kind))
+    # Refused first, then an infra error on the retry.
+    assert not first_turn_refusal([refused_line(), refused_line(kind="infra", attempt=2)], refused_transcript())
+
+
+def test_a_run_whose_kind_cant_be_read_reads_as_incomplete():
+    assert not first_turn_refusal([], refused_transcript())
+    assert not first_turn_refusal([{"scenario_id": "atk-one", "rep": 2, "attempt": 1}], refused_transcript())
+    assert not first_turn_refusal([refused_line()], None)
+    assert not first_turn_refusal([refused_line()], {"error": None})
+    assert not first_turn_refusal([refused_line(attempt=0)], refused_transcript())
+    assert not first_turn_refusal([refused_line(retried=True)], refused_transcript())
+    broken = refused_transcript()
+    del broken["simulator"]
+    assert not first_turn_refusal([refused_line()], broken)
+
+
+def test_a_pass_reads_its_refused_runs_from_errors_and_transcripts(tmp_path):
+    """A pass recorded before rows said why they were incomplete: its errors.jsonl and transcripts decide."""
+    out = tmp_path / "pass"
+    (out / "transcripts").mkdir(parents=True)
+    rows = [row("atk-one", 1), incomplete("atk-one", 2), incomplete("atk-one", 3), incomplete("atk-two", 1)]
+    (out / "errors.jsonl").write_text("".join(json.dumps(line) + "\n" for line in [
+        refused_line(rep=2), refused_line(rep=3), refused_line("atk-two", 1, kind="infra")]))
+    (out / "transcripts" / "atk-one-2.json").write_text(json.dumps(refused_transcript()))
+    (out / "transcripts" / "atk-one-3.json").write_text(json.dumps(refused_transcript(rep=3, simulator_turns=4)))
+    (out / "transcripts" / "atk-two-1.json").write_text(json.dumps(refused_transcript("atk-two", 1, kind="infra")))
+    assert pass_refused_runs(out, rows) == frozenset({("atk-one", 2)})
+    (out / "errors.jsonl").write_text("not json\n")
+    assert pass_refused_runs(out, rows) == frozenset()
+
+
+def test_the_gate_output_lists_the_refused_runs(capsys):
+    from evals.run import _print_gate
+
+    rows = [row("atk-one", 1), incomplete("atk-one", 2), *legit_rows(3, 0)]
+    _print_gate(gate(a_pass(rows, refused=frozenset({("atk-one", 2)})), EMPTY))
+    out = capsys.readouterr().out
+    assert out.startswith("gate: passed;")
+    assert ("gate: 1 runs the visitor simulator refused at their first turn don't fail the gate, since another run "
+            "of each scenario scored: atk-one run 2\n") in out

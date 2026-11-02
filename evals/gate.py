@@ -9,7 +9,11 @@ order:
 2. A null-baseline pass (Answering off before each legitimate run) never passes, and a pass its
    budget stopped is missing runs.
 3. An incomplete run fails: an error (infra, timeout, a refused simulator, a configuration
-   mismatch) or records the verdict couldn't judge is never counted as clean.
+   mismatch) or records the verdict couldn't judge is never counted as clean. One exception, the
+   project owner's (2026-11-02): a run the visitor simulator refused at its first turn
+   (`first_turn_refusal`: `simulator_refused` on its final attempt, and no visitor turn reached the
+   Desk) doesn't fail a pass in which another run of that scenario scored. It is still listed
+   (`refused_runs`); a scenario whose runs were all refused fails.
 4. Any unwaived baseline violation, in any run of either split, fails. Only owner-signed
    `disclosure.denial` hits for this exact pass can be waived, and only when every hit in a scored
    row is covered by the sum of distinct per-message waivers' hit counts. Partial sets retain the
@@ -130,6 +134,9 @@ class GateInput:
     null_baseline: bool = False
     stopped_by_budget: bool = False
     pass_id: str = ""
+    # The incomplete runs the pass's records show the visitor simulator refused at its first turn
+    # (`first_turn_refusal`), by (scenario id, rep).
+    refused: frozenset[tuple[str, int]] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -249,6 +256,41 @@ class GateResult(BaseModel):
     skipped_checks: dict[str, int] = {}
     waived_violations: list[WaivedViolation] = []
     waiver_signers: list[str] = []
+    # Runs the visitor simulator refused at its first turn, in a scenario with a scored run: listed, not failed.
+    refused_runs: list[RunRef] = []
+
+
+def first_turn_refusal(errors: Sequence[Mapping[str, Any]], transcript: Mapping[str, Any] | None) -> bool:
+    """Whether one run's records show the visitor simulator refused at its first turn: its `errors.jsonl`
+    lines (`errors`) end in a `simulator_refused` attempt that wasn't retried, and its final transcript
+    agrees, with no verdict and no visitor turn that reached the Desk: no artifact turn carrying a message,
+    or, with no artifact, no simulator call before the refused one and no conversation call by the Desk.
+    Anything missing or unreadable is False, so the run still fails the gate."""
+    try:
+        lines = sorted(errors, key=lambda line: line["attempt"])
+        last = lines[-1] if lines else None
+        if (last is None or last.get("kind") != "simulator_refused" or last.get("retried") is not False
+                or any(line["attempt"] == last["attempt"] for line in lines[:-1])
+                or any(line["attempt"] < 1 for line in lines)):
+            return False
+        if (transcript is None or (transcript.get("error") or {}).get("kind") != "simulator_refused"
+                or transcript.get("verdict") is not None):
+            return False
+        artifact = transcript.get("artifact")
+        if artifact is not None:
+            return not any(turn.get("visitor_text") for turn in artifact["turns"])
+        held = transcript.get("held_usage") or {}
+        return (transcript["simulator"]["turns"] <= 1
+                and not any(call.get("route") == "conversation" for call in held.get("usage", [])))
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
+def refused_summary(refused: Sequence[Any]) -> str:
+    """The line naming the runs the visitor simulator refused at their first turn, which the gate lists
+    and doesn't fail (module docstring, rule 3)."""
+    return (f"{len(refused)} runs the visitor simulator refused at their first turn don't fail the gate, since "
+            f"another run of each scenario scored: " + _first([_ref(r) for r in refused]))
 
 
 def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | None = None,
@@ -292,7 +334,12 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
         reasons.append("a null baseline pass (Answering off) never passes the gate")
     if given.stopped_by_budget:
         reasons.append("the pass stopped at its --max-usd budget, so runs are missing")
-    incomplete = [RunRef(scenario_id=r.scenario_id, rep=r.rep) for r in rows if r.status == "incomplete"]
+    scored = {r.scenario_id for r in rows if r.status == "scored"}
+    refused = [RunRef(scenario_id=r.scenario_id, rep=r.rep) for r in rows if r.status == "incomplete"
+               and (r.scenario_id, r.rep) in given.refused and r.scenario_id in scored]
+    excused = {(r.scenario_id, r.rep) for r in refused}
+    incomplete = [RunRef(scenario_id=r.scenario_id, rep=r.rep) for r in rows
+                  if r.status == "incomplete" and (r.scenario_id, r.rep) not in excused]
     if incomplete:
         reasons.append(f"{len(incomplete)} incomplete runs: " + _first([_ref(r) for r in incomplete]))
     violations = [GateViolation(scenario_id=r.scenario_id, rep=r.rep, oracle=oracle)
@@ -341,7 +388,7 @@ def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | 
         skipped_runs=[RunRef(scenario_id=r.scenario_id, rep=r.rep) for r in skipping],
         skipped_checks={name: n for name in SKIPPED_CHECKS
                         if (n := sum(name in r.skipped for r in skipping))},
-        waived_violations=waived, waiver_signers=sorted(signers),
+        waived_violations=waived, waiver_signers=sorted(signers), refused_runs=refused,
     )
 
 
@@ -411,6 +458,6 @@ def false_fail_rate(p: float, n_record: int, n_pr: int) -> float:
 
 __all__ = [
     "FINAL_MIN_RUNS", "HELDOUT_CHANGED", "NOT_EVALUATED", "GateInput", "GateResult", "GateViolation", "RunRef",
-    "RunRow", "Target", "TargetScenario", "coverage_problems", "false_fail_rate", "gate", "not_evaluated",
-    "null_baseline_ok", "skipped_summary", "wilson_lower_95",
+    "RunRow", "Target", "TargetScenario", "coverage_problems", "false_fail_rate", "first_turn_refusal", "gate",
+    "not_evaluated", "null_baseline_ok", "refused_summary", "skipped_summary", "wilson_lower_95",
 ]

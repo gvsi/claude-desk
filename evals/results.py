@@ -120,7 +120,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from itertools import zip_longest
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AwareDatetime,
@@ -133,9 +133,13 @@ from pydantic import (
     ValidationError,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
-from evals.gate import SHOWN, GateInput, GateResult, RunRow, Target, coverage_problems, skipped_summary, waiver_summary
+from evals.gate import (
+    SHOWN, GateInput, GateResult, RunRef, RunRow, Target, coverage_problems, refused_summary, skipped_summary,
+    waiver_summary,
+)
 from evals.gate import gate as gate_of
 from evals.oracles.canonical import sha256_hex
 from evals.tier1.harness import load_landed
@@ -574,6 +578,17 @@ class ResultsFile(BaseModel):
     runs: list[RunRow]
     pending: dict[str, str]
     gate: GateResult                             # as the pass judged it; results-check recomputes it
+    # The incomplete runs the pass's records show the visitor simulator refused at their first turn; the gate
+    # doesn't fail them while another run of the scenario scored (`gate`, rule 3).
+    refused_runs: list[RunRef] = []
+
+    @model_validator(mode="after")
+    def _refused_are_incomplete_rows(self) -> Self:
+        named = [(r.scenario_id, r.rep) for r in self.refused_runs]
+        incomplete = {(r.scenario_id, r.rep) for r in self.runs if r.status == "incomplete"}
+        if len(set(named)) != len(named) or not set(named) <= incomplete:
+            raise ValueError("refused_runs names each refused run once, and only incomplete rows")
+        return self
 
     @field_validator("gated", mode="before")
     @classmethod
@@ -587,7 +602,8 @@ class ResultsFile(BaseModel):
 
     def gate_input(self) -> GateInput:
         return GateInput(runs=self.runs, pending=self.pending, runs_per_scenario=self.runs_per_scenario,
-                         heldout_sha256=self.heldout_sha256, provider=self.providers.api)
+                         heldout_sha256=self.heldout_sha256, provider=self.providers.api,
+                         refused=frozenset((r.scenario_id, r.rep) for r in self.refused_runs))
 
     def dumps(self) -> str:
         return json.dumps(self.model_dump(mode="json", by_alias=True), indent=1) + "\n"
@@ -619,7 +635,7 @@ def results_file(p: Any, rates: RecordedRates, *, root: Path = REPO_ROOT) -> Res
         providers=ResultsProviders(api=p.providers.api, simulator=p.providers.simulator, kernel_checks="anthropic"),
         model_ids=p.model_ids, landed=list(p.landed), suite_sha256=p.suite_sha256, heldout_sha256=p.heldout_sha256,
         recorded_rate=rate_ref(rates), runs=list(p.runs), pending=dict(p.pending),
-        gate=gate_of(p, rates, waivers=waivers),
+        gate=gate_of(p, rates, waivers=waivers), refused_runs=list(p.refused_runs),
     )
 
 
@@ -931,8 +947,9 @@ def _check(base: str, root: Path) -> str:
     skipped = [skipped_summary(len(result.skipped_runs), result.skipped_checks)] if result.skipped_runs else []
     lowered = [notice for entry in rates.history[len(before):] if (notice := lowered_notice(entry))]
     waived = [waiver_summary(result)] if result.waived_violations else []
+    refused = [refused_summary(result.refused_runs)] if result.refused_runs else []
     return "; ".join([f"{name} passes: {len(file.runs)} runs, {len(file.pending)} scenarios pending, "
-                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *waived, *lowered])
+                      f"recorded rate {_rate(file.recorded_rate)}", *skipped, *refused, *waived, *lowered])
 
 
 def _check_unarmed(rev: str, base: str, root: Path) -> None:

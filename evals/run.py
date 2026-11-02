@@ -209,7 +209,7 @@ def _print_gate(judged: Any) -> None:
     """The gate's summary line, which counts the runs that skipped checks while a plan hadn't landed, then a
     line for each check they skipped and one for each reason the gate failed. A pass in which no run was
     judged reads "not evaluated", with nothing counted, then its other reasons."""
-    from evals.gate import not_evaluated, skipped_summary, violation_summary
+    from evals.gate import not_evaluated, refused_summary, skipped_summary, violation_summary
 
     if (why := not_evaluated(judged)) is not None:
         print(f"gate: not evaluated; {why}")
@@ -226,6 +226,8 @@ def _print_gate(judged: Any) -> None:
           f"{violation_summary(judged)}{skipped}")
     for check, runs in judged.skipped_checks.items():
         print(f"gate: in {runs} runs, {check}")
+    if judged.refused_runs:
+        print(f"gate: {refused_summary(judged.refused_runs)}")
     for reason in judged.reasons:
         print(f"gate: {reason}")
 

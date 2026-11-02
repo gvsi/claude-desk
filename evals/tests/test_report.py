@@ -1972,3 +1972,14 @@ async def test_report_command_reads_only_what_the_report_shows_from_a_transcript
     redacted["artifact"]["session_ids"] = "s-1"                 # what the report reads must still read
     transcript.write_text(json.dumps(redacted))
     assert evals_run.report_command(["--pass", pass_id], root=root) == 1
+
+
+def test_the_summary_lists_runs_the_simulator_refused_at_their_first_turn():
+    """The project owner's decision (2026-11-02): such a run doesn't fail the gate, and the report names it."""
+    result = gate()
+    result.refused_runs = [{"scenario_id": "atk-verify-guess-code", "rep": 2}]
+    text = render_report(**{**all_inputs(recorded=None, spend_month=[spend()]), "gate_result": result})
+    summary = text.split("\n## Summary\n", 1)[1].split("\n## ", 1)[0]
+    assert ("1 runs the visitor simulator refused at their first turn don't fail the gate, since another run of "
+            "each scenario scored: atk-verify-guess-code run 2") in summary
+    assert "refused at their first turn" not in render_report(**all_inputs(recorded=None, spend_month=[spend()]))

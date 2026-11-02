@@ -90,7 +90,7 @@ from pydantic import (
 
 from evals import results
 from evals.credentials import mask_credentials
-from evals.gate import GateInput, RunRow, gate, waiver_summary
+from evals.gate import GateInput, RunRef, RunRow, first_turn_refusal, gate, waiver_summary
 from evals.results import API_ROUTES, KERNEL_ROUTES, SIMULATOR_ROUTES
 from evals.tier1.harness import load_landed
 from evals.tier2.runner import RunError, RunOutcome, SimulatorStats, run_scenario
@@ -286,6 +286,9 @@ class PassResult(BaseModel):
     simulator_fallbacks: dict[str, int]       # turns a fallback model served, and switches
     estimated_spend: list[EstimatedSpend] = []   # attempts in `spend` at a run's estimate, not priced
     start: StartChecks | None = None          # None in a pass.json from before passes recorded it
+    # The incomplete runs the visitor simulator refused at their first turn, read from errors.jsonl and the
+    # transcripts (`refused_runs`) whenever a pass is made or loaded, never from pass.json.
+    refused_runs: list[RunRef] = []
 
     @property
     def runs_per_scenario(self) -> int:
@@ -305,7 +308,8 @@ class PassResult(BaseModel):
     def gate_input(self) -> GateInput:
         return GateInput(runs=self.runs, pending=self.pending, runs_per_scenario=self.config.runs,
                          heldout_sha256=self.heldout_sha256, provider=self.providers.api,
-                         null_baseline=self.config.null_baseline, stopped_by_budget=self.stopped_by_budget)
+                         null_baseline=self.config.null_baseline, stopped_by_budget=self.stopped_by_budget,
+                         refused=frozenset((r.scenario_id, r.rep) for r in self.refused_runs))
 
 
 @dataclass
@@ -651,6 +655,7 @@ class _Pass:
             simulator_fallbacks=self.fallbacks,
             estimated_spend=sorted(self.estimated, key=lambda e: (e.scenario_id, e.rep, e.attempt)),
             start=StartChecks(uncommitted=uncommitted, kernel_built=kernel_built),
+            refused_runs=[RunRef(scenario_id=sid, rep=rep) for sid, rep in sorted(refused_runs(self.out, self.rows))],
         )
         write_pass(result, self.out)
         return result
@@ -847,7 +852,7 @@ class _Provided:
 
 def write_pass(result: PassResult, out: Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
-    (out / "pass.json").write_text(result.model_dump_json(indent=1, exclude={"runs"}) + "\n")
+    (out / "pass.json").write_text(result.model_dump_json(indent=1, exclude={"runs", "refused_runs"}) + "\n")
     (out / "runs.jsonl").write_text("".join(row.model_dump_json() + "\n" for row in result.runs))
 
 
@@ -858,7 +863,36 @@ def load_pass(pass_id: str, root: Path = REPO_ROOT) -> PassResult:
         raise PassRefused(f"no finished pass {pass_id} in evals/out/passes")
     data = json.loads((out / "pass.json").read_text())
     data["runs"] = [json.loads(line) for line in (out / "runs.jsonl").read_text().splitlines() if line.strip()]
+    rows = [RunRow.model_validate(row) for row in data["runs"]]
+    data["refused_runs"] = [{"scenario_id": sid, "rep": rep} for sid, rep in sorted(refused_runs(out, rows))]
     return PassResult.model_validate(data)
+
+
+def refused_runs(out: Path, rows: Iterable[RunRow]) -> frozenset[tuple[str, int]]:
+    """The incomplete runs of the pass in `out` that its own records show the visitor simulator refused at
+    their first turn (`gate.first_turn_refusal`), by (scenario id, rep), read from `errors.jsonl` and each
+    run's final transcript, so a pass recorded before this was read is judged the same way. An
+    `errors.jsonl` that can't be read names none; a transcript that can't be read leaves its run incomplete."""
+    try:
+        lines = [json.loads(line) for line in (out / "errors.jsonl").read_text().splitlines() if line.strip()]
+        by_run: dict[tuple[str, int], list[dict[str, Any]]] = {}
+        for line in lines:
+            by_run.setdefault((line["scenario_id"], line["rep"]), []).append(line)
+    except (OSError, ValueError, KeyError, TypeError):
+        return frozenset()
+    found = set()
+    for row in rows:
+        if row.status != "incomplete":
+            continue
+        try:
+            transcript = json.loads((out / "transcripts" / f"{row.scenario_id}-{row.rep}.json").read_text())
+        except (OSError, ValueError):
+            transcript = None
+        if (isinstance(transcript, dict) and (transcript.get("scenario_id"), transcript.get("rep")) == (
+                row.scenario_id, row.rep) and first_turn_refusal(by_run.get((row.scenario_id, row.rep), []),
+                                                                  transcript)):
+            found.add((row.scenario_id, row.rep))
+    return frozenset(found)
 
 
 # The stack
@@ -1084,7 +1118,8 @@ def record_rate(result: PassResult, *, signed_off_by: str, reason: str, lower_ba
                           f"not {config.runs}")
     # Judge safety through the gate's sole waiver-matching path. Completion's lower-bar rule stays below.
     judged = gate(result, RecordedRates(history=[]), waivers=at_head.waivers)
-    if not judged.passed or judged.skipped_runs:
+    # A run the simulator refused at its first turn passes the gate but is still incomplete, so no rate comes of it.
+    if not judged.passed or judged.skipped_runs or judged.refused_runs:
         raise PassRefused("a rate is recorded only from a clean pass: no incomplete run, violation, skipped check or "
                           "budget stop")
     suite = load_suite(evals_path(root, "tier2", "scenarios"))
