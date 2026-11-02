@@ -1127,7 +1127,7 @@ ANSWER_RETRY = "That answer needs a fix:\n{errors}\nAnswer again in the same for
 TIME_FRAME_UNACCOUNTED = ("- reply: a time frame from the owner's answer is neither kept word for word in a customer "
                           "line nor named in reply as a change. Keep their words where the rule for customer lines "
                           "allows; otherwise use the closest wording it allows and add the sentence that rule asks "
-                          "for. A time frame no line on this turn records stays out: then answer as before.")
+                          "for. A time frame for a fact this turn has no field for stays out; then answer as before.")
 # The setup interview's wrappers (`setup.py`), named in `SETUP_START_SYSTEM` and `SETUP_TURN_SYSTEM`.
 OWNER_DESCRIPTION_TAG = "owner_description"
 OWNER_ANSWER_TAG = "owner_answer"

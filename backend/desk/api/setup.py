@@ -121,7 +121,7 @@ import logging
 import re
 import secrets
 import unicodedata
-from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Collection, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -2297,8 +2297,9 @@ _WEEKDAY_ES = r"(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|
 OWNER_TIME_FRAME = re.compile(
     rf"(?<!\w)(?:{_COUNT_EN}\s+{_UNIT_EN}"
     r"|\d+\s*(?:hrs?|h|mins?)"
-    # "a" or "an" counts only after a deadline's preposition: "$150 an hour" and "once a week" are no time frames
-    rf"|(?:within|in|under|after|inside(?:\s+of)?)\s+(?:an?|a\s+few|a\s+couple(?:\s+of)?)\s+{_UNIT_EN}"
+    # "a" or "an" counts only after a deadline's or a threshold's words: "$150 an hour" and "once a week" are none
+    rf"|(?:within|in|under|after|inside(?:\s+of)?|at\s+least)\s+(?:an?|a\s+few|a\s+couple(?:\s+of)?)\s+{_UNIT_EN}"
+    r"|an?\s+(?:minute|hour|day|week|month)(?:'s|s)?\s+(?:notice|ahead|in\s+advance|beforehand)"
     r"|(?:the\s+)?(?:next|same|following)\s+(?:(?:business|working)\s+)?(?:day|week|month|morning)"
     r"|within\s+the\s+(?:hour|day|week|month)"
     r"|end\s+of\s+(?:the\s+)?(?:(?:business|working)\s+)?(?:day|week|month)"
@@ -2310,20 +2311,22 @@ OWNER_TIME_FRAME = re.compile(
     r"|dentro\s+de\s+la\s+(?:hora|semana)"
     rf"|(?:antes\s+del?|para\s+el|hasta\s+el)\s+{_WEEKDAY_ES}"
     r"|esta\s+semana|hoy|(?<!la\s)mañana)(?!\w)")
-# Hours ("7 days a week", "24 hours a day", "Monday until Friday", "del lunes hasta el viernes") and how long a visit
-# lasts, which no customer line holds as a time frame.
+# Hours ("7 days a week", "24 hours a day", "open 24h", "de 9h a 18h", "Monday until Friday", "del lunes hasta el
+# viernes") and how long a visit lasts (never "the last 30 days"), which no customer line holds as a time frame.
 _NOT_TIME_FRAMES = re.compile(
-    r"(?<!\w)(?:\w+\s+(?:hours?|days?)\s+a\s+(?:day|week)|24/7"
+    r"(?<!\w)(?:\w+\s+(?:hours?|days?)\s+a\s+(?:day|week)|24/7|open\s+24\s*(?:h|hrs?|hours?)"
+    r"|\d+\s*h(?:\s+(?:a|al|to|until|till|hasta))?\s+\d+\s*h"
     rf"|{_WEEKDAY_EN}\s+(?:to|through|thru|until|till)\s+{_WEEKDAY_EN}"
     rf"|(?:de|del)\s+{_WEEKDAY_ES}\s+(?:a|al|hasta(?:\s+el)?)\s+{_WEEKDAY_ES}"
-    r"|last(?:s|ing)?\s+(?:about\s+|around\s+|up\s+to\s+)?\S+\s+(?:minute|min|hour|hr|day|week|month)s?)(?!\w)")
+    r"|(?<!the\s)(?<!past\s)last(?:s|ing)?\s+(?:about\s+|around\s+|up\s+to\s+)?\S+\s+"
+    r"(?:minute|min|hour|hr|day|week|month)s?)(?!\w)")
 TIME_FRAME_LINES = ("summary", "pricing", "intake", "urgent", "after_hours")
 # A reply names a change only beside the pointer the rule for customer lines asks for, never by saying the words back.
 LINES_POINTER = "what customers will read"
 
 
 def _plain(text: str) -> str:
-    return " ".join(text.casefold().replace("-", " ").split())
+    return " ".join(text.casefold().replace("-", " ").replace("\u2019", "'").split())
 
 
 def owner_time_frames(text: str) -> list[str]:
@@ -2336,14 +2339,16 @@ def _says(text: str, span: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(span)}(?!\w)", _plain(text)) is not None
 
 
-def owner_time_frame_errors(text: str, turn: SetupTurn, stored: Iterable[str] = ()) -> list[str]:
+def owner_time_frame_errors(text: str, turn: SetupTurn, stored: Mapping[str, str] | None = None) -> list[str]:
     """The answer turn's retry line when it drafts a customer line and a time frame from the owner's answer `text` is
-    in none of its customer lines nor the `stored` ones, nor named in its reply as a change (with the pointer to What
-    customers will read). A turn that drafts none has nothing to check."""
-    drafted = [line for name in TIME_FRAME_LINES if isinstance(line := getattr(turn, name, None), str) and line.strip()]
+    in none of its customer lines nor the `stored` ones (by field) it leaves as they are, nor named in its reply as a
+    change (with the pointer to What customers will read). A turn that drafts none has nothing to check."""
+    drafted = {name: line for name in TIME_FRAME_LINES
+               if isinstance(line := getattr(turn, name, None), str) and line.strip()}
     if not drafted:
         return []
-    lines, named = [*drafted, *stored], LINES_POINTER in _plain(turn.reply)
+    kept = [line for name, line in (stored or {}).items() if name not in drafted]
+    lines, named = [*drafted.values(), *kept], LINES_POINTER in _plain(turn.reply)
     missing = [span for span in owner_time_frames(text)
                if not any(_says(line, span) for line in lines) and not (named and _says(turn.reply, span))]
     if not missing:
@@ -2622,8 +2627,8 @@ async def answer(owner: OwnerCtx, engine: AsyncEngine, model: ModelClient, inter
         desk_id = interview.desk_id
         said, = staged
         _hold_unless_kept(interview, key)
-        stored_lines = [line for name in TIME_FRAME_LINES
-                        if isinstance(line := getattr(interview.answers, name, None), str)]
+        stored_lines = {name: line for name in TIME_FRAME_LINES
+                        if isinstance(line := getattr(interview.answers, name, None), str)}
         turn = await structured(model, recorder(engine, ctx), SETUP_TURN_SYSTEM,
                                 [_turn_message(interview, key, text, run_id=said.pending)], SETUP_TURNS[key], TURN_MAX_TOKENS,
                                 problems=lambda drafted: owner_time_frame_errors(text, drafted, stored_lines),

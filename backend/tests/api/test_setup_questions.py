@@ -2721,6 +2721,11 @@ def test_setup_public_line_examples_hold_against_the_kernel_check():
     ("We reply in a day or two, within 24 hrs for audits, 48h at most, or the next morning.",
      ["in a day", "24 hrs", "48h", "next morning"]),
     ("Respondemos en un dia habil, o la proxima semana.", ["un dia habil", "proxima semana"]),
+    # thresholds: how recent something urgent is, how much notice a booking needs
+    ("Nothing is urgent except an IRS notice from the last 30 days.", ["30 days"]),
+    ("Please give us a week's notice, or book at least a day in advance.", ["a week's notice", "at least a day"]),
+    # clock times are hours, never a time frame
+    ("Abrimos de lunes a viernes de 9h a 18h; open 24h for emergencies.", []),
     # the days it opens are hours, never a deadline
     ("Open Monday to Friday, 9 to 5; abrimos de lunes a viernes.", []),
     ("Open Monday until Friday; abrimos del lunes hasta el viernes; open 24 hours a day.", []),
@@ -2764,11 +2769,26 @@ def test_saying_the_time_frame_back_is_no_named_change():
 
 
 def test_a_time_frame_already_in_a_stored_line_is_kept():
-    # An earlier turn may hold the owner's words already; this turn's lines needn't repeat them.
-    text = "Tax returns for families; we reply within one business day."
-    stored_lines = ["Outside office hours, leave a message and we reply within one business day."]
-    drafted = answer_turn(SETUP_TURNS["what_you_do"], intake="New clients send last year's return.")
-    assert desk_setup.owner_time_frame_errors(text, drafted, stored_lines) == []
+    # An earlier turn may hold the owner's words already; this turn's lines needn't repeat them, unless this turn
+    # redrafts that very line, which replaces the stored one.
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    text = "Take the message; we reply within one business day."
+    stored = {"after_hours": "Outside office hours, leave a message and we reply within one business day."}
+    drafted = answer_turn(SETUP_TURNS["contact_and_after_hours"], urgent="An IRS notice counts as urgent.")
+    assert desk_setup.owner_time_frame_errors(text, drafted, stored) == []
+    redrafted = answer_turn(SETUP_TURNS["contact_and_after_hours"],
+                            after_hours="Leave a message and the team replies once the office reopens.")
+    assert desk_setup.owner_time_frame_errors(text, redrafted, stored) == [TIME_FRAME_UNACCOUNTED]
+
+
+def test_the_retry_line_lets_only_a_fact_with_no_field_stay_out():
+    # "No line records it" would also describe a softened line; the prompt's own term is a field.
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    assert TIME_FRAME_UNACCOUNTED.endswith(
+        "A time frame for a fact this turn has no field for stays out; then answer as before.")
+    assert "A fact with no field on this turn isn't recorded on this turn" in SETUP_TURN_SYSTEM
 
 
 IRS_ANSWER = "Tax returns for families. Nothing is urgent except an IRS notice with a deadline in the next week."
