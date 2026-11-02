@@ -24,8 +24,9 @@ written conversations instead of a recording:
   date, so Today has no booking bar. The deposit conversation also books; its link and quote are paid, with a
   session-only charge fact, the live completion's paid ledger shape and a signed payment confirmation. The old
   completion marker cannot make a paid link actionable. No provider checkout, execution, reservation, mandate
-  or Demo inbox entry is written. The paid sample contributes its marked amount to Reports. Refund normalization
-  refuses a known charge with no verified record owner before provider access. The urgent callback's unscheduled
+  or Demo inbox entry is written. The paid sample contributes its marked amount to Reports. The refund tool is
+  unchanged: its sample charge was never made at the payments server, so the server refuses a refund lookup as
+  an unknown charge; refunds only go to a charge's verified customer. The urgent callback's unscheduled
   handoff mirrors `request_callback.open_callback` and is done after 15 minutes, without an alert.
 - **One archived sample person.** The invoice conversation alone is verified with assurance `demo_code` as a
   sample-only person from `seed.SAMPLE_CUSTOMER`. Its consumed, long-expired challenge has an empty hash, which
@@ -52,7 +53,7 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel
@@ -155,7 +156,7 @@ class _Written:
     entries: list[_Entry] = field(default_factory=list)
     decisions: list[DecisionRow] = field(default_factory=list)
     finals: dict[str, datetime] = field(default_factory=dict)      # each decision's final moment
-    replies: list[tuple[datetime, str, Callable[[], ReplyVerdict]]] = field(default_factory=list)
+    replies: list[tuple[datetime, str, Callable[[], ReplyVerdict], Literal["claude", "desk"]]] = field(default_factory=list)
     said: list[tuple[datetime, str, str]] = field(default_factory=list)
 
     def entry(self, at: datetime, kind: str, session_id: str | None, ref_id: str | None, summary: dict[str, Any],
@@ -246,7 +247,8 @@ async def write(ctx: KernelCtx, copy_id: str, desk_id: str, now: datetime, sessi
     events = [ReplayedEvent(session_id=session_id, shown_at=signed_time(at), kind="visitor_message", text=text,
                             verdict=None, decision=None) for at, session_id, text in written.said]
     events += [ReplayedEvent(session_id=session_id, shown_at=signed_time(at), kind="reply", text=None,
-                             verdict=verdict(), decision=None) for at, session_id, verdict in written.replies]
+                             verdict=verdict(), decision=None, author=author)
+               for at, session_id, verdict, author in written.replies]
     for row in written.decisions:
         events.append(ReplayedEvent(session_id=row.session_id, shown_at=signed_time(written.finals[row.decision_id]),
                                     kind="receipt", text=None, verdict=None,
@@ -580,8 +582,8 @@ async def _effects(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, sess
 
 def _reply(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session: SessionRow, at: datetime,
            facts: dict[str, Fact], written: _Written, names: list[str], *, prose: str | None = None,
-           templates: tuple[str, ...] | None = None, author: str = "claude") -> None:
-    """Claude's reply: its prose, which must pass the reply check's prose scan, then a card per template the sample
+           templates: tuple[str, ...] | None = None, author: Literal["claude", "desk"] = "claude") -> None:
+    """A replayed reply: optional prose, which must pass the reply check's scan, then a card per template the sample
     names, rendered from the fact this conversation wrote; ledgered `reply` and signed at that entry."""
     prose = sample.prose if prose is None else prose
     templates = sample.cards if templates is None else templates
@@ -623,4 +625,4 @@ def _reply(ctx: KernelCtx, desk: _Desk, sample: seed.SampleSession, session: Ses
         "message_id": message_id, "author": author, "ok": True, "language": LANGUAGE, "violations": [],
         "rule_ids": [], "fact_ids": [ledger.safe_ref(fact_id) for fact_id in fact_ids], "soft_promise": None,
         "soft_checks": None, "dropped": [], "final": True}, recorded)
-    written.replies.append((at, session.session_id, verdict))
+    written.replies.append((at, session.session_id, verdict, author))

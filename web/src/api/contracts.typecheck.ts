@@ -41,6 +41,7 @@ export type Aliases = [
 ];
 
 export type Checks = [
+  Assert<Equal<C.ReplayedEvent['author'], 'claude' | 'desk' | undefined>>,
   // A Desk's brand is a dictionary of colors: a closed object would reject this read.
   Assert<Equal<C.PublicDesk['brand']['primary'], string>>,
   // The SSE union has its eleven members, discriminated by `type`.

@@ -533,6 +533,13 @@ class ReplayedEvent(BaseModel):           # one moment of the recorded night as 
     text: str | None                      # visitor_message only: the persona's words (untrusted text)
     verdict: ReplyVerdict | None          # reply: a full signed ReplyVerdict
     decision: Decision | None             # receipt: a full signed Decision, in its final state
+    author: Literal["claude", "desk"] = "claude"   # reply only; other kinds retain the default
+
+    @model_validator(mode="after")
+    def _author_matches_kind(self) -> Self:
+        if self.kind != "reply" and self.author != "claude":
+            raise ValueError("only a replayed reply may be authored by the Desk")
+        return self
 
 class SeededChat(BaseModel):
     session_id: str

@@ -337,6 +337,18 @@ async def test_each_sample_session_ends_with_its_conversations_outcome(week_on, 
         assert (max(candidates)[2] if candidates else None) == outcome, sample.said
 
 
+async def test_only_the_deposits_final_reply_is_authored_by_the_desk(week_on, app, client):
+    created = await create_copy(client, replay_night=True)
+    [deposit] = [event for event in created.replayed_messages
+                 if event.kind == "visitor_message" and event.text == seed.RIVERA_SAMPLE_WEEK[5].said]
+    replies = [event for event in created.replayed_messages if event.kind == "reply"]
+    last = max((event for event in replies if event.session_id == deposit.session_id), key=lambda event: event.shown_at)
+    assert last.author == "desk"
+    assert [block.template for block in last.verdict.blocks] == ["payment_confirmed"]
+    assert all(event.author == "claude" for event in replies if event is not last)
+    assert all(event.author == "claude" for event in created.replayed_messages if event.kind != "reply")
+
+
 @pytest.mark.parametrize("now", NOWS)
 async def test_booking_bars_use_the_two_conversations_dates(week_on, app, client, frozen_clock, now):
     frozen_clock.travel(now)
