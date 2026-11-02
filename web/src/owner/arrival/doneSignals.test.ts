@@ -13,6 +13,7 @@ import {
   answeredInView,
   answeredOnRecord,
   chattedAsCustomer,
+  demoVisitorRan,
   doneCaption,
   firstDesk,
   keepFor,
@@ -141,6 +142,21 @@ describe('chat as a customer', () => {
 
   it('a replayed chat is history, not the owner chatting', () => {
     expect(chattedAsCustomer([transcript([said(1, 'visitor_text', 'Hello?'), delivered(2, 'claude')], { replayed: true })])).toBe(false);
+  });
+});
+
+describe('watch a demo visitor', () => {
+  it("is done once the Desk's conversations list a demo visitor's chat", () => {
+    expect(demoVisitorRan([conversation('ses-visitor'), conversation('ses-riley', { demo_visitor: true })])).toBe(true);
+  });
+
+  it('a real visitor, the preview or an agent is not one', () => {
+    expect(demoVisitorRan([conversation('ses-visitor'), conversation('ses-preview', { owner_preview: true }), conversation('ses-agent', { kind: 'agent' })])).toBe(false);
+    expect(demoVisitorRan([])).toBe(false);
+  });
+
+  it("a replayed chat is history, not the owner's", () => {
+    expect(demoVisitorRan([conversation('ses-riley', { demo_visitor: true, replayed: true })])).toBe(false);
   });
 });
 
@@ -306,7 +322,7 @@ describe('create your own Desk', () => {
 /** What the reads show for each thing now: nothing settled and nothing done, unless given. */
 function reading(fields: Partial<Record<Thing, Partial<Reading>>> = {}): Record<Thing, Reading> {
   const one = (thing: Thing): Reading => ({ done: false, settled: false, ...fields[thing] });
-  return { chat: one('chat'), break: one('break'), answer: one('answer'), create: one('create') };
+  return { chat: one('chat'), demo: one('demo'), break: one('break'), answer: one('answer'), create: one('create') };
 }
 
 describe('what this view remembers', () => {
@@ -356,11 +372,11 @@ describe('what this view remembers', () => {
 });
 
 describe("the list's line", () => {
-  it('says how long it takes until something is done, then counts of 4', () => {
+  it('says how long it takes until something is done, then counts of 5', () => {
     expect(doneCaption(0)).toBe('About 10 minutes. No real customer sees any of it.');
-    expect(doneCaption(1)).toBe('1 of 4 done. No real customer sees any of it.');
-    expect(doneCaption(3)).toBe('3 of 4 done. No real customer sees any of it.');
-    expect(doneCaption(4)).toBe('All 4 done. No real customer sees any of it.');
+    expect(doneCaption(1)).toBe('1 of 5 done. No real customer sees any of it.');
+    expect(doneCaption(4)).toBe('4 of 5 done. No real customer sees any of it.');
+    expect(doneCaption(5)).toBe('All 5 done. No real customer sees any of it.');
   });
 });
 

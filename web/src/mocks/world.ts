@@ -104,6 +104,11 @@ export interface SessionRecord {
   person: { personId: string; name: string } | null;
   /** The verified person's name, else a lead's once the visitor gave one, else null. Untrusted. */
   displayName: string | null;
+  /**
+   * A demo visitor's chat (demoVisitors.ts): the persona's first name, which names the chat when it
+   * gave no name of its own, and which the owner's reads tag; absent or null for anyone else.
+   */
+  demoVisitor?: string | null;
   /** The last turn's language; a follow-up after an answer uses it. */
   language: Language;
   lastActivity: number;
@@ -399,8 +404,11 @@ export class MockWorld {
     this.deletedDesks.set(desk.summary.desk_id, desk);
   }
 
-  /** A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's, by the name it gave. */
-  addSession(desk: DeskRecord, opts: { sessionId?: string; ownerPreview?: boolean; agent?: string } = {}): SessionRecord {
+  /**
+   * A new chat on `desk`: a visitor's, the owner's preview, or with `agent` a signed visiting agent's,
+   * by the name it gave. With `demoVisitor`, the demo visitor's, by its persona's first name.
+   */
+  addSession(desk: DeskRecord, opts: { sessionId?: string; ownerPreview?: boolean; agent?: string; demoVisitor?: string } = {}): SessionRecord {
     const sessionId = opts.sessionId ?? this.id('ses-web');
     const kind = opts.agent === undefined ? 'visitor' : 'agent';
     const session: SessionRecord = {
@@ -410,6 +418,7 @@ export class MockWorld {
       ownerPreview: opts.ownerPreview ?? false,
       person: null,
       displayName: opts.agent ?? null,
+      demoVisitor: opts.demoVisitor ?? null,
       language: 'en',
       lastActivity: this.now(),
       items: [],

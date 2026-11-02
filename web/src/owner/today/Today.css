@@ -333,6 +333,11 @@
   color: var(--text-secondary);
 }
 
+/* A start that failed: a refused dot, then the line in the detail's place. */
+.cd-things__detail > .cd-status-dot {
+  margin-right: var(--space-6);
+}
+
 .cd-things__action {
   display: flex;
   justify-content: flex-end;
@@ -344,8 +349,8 @@
 }
 
 /* From 640 px: the card around the list goes, and each thing is a card of its own, its next step
-   at the foot, so the steps of a row of cards share a line (grid rows stretch). Two to a row, four
-   from 1280 px, where the band is wide enough for each step's words. */
+   at the foot, so the steps of a row of cards share a line (grid rows stretch). Two to a row, three
+   from 1280 px, two rows for the five things, where the band is wide enough for each step's words. */
 @media (min-width: 640px) {
   .cd-things > .cd-card {
     padding: 0;
@@ -385,7 +390,7 @@
 
 @media (min-width: 1280px) {
   .cd-things__list {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

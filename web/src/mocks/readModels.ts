@@ -285,13 +285,14 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
   return {
     session_id: session.state.session_id,
     kind: session.state.kind,
-    display_name: session.displayName,
+    display_name: session.displayName ?? session.demoVisitor ?? null,
     verified: session.state.verified,
     mode: session.state.mode,
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
+    demo_visitor: session.demoVisitor != null,
     ...(session.state.kind === 'agent' ? latestAgentOutcome(world, session) : { ...NO_OUTCOME, latest_outcome: latestVisitorOutcome(world, session) }),
   };
 }
@@ -300,9 +301,10 @@ function needsYouSession(session: SessionRecord | undefined, sessionId: string):
   return {
     session_id: sessionId,
     kind: session?.state.kind ?? 'visitor',
-    display_name: session?.displayName ?? null,
+    display_name: session?.displayName ?? session?.demoVisitor ?? null,
     verified: session?.state.verified ?? false,
     assurance: session?.state.assurance ?? 'none',
+    demo_visitor: session?.demoVisitor != null,
   };
 }
 
@@ -848,6 +850,7 @@ export function ownerTranscript(session: SessionRecord, after: number, now: numb
       return { ...item, owner_translation: item.owner_translation ?? null, triage: item.triage ?? null, owner_plain: ownerPlain };
     }),
     typing_until: typing !== null && typing > now ? isoTime(typing) : null,
+    demo_visitor: session.demoVisitor != null,
   };
 }
 

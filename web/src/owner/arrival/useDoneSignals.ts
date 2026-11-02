@@ -2,8 +2,8 @@
  * The reads behind Today's things to try, and what this view remembers of them. Every read is one
  * another owner screen already makes, under that screen's key, so they share it: the conversations
  * list, a preview chat's transcript, Safety's attempts and its signed record, and the copy's Desks.
- * Signals 1 to 3 read the Desk the copy started with, on whichever Desk the list shows; "Create your
- * own Desk" is copy-wide. A hidden list reads nothing, and a read stops once every thing it tells is
+ * Every signal but "Create your own Desk" reads the Desk the copy started with, on whichever Desk the
+ * list shows; that one is copy-wide. A hidden list reads nothing, and a read stops once every thing it tells is
  * done. A read that is loading or failed ticks nothing and shows no error: the list is a guide.
  * What the list remembers (the Desk the copy started with and the things seen done) lasts while the
  * app runs, across visits to Today, until a reload or a new copy.
@@ -24,6 +24,7 @@ import {
   answeredInView,
   answeredOnRecord,
   chattedAsCustomer,
+  demoVisitorRan,
   keepFor,
   listedDesks,
   madeAnotherDesk,
@@ -45,7 +46,7 @@ export interface Done {
 export interface DoneSignals {
   /** Each thing seen done in this view; a thing not done yet is missing. */
   done: Readonly<Partial<Record<Thing, Done>>>;
-  /** How many of the four are done. */
+  /** How many of the five are done. */
   count: number;
   /** Whether the list shows the Desk the copy started with. */
   onStartingDesk: boolean;
@@ -134,7 +135,7 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
   const conversations = useQuery({
     queryKey: conversationsKey(seeded ?? ''),
     queryFn: () => request('conversations', { params: { desk_id: seeded ?? '' } }),
-    enabled: reading && (seen.chat === undefined || seen.break === undefined),
+    enabled: reading && (seen.chat === undefined || seen.demo === undefined || seen.break === undefined),
     ...polled(),
   });
   const previews = conversations.data === undefined ? [] : previewSessions(conversations.data);
@@ -172,6 +173,10 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
     chat: {
       settled: reading && fresh(conversationsKey(seeded ?? ''), conversations) && transcripts.every((t, i) => fresh(conversationKey(previews[i] ?? ''), t)),
       done: reading && conversationsWorked && chattedAsCustomer(chats),
+    },
+    demo: {
+      settled: reading && fresh(conversationsKey(seeded ?? ''), conversations),
+      done: reading && conversationsWorked && demoVisitorRan(conversations.data ?? []),
     },
     break: {
       settled:

@@ -12,6 +12,7 @@ import { ROUTES, type RouteKey, type RouteResponse, type RouteSpec } from '../ap
 import type {
   AgentRunStarted,
   AgentTasks,
+  DemoVisitorStarted,
   ApprovalAnswerOut,
   CancelAccepted,
   CancelReason,
@@ -24,6 +25,7 @@ import type {
   VisitorSession,
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
+import { DemoVisitorRuns, type DemoVisitorHost } from './demoVisitors.ts';
 import { idempotencyKeyOf } from './keys.ts';
 import { OWNER_LANGUAGE, loweredReason } from './moneyCap.ts';
 import {
@@ -298,10 +300,12 @@ export interface CopyNaming {
 }
 
 /** The API's side of one copy: the copy itself and the turns in progress. */
-export class Server {
+export class Server implements DemoVisitorHost {
   world: MockWorld;
   /** The built-in agent's runs in this copy. */
   readonly agents = new AgentRuns();
+  /** The demo visitor's runs in this copy. */
+  readonly demoVisitors = new DemoVisitorRuns();
   /** How this copy's owner-chat streams are written; a test may change whether setup's turns stream. */
   readonly streams: StreamSettings;
   /** Streams a test planned, each taken by the next stream of its kind. */
@@ -349,6 +353,7 @@ export class Server {
     for (const turn of this.turns.values()) if (turn.timer !== null) clearTimeout(turn.timer);
     this.turns.clear();
     this.agents.stop();
+    this.demoVisitors.stop();
     stopSetupRuns(this.world);
   }
 
@@ -370,6 +375,29 @@ export class Server {
       session.listeners.clear();
     }
     this.world.deleteDesk(desk);
+  }
+
+  /** How long the demo visitor reads before it types, and types before it sends. */
+  get paceMs(): number {
+    return this.streams.demoVisitorMs;
+  }
+
+  /** Whether Claude's turn in the chat is going: a step waits, or more are queued. */
+  turnGoing(sessionId: string): boolean {
+    const turn = this.turns.get(sessionId);
+    return turn !== undefined && (turn.timer !== null || turn.queue.length > 0);
+  }
+
+  /**
+   * The visitor's message in their chat, as their own route sends it: Claude's turn follows in a
+   * chat Claude has, and the kernel's handoff in a paused one; in a chat the owner has, nothing.
+   */
+  visitorSays(session: SessionRecord, text: string): void {
+    this.world.visitorText(session, text);
+    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
+    if (session.state.mode === 'ai') this.runTurn(session, () => scriptedTurn(text, hasAllTools(this.world, session), this.world.ownerOf(session), session.person), session.language, text);
+    // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
+    else if (session.state.mode === 'paused') this.runTurn(session, PAUSED_TURN, session.language, text);
   }
 
   /** The session the request's visitor cookie names for `slug`, or why there is none. */
@@ -654,6 +682,35 @@ const SERVED: ServedRoutes = {
     if (!record) return NOT_FOUND;
     return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(record.decision);
   },
+  startDemoVisitor(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const key = idempotencyKeyOf(req.body);
+    if (req.malformed || key === false) return INVALID;
+    const run = sv.demoVisitors.start(sv, desk, key);
+    if ('refused' in run) return run.refused === 'conflict' ? failWith(409, 'conflict') : failWith(429, 'rate_limited', { retry_after: run.retryAfter });
+    if (run.session_id === null) return failWith(503, 'demo_visitor_unavailable');
+    return ok({ run_id: run.run_id, desk_id: run.desk_id, session_id: run.session_id } satisfies DemoVisitorStarted, 202);
+  },
+  demoVisitor(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const run = sv.demoVisitors.newest(desk.summary.desk_id);
+    return run === null ? NOT_FOUND : ok(run);
+  },
+  demoVisitorRun(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const run = sv.demoVisitors.read(req.params.run_id);
+    return run !== null && run.desk_id === desk.summary.desk_id ? ok(run) : NOT_FOUND;
+  },
+  stopDemoVisitor(sv, req) {
+    const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
+    if (isFailure(desk)) return desk;
+    const run = sv.demoVisitors.read(req.params.run_id);
+    const stopped = run === null || run.desk_id !== desk.summary.desk_id ? null : sv.demoVisitors.stopRun(run.run_id);
+    return stopped === null ? NOT_FOUND : ok(stopped);
+  },
   ownerInbox(sv, req) {
     // Everything the copy's Demo inbox holds, as the kernel's owner form answers.
     return req.cookies.owner ? ok(sv.world.inbox.map((record) => record.entry)) : NO_OWNER;
@@ -830,12 +887,7 @@ const SERVED: ServedRoutes = {
     if (isFailure(visitor)) return visitor;
     const text = isRecord(req.body) ? req.body.text : undefined;
     if (req.malformed || typeof text !== 'string' || text.length < 1 || text.length > MESSAGE_MAX) return INVALID;
-    const { session } = visitor;
-    sv.world.visitorText(session, text);
-    // The turn's tools, and whom the chat is verified as, are read when it starts, which may be after a turn in progress ends.
-    if (session.state.mode === 'ai') sv.runTurn(session, () => scriptedTurn(text, hasAllTools(sv.world, session), sv.world.ownerOf(session), session.person), session.language, text);
-    // A paused chat's turn is the kernel's handoff, which hands the chat to the owner as any handoff card does.
-    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, text);
+    sv.visitorSays(visitor.session, text);
     return ok({ message_id: sv.world.id('vmsg') } satisfies MessageAccepted, 202);
   },
   visitorTyping(sv, req) {

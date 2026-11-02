@@ -23,6 +23,20 @@ export const THINGS_TO_TRY = [
 ] as const satisfies readonly ThingToTry[];
 
 /**
+ * Today's "Watch a demo visitor", the second of its things to try, which the intro dialog doesn't
+ * list: an AI plays a customer in a chat on the owner's own Desk, so the owner can take it over or
+ * whisper to Claude while it chats. Its done row keeps these words, with its Done pill read out.
+ */
+export const DEMO_VISITOR_THING = {
+  title: 'Watch a demo visitor',
+  detail: 'An AI plays a customer on your Desk. Take over or whisper to Claude while it chats.',
+  icon: 'agent',
+  start: 'Start a demo visitor',
+  /** Said in the detail's place, after a refused dot, when a start fails for any reason; the button stays. */
+  startFailed: 'The demo visitor couldn’t start. Try again in a few minutes.',
+} as const satisfies Omit<ThingToTry, 'done'> & { start: string; startFailed: string };
+
+/**
  * What "Answer a held request" says once an answer given on Today settles a request the list doesn't
  * count, in the card's own words: the request had expired or been cancelled first, so nothing was
  * done; or, on a Desk besides the one the copy started with, the answer went through (the row's
