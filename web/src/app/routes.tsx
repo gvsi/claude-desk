@@ -109,6 +109,8 @@ export const routes: RouteObject[] = [
         children: [
           { index: true, element: <Navigate to={FIRST_SETTINGS_SECTION} replace /> },
           ...SETTINGS_SECTIONS.map(({ path, element }) => ({ path, element })),
+          // Keep old links to Notifications, now Alerts, working without leaving them in history.
+          { path: 'notifications', element: <Navigate to="../alerts" replace /> },
         ],
       },
     ],

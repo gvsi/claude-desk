@@ -5,9 +5,9 @@ import { expectComputed } from '../../test/expectComputed.ts';
 import { expectListsKeepTheirRole } from '../../test/expectListRoles.ts';
 import { AlertList, type AlertListItem } from './AlertList.tsx';
 
-/** The alerts set for a plumber, as N-Run2-Settings-Notifications writes them. */
+/** The alerts set for a plumber, as REV-NOTIF-Aset writes them on N-Run2-Settings-Notifications' card. */
 const PLUMBER: AlertListItem[] = [
-  { when: 'Right away', what: 'Held requests, paused chats and emergencies', how: 'Demo inbox' },
+  { when: 'Right away', what: 'Held requests, paused chats and emergencies', how: 'Notifications' },
   { when: 'In your briefing', what: 'New leads, bookings and payments', how: 'Each morning at 7:00 am' },
   { when: 'Not at all', what: 'Messages Claude answered on its own' },
 ];
@@ -87,7 +87,7 @@ export const Phone: Story = {
   parameters: {
     layout: 'fullscreen',
     canvas: 'none',
-    canvasNote: 'No board draws Notifications on a phone, so this follows N-Run2-Settings-Notifications: in a 358 px card, how an alert reaches the owner goes under what it is when the two don’t fit on a line.',
+    canvasNote: 'No board draws Alerts on a phone, so this follows N-Run2-Settings-Notifications: in a 358 px card, how an alert reaches the owner goes under what it is when the two don’t fit on a line.',
   },
   play: async ({ canvas }) => {
     await expect(window.innerWidth).toBe(390);

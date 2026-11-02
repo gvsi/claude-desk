@@ -1,7 +1,7 @@
 /**
  * Settings in a real browser against the mock API: its sections, with no connectors (they have
  * their own tab); General's details from the copy's Desks, its Answering switch (the sidebar's,
- * the same control) and deleting a Desk; Notifications and Billing as vision; each as its signed
+ * the same control) and deleting a Desk; Alerts and Billing as vision; each as its signed
  * board draws it, on a laptop and on a phone.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
@@ -23,7 +23,7 @@ const DESK = `/app/${RIVERA.deskId}`;
 const SETTINGS = `${DESK}/settings`;
 const PROFILE = `${DESK}/profile`;
 const GENERAL = `${SETTINGS}/general`;
-const NOTIFICATIONS = `${SETTINGS}/notifications`;
+const ALERTS = `${SETTINGS}/alerts`;
 const BILLING = `${SETTINGS}/billing`;
 
 /** What Answering on means, under General's switch (owner decision, 2026-10-30: the short line everywhere). */
@@ -44,18 +44,18 @@ const REFUSED: readonly (readonly [status: number, line: string])[] = [
   [429, "That's a lot of requests at once. Wait a moment, then try again."],
 ];
 
-/** Notifications' lead, under its vision note. */
-const NOTIFICATIONS_LEAD = 'Held requests and paused chats reach your Demo inbox right away. Other alerts wait for your briefing.';
+/** Alerts' lead, under its vision note. */
+const ALERTS_LEAD = 'Held requests and paused chats arrive in Notifications right away. Other alerts wait for your briefing.';
 
 /** The alerts set for a plumber, as the board writes them: when, which, and how they arrive. */
 const PLUMBER = [
-  ['Right away', 'Held requests, paused chats and emergencies', 'Demo inbox'],
+  ['Right away', 'Held requests, paused chats and emergencies', 'Notifications'],
   ['In your briefing', 'New leads, bookings and payments', 'Each morning at 7:00 am'],
   ['Not at all', 'Messages Claude answered on its own'],
 ];
 
 /** The sections Settings ships with, in order. Channels joins when its page does. */
-const SECTIONS = ['General', 'Notifications', 'Billing'];
+const SECTIONS = ['General', 'Alerts', 'Billing'];
 
 /** The requests a route got, by key. */
 const requests = (key: string) => mockStore.requests.filter((r) => r.key === key);
@@ -100,7 +100,7 @@ describe('Settings', () => {
 
     // Each section at its own address, marked as the current one, with its own page drawn.
     for (const [name, path, region] of [
-      ['Notifications', NOTIFICATIONS, 'Set for a plumber'],
+      ['Alerts', ALERTS, 'Set for a plumber'],
       ['Billing', BILLING, 'Plan'],
       ['General', GENERAL, 'Claude acts for you'],
     ] as const) {
@@ -477,15 +477,15 @@ describe('Settings against its boards', () => {
     await userEvent.keyboard('{Escape}');
     await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument();
 
-    // Notifications as N-Run2-Settings-Notifications draws it: the vision note, the lead 20 px
-    // under it, then the alerts set for a plumber 20 px under that, read-only.
-    await subNav(screen).getByRole('link', { name: 'Notifications' }).click();
+    // Alerts as REV-NOTIF-Aset draws it: the vision note, the lead 20 px under it, then the alerts
+    // set for a plumber 20 px under that, read-only.
+    await subNav(screen).getByRole('link', { name: 'Alerts' }).click();
     const alerts = main(screen).getByRole('region', { name: 'Set for a plumber' });
     await expect.element(alerts).toBeVisible();
     await expectOwnerBoard(screen.container, { current: 'Settings', fill: true });
-    content = await expectSettingsColumns(screen, 'Notifications');
-    const vision = expectVisionNote(content, 'In this prototype, alerts reach your Demo inbox.');
-    const lead = main(screen).getByText(NOTIFICATIONS_LEAD, { exact: true }).element();
+    content = await expectSettingsColumns(screen, 'Alerts');
+    const vision = expectVisionNote(content, 'In this prototype, alerts arrive in Notifications.');
+    const lead = main(screen).getByText(ALERTS_LEAD, { exact: true }).element();
     expectComputed(lead, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
     expect(round(top(lead) - bottom(vision))).toBe(20);
     expect(round(top(alerts.element()) - bottom(lead))).toBe(20);
@@ -548,7 +548,7 @@ describe('Settings against its boards', () => {
     await expect.element(main(screen).getByRole('region', { name: 'Claude acts for you' })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     for (const [name, region] of [
-      ['Notifications', 'Set for a plumber'],
+      ['Alerts', 'Set for a plumber'],
       ['Billing', 'Plan'],
     ] as const) {
       await subNav(screen).getByRole('link', { name }).click();
@@ -575,7 +575,7 @@ describe('Settings against its boards', () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     // On a phone too, with nothing scrolling sideways.
-    const phone = await renderRoute(NOTIFICATIONS, { viewport: 'phone', seed: 'rivera' });
+    const phone = await renderRoute(ALERTS, { viewport: 'phone', seed: 'rivera' });
     await expect.element(main(phone.screen).getByRole('region', { name: 'Set for a plumber' })).toBeVisible();
     await expectScreenBasics(phone.screen.container, { owner: true });
     expectNoHorizontalScroll();

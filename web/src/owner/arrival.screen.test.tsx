@@ -1260,10 +1260,11 @@ describe('OwnerLayout', () => {
       ['rules', 'Rules', 'Rules'],
       ['rules/all', 'All rules', 'All rules'],
       ['safety', 'Safety', 'Safety'],
+      ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
       ['share', 'Share', 'Share'],
       ['settings/general', 'Settings', 'Settings'],
-      ['settings/notifications', 'Settings', 'Settings'],
+      ['settings/alerts', 'Settings', 'Settings'],
       ['settings/billing', 'Settings', 'Settings'],
     ];
     for (const [path, heading, title] of pages) {
