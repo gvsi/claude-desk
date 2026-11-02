@@ -61,10 +61,12 @@ export function Steps({ label, steps, current, finished = false, drawCheck = fal
         })}
       </ol>
       {/* The list says the same to screen readers, so the line is drawn only. */}
-      {at !== null && steps.length > 0 ? (
+      {steps.length > 0 ? (
         <p className="cd-steps__compact cd-type-meta" aria-hidden="true">
-          {`Step ${at + 1} of ${steps.length}: `}
-          <span className="cd-steps__compact-name">{steps[at]}</span>
+          {at === null ? '\u00a0' : <>
+            {`Step ${at + 1} of ${steps.length}: `}
+            <span className="cd-steps__compact-name">{steps[at]}</span>
+          </>}
         </p>
       ) : null}
     </div>

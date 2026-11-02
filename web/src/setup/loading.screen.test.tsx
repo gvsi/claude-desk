@@ -490,13 +490,17 @@ it.each(['desktop', 'phone'] as const)('setup_reload_marks_no_step_until_read at
   const steps = screen.getByRole('list', { name: 'Set up your Desk' });
   expect(steps.element().querySelector('[aria-current]')).toBeNull();
   expect(steps.element().querySelector('.cd-steps__step--current, .cd-steps__step--done')).toBeNull();
-  expect(document.querySelector('.cd-steps__compact')).toBeNull();
+  expect(document.querySelector('.cd-steps__compact')?.textContent?.trim()).toBe('');
   expect(screen.container.textContent).not.toContain('Step 1 of 5');
+  const barBottom = document.querySelector('.cd-setup__bar')!.getBoundingClientRect().bottom;
 
   interview.release();
   await vi.waitFor(() => expect(steps.element().querySelector('[aria-current="step"]')?.textContent).toBe('Live, done'));
   expect(document.querySelector('.cd-steps__compact')?.textContent).toBe('Step 5 of 5: Live');
-  if (viewport === 'phone') await expect.element(screen.getByText('Step 5 of 5: Live', { exact: true })).toBeVisible();
+  if (viewport === 'phone') {
+    await expect.element(screen.getByText('Step 5 of 5: Live', { exact: true })).toBeVisible();
+    expect(Math.abs(document.querySelector('.cd-setup__bar')!.getBoundingClientRect().bottom - barBottom)).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  }
 });
 
 it.each(['desktop', 'phone'] as const)('fresh_setup_starts_at_questions at %s', async (viewport) => {
