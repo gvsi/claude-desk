@@ -759,7 +759,8 @@ def setup_state(interview: Interview, slug: str, *, cards: bool = False,
                       consent=interview.consent, question=interview.question, busy=interview.busy,
                       pending_card=interview.pending_card,
                       held_policy_keys=interview.held_policy_keys,
-                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry))
+                      messages=[SetupMessage(role=entry.role, text=entry.text, choices=entry.choices, card=visible(entry),
+                                             owner_decided=entry.owner_decided)
                                 for entry in interview.transcript[1:]
                                 if (entry.text or entry.choices or entry.card is not None) and
                                 (cards or entry.card is None) and (entry.role != "owner" or bool(entry.text))])

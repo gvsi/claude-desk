@@ -90,15 +90,17 @@ function sameData(a: unknown, b: unknown): boolean {
 }
 
 /**
- * The owner's accepted choice for one of the Desk's own jobs, read from setup's conversation: the
- * `autonomy` of the accepted card the job was made from (setup publishes each accepted job's title
- * and setup as its definition, so it is the card with both), or null when no accepted card matches
- * or two that match disagree. It changes only words on the review: the job's own rule comes from
- * the card the owner confirms at the Rules step, never from here.
+ * The owner's own accepted choice for one of the Desk's own jobs, read from setup's conversation:
+ * the `autonomy` of the card the job was made from (setup publishes each accepted job's title and
+ * setup as its definition, so it is the card with both), when the owner accepted it themselves
+ * (`owner_decided`, as Rules drafting counts it). Null when no such card matches, or two that match
+ * disagree: a card "Use your suggestions" accepted for them was never their choice. It changes only
+ * words on the review: the job's own rule comes from the card the owner confirms at the Rules step.
  */
 export function acceptedAutonomy(def: BusinessToolDef, messages: readonly SetupMessage[]): 'auto' | 'ask' | null {
-  const choices = new Set(messages.flatMap(({ card }) =>
-    card?.state === 'accepted' && card.job?.config && card.job.title === def.title && sameData(card.job.config, def.config) ? [card.job.autonomy] : []));
+  const choices = new Set(messages.flatMap(({ card, owner_decided: decided }) =>
+    decided === true && card?.state === 'accepted' && card.job?.config && card.job.title === def.title && sameData(card.job.config, def.config)
+      ? [card.job.autonomy] : []));
   return choices.size === 1 ? [...choices][0] ?? null : null;
 }
 

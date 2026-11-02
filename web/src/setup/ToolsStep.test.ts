@@ -38,8 +38,8 @@ it('reviews every business block by its title and owner line instead of Claude-f
 
 it("reads a job's accepted choice from the setup card it was made from, by its title and setup", () => {
   const def = { title: 'Book a free intro call', description: 'Books a call.', config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 } } as const;
-  const card = (state: ProposalCard['state'], autonomy: 'auto' | 'ask', changes: Partial<NonNullable<ProposalCard['job']>> = {}): SetupMessage => ({
-    role: 'claude', text: '', choices: [], card: {
+  const card = (state: ProposalCard['state'], autonomy: 'auto' | 'ask', changes: Partial<NonNullable<ProposalCard['job']>> = {}, decided = true): SetupMessage => ({
+    role: 'claude', text: '', choices: [], owner_decided: decided, card: {
       proposal_id: 'p-000000000001', kind: 'job', state, superseded_by: null, connector: null,
       job: { job: 'schedule', title: def.title, why: '', how: '', can_do_today: true, autonomy, config: { ...def.config }, ...changes },
     },
@@ -49,6 +49,9 @@ it("reads a job's accepted choice from the setup card it was made from, by its t
   expect(acceptedAutonomy(def, [card('accepted', 'ask')])).toBe('ask');
   // The stored setup comes back with its keys in any order.
   expect(acceptedAutonomy(def, [card('accepted', 'auto', { config: { minutes: 20, block: 'typed_booking', appointment_type: 'Free intro call' } })])).toBe('auto');
+  // Only the owner's own decision counts: a card setup accepted for them ("Use your suggestions") wasn't their choice.
+  expect(acceptedAutonomy(def, [card('accepted', 'auto', {}, false)])).toBeNull();
+  expect(acceptedAutonomy(def, [{ ...card('accepted', 'auto'), owner_decided: undefined }])).toBeNull();
   // Only an accepted card with the same title and setup counts.
   for (const state of ['proposed', 'declined', 'changed'] as const) expect(acceptedAutonomy(def, [card(state, 'auto')])).toBeNull();
   expect(acceptedAutonomy(def, [card('accepted', 'auto', { title: 'Book a call' })])).toBeNull();

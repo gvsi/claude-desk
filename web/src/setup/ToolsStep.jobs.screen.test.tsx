@@ -35,12 +35,10 @@ async function interviewAtTools() {
 }
 
 /**
- * A Chen setup at the Tools step with each card decided in the chat as the owner would: the booking
- * job accepted with `booking` as its choice ("on its own" or "ask"), the other jobs and apps
- * accepted, the unpriced retainer declined. Its jobs are the mock's own business tools, made from
- * those accepted cards.
+ * A Chen setup with its cards shown one at a time, the cards before the booking job's decided in the
+ * chat as the owner would (Google Calendar accepted), stopped with the booking card waiting.
  */
-async function interviewWithBooking(booking: 'auto' | 'ask') {
+async function interviewAtTheBookingCard() {
   const started = await mockStore.dispatch('startSetup', { body: {
     description: 'Chen & Co. CPA. I am Linda, a CPA in San Jose.', timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
   } });
@@ -56,8 +54,26 @@ async function interviewWithBooking(booking: 'auto' | 'ask') {
   while (state.pending_card) {
     const card = state.messages.find((message) => message.card?.proposal_id === state.pending_card)?.card;
     if (!card) throw new Error('The pending card is shown');
-    const decision: SetupProposalBody = card.job?.job === 'schedule' ? { accept: true, autonomy: booking } : { accept: card.job?.job !== 'payment' };
-    state = await call('setupProposal', decision, card.proposal_id);
+    if (card.job?.job === 'schedule') return { state, call, card };
+    state = await call('setupProposal', { accept: card.job?.job !== 'payment' }, card.proposal_id);
+  }
+  throw new Error('Setup offers the booking job');
+}
+
+/**
+ * A Chen setup at the Tools step with each card decided in the chat as the owner would: the booking
+ * job accepted with `booking` as its choice ("on its own" or "ask"), the other jobs and apps
+ * accepted, the unpriced retainer declined. Its jobs are the mock's own business tools, made from
+ * those accepted cards.
+ */
+async function interviewWithBooking(booking: 'auto' | 'ask') {
+  const { call, card } = await interviewAtTheBookingCard();
+  const choice: SetupProposalBody = { accept: true, autonomy: booking };
+  let state = await call('setupProposal', choice, card.proposal_id);
+  while (state.pending_card) {
+    const next = state.messages.find((message) => message.card?.proposal_id === state.pending_card)?.card;
+    if (!next) throw new Error('The pending card is shown');
+    state = await call('setupProposal', { accept: next.job?.job !== 'payment' }, next.proposal_id);
   }
   state = await call('setupAnswer', { question: state.question, text: 'Ask me before every payment' });
   expect(state.step).toBe('tools');
@@ -91,6 +107,20 @@ it.each([1440, 390])('at %i px, a job the owner let run on its own says so, and 
 it("keeps today's line for a job the owner accepted as asking first", async () => {
   const { state } = await interviewWithBooking('ask');
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
+  const tools = screen.getByRole('region', { name: 'Tools', exact: true });
+  expect(coverage(tools)).toEqual([NO_RULE_YET]);
+  await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
+});
+
+it("keeps today's line for a booking job that Use your suggestions accepted for the owner", async () => {
+  const { state, card } = await interviewAtTheBookingCard();
+  expect(card.job?.autonomy).toBe('auto');
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  // The owner moves on with the booking card still waiting: setup accepts it for them, so they never chose its autonomy.
+  await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+  await screen.getByRole('button', { name: 'Continue', exact: true }).click();
   await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
   const tools = screen.getByRole('region', { name: 'Tools', exact: true });

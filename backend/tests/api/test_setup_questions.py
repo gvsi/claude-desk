@@ -861,7 +861,7 @@ async def test_a_failed_understanding_still_asks_the_first_question(
     state = await landed(owner, state["interview_id"], cards=True)
     assert state["question"] == "what_you_do"
     assert state["messages"][-1] == {"role": "claude", "text": question_text("what_you_do", "trade"),
-                                       "choices": [], "card": None}
+                                       "choices": [], "card": None, "owner_decided": False}
     assert not any(message["card"] for message in state["messages"])
     assert not any("suggested" in entry for entry in (await stored(engine, state["interview_id"]))["transcript"])
     assert "understanding" in caplog.text and "first question" in caplog.text
@@ -1555,7 +1555,7 @@ async def test_setups_messages_leave_out_the_owners_description(app, browser, fa
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
     assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION,
-                                   "choices": [], "card": None}]
+                                   "choices": [], "card": None, "owner_decided": False}]
     interview_id = state["interview_id"]
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["messages"] == state["messages"]
     transcript = (await stored(engine, interview_id))["transcript"]
@@ -1641,7 +1641,7 @@ async def test_setup_tools_use_the_owner_session_and_desk(app, browser, fake, ke
     desk.tools["native.fetch_website"] = desk.tools["native.fetch_website"].model_copy(update={"status": "disabled"})
     consented = await consent(owner, other["interview_id"], True, model)
     assert consented["messages"][3] == {"role": "tool_label", "text": "Couldn't read turner-plumbing.example",
-                                        "choices": [], "card": None}
+                                        "choices": [], "card": None, "owner_decided": False}
     proposed = [call.body["call"]["tool"] for call in fake.called("POST /decide")
                 if call.body["desk_id"] == other["desk_id"]]
     assert proposed == ["native.read_memory"]
@@ -2309,7 +2309,7 @@ async def test_seven_answers_finish_the_questions(app, browser, fake, kernel_htt
             assert followed.json()["messages"][-1] == {"role": "claude", "text": "How much, at most?",
                                                        "choices": [{"text": choice.text, "recommended": False}
                                                                    for choice in LIMIT_CHOICES[key]("trade")],
-                                                       "card": None}
+                                                       "card": None, "owner_decided": False}
         patch = {"owner_display_name": "Mike Turner", "public_contact": "(510) 555-0142"} \
             if key == "contact_and_after_hours" else {}
         reply = await answer(owner, model, interview_id, f"About {key}.", turn(**patch))
@@ -3718,7 +3718,7 @@ async def test_claude_chooses_the_next_fact_topic_and_its_words(app, browser, ke
     assert reply.status_code == 200, reply.text
     assert reply.json()["question"] == "contact_and_after_hours"
     assert reply.json()["messages"][-1] == {"role": "claude", "text": "What happens after hours?",
-                                             "choices": choices, "card": None}
+                                             "choices": choices, "card": None, "owner_decided": False}
 
 
 @pytest.mark.parametrize("following", ["contact_and_after_hours", "done"])
@@ -3952,7 +3952,7 @@ async def test_a_limit_topic_always_asks_codes_question_and_choices(app, browser
     assert reply.status_code == 200, reply.text
     assert reply.json()["question"] == "money_limit"
     assert reply.json()["messages"][-1] == {
-        "role": "claude", "text": question_text("money_limit", "office"), "card": None,
+        "role": "claude", "text": question_text("money_limit", "office"), "card": None, "owner_decided": False,
         "choices": [{"text": choice.text, "recommended": False}
                     for choice in LIMIT_CHOICES["money_limit"]("office")]}
 
@@ -4070,7 +4070,7 @@ async def test_opting_in_asks_codes_money_question(app, browser, kernel_http, mo
     assert response.status_code == 200, response.text
     assert response.json()["question"] == "money_limit"
     assert response.json()["messages"][-1] == {
-        "role": "claude", "text": question_text("money_limit", "trade"), "card": None,
+        "role": "claude", "text": question_text("money_limit", "trade"), "card": None, "owner_decided": False,
         "choices": [{"text": choice.text, "recommended": False} for choice in LIMIT_CHOICES["money_limit"]("trade")]}
 
 
@@ -4778,7 +4778,8 @@ async def test_typed_card_answers_share_the_turn_guard(app, browser, kernel_http
         assert second.status_code == 202 and len(model.requests) == calls
         assert second.json()["busy"] is True
         assert second.json() == (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()
-        assert second.json()["messages"][-1] == {"role": "owner", "text": "Yes", "card": None, "choices": []}
+        assert second.json()["messages"][-1] == {"role": "owner", "text": "Yes", "card": None, "choices": [],
+                                                 "owner_decided": False}
         assert asked.count("setup_turn") == 1
     finally:
         release.set()

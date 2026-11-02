@@ -2797,6 +2797,26 @@ async def test_rules_drafting_receives_only_owner_decided_jobs(proposals, model,
     assert "Meet new clients" not in message
 
 
+@pytest.mark.parametrize("owner_decided", [False, True, "typed"])
+async def test_setup_messages_mark_only_the_cards_the_owner_decided(proposals, model, owner_decided):
+    """A card the owner decided, by a click or a typed answer, says so on its message; one "Use your suggestions"
+    settled for them doesn't. The Tools step reads it before saying the owner chose a job's autonomy."""
+    owner, state, ids = proposals
+    path = f"/api/owner/setup/{state['interview_id']}"
+    if owner_decided == "typed":
+        model.add(card_answer("accept", next=next_ask("what_you_do")))
+        assert (await owner.browser.post(path + "/answer", json={"card": ids[0], "text": "Yes"})).status_code == 200
+    elif owner_decided:
+        assert (await owner.browser.post(path + f"/proposals/{ids[0]}", json={"accept": True, "autonomy": "auto"})).status_code == 200
+    reply = await owner.browser.post(path + "/suggestions?cards=1", json={})
+    assert reply.status_code == 200, reply.text
+    cards = {message["card"]["proposal_id"]: message for message in reply.json()["messages"] if message["card"]}
+    assert cards[ids[0]]["card"]["state"] == "accepted"
+    assert cards[ids[0]]["owner_decided"] is bool(owner_decided)
+    assert all(message["owner_decided"] is False for proposal_id, message in cards.items() if proposal_id != ids[0])
+    assert all(message["owner_decided"] is False for message in reply.json()["messages"] if not message["card"])
+
+
 @pytest.mark.parametrize("app_key, declined", [("stripe", False), ("stripe", True), ("square", False), ("google_calendar", False)])
 async def test_finish_and_after_finish_never_connect(monkeypatch, app_key, declined):
     from types import SimpleNamespace
