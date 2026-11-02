@@ -64,6 +64,10 @@ Claude Desk is a public, always-on Claude for a person or small business: strang
 - Round controls with `radius-control`; cards, dialogs and bubbles with `radius-card`; the composer with `radius-composer`; pills, chips, switches and avatars with `radius-full`.
 - Use `shadow-composer` on the composer and nowhere else. The shadows and the scrim are lighter in the light theme. The first-visit intro dialog, the connector picker and the connector sign-in sit over `scrim` and lift with `shadow-dialog`, as do the popover menus (an approval's answers, `OutcomeMenu`, `PresetMenu`) over the page. `Dialog` sits over `scrim` with no shadow, as N-Run2-Settings-DeleteDesk draws it, and so does the Ask Claude panel as a tablet's sheet, docked at the window's right edge.
 
+### Scrollbars
+
+S1 applies to every app scroll area, on both axes: a 6 px thumb inset 3 px in a transparent 12 px track, at least 32 px long, with `radius-full` corners. Its token pair is `--line-control` at rest (decoration) and `--text-tertiary` while the scroll area is hovered or the thumb is dragged; its width never changes. Firefox uses its native thin bar with the resting token, only where WebKit scrollbar selectors are unsupported. SubNav keeps its hidden bar, and the About pages' paper and standalone vision pages keep the browser's own scrollbar. Scrolling behaviour stays native.
+
 ### Motion
 
 - Keep transitions between 60 and 200 ms: `motion-instant` for color, `motion-fast` for press feedback, `motion-base` for a check that draws once or a reveal. Ease with `motion-ease`, or `motion-ease-emphasis` for a screen's one small moment. Results that arrive one by one are `motion-stagger` apart. Each new word of Claude's reply settles in over `motion-settle` as it streams or is revealed (`ChatMarkdown`). After a revealed reply's words, its cards and then their receipts fade and rise in over `motion-base`, `motion-follow` apart (`ClaudeMessage`, `TranscriptRow`).
@@ -132,19 +136,19 @@ The spinner's arc is a graphic, 3:1, drawn in the busy label color at full stren
 
 In Deny's menu on a held request, `button-danger-text` reads 7.2 on `bg-surface` and 6.0 on `fill-hover` over it (an item hovered or focused). Allow's items use `text-primary` and every item's line `text-secondary`, already listed on `bg-surface` and on `fill-hover` over it.
 
-Focus edges and status dots, 3:1:
+Focus edges, status dots and the scrollbar's hovered or dragged thumb, 3:1:
 
-| Ground | `line-focus` | `accent-blue` | `status-handled` | `status-held` | `status-refused` | `status-info` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `bg-app` | 7.3 | 7.3 | 6.1 | 9.4 | 6.3 | 7.3 |
-| `bg-panel` | 7.0 | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
-| `bg-surface` | 6.6 | 6.2 | 5.1 | 7.9 | 5.3 | 6.6 |
-| `bg-muted` | 6.4 | not used | not used | not used | not used | not used |
-| `bg-selected` | 5.6 | 4.9 | 4.1 | 6.3 | 4.2 | 5.6 |
-| `fill-card` over `bg-app` | 7.0 | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 |
-| `fill-hover` over `bg-app` | 6.6 | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
-| `fill-card` over `bg-panel` | 6.6 | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 |
-| `fill-hover` over `bg-surface` | 5.8 | not used | not used | not used | not used | not used |
+| Ground | `line-focus` | `accent-blue` | `status-handled` | `status-held` | `status-refused` | `status-info` | S1 hover `text-tertiary` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `bg-app` | 7.3 | 7.3 | 6.1 | 9.4 | 6.3 | 7.3 | 6.6 |
+| `bg-panel` | 7.0 | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 | 6.3 |
+| `bg-surface` | 6.6 | 6.2 | 5.1 | 7.9 | 5.3 | 6.6 | 6.0 |
+| `bg-muted` | 6.4 | not used | not used | not used | not used | not used | 5.8 |
+| `bg-selected` | 5.6 | 4.9 | 4.1 | 6.3 | 4.2 | 5.6 | 5.1 |
+| `fill-card` over `bg-app` | 7.0 | 6.8 | 5.6 | 8.7 | 5.8 | 7.0 | 6.3 |
+| `fill-hover` over `bg-app` | 6.6 | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 | 6.0 |
+| `fill-card` over `bg-panel` | 6.6 | 6.3 | 5.2 | 8.0 | 5.3 | 6.6 | 6.0 |
+| `fill-hover` over `bg-surface` | 5.8 | not used | not used | not used | not used | not used | 5.3 |
 
 Inside a button, the focus edge lands on its fill: `line-focus` reads 6.0 on `fill-secondary` and 5.3 on `fill-secondary-hover` over `bg-app` (5.7 and 5.0 in a card, 5.3 on `fill-secondary` in a dialog), 6.2 on `button-danger-fill` and 5.5 on `button-danger-fill-hover` over `bg-app` (5.8 and 5.2 in a card, 5.4 and 4.9 in a dialog’s `bg-surface`; 5.4 and 5.2 in a light dialog), and 6.2 on `fill-hover` over `bg-panel`, a hovered sidebar row. The primary's 2 px edge of `bg-app` reads 14.6 on `button-primary` and 12.2 on `button-primary-hover`.
 

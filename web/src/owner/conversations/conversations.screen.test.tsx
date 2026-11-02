@@ -234,6 +234,75 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it.each([[1440, 900], [390, 844]])('day_headers_keep_their_resting_layout_and_push_each_other_out_at_%sx%s', async (width, height) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const [base] = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const rows = Array.from({ length: 36 }, (_, i): ConversationSummary => ({
+      ...base!, session_id: `sticky-${i}`, display_name: DANA, latest_visitor_text: 'Tuesday at 2 works.',
+      replayed: false, outcome_counts: {},
+      last_activity: new Date(Date.now() - Math.floor(i / 12) * 86_400_000 - i * 1000).toISOString(),
+    }));
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: new RegExp(`^${DANA}`) }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const list = document.querySelector<HTMLElement>('.cd-conversations__list')!;
+    const days = [...list.querySelectorAll<HTMLElement>('.cd-conversations__day')];
+    expect(days).toHaveLength(3);
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(getComputedStyle(list).paddingTop).toBe('24px');
+
+    // Recreate the old spacing in this same browser: all label boxes, rule centres and rows
+    // must stay exactly where they were, despite the new opaque band around each label.
+    const legacy = document.createElement('style');
+    legacy.textContent = `
+      .cd-conversations__list .cd-conversations__group > .cd-conversations__day { position: static; padding-block: 0; margin-top: 0; }
+      .cd-conversations__group + .cd-conversations__group { margin-top: var(--space-8); }
+      .cd-conversations__day + .cd-conversations__items { margin-top: 0; }
+    `;
+    document.head.append(legacy);
+    onTestFinished(() => legacy.remove());
+    const resting = () => ({
+      labels: days.map(day => day.firstElementChild!.getBoundingClientRect().toJSON()),
+      rules: days.map(day => day.getBoundingClientRect().top + day.getBoundingClientRect().height / 2),
+      rows: [...list.querySelectorAll('.cd-conversations__items .cd-conversation-item')].map(row => row.getBoundingClientRect().toJSON()),
+    });
+    const before = resting();
+    legacy.remove();
+    expect(resting()).toEqual(before);
+
+    const edge = list.getBoundingClientRect().top;
+    const tops = days.map(day => day.getBoundingClientRect().top - edge);
+    const scrollTo = async (top: number) => {
+      list.scrollTop = top;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+    for (let i = 0; i < 2; i += 1) {
+      const day = days[i]!;
+      await scrollTo(tops[i]! + 100);
+      expect(day.getBoundingClientRect().top).toBe(edge);
+      expect(getComputedStyle(day).backgroundColor).toBe(tokenColor('--bg-app'));
+      expect(getComputedStyle(day).zIndex).toBe('1');
+      expect(getComputedStyle(day).paddingBlock).toBe('8px');
+      // The band's opaque ground paints over rows reaching the top, across the whole row.
+      for (const x of [day.getBoundingClientRect().left + 2, day.getBoundingClientRect().right - 2]) {
+        expect(document.elementFromPoint(x, edge + 1)?.closest('.cd-conversations__day')).toBe(day);
+      }
+
+      const next = days[i + 1]!;
+      await scrollTo(tops[i + 1]! - day.getBoundingClientRect().height / 2);
+      expect(day.getBoundingClientRect().top).toBeLessThan(edge);
+      expect(day.getBoundingClientRect().bottom).toBeLessThanOrEqual(next.getBoundingClientRect().top);
+      await scrollTo(tops[i + 1]! + 1);
+      expect(next.getBoundingClientRect().top).toBe(edge);
+      expect(day.getBoundingClientRect().bottom).toBeLessThanOrEqual(edge);
+    }
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
+
   it.each([[1512, 982], [390, 844]])('day_rules_and_visitor_previews_fit_at_%sx%s', async (width, height) => {
     // The rows below are a day apart from a fixed afternoon on the Desk's clock, so the list's day
     // groups never depend on when the test runs (near midnight, or on a 25-hour day as clocks go back).
@@ -284,8 +353,8 @@ describe('Conversations', () => {
     }
     const groups = [...document.querySelectorAll<HTMLElement>('.cd-conversations__under > .cd-conversations__group')];
     expect(groups).toHaveLength(2);
-    expect(getComputedStyle(groups[1]!).marginTop).toBe('8px');
-    expect(groups[1]!.getBoundingClientRect().top - groups[0]!.getBoundingClientRect().bottom).toBe(24);
+    expect(getComputedStyle(groups[1]!).marginTop).toBe('0px');
+    expect(groups[1]!.getBoundingClientRect().top - groups[0]!.getBoundingClientRect().bottom).toBe(16);
     for (const group of groups) {
       const day = group.querySelector<HTMLElement>('.cd-conversations__day')!;
       const style = getComputedStyle(day);

@@ -108,11 +108,27 @@
 }
 
 .cd-conversations__day {
+  position: sticky;
+  top: calc(-1 * var(--space-24));
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: var(--space-8);
+  padding-block: var(--space-8);
+  background: var(--bg-app);
   color: var(--text-tertiary);
   font-weight: 520;
+}
+
+/* Give the band's padding back at rest: the first label and every row stay in their old slots.
+   Later groups use the next band's top padding in place of their old 8 px top margin. */
+.cd-conversations__group:first-child > .cd-conversations__day,
+:not(.cd-conversations__group) + .cd-conversations__group > .cd-conversations__day {
+  margin-top: calc(-1 * var(--space-8));
+}
+
+.cd-conversations__day + .cd-conversations__items {
+  margin-top: calc(-1 * var(--space-8));
 }
 
 .cd-conversations__day::after {
@@ -124,7 +140,7 @@
 }
 
 .cd-conversations__group + .cd-conversations__group {
-  margin-top: var(--space-8);
+  margin-top: 0;
 }
 
 .cd-conversations__items {
