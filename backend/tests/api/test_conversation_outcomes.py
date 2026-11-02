@@ -1,4 +1,5 @@
-"""Agent list outcomes come from stored decisions and shown, checked cards, never request text."""
+"""List outcomes: an agent's come from stored decisions and shown, checked cards; a visitor's from the kernel's
+decisions, payment links and handoffs, timed by the ledger. Never request text."""
 
 from datetime import timedelta
 
@@ -11,6 +12,7 @@ from desk.api.store import Ids, NOTES, append_message
 from desk.contracts import Decision, RenderedBlock, ReplyVerdict
 from desk.events import EvTurnEnd
 from tests.api.test_owner_reads import app, model, scene, local  # noqa: F401 (shared fixtures)
+from tests.kernel_contract.fake_kernel import signed_time
 
 
 async def record(scene, ids, at, *, state="executed", tool="native.book", card="booking_confirmed",
@@ -117,7 +119,7 @@ async def test_agent_outcome_uses_ledger_order_not_receipt_publication(scene, re
     ("booking", "visit_booked"), ("charge", "deposit_paid"), ("payment", "deposit_paid"),
     ("refusal", "turned_down"), ("execution_refusal", "turned_down"),
     ("later_refusal", "turned_down"), ("same_time_refusal", "turned_down"), ("later_hold", None), ("resolved_hold", None), ("later_handoff", None),
-    ("no_card", None), ("visitor", None), ("wrong_tool", None), ("no_receipt", None),
+    ("no_card", None), ("visitor", "visit_booked"), ("wrong_tool", None), ("no_receipt", None),
     ("claude_payment", None),
 ])
 async def test_agent_latest_outcome(scene, case, expected):
@@ -151,3 +153,177 @@ async def test_agent_latest_outcome(scene, case, expected):
     assert result.status_code == 200, result.text
     summary = next(row for row in result.json() if row["session_id"] == session.session_id)
     assert summary["latest_outcome"] == expected
+
+
+# Visitors -----------------------------------------------------------------------------------------------------
+
+
+def entry(scene, ids, at, kind, summary, *, on_session=True, recorded_at=None) -> int:
+    """A ledger entry on the Desk written at `at`, on the visitor's session unless `on_session` is false; replayed
+    into the copy with `recorded_at` as its recorded time when given, as recorded history is. Returns its seq."""
+    fake = scene.fake
+    fake.now = at
+    if recorded_at is not None:
+        summary = {**summary, "replayed": {"at": signed_time(recorded_at), "recording": "a recorded night"}}
+    written = fake.append(fake.desks[ids.desk_id], kind, summary, session_id=ids.session_id if on_session else None)
+    fake.flush()
+    return written.seq
+
+
+def decided(scene, ids, at, tool, state, *, written_at=None) -> str:
+    """A visitor's decision now in `state`, its current ledger entry at `at` (or written at `written_at` and replayed
+    with `at` as its recorded time, the decision row stamped at the recorded time too). Returns its ID."""
+    seq = entry(scene, ids, written_at or at, "execute", {"state": state}, recorded_at=at if written_at else None)
+    decision_id = f"visitor-decision-{seq}"
+    scene.fake._put("decisions", (decision_id,), {
+        "decision_id": decision_id, "copy_id": ids.copy_id, "desk_id": ids.desk_id, "session_id": ids.session_id,
+        "tool": tool, "effects": [], "outcome": "refuse" if state.startswith("refused") else
+        "hold" if state in {"held", "denied", "expired"} else "allow", "state": state, "answers": [],
+        "policy_version": 1, "card_ids": [], "review": None, "reason_plain": "Recorded result",
+        "visitor_plain": "Checked", "expires_at": at + timedelta(hours=1), "ledger_seq": seq, "created_at": at,
+        "policy_ids": []})
+    scene.fake.flush()
+    return decision_id
+
+
+async def visitor_outcome(scene, who) -> str | None:
+    result = await scene.owner.get(f"desks/{scene.owner.desk_id}/conversations")
+    assert result.status_code == 200, result.text
+    return next(row for row in result.json() if row["session_id"] == who.session_id)["latest_outcome"]
+
+
+@pytest.mark.parametrize("tool,state,expected", [
+    ("native.quote", "executed", "quoted"),
+    ("native.book", "executed", "visit_booked"),
+    ("native.capture_lead", "executed", "lead_captured"),
+    ("native.release_document", "executed", "document_sent"),
+    ("native.release_document", "refused", "turned_down"),
+    ("native.book", "refused_at_execution", "turned_down"),
+    ("native.quote", "denied", "owner_declined"),
+    ("native.request_callback", "executed", None),
+    ("native.payment_link", "executed", None),
+    ("native.quote", "held", None), ("native.quote", "allowed", None), ("native.book", "failed", None),
+])
+async def test_visitor_latest_outcome_from_a_decision(scene, tool, state, expected):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, tool, state)
+    assert await visitor_outcome(scene, who) == expected
+
+
+def paid_link(scene, ids, at, *, refused_first=False) -> None:
+    """A payment link of the visitor's that moved to `paid` at `at`, ledgered as the kernel ledgers the move (after a
+    refused retry, ledgered with the link's state too, a minute earlier, when `refused_first`)."""
+    link_id = f"link-{at.timestamp()}"
+    scene.fake._put("payment_links", (link_id,), {
+        "link_id": link_id, "copy_id": ids.copy_id, "desk_id": ids.desk_id, "session_id": ids.session_id,
+        "quote_id": None, "action_id": None, "amount_cents": 18000, "state": "paid",
+        "expires_at": at + timedelta(hours=1)})
+    if refused_first:
+        entry(scene, ids, at - timedelta(minutes=1), "payment", {"link_id": link_id, "state": "paid", "refused": True})
+    entry(scene, ids, at, "payment", {"link_id": link_id, "state": "paid"})
+
+
+@pytest.mark.parametrize("refused_first", [False, True])
+async def test_visitor_paid_link_is_deposit_paid(scene, refused_first):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, "native.payment_link", "executed")
+    paid_link(scene, who.ids, at + timedelta(minutes=5), refused_first=refused_first)
+    assert await visitor_outcome(scene, who) == "deposit_paid"
+
+
+async def test_visitor_newest_outcome_wins(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, "native.quote", "executed")
+    assert await visitor_outcome(scene, who) == "quoted"
+    decided(scene, who.ids, at + timedelta(minutes=1), "native.book", "executed")
+    assert await visitor_outcome(scene, who) == "visit_booked"
+    paid_link(scene, who.ids, at + timedelta(minutes=2))
+    assert await visitor_outcome(scene, who) == "deposit_paid"
+    decided(scene, who.ids, at + timedelta(minutes=3), "native.request_callback", "executed")
+    assert await visitor_outcome(scene, who) == "deposit_paid"         # a call-back request is no outcome
+
+
+async def test_visitor_ties_go_to_the_later_ledger_entry(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, "native.book", "executed")
+    decided(scene, who.ids, at, "native.quote", "refused")
+    assert await visitor_outcome(scene, who) == "turned_down"
+
+
+@pytest.mark.parametrize("state", ["held", "expired", "cancelled"])
+async def test_visitor_later_unresolved_request_clears_the_outcome(scene, state):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, "native.book", "executed")
+    decided(scene, who.ids, at + timedelta(minutes=1), "native.quote", state)
+    assert await visitor_outcome(scene, who) is None
+
+
+async def test_visitor_later_handoff_card_clears_the_outcome(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, "native.book", "executed")
+    entry(scene, who.ids, at + timedelta(minutes=1), "desk_data",
+          {"part": "handoffs", "refs": ["handoff-card"], "kind": "card"})
+    assert await visitor_outcome(scene, who) is None
+
+
+CALLBACK = {"name": "Sam Ortiz", "contact": "(510) 555-0199", "reason": "Leaking water heater"}
+
+
+async def test_visitor_callback_marked_done_is_called_back(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    await who.run("native.request_callback", CALLBACK)
+    (handoff_id,) = [h for h, row in scene.fake.handoffs.items() if row["session_id"] == who.session_id]
+    decided(scene, who.ids, at + timedelta(minutes=1), "native.quote", "executed")
+    assert await visitor_outcome(scene, who) == "quoted"             # an open call-back is no outcome yet
+    scene.fake.now = at + timedelta(minutes=2)
+    done = await scene.owner.browser.post(f"/api/owner/handoffs/{handoff_id}/done")
+    assert done.status_code == 200, done.text
+    assert await visitor_outcome(scene, who) == "called_back"
+    decided(scene, who.ids, at + timedelta(minutes=3), "native.book", "executed")
+    assert await visitor_outcome(scene, who) == "visit_booked"
+
+
+async def test_visitor_callback_replaced_by_a_newer_one_is_not_called_back(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    decided(scene, who.ids, at, "native.quote", "executed")
+    scene.fake.now = at + timedelta(minutes=1)
+    await who.run("native.request_callback", CALLBACK)
+    scene.fake.now = at + timedelta(minutes=2)
+    await who.run("native.request_callback", CALLBACK)            # closes the first as done, replaced
+    statuses = sorted(row["status"] for row in scene.fake.handoffs.values() if row["session_id"] == who.session_id)
+    assert statuses == ["done", "open"]
+    assert await visitor_outcome(scene, who) == "quoted"
+
+
+async def test_visitor_outcome_follows_the_recorded_time_of_replayed_history(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    # recorded at 9:00 but written into the copy at 9:30, after a live quote at 9:10
+    decided(scene, who.ids, at, "native.book", "executed", written_at=at + timedelta(minutes=30))
+    decided(scene, who.ids, at + timedelta(minutes=10), "native.quote", "executed")
+    assert await visitor_outcome(scene, who) == "quoted"
+    decided(scene, who.ids, at + timedelta(minutes=20), "native.capture_lead", "executed",
+            written_at=at + timedelta(minutes=40))
+    assert await visitor_outcome(scene, who) == "lead_captured"
+
+
+async def test_owner_preview_has_no_outcome(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at, preview=True)
+    decided(scene, who.ids, at, "native.book", "executed")
+    assert await visitor_outcome(scene, who) is None
+
+
+async def test_visitor_with_no_outcome_events_is_null(scene):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at)
+    await scene.text(who, at)
+    assert await visitor_outcome(scene, who) is None

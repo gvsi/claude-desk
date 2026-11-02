@@ -6,6 +6,7 @@
  */
 import { HttpResponse, http } from 'msw';
 import { describe, expect, it, onTestFinished } from 'vitest';
+import { userEvent } from 'vitest/browser';
 
 import { newIdempotencyKey, observeRequests } from '../api/http.ts';
 import type { SetupState } from '../api/views.ts';
@@ -93,12 +94,47 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     await expect.element(screen.getByText('Both, about evenly', { exact: true })).toBeVisible();
     expect(screen.getByRole('region', { name: FIRST_QUESTION, exact: true }).elements()).toHaveLength(0);
     expect(screen.getByRole('article', { name: 'Google Calendar', exact: true }).elements()).toHaveLength(0);
-    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeDisabled();
+    // The message box takes typing while the reply is written; Send waits for the saved turn.
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toBeEnabled();
+    await expect.element(screen.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
 
     held.release();
     await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
     expect(growing()).toBeNull();
     expect(screen.getByText(CPA_COPY.consult, { exact: true }).elements()).toHaveLength(1);
+  });
+
+  it('takes_typing_while_a_turn_streams_and_sends_it_once_the_turn_is_saved', async () => {
+    const state = await cpaInterview(true);
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+    mockStore.streamSetupTurns();
+    const held = gate();
+    mockStore.planStream('setup', { pauseAfter: 3, until: held.until });
+    onTestFinished(() => held.release());
+    const answers = () => mockStore.requests.filter((r) => r.key === 'setupAnswer');
+    const box = screen.getByRole('textbox', { name: 'Your answer', exact: true });
+    const send = screen.getByRole('button', { name: 'Send', exact: true });
+    await box.click();
+    await userEvent.keyboard('Both, about evenly{Enter}');
+    await expect.poll(() => growing()?.textContent).toBe(growingWords(CPA_COPY.consult)[1]);
+    // While the reply is written, the box keeps focus and takes typing; only Send and Enter wait.
+    await expect.element(box).toBeEnabled();
+    await expect.element(box).toHaveFocus();
+    await userEvent.keyboard('Consults are free');
+    await expect.element(box).toHaveValue('Consults are free');
+    await expect.element(send).toBeDisabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('Consults are free');
+    expect(answers()).toHaveLength(1);
+
+    held.release();
+    await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true })).toBeVisible();
+    // The turn is saved: the words typed meanwhile are still there, with focus, and they send.
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('Consults are free');
+    await expect.element(send).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => answers()).toHaveLength(2);
   });
 
   it('follows_a_turn_already_running_when_the_step_opens', async () => {

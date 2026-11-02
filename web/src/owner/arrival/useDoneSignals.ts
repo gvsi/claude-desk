@@ -18,6 +18,7 @@ import { conversationsKey } from '../conversations/ConversationsPage.tsx';
 import { conversationKey } from '../conversations/useTakeOver.ts';
 import { attemptsQuery, ledgerQuery } from '../safety/queries.ts';
 import { useDesks } from '../useDesks.ts';
+import { keptByApp } from './keptCopy.ts';
 import {
   THINGS,
   answeredInView,
@@ -31,7 +32,6 @@ import {
   restoreKept,
   stoppedInPreview,
   uncountedAnswer,
-  type Kept,
   type Reading,
   type Thing,
   type UncountedAnswer,
@@ -107,9 +107,6 @@ function useFreshReads(queryClient: QueryClient) {
     return read.status === 'success' && fetchesEnded(queryClient, queryKey) > wait;
   };
 }
-
-/** Per app (its query client, so a reload starts afresh), what the list last kept of its copy. */
-const keptByApp = new WeakMap<QueryClient, Kept>();
 
 export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSignalsOptions): DoneSignals {
   const queryClient = useQueryClient();

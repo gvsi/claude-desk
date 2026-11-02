@@ -1,14 +1,16 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, SetupState, WentLive } from '../api/views.ts';
 import { Button, Card, Notice, PageHeader, Pill, StatusDot, StatusLabel } from '../ds/index.ts';
+import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
+import { COMING_LATER_CHANNELS, WEBSITE_EMBED } from '../lib/channels.ts';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
 import { DESKS_KEY, withAnswering } from '../owner/useDesks.ts';
-import { COMING_LATER_CHANNELS, SETUP_COPY, stillCheckingLine } from './copy.ts';
+import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { gaveUp } from './shared.ts';
 
 const copy = SETUP_COPY.live;
@@ -56,6 +58,9 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   const [wentLive, setWentLive] = useState<WentLive | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The preview's composer takes focus once its chat can be written in, for the owner to try it at once.
+  const preview = useRef<HTMLDivElement>(null);
+  useFocusOnArrival(preview, '.cd-public-shell__composer textarea');
 
   const goLive = async () => {
     setPending(true);
@@ -126,8 +131,8 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
             </div>
             <div className="cd-setup-live__embed">
               <div className="cd-setup-live__embed-text">
-                <p className="cd-setup-live__embed-title cd-type-body">{copy.websiteEmbed}</p>
-                <p className="cd-setup-live__embed-line cd-type-meta">{copy.websiteEmbedLine}</p>
+                <p className="cd-setup-live__embed-title cd-type-body">{WEBSITE_EMBED.name}</p>
+                <p className="cd-setup-live__embed-line cd-type-meta">{WEBSITE_EMBED.line}</p>
               </div>
               <Pill>{copy.comingLater}</Pill>
             </div>
@@ -140,7 +145,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
               <li key={channel.key} className="cd-setup-live__embed cd-setup-live__channel">
                 <div className="cd-setup-live__embed-text">
                   <p className="cd-setup-live__embed-title cd-type-body">{channel.name}</p>
-                  {channel.line ? <p className="cd-setup-live__embed-line cd-type-meta">{channel.line}</p> : null}
+                  <p className="cd-setup-live__embed-line cd-type-meta">{channel.line}</p>
                 </div>
                 <Pill>{copy.comingLater}</Pill>
               </li>
@@ -154,7 +159,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.previewTitle} />
-      <div className="cd-setup-live__preview">
+      <div className="cd-setup-live__preview" ref={preview}>
         <PublicChat slug={state.slug} previewDeskId={state.desk_id} embedded />
       </div>
       {error === null ? null : <Notice tone="error">{error}</Notice>}

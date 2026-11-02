@@ -4,52 +4,20 @@ import { useNavigate } from 'react-router';
 
 import { ApiError, OWNER_ERROR_COPY, isUncertain, ownerErrorCopy, request } from '../../api/http.ts';
 import type { BusinessOut } from '../../api/views.ts';
-import { ACTING_SWITCH_COPY, Button, Card, DetailList, Dialog, Notice, SectionHeader, Switch, type DetailItem } from '../../ds/index.ts';
-import { hoursParts } from '../../lib/format.ts';
+import { ACTING_SWITCH_COPY, Button, Card, Dialog, Notice, SectionHeader, Switch } from '../../ds/index.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { DESKS_KEY, findDesk, invalidateCopy, todayPath } from '../useDesks.ts';
-import { HeaderColourCard } from './HeaderColourCard.tsx';
-
-/**
- * A Desk's hours window in the signed board's words, "Weekdays 8:00 am to 6:00 pm". No board draws
- * an all-day window, so one reads as Rules writes it, with the comma: "Every day, all day".
- */
-function hoursWords({ days, times, allDay }: ReturnType<typeof hoursParts>): string {
-  return allDay ? `${days}, ${times}` : `${days} ${times}`;
-}
 
 /** What deleting a Desk does, beside its button and in the dialog that asks first. */
 const DELETE_LINE = 'Its public link stops working and its chats close. Its safety record is kept.';
 
 /**
- * An IANA time zone as the owner reads it: its generic name and its city, "Pacific Time (Los
- * Angeles)" for America/Los_Angeles; the generic name alone when it already names the city, and
- * the zone as it came when the browser can't name it.
- */
-function timeZoneWords(zone: string): string {
-  const city = zone.split('/').at(-1)?.replaceAll('_', ' ') ?? zone;
-  try {
-    const name = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longGeneric' })
-      .formatToParts(new Date())
-      .find((part) => part.type === 'timeZoneName')?.value;
-    if (name === undefined || name === '') return zone;
-    return name.includes(city) ? name : `${name} (${city})`;
-  } catch {
-    return zone;
-  }
-}
-
-/**
- * Settings › General: the business's details from the copy's Desks, read-only (the business, this
- * Desk, the name customers see, the time zone and the Desk's hours); Answering, the same switch as
- * the sidebar's; and deleting this Desk, which asks first, then opens the business's next Desk's
- * Today, or setup when it was the last one.
+ * Settings › General: whether Claude acts for this Desk, and deleting it with confirmation.
  */
 export function GeneralPage() {
   const { business, desk, setAnswering, holdDesk } = useOwnerDesk();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const businessId = useId();
   const deleteId = useId();
   const [confirming, setConfirming] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -71,16 +39,6 @@ export function GeneralPage() {
     if (active !== null && active !== document.body) return;
     document.getElementById(unconfirmed ? reloadId : removeButtonId)?.focus();
   }, [unconfirmed, reloadId, removeButtonId]);
-
-  const details: DetailItem[] = [
-    { label: 'Business', value: business.name },
-    { label: 'This Desk', value: desk.name },
-    { label: 'Customers see you as', value: business.owner_display_name },
-    { label: 'Time zone', value: timeZoneWords(business.timezone) },
-  ];
-  // In the signed board's words: "Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm".
-  const hours = desk.hours.map((window) => hoursWords(hoursParts(window)));
-  if (hours.length > 0) details.push({ label: 'Hours', value: hours.join(', ') });
 
   /** The Desk is gone: the business's next Desk's Today, or setup for a new one; then the copy is read again. */
   const leave = async (businesses: readonly BusinessOut[] = [business]) => {
@@ -163,11 +121,6 @@ export function GeneralPage() {
 
   return (
     <>
-      <section aria-labelledby={businessId} className="cd-settings__section">
-        <SectionHeader id={businessId} title="Your business" />
-        <DetailList items={details} />
-      </section>
-      <HeaderColourCard key={desk.desk_id} business={business} desk={desk} />
       <Card as="section" label={ACTING_SWITCH_COPY.label} padding={0}>
         <div className="cd-settings__answering">
           <Switch label={ACTING_SWITCH_COPY.label} description={ACTING_SWITCH_COPY[desk.answering ? 'on' : 'off']} checked={desk.answering} onChange={setAnswering} />

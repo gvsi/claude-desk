@@ -18,6 +18,12 @@
   background: var(--fill-hover);
 }
 
+/* Keyboard focus turns the pill's edge line-focus, the outline drawn inside it as its edge is; on a
+   phone's top bar, where it has no edge, the same 1 px edge shows inside it. */
+.cd-about-try:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--line-focus);
+}
+
 .cd-about-try__icon {
   flex: none;
 }

@@ -665,6 +665,8 @@ async def test_cancel_held_decision(kernel, ro_read):
     assert cancelled.answers == [] and cancelled.ledger_seq > held.ledger_seq
     assert await refused(cancel(visitor)) == (409, "conflict")
     assert await refused(answer(http.owner(copy.owner_token), held.decision_id, "allow_once")) == (409, "conflict")
+    # the visitor withdrew it themselves: the owner's read has no owner line, so the owner's card keeps its own
+    assert (await read_decision(http.owner(copy.owner_token), held.decision_id)).owner_plain is None
 
 
 @pytest.mark.kernel_plan("01a")
@@ -1742,7 +1744,8 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(kernel
     next read of the held quote, through the API's own client, finds it `cancelled` with the state's own line, ledgered
     `decide` naming the booking and the rules version in force with its money cap, and the owner's answer to it is 409
     with nothing run. A typed booking writes the same booking, so it counts the same way. Another session's held
-    discount quote, with no booking, stays held."""
+    discount quote, with no booking, stays held. The owner alone reads that a booking closed it (`owner_plain`, the
+    owner's line, unsigned); the visitor's reads, and its cancel, now refused, carry none of it."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
@@ -1762,8 +1765,10 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(kernel
     cancelled = await read_decision(view, held.decision_id)
     assert (cancelled.state, cancelled.visitor_plain, cancelled.answers) == ("cancelled", "Cancelled", [])
     assert cancelled.ledger_seq > held.ledger_seq and cancelled.signature != held.signature
+    assert cancelled.owner_plain is None
     assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
-    assert (await read_decision(owner, held.decision_id)).state == "cancelled"
+    assert await read_decision(owner, held.decision_id) == cancelled.model_copy(update={"owner_plain": BOOKED_LINE})
+    assert await read_decision(view, held.decision_id) == cancelled
     assert (await read_decision(owner, kept.decision_id)).state == "held"
     stored = ro_read(ro_schema, copy.copy_id, "SELECT state FROM {ro}.decisions WHERE decision_id = %s",
                      (held.decision_id,))
@@ -1776,6 +1781,13 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(kernel
                             "cancelled_by": "booking", "booking_id": row["booking_id"],
                             "policy_version": active["version"],
                             "auto_money_cap_cents": active["auto_money_cap_cents"]}]
+    assert await refused(view.call("POST /decisions/{decision_id}/cancel",
+                                   CancelRequest(session_id=visitor.state.session_id),
+                                   path={"decision_id": held.decision_id})) == (409, "conflict")
+
+
+# The owner's line for a held request a booking closed (the kernel's `render.owner_line("cancelled_by_booking")`).
+BOOKED_LINE = "The visitor booked before you answered, so this request closed."
 
 
 @pytest.mark.kernel_plan("01b")

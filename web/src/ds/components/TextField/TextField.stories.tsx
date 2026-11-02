@@ -216,14 +216,15 @@ export const ReadOnly: Story = {
       await expect([field.selectionStart, field.selectionEnd]).toEqual([0, value.length]);
     }
 
-    // Both stay in the tab order. A held field has no caret, so keyboard focus rings it in the warm
-    // `ring-focus` (the secondary ink), as any other control; its border doesn't change.
+    // Both stay in the tab order. A held field has no caret, so keyboard focus draws the warm
+    // `line-focus` edge (the secondary ink) 1 px inside it, as on any other borderless control; its
+    // border doesn't change, and nothing rings it.
     multiline.focus();
     await userEvent.tab();
     await expect(singleLine).toHaveFocus();
-    expectComputed(singleLine, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'none' });
+    expectComputed(singleLine, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
     await userEvent.tab({ shift: true });
     await expect(multiline).toHaveFocus();
-    expectComputed(multiline, { outlineStyle: 'solid', outlineWidth: '2px', outlineColor: 'rgba(250, 249, 245, 0.64)', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'none' });
+    expectComputed(multiline, { outlineStyle: 'none', borderTopColor: 'rgba(250, 249, 245, 0.22)', boxShadow: 'rgba(250, 249, 245, 0.64) 0px 0px 0px 1px inset' });
   },
 };

@@ -6,7 +6,7 @@
  */
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
 import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
@@ -159,6 +159,24 @@ function typeStillLoading(): () => void {
 }
 
 describe('ReaderPage with motion', () => {
+  it('read_next_arrow_nudges_toward_the_next_page', async () => {
+    // Pointing at the "Read next" card moves its arrow 4 px toward the next page, and back when the pointer leaves.
+    for (const id of ['proposal', 'prediction'] as const) {
+      const screen = await renderReader(id);
+      const card = document.querySelector<HTMLElement>('.cd-about-next .cd-card');
+      const arrow = card?.querySelector<SVGSVGElement>('svg.cd-about-next__arrow');
+      if (!card || !arrow) throw new Error(`${id}: Read next draws no arrow`);
+      expect(getComputedStyle(arrow).transform, id).toBe('none');
+      card.scrollIntoView({ block: 'center' });
+      const link = card.querySelector('a') as HTMLElement;
+      await userEvent.hover(link);
+      await expect.poll(() => getComputedStyle(arrow).transform, { message: id }).toBe('matrix(1, 0, 0, 1, 4, 0)');
+      await userEvent.unhover(link);
+      await expect.poll(() => getComputedStyle(arrow).transform, { message: id }).toBe('none');
+      await screen.unmount();
+    }
+  });
+
   it('contents_link_scrolls_smoothly', async () => {
     const screen = await renderReader('prediction');
     const heading = headingOf('limitations');

@@ -74,8 +74,11 @@ export const GoogleCalendar: Story = {
     await expect(jobs).toBeChecked();
     await expect(jobs).toHaveFocus();
     await expect(jobs).toHaveAccessibleName('Turner Plumbing jobs mike@turnerplumbing.example');
-    // The checked choice's box takes the accent border.
-    expectComputed(jobs.closest('label') as Element, { borderTopColor: 'rgb(126, 174, 218)' });
+    // The dialog's initial focus can count as keyboard focus. Read the selected border away from
+    // focus, after its transition finishes. Native pointer and keyboard styles are covered in
+    // focus.browser.test.tsx, since synthetic clicks don't set the browser's focus modality.
+    jobs.blur();
+    await waitFor(() => expectComputed(jobs.closest('label') as Element, { borderTopColor: 'rgb(126, 174, 218)' }));
     // Choosing another calls onChange; Continue sends the screen's value.
     await userEvent.click(personal);
     await expect(args.onChange).toHaveBeenCalledWith('personal');

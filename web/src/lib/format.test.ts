@@ -53,10 +53,12 @@ describe('format', () => {
     expect(conversationDay('2026-10-23T06:59:00Z', LA, now)).toBe('Earlier'); // Oct 22
     expect(conversationDay('not a time', LA, now)).toBe('Earlier');
 
-    // Today and yesterday show the time, anything older the date.
+    // Today and yesterday show the time, the rest of the last 7 days the weekday, anything older the date.
     expect(formatListTime('2026-10-29T17:20:00Z', LA, now)).toBe('10:20 am');
     expect(formatListTime('2026-10-29T05:10:00Z', LA, now)).toBe('10:10 pm');
-    expect(formatListTime('2026-10-27T17:20:00Z', LA, now)).toBe('Oct 27');
+    expect(formatListTime('2026-10-27T17:20:00Z', LA, now)).toBe('Tue');
+    expect(formatListTime('2026-10-23T07:00:00Z', LA, now)).toBe('Fri'); // the first of the last 7 days
+    expect(formatListTime('2026-10-23T06:59:00Z', LA, now)).toBe('Oct 22');
     expect(formatListTime('nope', LA, now)).toBe('');
 
     // When a conversation started: "Today at 12:04 pm", "Yesterday at 10:10 pm", "Oct 27 at 9:52 am".

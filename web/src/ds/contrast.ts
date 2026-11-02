@@ -17,7 +17,7 @@ export type ContrastPair = {
   readonly under?: string;
   /** The control's own opacity when it is drawn faded as a whole: its label and fill fade together over `over`. */
   readonly opacity?: number;
-  /** 4.5:1 for text; 3:1 for focus rings, dots, the mark and text at 24 px and up. */
+  /** 4.5:1 for text; 3:1 for focus edges, dots, the mark and text at 24 px and up. */
   readonly min: 4.5 | 3;
   readonly use: string;
 };
@@ -141,7 +141,7 @@ function pairs(
 
 const TEXT = ['text-primary', 'text-secondary', 'text-tertiary', 'accent-blue'] as const;
 
-const MARKS = ['accent-blue', 'ring-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
+const MARKS = ['accent-blue', 'line-focus', 'status-handled', 'status-held', 'status-refused', 'status-info'] as const;
 const SURFACES = ['bg-app', 'bg-panel', 'bg-surface', 'bg-selected'] as const;
 
 export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
@@ -151,11 +151,29 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'Text on a hovered secondary button on the app background.', 'bg-app'),
   ...pairs(['text-primary', 'text-secondary'], ['fill-secondary-hover'], 4.5, 'Text on a hovered secondary button inside the composer and menus.', 'bg-surface'),
   ...pairs(['button-primary-text'], ['button-primary', 'button-primary-hover'], 4.5, 'Text on the primary button, at rest, on hover and while busy.'),
-  ...pairs(MARKS, SURFACES, 3, 'Focus rings and status dots on the app, panels, raised surfaces and the selected row.'),
-  ...pairs(MARKS, ['fill-card'], 3, 'Focus rings and status dots inside cards.', 'bg-app'),
-  ...pairs(MARKS, ['fill-hover'], 3, 'Focus rings and status dots on a hovered conversation or attempt row.', 'bg-app'),
-  ...pairs(['ring-focus'], ['bg-muted'], 3, "The focus ring on the reviewer bar's Start over."),
-  ...pairs(['ring-focus'], ['fill-hover'], 3, 'The focus ring just inside a menu item that has focus, on its hover fill in a menu.', 'bg-surface'),
+  ...pairs(MARKS, SURFACES, 3, 'Focus edges and status dots on the app, panels, raised surfaces and the selected row.'),
+  ...pairs(MARKS, ['fill-card'], 3, 'Focus edges and status dots inside cards.', 'bg-app'),
+  ...pairs(MARKS, ['fill-hover'], 3, 'Focus edges and status dots on a hovered conversation or attempt row.', 'bg-app'),
+  ...pairs(['line-focus'], ['bg-muted'], 3, "The focus edge inside the reviewer bar's Start over."),
+  ...pairs(['line-focus'], ['fill-hover'], 3, 'The focus edge just inside a menu item that has focus, on its hover fill in a menu.', 'bg-surface'),
+  ...pairs(['line-focus'], ['fill-hover'], 3, 'The focus edge just inside a sidebar row that has focus while it is hovered.', 'bg-panel'),
+  ...pairs(
+    ['line-focus'],
+    ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'],
+    3,
+    'The focus edge just inside a secondary or danger button on a page, at rest and hovered.',
+    'bg-app',
+  ),
+  ...pairs(
+    ['line-focus'],
+    ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'],
+    3,
+    "The focus edge just inside a secondary or danger button in a card, such as a held request's answers, at rest and hovered.",
+    'fill-card',
+    { under: 'bg-app' },
+  ),
+  ...pairs(['line-focus'], ['fill-secondary', 'fill-secondary-hover'], 3, 'The focus edge just inside a secondary button in a dialog or a menu, at rest and hovered.', 'bg-surface'),
+  ...pairs(['bg-app'], ['button-primary', 'button-primary-hover'], 3, "The primary button's focus edge, 2 px of the page's own dark just inside its fill, at rest and hovered."),
   ...pairs(
     ['mark-ink-light', 'mark-clay'],
     ['bg-app', 'bg-panel', 'bg-surface'],
@@ -173,7 +191,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['text-secondary'], ['fill-secondary'], 3, 'The switch knob when off, against its track in the sidebar.', 'bg-panel'),
   ...pairs(['text-primary', 'text-secondary'], ['fill-hover'], 4.5, "The switch row's label and description while it is hovered in the sidebar.", 'bg-panel'),
   ...pairs(TEXT, ['fill-card'], 4.5, "Text and links in reply cards in the public page's about column.", 'bg-panel'),
-  ...pairs(MARKS, ['fill-card'], 3, "Focus rings and status marks in reply cards in the public page's about column.", 'bg-panel'),
+  ...pairs(MARKS, ['fill-card'], 3, "Focus edges and status marks in reply cards in the public page's about column.", 'bg-panel'),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "Count pills on the sidebar's nav rows.", 'bg-panel'),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "A count pill on the sidebar's current nav row.", 'bg-selected'),
   ...pairs(['text-primary'], ['fill-hover'], 4.5, "The reviewer bar's Start over button while it is hovered.", 'bg-muted'),
@@ -199,7 +217,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   // no_button_on_the_selected_ground (guards.test.ts) keeps Buttons off that ground.
   ...pairs(['text-secondary'], ['fill-secondary'], 4.5, "A busy secondary answer in a card: its text-secondary label on the button's fill.", 'fill-card', { under: 'bg-app' }),
   ...pairs(['text-secondary', 'accent-blue'], ['fill-card'], 4.5, "Who an entry went to, an owner's time, and the link under an owner's alert, in the Demo inbox's entries inside its sheet.", 'bg-surface'),
-  ...pairs(MARKS, ['fill-card'], 3, "Focus rings and status dots in the Demo inbox's entries inside its sheet.", 'bg-surface'),
+  ...pairs(MARKS, ['fill-card'], 3, "Focus edges and status dots in the Demo inbox's entries inside its sheet.", 'bg-surface'),
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Try again on an entry that failed to open, inside the Demo inbox's sheet.", 'fill-card', { under: 'bg-surface' }),
   ...pairs(['text-secondary'], ['fill-count'], 4.5, "The count on the Demo inbox's button.", 'fill-secondary', { under: 'bg-app' }),
   ...pairs(['text-primary'], ['fill-secondary'], 4.5, "Code in a card on the agents page: a CodeBlock or a CopyField's box, and a secondary button's label beside it.", 'fill-card', { under: 'bg-app' }),

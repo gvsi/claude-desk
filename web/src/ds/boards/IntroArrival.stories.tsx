@@ -77,11 +77,17 @@ export const Board: Story = {
     await expect(illustration.getBoundingClientRect().right).toBe(panel.right);
 
     // focus_order_is_logical: focus starts in the passcode field, and with the field empty (Start
-    // the demo disabled) Tab stays on it: nothing behind the dialog is reachable.
+    // the demo disabled) Tab goes only to the footer's author link and back: nothing behind the
+    // dialog is reachable.
     const field = within(dialog).getByLabelText('Passcode');
+    const author = dialog.querySelector<HTMLElement>('[data-ds="concept-footer"] a');
     await expect(field).toHaveFocus();
     await userEvent.tab();
+    await expect(author).toHaveFocus();
+    await userEvent.tab();
     await expect(field).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    await expect(author).toHaveFocus();
     await userEvent.tab({ shift: true });
     await expect(field).toHaveFocus();
     const start = within(dialog).getByRole('button', { name: 'Start the demo' });

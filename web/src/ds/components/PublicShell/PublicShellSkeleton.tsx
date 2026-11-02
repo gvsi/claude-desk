@@ -100,7 +100,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
           </div>
           {footer ? (
             <div className="cd-public-shell__footer">
-              <div data-skeleton-anchor="concept-footer"><ConceptFooter poweredBy /></div>
+              <div data-skeleton-anchor="concept-footer"><ConceptFooter poweredBy skeleton /></div>
             </div>
           ) : null}
           {aboutBeside ? null : about}

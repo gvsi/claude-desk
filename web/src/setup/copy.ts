@@ -283,36 +283,7 @@ export const SETUP_COPY = {
     open: 'Open',
     goToToday: 'Go to Today',
     shareIt: 'Share it',
-    websiteEmbed: 'Website embed',
-    websiteEmbedLine: 'The same chat on your own site.',
     comingLater: 'Coming later',
     moreChannels: 'More channels',
-    whatsApp: 'WhatsApp',
-    whatsAppLine: 'Customers message your Desk from WhatsApp.',
-    iMessage: 'iMessage',
-    iMessageLine: 'The same chat in Messages on iPhone.',
-    phoneCalls: 'Phone calls',
-    phoneCallsLine: 'Your Desk answers your business line by voice.',
   },
 } as const;
-
-/**
- * A way people will reach the Desk that isn't built yet, as Live lists it under "Coming later": its
- * name and, when it has one, the line under it.
- */
-export interface ComingLaterChannel {
-  /** Unique in the list, stable across copy changes. */
-  key: string;
-  name: string;
-  line?: string;
-}
-
-/**
- * The channels Live lists under "More channels", each coming later, in order. The website embed,
- * also coming later, stays in "Share it" beside the link's QR code.
- */
-export const COMING_LATER_CHANNELS: readonly ComingLaterChannel[] = [
-  { key: 'whatsapp', name: SETUP_COPY.live.whatsApp, line: SETUP_COPY.live.whatsAppLine },
-  { key: 'imessage', name: SETUP_COPY.live.iMessage, line: SETUP_COPY.live.iMessageLine },
-  { key: 'phone_calls', name: SETUP_COPY.live.phoneCalls, line: SETUP_COPY.live.phoneCallsLine },
-];
