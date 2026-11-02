@@ -262,7 +262,7 @@ describe('a confirmed rule change in Ask Claude', () => {
 
     // To All rules and back: Rules opens afresh, and nothing on it says it was updated.
     await screen.getByRole('link', { name: 'See all rules' }).first().click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Anyone · No discounts · Weekdays, all day');
@@ -592,7 +592,7 @@ describe('a preset or a new payment limit', () => {
   it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
     // All rules, then Rules, then a preset's review, whose confirm is held.
     const { screen, router } = await renderRoute(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await router.navigate(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
@@ -666,7 +666,7 @@ describe('a preset or a new payment limit', () => {
     }).toBe(true);
     // (Navigated to directly: clicking a link would first scroll it into view, moving the place.)
     await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     await expect.poll(() => main.scrollTop).toBe(place);
@@ -839,7 +839,7 @@ describe('on a phone', () => {
   it('a_change_left_behind_with_back_never_lands_on_a_later_visit', async () => {
     // From All rules to Rules, so Back has somewhere to go.
     const rendered = await renderRoute(`${DESK}/rules/all`, { viewport: 'phone' });
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await rendered.router.navigate(`${DESK}/rules`);
     answerWithNoRefunds();
     const composer = rendered.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
@@ -853,7 +853,7 @@ describe('on a phone', () => {
 
     // Back with the sheet still open, then Forward to Rules: a new visit, where nothing says it was updated.
     await rendered.router.navigate(-1);
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await rendered.router.navigate(1);
     await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     const root = rendered.screen.container;

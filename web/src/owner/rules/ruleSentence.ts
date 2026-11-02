@@ -313,6 +313,12 @@ export function moneyCapSentence(cents: number): SentencePart[] {
   return [{ text: 'Claude asks you before any payment over ' }, key(formatCents(cents)), { text: ', whatever the other rules say' }];
 }
 
+/** C4's compact payment-limit sentence on Your tools; C1 keeps `moneyCapSentence`. */
+export function moneyCapToolSentence(cents: number): SentencePart[] {
+  if (cents <= 0) return [{ text: 'Any payment asks you first' }];
+  return [{ text: 'Any payment over ' }, key(formatCents(cents)), { text: ' asks you first' }];
+}
+
 /**
  * The payment limit's line: the Desk's tools that move money (`words.tools`, in the screen's order),
  * else the app's words for them; for anyone.

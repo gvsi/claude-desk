@@ -1262,7 +1262,7 @@ describe('OwnerLayout', () => {
       ['people', 'Customers', 'Customers'],
       ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
-      ['rules/all', 'All rules', 'All rules'],
+      ['rules/all', 'Your tools', 'Your tools'],
       ['safety', 'Safety', 'Safety'],
       ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
