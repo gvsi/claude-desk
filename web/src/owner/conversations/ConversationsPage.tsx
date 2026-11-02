@@ -106,7 +106,7 @@ export function ConversationsPage() {
   } else {
     listBody = groups.map((group) => (
       <div key={group.day} className="cd-conversations__group">
-        <h2 className="cd-conversations__day cd-type-meta">{group.day}</h2>
+        <h2 className="cd-conversations__day cd-type-caption"><span>{group.day}</span></h2>
         <ul className="cd-conversations__items">
           {group.items.map((s) => (
             <li key={s.session_id}>
@@ -117,6 +117,7 @@ export function ConversationsPage() {
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
                 recorded={s.replayed === true}
+                quote={s.kind === 'visitor' && !s.owner_preview ? s.latest_visitor_text ?? undefined : undefined}
               />
             </li>
           ))}
