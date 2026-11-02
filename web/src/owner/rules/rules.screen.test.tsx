@@ -1538,6 +1538,34 @@ describe("Ask Claude's question about a hold", () => {
     expect(chipWords(again)).toEqual([...FIXED_CHIPS, 'Why was this refund held?']);
   });
 
+  it('hold_question_does_not_reuse_a_read_started_before_leaving', async () => {
+    const { screen, router } = await renderRoute(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
+    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'needsYou', status: 200, body: (answer as { body: unknown }).body, until });
+    const before = requests('needsYou').length;
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before);
+    await router.navigate(`${DESK}/rules/all`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
+    if (!held) throw new Error('the seed holds a quote');
+    mockStore.world.answer(held, 'deny_once');
+
+    const current = holdNeedsYou();
+    await router.navigate(`${DESK}/rules`);
+    await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
+    release();
+    await expect.poll(() => current.held()).toBeGreaterThan(0);
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+    current.release();
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before + 1);
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+  });
+
   it('hold_question_goes_while_needs_you_cannot_be_read', async () => {
     const { screen } = await renderRoute(`${DESK}/rules`, { retryScale: 0.05 });
     const group = screen.getByRole('group', { name: 'Suggestions' });
