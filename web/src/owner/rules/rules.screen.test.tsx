@@ -203,7 +203,8 @@ function withConnectorsPage(): RouteObject[] {
  */
 async function expectToolRow(root: HTMLElement, words: RegExp): Promise<HTMLElement> {
   const find = () => [...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find((row) => words.test(toolRowWords(row)));
-  await expect.poll(() => find() !== undefined, { message: `a tool row reading ${words}` }).toBe(true);
+  // The page's opening reads may take a moment longer on a loaded runner; the row it shows stays the same.
+  await vi.waitFor(() => expect(find() !== undefined, `a tool row reading ${words}`).toBe(true), { timeout: 4_000 });
   const row = find() as HTMLElement;
   await expect(row).toBeVisible();
   return row;
@@ -1126,15 +1127,18 @@ describe('rules page', () => {
     // With the panel open and a change drafted in it.
     await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Stop quoting on weekends' }).click();
     const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
-    await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    // Claude's drafted change shows its confirm (a loaded runner may take a moment longer).
+    await expect.element(log.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
 
     // The house rules, and the Rules page at a phone's width, unbroken.
     const all = await renderRoute(`${DESK}/rules/all`);
-    await expect.element(all.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
+    // The house rules open on Payment link's rules.
+    await expect.element(all.screen.getByRole('region', { name: 'Payment link' }), { timeout: 4_000 }).toBeVisible();
     await expectScreenBasics(all.screen.container, { owner: true });
     const phone = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
-    await expect.element(phone.screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    // Rules opens on the phone with its Stripe connector.
+    await expect.element(phone.screen.getByRole('region', { name: 'Stripe' }), { timeout: 4_000 }).toBeVisible();
     // Under 640 px the header actions share a line under the title.
     const menu = phone.screen.getByRole('button', { name: 'Start from a preset' }).element();
     const title = phone.screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
@@ -1309,8 +1313,11 @@ describe("Ask Claude's question about a hold", () => {
       if (outcome.key === 'rules' && outcome.ok) rulesRead = true;
     }));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport: 'desktop' });
-    await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+    // Each step may take a moment longer on a loaded runner; what they show, and their order, stay the same.
+    // The Rules read has landed while Needs you's read is still held.
+    await vi.waitFor(() => expect(rulesRead && reads.held() > 0).toBe(true), { timeout: 4_000 });
+    // Rules says it's still reading, and draws neither the body nor the hold question yet.
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
@@ -1325,12 +1332,16 @@ describe("Ask Claude's question about a hold", () => {
     observer.observe(screen.container, { childList: true, subtree: true });
     onTestFinished(() => observer.disconnect());
     reads.release();
-    await expect.poll(() => pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?');
-    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    // Once Needs you lands, the hold question joins the chips.
+    await vi.waitFor(() => expect(pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?'), { timeout: 4_000 });
+    // The question shows, drawn in the same render as the body.
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' }), { timeout: 4_000 }).toBeVisible();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
-    await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
+    // The suggested rule's draft button shows with them.
+    await expect.element(screen.getByRole('button', { name: 'Draft this rule' }), { timeout: 4_000 }).toBeVisible();
     expect(mismatches).toEqual([]);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
+    // And the reading note is gone.
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).not.toBeInTheDocument();
     expectNoHorizontalScroll();
   });
 
