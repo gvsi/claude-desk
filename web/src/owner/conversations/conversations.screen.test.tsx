@@ -1206,7 +1206,16 @@ describe('Conversations', () => {
     (lastReceipt.element() as HTMLElement).focus({ preventScroll: true });
     const column = scrollerOf(log(screen).element());
     expect(column.contains(head.element())).toBe(true);
-    const on = Math.round(lastReceipt.element().getBoundingClientRect().top);
+    // Take her place once the opening has settled: the head's lines can still reflow after the
+    // list's read names Dana, and the open-at-end scroll follows them.
+    let seen = Number.NaN;
+    await expect.poll(() => {
+      const now = Math.round(lastReceipt.element().getBoundingClientRect().top);
+      const settled = now === seen;
+      seen = now;
+      return settled;
+    }, { interval: 100 }).toBe(true);
+    const on = seen;
 
     // A message arrives while focus is in the transcript: nothing moves under her. The held cards
     // now quote her two latest lines, so the one above her can change height; the receipt she's on
@@ -1216,7 +1225,7 @@ describe('Conversations', () => {
     await expect.poll(() => heldCard(screen, REFUND_REASON).first().element().textContent).toContain('Are you still there?');
     await readsMore('conversation', 2);
     expect(column.contains(lastReceipt.element())).toBe(true);
-    expect(Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
+    await expect.poll(() => Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
     expect(document.activeElement).toBe(lastReceipt.element());
   });
 
