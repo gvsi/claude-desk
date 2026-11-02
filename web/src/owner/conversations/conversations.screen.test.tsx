@@ -592,7 +592,8 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
     await card.getByRole('button', { name: 'Mark done' }).click();
     await expect.element(card).not.toBeInTheDocument();
-    await expect.element(row.getByText('Visitor', { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Mike called back', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
     const heading = screen.getByRole('heading', { level: 2, name: DANA });
     await expect.poll(() => document.activeElement).toBe(heading.element());
     expect(getComputedStyle(heading.element()).outlineStyle).toBe('none');
@@ -659,6 +660,16 @@ describe('Conversations', () => {
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Agent/ });
     await expect.element(row.getByText('Agent · Visit booked', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-status-dot--info')).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('seeded_visitor_rows_show_the_booking_with_its_handled_dot', async () => {
+    named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(LIST);
+    const row = screen.getByRole('navigation', { name: 'Conversations' })
+      .getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Booked', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
   });
 

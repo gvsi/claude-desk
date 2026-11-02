@@ -1083,6 +1083,10 @@ export class MockWorld {
       createdAt: this.now(),
     });
     session.displayName ??= fields.lead;
+    this.appendLedger(this.deskOf(session), {
+      kind: 'desk_data', origin: 'kernel', session_id: sessionId, ref_id: null,
+      summary: { part: 'handoffs', refs: [handoffId], kind: 'callback' },
+    });
   }
 
   /**
