@@ -6,7 +6,7 @@ import { greetingFor } from '../../lib/format.ts';
 import { THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { publicLink } from '../customerLink.ts';
-import { handledCount, steppedInCount, TODAY_COPY } from './copy.ts';
+import { handledCount, howItWorksSteps, outcomeWords, stepLabel, steppedInCount, TODAY_COPY, todayOutcomes } from './copy.ts';
 import { sinceLastNightLine } from './sinceLastNightLine.ts';
 
 import './Today.css';
@@ -141,6 +141,55 @@ function Legend() {
   </div>;
 }
 
+/**
+ * The fresh copy's Today line (Decision 15): the night's answer and booking handled, its one request
+ * held, nothing turned down.
+ */
+const FRESH_OUTCOMES = todayOutcomes({ handled: 2, held: 1, turnedDown: 0 });
+
+/** How your Desk works: the three steps, in their real wrapping, then the Today line's rows. */
+function HowItWorksShape() {
+  return (
+    <div className="cd-today__section cd-how">
+      <SectionTitle anchor="how-title" />
+      <SkeletonCard anchor="how-card">
+        <div className="cd-how__steps">
+          {howItWorksSteps(rivera.business.name).map((step, i) => (
+            <div key={step.title} className="cd-how__step">
+              <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" className="cd-today-skeleton__how-tile" anchor={`how-tile-${i}`} />
+              <div className="cd-how__words">
+                <TextLines words={stepLabel(i + 1)} className="cd-how__label" intrinsic lineWidth="100%" lastWidth="100%" />
+                <TextLines words={step.title} text="control" className="cd-how__title" intrinsic lineWidth="100%" lastWidth="100%" />
+                <TextLines words={step.line} className="cd-how__line" />
+              </div>
+            </div>
+          ))}
+        </div>
+        <TodayLineRows />
+      </SkeletonCard>
+    </div>
+  );
+}
+
+/** The Today line's real flex items, unseen, then one pill on each row they take. */
+function TodayLineRows() {
+  const box = useRef<HTMLDivElement>(null);
+  const rows = useRows(box);
+  return <div className="cd-how__today cd-today-skeleton__how-today">
+    <div className="cd-today-skeleton__legend">
+      <div ref={box} className="cd-today-skeleton__how-items cd-type-meta cd-today-skeleton__legend-room">
+        <span><WordRoom words={FRESH_OUTCOMES.quiet ? FRESH_OUTCOMES.line : FRESH_OUTCOMES.lead} /></span>
+        {FRESH_OUTCOMES.quiet ? null : FRESH_OUTCOMES.parts.map((part) => (
+          <span key={part.kind} className="cd-how__outcome"><span className="cd-status-dot" /><WordRoom words={outcomeWords(part)} /></span>
+        ))}
+      </div>
+      <div className="cd-today-skeleton__legend-paint cd-today-skeleton__how-paint">
+        {Array.from({ length: rows }, (_, i) => <Skeleton key={i} shape="line" text="meta" />)}
+      </div>
+    </div>
+  </div>;
+}
+
 /** A fresh hold's status and age can also wrap to two rows in the card's narrow column. */
 function ApprovalTop() {
   const box = useRef<HTMLDivElement>(null);
@@ -189,7 +238,7 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
   );
 }
 
-/** The first view of a fresh copy: the band (greeting, link, "Chat as a customer" and four things to try), one held request and the recorded night. */
+/** The first view of a fresh copy: the band (greeting, link, "Chat as a customer", how the Desk works and four things to try), one held request and the recorded night. */
 export function TodaySkeleton() {
   return (
     <div className="cd-today cd-today--skeleton">
@@ -215,6 +264,7 @@ export function TodaySkeleton() {
             </div>
           </div>
         </div>
+        <HowItWorksShape />
         <div className="cd-things">
           <div className="cd-things__head">
             <div className="cd-things__head-line">

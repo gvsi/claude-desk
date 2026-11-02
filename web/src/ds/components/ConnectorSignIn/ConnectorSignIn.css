@@ -87,15 +87,28 @@
   border: 1px solid var(--line-control);
   border-radius: var(--radius-control);
   cursor: pointer;
-  transition: border-color var(--motion-instant) var(--motion-ease);
+  transition:
+    background-color var(--motion-instant) var(--motion-ease),
+    border-color var(--motion-instant) var(--motion-ease);
 }
 
+/* Hover is the fill alone: the border stays as it is, so only the choice and keyboard focus change it. */
 .cd-connector-sign-in__choice:hover {
-  border-color: var(--line-control-hover);
+  background: var(--fill-hover);
 }
 
 .cd-connector-sign-in__choice:has(.cd-connector-sign-in__radio:checked) {
   border-color: var(--accent-blue);
+}
+
+/* Keyboard focus on its radio turns the choice's own border line-focus, the radio's own dot still
+   saying which is chosen; the radio draws nothing around itself. */
+.cd-connector-sign-in__choice:has(.cd-connector-sign-in__radio:focus-visible) {
+  border-color: var(--line-focus);
+}
+
+.cd-connector-sign-in__radio:focus-visible {
+  box-shadow: none;
 }
 
 /* The native radio, in the accent color, on the label's first line. */

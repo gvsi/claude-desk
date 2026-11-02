@@ -4,7 +4,7 @@
 
 ## When to use
 
-- In Settings, beside its pages: General, Knowledge, Notifications, Channels and Billing. Connectors have their own tab, so Settings lists no Integrations or Connectors page.
+- In Settings, beside its pages: General, Notifications, Channels and Billing. Connectors have their own tab, so Settings lists no Integrations or Connectors page.
 - Not for the app's own pages, which are the `Sidebar`'s, and not for a trail back up, which is a `Breadcrumb`.
 
 ## What it shows

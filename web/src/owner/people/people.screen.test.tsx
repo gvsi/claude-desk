@@ -20,7 +20,7 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { MINUTE } from '../../mocks/world.ts';
-import { SPEC, expectTabOrder } from '../../ds/boards/spec.ts';
+import { SPEC, expectTabOrder, footerLink } from '../../ds/boards/spec.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { holdReads } from '../../test/holdReads.ts';
@@ -352,7 +352,7 @@ describe('customers', () => {
     expect(screen.getByRole('list', { name: 'Leads' }).getByRole('link').elements()).toEqual([]);
     await expectOwnerBoard(screen.container, { current: 'Customers', cards: false });
     const reached = await expectTabOrder(userEvent, [...people, caption]);
-    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption]);
+    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption, footerLink(screen.container)]);
   });
 
   it('empty_people_is_kind', async () => {
@@ -542,6 +542,47 @@ describe('a person outside the list', () => {
 });
 
 describe('share', () => {
+  it('more_channels_matches_the_signed_section_on_desktop_and_phone', async () => {
+    const channels = [
+      ['Website embed', 'The same chat on your own site.'],
+      ['WhatsApp', 'Customers message your Desk from WhatsApp.'],
+      ['iMessage', 'The same chat in Messages on iPhone.'],
+      ['Phone calls', 'Your Desk answers your business line by voice.'],
+    ];
+    for (const viewport of ['desktop', 'phone'] as const) {
+      const { screen } = await renderRoute(`${DESK}/share`, { viewport });
+      const section = screen.getByRole('region', { name: 'More channels' });
+      await expect.element(section).toBeVisible();
+      const heading = section.getByRole('heading', { level: 2, name: 'More channels' }).element();
+      expect(heading.classList).toContain('cd-share-kit__heading');
+      const cards = section.element().querySelectorAll('.cd-card');
+      expect(cards).toHaveLength(1);
+      const card = cards[0] as HTMLElement;
+      expect(getComputedStyle(card).padding).toBe('0px');
+      const words = screen.getByRole('list', { name: 'Ready-made words' }).element();
+      expect(Math.round(heading.getBoundingClientRect().top - words.getBoundingClientRect().bottom)).toBe(8);
+      expect(Math.round(card.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12);
+      const rows = section.getByRole('listitem').elements();
+      expect(rows.map((row) => [row.querySelector('.cd-share-kit__later-title')?.textContent, row.querySelector('.cd-share-kit__later-line')?.textContent, row.querySelector('.cd-pill')?.textContent])).toEqual(
+        channels.map(([name, line]) => [name, line, 'Coming later']),
+      );
+      for (const [index, row] of rows.entries()) {
+        const style = getComputedStyle(row);
+        expect(style.padding).toBe('16px');
+        expect(style.borderTopWidth).toBe(index === 0 ? '0px' : '1px');
+        if (index > 0) expect(style.borderTopColor).toBe('rgba(250, 249, 245, 0.12)');
+        expect(row.querySelector('button, a, input, [tabindex]')).toBeNull();
+        for (const text of row.querySelectorAll('p, .cd-pill')) {
+          expect(text.scrollWidth).toBeLessThanOrEqual(text.clientWidth);
+        }
+        const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
+        const text = row.querySelector('.cd-share-kit__later-text')!.getBoundingClientRect();
+        expect(pill.left).toBeGreaterThanOrEqual(text.right);
+      }
+      expectNoHorizontalScroll();
+    }
+  });
+
   it('share_page_uses_the_desk_slug', async () => {
     const { screen } = await renderRoute(`${DESK}/share`);
     const url = `${window.location.origin}/d/${RIVERA.slug}`;
@@ -855,15 +896,15 @@ describe('share', () => {
     const { screen } = await renderRoute(`${DESK}/share`, { viewport: 'phone' });
     await expect.element(screen.getByRole('img', { name: /^QR code for/ })).toBeVisible();
     // N-Run2-Share-Phone: 16 px between the header, the link card, the printable card and Print
-    // card, the ready-made words and the website embed.
+    // card and the ready-made words; More channels follows 8 px under the words.
     const header = screen.container.querySelector('.cd-page-header')!.getBoundingClientRect();
     const link = screen.getByRole('region', { name: 'Your link' }).element().getBoundingClientRect();
     const card = screen.getByRole('figure').element().getBoundingClientRect();
     const print = screen.getByRole('button', { name: 'Print card' }).element().getBoundingClientRect();
     const heading = screen.getByRole('heading', { level: 2, name: 'Ready-made words' }).element().getBoundingClientRect();
     const words = screen.getByRole('list', { name: 'Ready-made words' }).element().getBoundingClientRect();
-    const later = screen.container.querySelector('.cd-share-kit__later')!.getBoundingClientRect();
-    expect([link.top - header.bottom, card.top - link.bottom, heading.top - print.bottom, later.top - words.bottom].map(Math.round)).toEqual([16, 16, 16, 16]);
+    const later = screen.getByRole('heading', { level: 2, name: 'More channels' }).element().getBoundingClientRect();
+    expect([link.top - header.bottom, card.top - link.bottom, heading.top - print.bottom, later.top - words.bottom].map(Math.round)).toEqual([16, 16, 16, 8]);
   });
 });
 

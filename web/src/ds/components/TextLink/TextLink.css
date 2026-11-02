@@ -14,6 +14,17 @@
   text-decoration-color: currentColor;
 }
 
+/* Keyboard focus shows in the words, never around them: they and a 2 px underline turn the primary
+   ink (a grey line under a blue link would read as its resting state). After hover, so it holds while
+   the pointer is over the link too. */
+.cd-text-link:focus-visible {
+  box-shadow: none;
+  color: var(--text-primary);
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: var(--text-primary);
+}
+
 /* On a touch screen, a link takes a tap anywhere in a size-touch band centred on its words, through
    an unseen hit area: nothing is drawn and no word moves (position: relative only gives the hit area
    its frame). A layout that puts controls closer together caps the reach on each axis at half its gap

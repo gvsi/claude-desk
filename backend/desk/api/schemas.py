@@ -417,10 +417,15 @@ class ConversationSummary(BaseModel):
     preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
     whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
     never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
-    written yet. `latest_outcome` is agent-only: an executed booking/mandate charge with its matching shown,
+    written yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose
+    or positive counts; otherwise null. An agent's is an executed booking/mandate charge with its matching shown,
     checked done card and executed receipt in the same turn, or a Desk-authored payment confirmation; an actual
-    refusal at decide/execution gives `turned_down`. The newest decisive event wins, with a later hold or handoff
-    clearing success. It is derived from stored events, never task names, prose or positive counts; otherwise null."""
+    refusal at decide/execution gives `turned_down`, and a later hold or handoff clears success. A visitor's (never
+    the owner's preview) comes from the kernel's decisions, payment links and handoffs alone, timed by their ledger
+    entries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release
+    (`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the
+    owner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later
+    request still held, expired or cancelled, or a handoff card opening, clears it to null."""
 
     session_id: str
     kind: ActorKind
@@ -431,7 +436,8 @@ class ConversationSummary(BaseModel):
     outcome_counts: dict[DecisionState, int]
     owner_preview: bool
     latest_visitor_text: str | None
-    latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down"] | None
+    latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down", "quoted", "lead_captured",
+                            "owner_declined", "called_back", "document_sent"] | None
     replayed: bool = False                  # recorded history written into the copy (`owner_reads.history_sessions`)
 
 

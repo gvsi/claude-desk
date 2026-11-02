@@ -35,12 +35,13 @@ STATUS: dict[str, str] = {
     "owner_say_blocked": "Not sent: it included text from a private document",   # shown to the owner alone
 }
 
-# Owner-only, key for key with `es.OWNER_STATUS`: why an approved or allowed action was refused at
-# execution, a decision's `owner_plain`. An approved release of private data whose session no
+# Owner-only, key for key with `es.OWNER_STATUS`: a decision's `owner_plain`. Why an approved or
+# allowed action was refused at execution: an approved release of private data whose session no
 # longer stood for its person says why the session ended; otherwise the Desk was deleted, the rules
-# changed (a failed re-check), or, for anything else, a line that names no cause. A decision's
-# status line reaches the visitor, who mustn't read why their session ended, so these are kept out
-# of `STATUS` and no status line can render one.
+# changed (a failed re-check), or, for anything else, a line that names no cause. And a held
+# request the visitor's own booking closed (`cancelled_by_booking`), which a visitor's own cancel
+# never takes. A decision's status line reaches the visitor, who mustn't read why their session
+# ended, so these are kept out of `STATUS` and no status line can render one.
 OWNER_STATUS: dict[str, str] = {
     "refused_contact_changed": "Not shared: their session ended when their contact changed",
     "refused_person_removed": "Not shared: they were removed from your records",
@@ -48,6 +49,7 @@ OWNER_STATUS: dict[str, str] = {
     "refused_rules_changed": "Your rules changed before this ran, so it wasn't done.",
     "refused_desk_deleted": "This Desk was deleted before this ran, so it wasn't done.",
     "refused_fallback": "This couldn't run, so it wasn't done.",
+    "cancelled_by_booking": "The visitor booked before you answered, so this request closed.",
 }
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a
@@ -75,7 +77,8 @@ EXECUTED: dict[str, str] = {
 # the same whether or not a contact is on record, the Demo inbox's code entry, whose body is the
 # only kernel text that carries a code, and the call-back offer a reply blocked only for its prose
 # shows when it has no card to keep (`reply_check.blocked_blocks`), the API's signed
-# `STATUS_LINES["offer_callback"]` word for word.
+# `STATUS_LINES["offer_callback"]` word for word, and the line it shows instead while a held request
+# awaits the owner, the API's signed `STATUS_LINES["check_status"]` word for word.
 MESSAGES: dict[str, str] = {
     "verify_started": "If that contact is on record, a code is on its way. Enter it below to confirm it's you.",
     "verify_already": "You're already confirmed in this chat.",
@@ -83,6 +86,7 @@ MESSAGES: dict[str, str] = {
     "inbox_code_body": ("Your {business} code is {code}. It expires in ten minutes. "
                         "If you didn't ask for it, ignore this message."),
     "offer_callback": "Would you like me to arrange a callback?",
+    "check_status": "Please check the request status in this chat.",
 }
 
 # Owner-only, in English: the preview line of a Demo inbox alert.

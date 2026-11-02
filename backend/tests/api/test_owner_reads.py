@@ -1129,6 +1129,8 @@ async def test_an_intake_block_counts_as_neither_a_callback_nor_a_booking(scene,
     async with owner_context(app.state.runtime.started(), owner.token) as ctx:
         done = await owner_reads.activity(ctx, owner.desk_id, when)
     assert done.callbacks == done.bookings == []
+    listed = (await owner.get(f"desks/{owner.desk_id}/conversations")).json()
+    assert [row["latest_outcome"] for row in listed if row["session_id"] == caller.session_id] == ["lead_captured"]
 
 
 @pytest.mark.parametrize("business", [
@@ -1157,6 +1159,8 @@ async def test_a_malformed_business_tool_counts_as_neither_a_callback_nor_a_book
     async with owner_context(app.state.runtime.started(), owner.token) as ctx:
         done = await owner_reads.activity(ctx, owner.desk_id, when)
     assert done.callbacks == done.bookings == []
+    listed = (await owner.get(f"desks/{owner.desk_id}/conversations")).json()
+    assert [row["latest_outcome"] for row in listed if row["session_id"] == caller.session_id] == [None]
 
 
 async def test_block_counts_use_only_the_current_desks_tool_definition(scene, clock, app):
@@ -1252,6 +1256,8 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     [item] = (await owner.get(f'desks/{owner.desk_id}/briefing')).json()['items']
     assert (item['kind'], item['ref_id']) == ('booking', decision.decision_id)
     assert 'Claude\'s note: “Use the side entrance.”' in item['line']
+    listed = (await owner.get(f'desks/{owner.desk_id}/conversations')).json()
+    assert [row['latest_outcome'] for row in listed if row['session_id'] == visitor.session_id] == ['visit_booked']
 
 
 

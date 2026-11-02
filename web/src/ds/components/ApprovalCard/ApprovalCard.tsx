@@ -203,9 +203,12 @@ function itemWords(answer: ApprovalAnswer, personName: string | undefined): Reac
   return say(ANSWERS[answer].item, personName);
 }
 
-/** The kernel's owner line for an execution refusal, else the state's line; unknown states ask for a reload. */
+/**
+ * The kernel's owner line for an execution refusal or a request the visitor's booking closed (a
+ * `cancelled` one that carries it), else the state's line; unknown states ask for a reload.
+ */
 function statusLine({ state, owner_plain }: Decision): string {
-  if (state === 'refused_at_execution' && owner_plain != null) return owner_plain;
+  if ((state === 'refused_at_execution' || state === 'cancelled') && owner_plain != null) return owner_plain;
   return Object.hasOwn(STATUS_LINES, state) ? STATUS_LINES[state] : errorCopy('conflict');
 }
 

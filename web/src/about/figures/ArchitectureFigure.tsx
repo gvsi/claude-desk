@@ -5,7 +5,8 @@
  * readers, so the words read in order.
  *
  * Its labels are the v1 diagram's, as the kernel and safety session checked them; a change to any of them goes
- * through that session first.
+ * through that session first. Each check says two lines, as the proposal's "Enforced in code" tiers do: what code
+ * decides, then what the models may do.
  *
  * The first time it is a third in view, it traces one request along that path, once (`usePlayOnce`, `reader.css`).
  */
@@ -27,18 +28,27 @@ export const ARCHITECTURE_LABELS = {
   kernel: 'Kernel',
   kernelProcess: 'Its own process; holds every business credential',
   decide: 'Decide',
-  decideRules: 'Cedar rules compiled from the owner’s cards',
+  decideRules: 'Cedar rules from the owner’s cards',
+  decideReview: 'A Sonnet review can only narrow',
   runs: 'Runs',
   ownerDecides: 'Owner decides',
   refused: 'Refused',
   check: 'Check reply',
   checkCards: 'Prices, dates and discounts only in typed cards',
+  checkModels: 'Sonnet and Jev can only add blocks',
   shown: 'Shown',
   handedOff: 'Handed off',
   ledger: 'Signed ledger of every decision and check',
 } as const;
 
 const L = ARCHITECTURE_LABELS;
+
+/** Emphasize the known technologies without changing the checked label's text. */
+function technologyNames(label: string) {
+  return label.split(/\b(Cedar|Sonnet|Jev)\b/g).map((part, i) =>
+    i % 2 === 1 ? <span key={i} className="cd-about-arch__tech">{part}</span> : part,
+  );
+}
 
 /**
  * The path the figure traces, in order: the visitor, the chat layer, the kernel's Decide and an action that runs,
@@ -112,18 +122,19 @@ function Connector({ direction }: { direction: 'right' | 'both' | 'down' }) {
 }
 
 /**
- * One of the kernel's checks: its box, then what can come of it, each a pill with a status dot and its word. The
- * box is a step of the trace, and so is one outcome's pill, through the hook on its list item.
+ * One of the kernel's checks: its box, with its name and its two lines (what code decides, then what the models may
+ * do), then what can come of it, each a pill with a status dot and its word. The box is a step of the trace, and so
+ * is one outcome's pill, through the hook on its list item.
  */
 function Check({
   name,
-  line,
+  lines,
   step,
   outcomes,
   compact,
 }: {
   name: string;
-  line: string;
+  lines: readonly [string, string];
   step: TraceStep;
   outcomes: Outcome[];
   compact: boolean;
@@ -144,7 +155,11 @@ function Check({
     <div className="cd-about-arch__check">
       <div className="cd-about-arch__box" {...traced(step)}>
         <span className="cd-about-arch__name cd-type-section">{name}</span>
-        <span className="cd-about-arch__line cd-type-caption">{line}</span>
+        {lines.map((line) => (
+          <span key={line} className="cd-about-arch__line cd-type-caption">
+            {technologyNames(line)}
+          </span>
+        ))}
         {compact ? list : null}
       </div>
       {compact ? null : (
@@ -189,8 +204,20 @@ export function ArchitectureFigure({ compact = false }: ArchitectureFigureProps)
             <span className="cd-about-arch__line cd-type-caption">{L.kernelProcess}</span>
           </div>
           <div className="cd-about-arch__checks">
-            <Check name={L.decide} line={L.decideRules} step="decide" outcomes={DECIDE} compact={compact} />
-            <Check name={L.check} line={L.checkCards} step="check" outcomes={CHECK} compact={compact} />
+            <Check
+              name={L.decide}
+              lines={[L.decideRules, L.decideReview]}
+              step="decide"
+              outcomes={DECIDE}
+              compact={compact}
+            />
+            <Check
+              name={L.check}
+              lines={[L.checkCards, L.checkModels]}
+              step="check"
+              outcomes={CHECK}
+              compact={compact}
+            />
           </div>
           <div className={`cd-about-arch__ledger ${compact ? 'cd-type-caption' : 'cd-type-meta'}`} {...traced('ledger')}>
             {compact ? null : <Icon name="lock" size={14} />}

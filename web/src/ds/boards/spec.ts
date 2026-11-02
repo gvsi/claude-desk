@@ -52,6 +52,8 @@ export const SPEC = {
   },
   receipt: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
   dot: { width: '6px', height: '6px' },
+  /** Share's More channels: four rows in one card, separated by hairlines. */
+  shareChannelRow: { paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' },
   card: {
     backgroundColor: 'rgba(250, 249, 245, 0.03)',
     borderTopWidth: '1px',
@@ -216,6 +218,13 @@ export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<nu
   return rows.length;
 }
 
+/** The footer's one link, the author's name, under `root`. */
+export function footerLink(root: ParentNode): HTMLElement {
+  const link = root.querySelector<HTMLElement>('[data-ds="concept-footer"] a');
+  if (!link) throw new Error('the footer draws the author\'s name as a link');
+  return link;
+}
+
 /**
  * focus_order_is_logical: Tab from the top of the page reaches each of `stops` in this order
  * (other stops may come between them). Returns every stop Tab reached, in order.
@@ -357,7 +366,7 @@ export async function expectRulesPage(root: HTMLElement, chips: readonly string[
 }
 
 /** Settings' sections, in SubNav's order. */
-export const SETTINGS_SECTION_NAMES = ['General', 'Knowledge', 'Notifications', 'Channels', 'Billing'] as const;
+export const SETTINGS_SECTION_NAMES = ['General', 'Notifications', 'Channels', 'Billing'] as const;
 
 /**
  * A Settings board on a laptop: the owner frame with the sidebar's Connectors row after Rules and

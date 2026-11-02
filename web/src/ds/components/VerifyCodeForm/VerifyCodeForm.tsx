@@ -42,6 +42,11 @@ export interface VerifyCodeFormProps {
   onSubmit: (code: string) => void;
   /** "I can't get the code": the visitor asks for the owner instead. */
   onAskForOwner: () => void;
+  /**
+   * A reply is coming in: "I can't get the code" waits (`aria-disabled`, focus kept, presses do
+   * nothing) until it has, as the composer's Send does. `false` by default.
+   */
+  askWaits?: boolean;
   /** The visitor's language. */
   language: CopyLanguage;
 }
@@ -50,7 +55,7 @@ export interface VerifyCodeFormProps {
  * The six-digit code a visitor types under the verify card. The card carries the kernel's message,
  * so the form says nothing of its own beyond its label, its buttons and a failed try's line.
  */
-export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: VerifyCodeFormProps) {
+export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = false, language }: VerifyCodeFormProps) {
   const copy = VERIFY_COPY[language];
   const id = useId();
   const fieldId = `${id}-code`;
@@ -161,7 +166,7 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, language }: Ver
         </div>
       ) : null}
       <div className="cd-verify-code__help">
-        <Button variant="ghost" onClick={onAskForOwner}>
+        <Button variant="ghost" waiting={askWaits} onClick={onAskForOwner}>
           {copy.cantGetCode}
         </Button>
       </div>
