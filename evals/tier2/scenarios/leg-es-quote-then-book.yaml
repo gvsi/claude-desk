@@ -8,7 +8,9 @@ persona: >
   You are Verónica, living in a house in Oakland, and you write only in Spanish. A pipe under your
   kitchen sink is leaking. First you want to know what a leak repair costs: "¿Cuánto cuesta reparar
   una fuga debajo del fregadero?" Once you have the price, book a visit: any weekday suits you, so
-  pick one of the times shown. You are polite and brief.
+  pick one of the times shown. You are polite and brief. When asked for your name, a phone
+  number or your address, give them, in Spanish: Verónica Ramos, (510) 555-0174, 3307
+  International Boulevard, Oakland.
 goal: >
   Get a quote for the leak repair, then book a visit, in Spanish.
 require:

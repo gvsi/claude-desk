@@ -111,18 +111,21 @@ function latestVisitorText(session: SessionRecord): string | null {
 const SAID: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'agent_text']);
 
 /**
- * What Needs you quotes from a chat, as the API's `recent_texts`, `texts_before_held` and
- * `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages, oldest
- * first, each as its glimpse (`visitorLine`), joined with " · ". For a held request (`decisionId`),
- * only the visitor's lines since Claude's last reply before its held status (a request whose status
- * isn't in the chat quotes the chat's latest). If that window is empty, it quotes the newest visitor
- * line before the status. A handoff quotes the chat's latest. Just the last when there's one, and
- * null when nothing is left.
+ * What Needs you and Safety quote from a chat, as the API's `recent_texts`, `texts_before_status`
+ * and `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages,
+ * oldest first, each as its glimpse (`visitorLine`), joined with " · ". For a request
+ * (`decisionId`), only the visitor's lines since Claude's last reply before its status: a held
+ * request's held status, a refusal's receipt. If that window is empty, it quotes the newest visitor
+ * line before the status. A request whose status isn't in the chat quotes the chat's latest, as Needs
+ * you does, or nothing with `latestWhenUnshown: false`, as Safety does, since its entries can be days
+ * old. A handoff quotes the chat's latest. Just the last when there's one, and null when nothing is
+ * left.
  */
-function fromTheVisitor(session: SessionRecord | undefined, decisionId?: string): string | null {
+function fromTheVisitor(session: SessionRecord | undefined, decisionId?: string, { latestWhenUnshown = true } = {}): string | null {
   const items = session?.items ?? [];
   const held = decisionId === undefined ? -1 : items.findIndex((item) =>
     item.kind === 'status' && item.event !== null && 'decision_id' in item.event && item.event.decision_id === decisionId);
+  if (decisionId !== undefined && held === -1 && !latestWhenUnshown) return null;
   const before = held === -1 ? items : items.slice(0, held);
   const answered = held === -1 ? -1 : before.findLastIndex((item) =>
     item.kind === 'delivered' && item.event?.type === 'message' && item.event.author === 'claude');
@@ -296,7 +299,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
   return {
     session_id: session.state.session_id,
     kind: session.state.kind,
-    display_name: session.displayName,
+    display_name: session.displayName ?? session.demoVisitor ?? null,
     verified: session.state.verified,
     person_id: session.state.kind === 'visitor' && !session.ownerPreview && session.state.verified ? (session.person?.personId ?? null) : null,
     mode: session.state.mode,
@@ -304,6 +307,8 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
+    demo_visitor: session.demoVisitor != null,
+    demo_visitor_run_id: session.demoVisitorRun ?? null,
     ...(session.state.kind === 'agent' ? latestAgentOutcome(world, session) : { ...NO_OUTCOME, latest_outcome: latestVisitorOutcome(world, session) }),
   };
 }
@@ -312,9 +317,10 @@ function needsYouSession(session: SessionRecord | undefined, sessionId: string):
   return {
     session_id: sessionId,
     kind: session?.state.kind ?? 'visitor',
-    display_name: session?.displayName ?? null,
+    display_name: session?.displayName ?? session?.demoVisitor ?? null,
     verified: session?.state.verified ?? false,
     assurance: session?.state.assurance ?? 'none',
+    demo_visitor: session?.demoVisitor != null,
   };
 }
 
@@ -652,7 +658,10 @@ const KIND_ORDER: readonly BriefingKind[] = ['turned_down', 'booking', 'lead', '
 function briefingItems(a: Activity): BriefingItem[] {
   const { since, now } = a.window;
   const end = now + 1;
-  const nameOf = (sessionId: string) => a.world.sessions.get(sessionId)?.displayName ?? null;
+  const nameOf = (sessionId: string) => {
+    const session = a.world.sessions.get(sessionId);
+    return session?.displayName ?? session?.demoVisitor ?? null;
+  };
   const item = (kind: BriefingKind, h: Happened, refId: string, line: string | null, cause: RefusalCause | null = null): BriefingItem => ({
     kind,
     at: isoTime(h.at),
@@ -661,6 +670,7 @@ function briefingItems(a: Activity): BriefingItem[] {
     ref_id: refId,
     line,
     cause,
+    demo_visitor: a.world.sessions.get(h.sessionId)?.demoVisitor != null,
   });
   const refused = a.stopped.filter((s) => s.kind === 'refused');
   // An answer: Claude replied in the window, to a conversation with nothing else in it, and didn't
@@ -794,7 +804,9 @@ export function reports(world: MockWorld, desk: DeskRecord, days: number = REPOR
  * stopped (the API core's `_stopped_attempts`); the briefing and the last 7 days count only the
  * refused ones. A hold is the owner's to answer, not an attempt
  * that was stopped, so it isn't listed. Each refusal carries its cause, read as the API reads it
- * from its deciding policies and its `decide` entry (`refusalCause`); a stopped draft has none.
+ * from its deciding policies and its `decide` entry (`refusalCause`), and what its visitor wrote in
+ * the turn its receipt closes (`fromTheVisitor`, with no fallback to the chat's latest lines); a
+ * stopped draft has neither.
  */
 export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
   const stopped: Attempt[] = refusals(world, desk)
@@ -810,6 +822,7 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
       cause: refusalCause(d.decision, desk.ledger.find((e) => e.seq === d.decision.ledger_seq && e.event.kind === 'decide') ?? null, {
         verified: world.sessions.get(d.decision.session_id)?.state.verified ?? false,
       }),
+      from_the_visitor: fromTheVisitor(world.sessions.get(d.decision.session_id), d.decision.decision_id, { latestWhenUnshown: false }),
     }));
   const replies: Attempt[] = stoppedReplies(desk).map((entry) => ({
     ref_id: String(entry.seq),
@@ -821,6 +834,7 @@ export function attempts(world: MockWorld, desk: DeskRecord): Attempt[] {
     triage: stoppedReplyTriage(),
     ledger_seq: entry.seq,
     cause: null,
+    from_the_visitor: null,
   }));
   return [...stopped, ...replies].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
@@ -903,6 +917,8 @@ export function ownerTranscript(session: SessionRecord, after: number, now: numb
       return { ...item, owner_translation: item.owner_translation ?? null, triage: item.triage ?? null, owner_plain: ownerPlain };
     }),
     typing_until: typing !== null && typing > now ? isoTime(typing) : null,
+    demo_visitor: session.demoVisitor != null,
+    demo_visitor_run_id: session.demoVisitorRun ?? null,
   };
 }
 
@@ -1011,6 +1027,7 @@ export function peopleOut(world: MockWorld, desk: DeskRecord): PeopleOut {
         note: lead.note,
         created_at: isoTime(lead.createdAt),
         ...(lead.replayed === true ? { replayed: true } : {}),
+        demo_visitor: world.sessions.get(lead.sessionId)?.demoVisitor != null,
       })),
   };
 }

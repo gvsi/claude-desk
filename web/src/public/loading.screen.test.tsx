@@ -11,6 +11,7 @@ import { holdReads } from '../test/holdReads.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectScreenBasics } from '../test/screen.ts';
 import { expectSkeletonLoad, expectSkeletonStill, type SkeletonAnchor } from '../test/skeleton.ts';
+import { DEMO_TASKS, DEMO_TASK_ROWS } from './agents/copy.ts';
 
 beforeAll(loadWebFonts);
 
@@ -23,6 +24,11 @@ const AGENTS_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'page-title', page: '.cd-agents-page__head h1' },
   { name: 'disclosure', page: '.cd-agents-page__head .cd-disclosure-line' },
   { name: 'send-card', page: '.cd-agents-page__cards > section:first-child', size: true },
+  ...DEMO_TASK_ROWS.flatMap((row, rowIndex) => row.map((task, chipIndex) => ({
+    name: `task-chip-${DEMO_TASKS.indexOf(task)}`,
+    page: `.cd-agents-card__tasks > :nth-child(${rowIndex + 1}) > :nth-child(${chipIndex + 1})`,
+    size: true,
+  }))),
 ];
 const CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'brand-header', page: '.cd-public-brand', size: true },
@@ -310,7 +316,6 @@ it.each(['phone', 'desktop'] as const)('agents_page_opens_in_spanish_%s', async 
       { name: 'key-card', page: '.cd-agents-page__cards > section:nth-child(5)', size: true },
       { name: 'key-action', page: '.cd-agents-page__cards > section:nth-child(5) .cd-button', size: true },
       { name: 'agents-footer', page: '.cd-agents-page__main > .cd-concept-footer', size: true },
-      ...[0, 1, 2].map((i) => ({ name: `task-chip-${i}`, page: `.cd-suggestion-chips > :nth-child(${i + 1})`, size: true })),
     ],
     open: async () => { await renderRoute(AGENTS, { viewport, language: 'es-MX', pollScale: 100 }); },
     release: read.release,

@@ -205,6 +205,7 @@ def test_tier2_gated_inputs_do_not_include_web():
             "backend/desk/kernel_service/lexicon/en.txt", "backend/desk/kernel_service/lexicon/nested/es.txt",
             "backend/desk/contracts.py", "backend/desk/money_cap.py", "backend/desk/api/rules.py",
             "backend/desk/kernel_service/seed.py", "backend/desk/kernel_service/render/en.py",
+            "backend/desk/api/prompts.py",
         ]],
         ([], {"backend": True, "web": True}),
         *[(["web/App.tsx", path], {"backend": True, "web": True}) for path in [
