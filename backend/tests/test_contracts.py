@@ -783,6 +783,21 @@ def test_a_copy_without_a_replay_carries_nothing_replayed():
     assert not {"replayed_messages", "replay_id"} & set(export_schema()["$defs"]["CopyCreated"]["required"])
 
 
+def test_schema_export_marks_the_fields_a_model_leaves_out_while_they_hold_their_default():
+    # A turn end's generation and a hand-back's resume fields are sent only when they say something, so the web's
+    # check of the mock's payloads (which takes every other field as always sent) may find them missing.
+    defs = export_schema()["$defs"]
+    marked = {(name, field) for name, model in defs.items()
+              for field, prop in (model.get("properties") or {}).items() if prop.get("x-omitted-when-default")}
+    assert marked == {("EvTurnEnd", "generation"), ("EvOwnerLeft", "resuming"), ("EvOwnerLeft", "generation")}
+    # Each one also as the model sends it: left out while it holds its default.
+    from desk.events import EvOwnerLeft, EvTurnEnd
+    assert EvTurnEnd(type="turn_end").model_dump(mode="json") == {"type": "turn_end"}
+    assert EvOwnerLeft(type="owner_left").model_dump(mode="json") == {"type": "owner_left"}
+    assert EvOwnerLeft(type="owner_left", resuming=True, generation=3).model_dump(mode="json") == {
+        "type": "owner_left", "resuming": True, "generation": 3}
+
+
 def test_schema_export_is_current():
     assert export_schema() == json.loads(Path("desk/contracts.schema.json").read_text())
 

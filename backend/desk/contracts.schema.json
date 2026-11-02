@@ -1620,7 +1620,8 @@
         "resuming": {
           "default": false,
           "title": "Resuming",
-          "type": "boolean"
+          "type": "boolean",
+          "x-omitted-when-default": true
         },
         "generation": {
           "anyOf": [
@@ -1633,7 +1634,8 @@
             }
           ],
           "default": null,
-          "title": "Generation"
+          "title": "Generation",
+          "x-omitted-when-default": true
         }
       },
       "required": [
@@ -1789,7 +1791,8 @@
             }
           ],
           "default": null,
-          "title": "Generation"
+          "title": "Generation",
+          "x-omitted-when-default": true
         }
       },
       "required": [
