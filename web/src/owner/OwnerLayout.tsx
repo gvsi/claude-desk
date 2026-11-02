@@ -19,6 +19,7 @@ import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary } from '../api/views.ts';
 import { startingDeskFor } from './arrival/keptCopy.ts';
 import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
+import { useUnreadConversations } from './conversations/useConversationRead.ts';
 import { givenOwnerName } from '../public/brand.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
@@ -531,7 +532,7 @@ export interface OwnerSidebarProps {
  */
 export function OwnerSidebar(props: OwnerSidebarProps) {
   const { businesses, business, desk, unreadCount } = props;
-  const unreadConversations = desk.unread_conversations ?? 0;
+  const unreadConversations = useUnreadConversations(desk.desk_id, desk.unread_conversations ?? 0);
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div ref={ref} className="cd-owner-layout__sidebar">

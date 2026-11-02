@@ -5,7 +5,7 @@
  * a way back to the list. The list is polled.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useId, useLayoutEffect, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router';
 
 import { request } from '../../api/http.ts';
@@ -22,6 +22,7 @@ import { entriesPath } from '../today/SinceLastNight.tsx';
 import { firstName, useDesks, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
+import { syncUnreadCount } from './useConversationRead.ts';
 import { agentLine } from './copy.ts';
 import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
@@ -103,6 +104,10 @@ export function ConversationsPage() {
     queryFn: () => request('conversations', { params: { desk_id: deskId } }),
     refetchInterval: pollMs('list'),
   });
+  // Each read of the list carries its unread count to the sidebar, which every page shows.
+  useEffect(() => {
+    if (list.data !== undefined) syncUnreadCount(queryClient, deskId);
+  }, [list.data, deskId, queryClient]);
   const needsYou = useNeedsYou(deskId);
   // The chats with an open handoff, from Needs you's last good read: a later read that fails leaves
   // them open, and with none yet, the rows keep their usual status.
