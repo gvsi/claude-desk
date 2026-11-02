@@ -136,8 +136,16 @@ describe('ROUTES', () => {
     // batch body, a whole connector in one action and one tool a list of one (plan 02b Task 7).
     expectTypeOf<RouteBody<'confirmTool'>>().toEqualTypeOf<{ tools: { tool: AnyToolName; definition_sha256: string }[]; enable: boolean }>();
     // A setup answer names the question it answers, so one sent twice can't answer the next (plan 02b Task 6): a
-    // topic, or the test-client offer at the plan's end.
-    expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<{ text: string } & ({ question: SetupQuestion; card?: never } | { question: null; card: string })>();
+    // topic, or the test-client offer at the plan's end. A question's answer can pick from its choices instead,
+    // with any typed words beside them.
+    expectTypeOf<RouteBody<'setupAnswer'>>().toEqualTypeOf<
+      | ({ text: string; picks?: never } & ({ question: SetupQuestion; card?: never } | { question: null; card: string }))
+      | { question: SetupQuestion; card?: never; picks: [string, ...string[]]; text?: string }
+    >();
+    // Picks with no words name at least one choice: an empty answer can't be typed.
+    // @ts-expect-error a picks answer with no picks and no text
+    const empty: RouteBody<'setupAnswer'> = { question: 'what_you_do', picks: [] };
+    void empty;
     // draftMoneyCap's body, the payment limit a draft changes to, is the API's own model, from its
     // document (`MoneyCapIn`, openapi.gen.ts), not typed by hand.
     expectTypeOf<RouteBody<'draftMoneyCap'>>().toEqualTypeOf<MoneyCapIn>();

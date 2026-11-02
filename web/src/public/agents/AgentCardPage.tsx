@@ -29,7 +29,7 @@ import {
 } from '../../ds/index.ts';
 import { browserLanguage } from '../../lib/language.ts';
 import { useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { brandFrom } from '../brand.ts';
+import { brandFrom, givenOwnerName } from '../brand.ts';
 import { PUBLIC_COPY } from '../copy.ts';
 import { useDocumentLanguage } from '../useDocumentLanguage.ts';
 import { useAgentSession } from './agentSession.ts';
@@ -139,7 +139,8 @@ function AgentsPage({ slug, desk, card, language }: AgentsPageProps) {
         </div>
         <div className="cd-agents-page__cards">
           {/* The page's one live moment leads, right under the disclosure; the reference follows it. */}
-          <SendAgentPanel slug={slug} business={business} ownerName={desk.owner_display_name} session={session} language={language} />
+          {/* An owner who gave no name speaks as the business, "{business} said" (owner, 2026-11-02). */}
+          <SendAgentPanel slug={slug} business={business} ownerName={givenOwnerName(desk.owner_display_name) ?? business} session={session} language={language} />
           <AgentsCard title={copy.canDoTitle}>
             {skills.length > 0 ? (
               <ul className="cd-agents-page__list cd-type-body">

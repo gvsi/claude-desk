@@ -558,10 +558,13 @@ class Handoff(Base):
     """A conversation handed to the owner, `open` until the owner marks it `done`: one the handoff
     card opened, or a callback a visitor asked for (`native.request_callback`, 01b_2_handoffs),
     which first closes the session's open ones. A row's kind never changes. The kernel keeps one
-    open handoff per session, of either kind, under the session row, not by a constraint, so rows
-    from before may hold several (01b_2b_handoff_kind). A call-back in the owner's own preview
-    inserts its row already `done`, with no closing entry or alert, so it leaves no Needs-you item;
-    its fact still backs the preview's card and its row stays for reconciliation."""
+    open handoff per session, of either kind, under the session row, and the table holds the rule
+    too (`handoffs_one_open_per_session`, kernel_one_open_handoff), whose revision left one open in
+    each session that rows from before held several in: the others are `superseded`, each naming
+    the handoff kept in `superseded_by`, so none reads as closed by the owner. A call-back in the
+    owner's own preview inserts its row already `done`, with no closing entry or alert, so it leaves
+    no Needs-you item; its fact still backs the preview's card and its row stays for
+    reconciliation."""
 
     __tablename__ = "handoffs"
     __table_args__ = {"schema": "kernel"}
@@ -571,12 +574,13 @@ class Handoff(Base):
     session_id: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
     callback_window: Mapped[str | None] = mapped_column(Text)    # ISO 8601 "<start>/<end>", or None
-    status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))
+    status: Mapped[str] = mapped_column(Text, server_default=text("'open'"))   # "open", "done" or "superseded"
     kind: Mapped[str] = mapped_column(Text)                      # "callback" or "card"; the kernel names it
     action_id: Mapped[str] = mapped_column(Text)                 # a call-back's action; a card's own handoff_id
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null without a window
     window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))   # null on rows from before
+    superseded_by: Mapped[str | None] = mapped_column(Text)      # the handoff kept in its place, when superseded
 
 
 class NotificationPref(Base):
@@ -667,6 +671,20 @@ class Message(Base):
     generation: Mapped[int | None] = mapped_column(Integer)        # an assistant row's calls' session generation
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
     replay_id: Mapped[str | None] = mapped_column(Text)            # recorded history: the copy's replayed night
+
+
+class ConversationRead(Base):
+    """The owner's read marker on one conversation (migration api_conversation_reads): the transcript cursor they have
+    seen, which only moves forward. One owner per copy, so it is keyed by the copy and the session."""
+
+    __tablename__ = "conversation_reads"
+    __table_args__ = {"schema": "app"}
+    copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    desk_id: Mapped[str] = mapped_column(Text)
+    read_through_n: Mapped[int] = mapped_column(BigInteger)        # an app.messages.n of the session
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)   # when it last moved
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)
 
 
 class RunEvent(Base):

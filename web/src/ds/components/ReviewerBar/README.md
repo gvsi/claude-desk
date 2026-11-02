@@ -9,7 +9,7 @@
 
 ## What the consumer provides
 
-- `ownerName`, the business's `owner_display_name` ("Mike Turner"). The bar reads "You're Mike Turner today. This is a concept prototype.", with the name shown as written.
+- `ownerName`, the business's `owner_display_name` ("Mike Turner"). The bar reads "You're Mike Turner today. This is a concept prototype.", with the name shown as written. When the owner gave no name, the screen passes null and the bar reads "You're the owner today." (owner, 2026-11-02).
 - `onStartOver`, which asks the owner to confirm (a `Dialog`) before it gets a fresh copy of the demo.
 - `actions`, the screen's own controls, just before Reset demo and in its style: as TOD-04 drew the owner's Demo inbox (`DemoInboxSheet` with `quiet`). The owner app passes none since its notifications moved to the sidebar (REV-NOTIF). They and Reset demo share one row, 16 px apart, that never wraps. With them, on a phone (under 640 px) the words take the first line and the controls the next, 4 px under them.
 
@@ -17,7 +17,7 @@
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `ownerName` | `string` | Required. `owner_display_name`. |
+| `ownerName` | `string \| null` | Required. `owner_display_name`, or null when the owner gave none. |
 | `onStartOver` | `() => void` | Required. The ghost "Reset demo" button. |
 | `actions` | `ReactNode` | Before Reset demo, in its row. |
 

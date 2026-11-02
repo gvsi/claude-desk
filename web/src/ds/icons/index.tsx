@@ -75,8 +75,11 @@ export const ICON_NAMES = [
 
 export type IconName = (typeof ICON_NAMES)[number];
 
-/** Sizes in px. 20 is the default; smaller sizes are for compact controls and card labels. */
-export type IconSize = 14 | 16 | 18 | 20;
+/**
+ * Sizes in px. 20 is the default; smaller sizes are for compact controls and card labels, and 12 for
+ * the check inside a checkbox's 18 px box.
+ */
+export type IconSize = 12 | 14 | 16 | 18 | 20;
 
 /** Each icon's shapes on the 24-unit grid. */
 const SHAPES = {

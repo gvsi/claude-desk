@@ -1,7 +1,7 @@
 /* PublicShell: the public page, a column the window's height. A brand header in the business's
    colors (--brand-* from the props, the accent only as the 2 px rule under it), with the kernel's
-   open status at its right; under it the chat (at most 680 px, centered) and the about column at
-   the right on the panel, 300 px as on the board.
+   open status in the header on narrow windows; under it the About column on the left and the chat
+   (at most 680 px, centered in the remaining space). The wide column holds the status.
 
    The document never scrolls. The brand header and the chat's head with the AI disclosure stay at
    the top and the composer and the footer at the bottom, and only the conversation's scroll region
@@ -46,6 +46,23 @@
 @container cd-public-shell (min-width: 900px) {
   .cd-public-shell .cd-public-shell-skeleton__beside-line {
     display: flex;
+  }
+}
+
+/* The fresh copy's wrapped card lines follow the column's content width as it grows. */
+.cd-public-shell--skeleton .cd-public-shell__about {
+  container: cd-public-about / inline-size;
+}
+
+@container cd-public-about (min-width: 280px) {
+  .cd-public-shell .cd-public-shell-skeleton__deposit-wrap {
+    display: none;
+  }
+}
+
+@container cd-public-about (min-width: 300px) {
+  .cd-public-shell .cd-public-shell-skeleton__hours-wrap {
+    display: none;
   }
 }
 
@@ -398,22 +415,35 @@
   max-height: min(6lh, max(2lh, calc(var(--cd-public-shell-height, 100dvh) / 6)));
 }
 
-/* The about column, at the right of the chat from the header to the window's foot. A long charter
+/* The about column, at the left of the chat from the header to the window's foot. A long charter
    scrolls in the column, on its own. */
 .cd-public-shell__about {
   position: relative;
   display: flex;
-  flex: 0 0 300px;
+  flex: 0 0 var(--size-public-about);
   flex-direction: column;
   gap: var(--space-16);
   box-sizing: border-box;
-  width: 300px;
+  width: var(--size-public-about);
   min-width: 0;
   min-height: 0;
   padding: var(--space-24) var(--space-24) var(--space-20);
   overflow-y: auto;
-  border-left: 1px solid var(--line-hairline);
   background: var(--bg-panel);
+}
+
+/* The wide column uses the theme's ink and status colors, away from the brand field. */
+.cd-public-shell__body > .cd-public-shell__about {
+  --brand-ink: var(--text-primary);
+  --brand-ink-secondary: var(--text-secondary);
+  --brand-status-handled: var(--status-handled);
+  border-right: 1px solid var(--line-hairline);
+}
+
+/* The column's 16 px gap leaves 8 px under its title and 16 px before the first card. */
+.cd-public-shell__about > .cd-public-shell__open-status {
+  flex: none;
+  margin-top: calc(var(--space-8) - var(--space-16));
 }
 
 /* Too narrow for the column beside the chat: it opens the scroll region, above the first message,

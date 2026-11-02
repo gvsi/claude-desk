@@ -28,10 +28,18 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
   useFirstView(shell, true, aboutBeside, CHIP_WIDTHS.length);
   const about = footer ? (
     <div className="cd-public-shell__about" data-skeleton-anchor="about-column">
-      <Skeleton shape="line" text="section" width={200} anchor="about-title" />
+      {/* Keep the title's line box when a tall charter makes the column scroll. */}
+      <div className="cd-public-shell__heading">
+        <Skeleton shape="line" text="section" width={200} anchor="about-title" />
+      </div>
+      {aboutBeside ? (
+        <div className="cd-public-shell__open-status" data-skeleton-anchor="about-status">
+          <Skeleton shape="line" text="meta" width={170} />
+        </div>
+      ) : null}
       <div className="cd-public-shell__blocks">
         {[0, 1, 2, 3, 4].map((i) => (
-          <SkeletonCard key={i} padding={16} className="cd-reply-card">
+          <SkeletonCard key={i} padding={16} className="cd-reply-card" anchor={`about-card-${i}`}>
             <div className="cd-reply-card__label">
               <Skeleton shape="block" width={16} height={16} />
               <Skeleton shape="line" text="caption" width={70} />
@@ -40,7 +48,7 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
               <div className="cd-reply-card__headline">
                 <Skeleton shape="line" text="section" />
                 {i === 2 || i === 3 ? <Skeleton shape="line" text="section" width="75%" /> : null}
-                {i === 0 || i === 3 ? <Skeleton shape="line" text="section" width="65%" className="cd-public-shell-skeleton__beside-line" /> : null}
+                {i === 0 || i === 3 ? <Skeleton shape="line" text="section" width="65%" className={`cd-public-shell-skeleton__beside-line cd-public-shell-skeleton__${i === 0 ? 'hours' : 'deposit'}-wrap`} /> : null}
               </div>
               {i === 0 ? <Skeleton shape="line" text="meta" width="85%" className="cd-reply-card__detail" /> : null}
             </div>
@@ -58,8 +66,9 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
   ) : null;
   return (
     <div ref={shell} className={`cd-public-shell cd-public-shell--skeleton cd-public-shell--first-view${footer ? '' : ' cd-public-shell--embedded'}`} lang={language}>
-      <PublicBrandHeaderSkeleton hours />
+      <PublicBrandHeaderSkeleton hours={!aboutBeside || !footer} />
       <div className="cd-public-shell__body">
+        {aboutBeside ? about : null}
         <div className="cd-public-shell__chat">
           <div className="cd-public-shell__chat-head" data-skeleton-anchor="chat-head">
             <div className="cd-public-shell__chat-title">
@@ -105,7 +114,6 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
           ) : null}
           {aboutBeside ? null : about}
         </div>
-        {aboutBeside ? about : null}
       </div>
     </div>
   );
