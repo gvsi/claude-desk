@@ -64,7 +64,6 @@ import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
 import {
   SETUP_ROUTES,
   setupPublicDesk,
-  setupTaskSet,
   stopSetupRuns,
   withSetupBusinesses,
   withSetupBusinessName,
@@ -908,16 +907,15 @@ const SERVED: ServedRoutes = {
     return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
   },
   agentTasks(sv, req) {
-    // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
-    // Turner's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    // The Desk's set, read with this browser's chat: its summary's business type, the one key the API reads for
+    // the agent and the owner's list (`agents.demo_task_sets`). That is its setup business type, Turner's on the
+    // copy's first Desk, and `other` on any other Desk setup didn't make.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
-    const deskId = visitor.desk.summary.desk_id;
-    const own = sv.world.desks[0]?.summary.desk_id === deskId;
     const payments = visitor.desk.tools.some((row) => row.status === 'enabled'
       && (row.tool === 'native.payment_link' || row.tool === 'native.charge_mandate'));
     return ok({
-      task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other'),
+      task_set: visitor.desk.summary.business_type,
       tasks: payments ? ['book_visit', 'quote_and_deposit', 'push_the_limit'] : ['book_visit'],
     } satisfies AgentTasks);
   },
