@@ -2953,10 +2953,13 @@ describe("Today's unfinished setup", () => {
     // Today says it isn't live yet, and the row, done for the copy, says nothing about being live.
     await liveSetupDeskIds("I'm Linda Chen. Chen & Co. keeps the books for small businesses in San Jose.");
     const state = await deskAtTools();
+    // Answering on doesn't make a Desk still in setup live: only finishing setup does.
+    await mockStore.dispatch('setAnswering', { params: { desk_id: state.desk_id }, body: { on: true } });
     const screen = await saveAndExitAtTools(state);
     const row = createRow(screen);
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     await expect.element(region(screen, 'Things to try').getByText('1 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Not live yet', { exact: true })).toBeVisible();
     expect(row.element().textContent).not.toMatch(/live/i);
     // It keeps its own words, so its Done pill is read out.
     await expect.element(row.getByText('Describe a business in a few sentences. Claude drafts the rules, and you confirm them.', { exact: true })).toBeVisible();

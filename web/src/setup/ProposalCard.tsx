@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { JobKind, JobProposal, ProposalCard as Proposal, SetupProposalBody } from '../api/views.ts';
 import { Button, Card, ConnectorIcon, type ConnectorIconName, ConnectorName, Pill, TextField } from '../ds/index.ts';
 import { Icon, type IconName } from '../ds/icons/index.tsx';
@@ -88,6 +88,8 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
   const initialCents = job.config?.block === 'purpose_payment' ? job.config.amount_cents : null;
   const [amount, setAmount] = useState(initialCents == null ? '' : (initialCents / 100).toFixed(2));
   const [error, setError] = useState<string | null>(null);
+  // A press that fails the check moves focus to Amount, so its label and the message are read out every time.
+  const amountRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   useEffect(() => { if (amountRequired) setError(copy.amountError); }, [amountRequired]);
   const accepted = proposal.state === 'accepted';
   const collapsed = accepted || proposal.state === 'declined';
@@ -98,7 +100,7 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
     const cents = /^(\d{1,3}(,\d{3})+|\d+)(\.\d{1,2})?$/.test(dollars)
       ? Math.round(Number(dollars.replace(/,/g, '')) * 100) : NaN;
     const decision = decisionBody({ action, proposal, ...(payment && action === 'accept' ? { amount_cents: cents } : {}) });
-    if (!decision.ok) { setError(copy.amountError); return; }
+    if (!decision.ok) { setError(copy.amountError); amountRef.current?.focus(); return; }
     onDecision({ proposal_id: proposal.proposal_id, action, body: decision.body });
   };
   return <Card as="article" label={job.title} padding={16}>
@@ -115,7 +117,7 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
         {rows.map(([label, value]) => <div className="cd-setup-c3__row" key={label}><dt className="cd-type-meta">{label}</dt><dd className="cd-type-body">{value}</dd></div>)}
       </dl> : null}
       {payment && proposal.state === 'proposed' ? <div className="cd-setup-c3__amount cd-setup-c3__indent">
-        <TextField label={copy.amount} value={amount} onChange={(value) => { setAmount(value); setError(null); }} hint={copy.amountHint} readOnly={disabled || !live || failed} {...(error ? { error } : {})} />
+        <TextField label={copy.amount} value={amount} onChange={(value) => { setAmount(value); setError(null); }} hint={copy.amountHint} readOnly={disabled || !live || failed} fieldRef={amountRef} {...(error ? { error } : {})} />
       </div> : null}
       {live && proposal.state === 'proposed' ? failed ? <FailedDecision disabled={disabled} onRetry={onRetry} /> : <div className="cd-setup-c3__actions cd-setup-c3__indent">
         {/* Pressed with no amount, it says why under Amount and sends nothing (`decisionBody`). */}

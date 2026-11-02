@@ -4754,6 +4754,12 @@ describe('consultant setup', () => {
     await expect.element(screen.getByText('Enter an amount to accept this.', { exact: true })).toBeVisible();
     await expect.element(amount).toHaveAttribute('aria-invalid', 'true');
     expect(decisions).toEqual([]);
+    // Focus moves to Amount, so its label and the message are read out on every press, not only the first.
+    await expect.poll(() => document.activeElement).toBe(amount.element());
+    (setup.element() as HTMLElement).focus();
+    await setup.click();
+    await expect.poll(() => document.activeElement).toBe(amount.element());
+    expect(decisions).toEqual([]);
     await amount.fill('50');
     await setup.click();
     expect(decisions).toEqual([{ proposal_id: proposal.proposal_id, action: 'accept', body: { accept: true, amount_cents: 5000 } }]);
