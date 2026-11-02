@@ -476,7 +476,7 @@ export const Cancelled: Story = {
 export const CancelledBackToTheChat: Story = {
   args: { state: 'cancelled', chatHref: CHAT_HREF },
   parameters: {
-    canvasNote: 'Visitor cancellation with a known chat: keeps the cancelled sentence and appends the paid state’s same-tab return link. Copy and design await owner sign-off.',
+    canvasNote: 'Cancelled for any reason but a rule change, with a known chat: keeps the cancelled sentence and appends the paid state’s same-tab return link. Copy and design await owner sign-off.',
   },
   play: async ({ canvasElement }) => {
     const { state } = await expectFinal(canvasElement, `${CANCELLED_LINE} Go back to the chat.`, 'info');
@@ -492,7 +492,7 @@ export const CancelledBackToTheChat: Story = {
 export const CancelledBackToTheChatSpanish: Story = {
   args: { state: 'cancelled', chatHref: CHAT_HREF, language: 'es' },
   parameters: {
-    canvasNote: 'Visitor cancellation in Spanish: appends the paid state’s “Vuelve al chat” link. Copy and design await owner sign-off.',
+    canvasNote: 'Cancelled for any reason but a rule change, in Spanish: appends the paid state’s “Vuelve al chat” link. Copy and design await owner sign-off.',
   },
   play: async ({ canvasElement }) => {
     const { card } = await expectChrome(canvasElement, 'es');

@@ -67,8 +67,9 @@ export interface MockCheckoutProps {
   customerName?: string;
   /**
    * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Once paid
-   * or cancelled by the visitor, "Go back to the chat" links there, in the same tab. Anything
-   * but a public chat's path is ignored, and the line keeps its original words with no link.
+   * or cancelled for any reason but a rule change, "Go back to the chat" links there, in the same
+   * tab. Anything but a public chat's path is ignored, and the line keeps its original words with
+   * no link.
    */
   chatHref?: string;
   /** A request to pay or cancel is in flight. The pressed button spins; Pay does when none was pressed here. */
