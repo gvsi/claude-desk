@@ -1240,9 +1240,10 @@ async def test_public_desk_says_whether_it_is_open_now(kernel, ro_read):
 
 @pytest.mark.kernel_plan("01c")
 async def test_public_desk_carries_the_agent_card(kernel, ro_read):
-    """The public page's Agent Card: prose the kernel writes in the language asked for, saying that Claude, an AI,
-    answers within the owner's rules, what an agent can do there (leaving details and asking for a callback alone while
-    Answering is off), where to send each request and how to sign it."""
+    """The public page's Agent Card: one prose block for each thing an agent can do on the Desk now, by its plain label
+    in sentence case and the language asked for (leaving details and asking for a callback alone while Answering is
+    off), and nothing else. The page says who answers, and the API's own card where to send requests and how to sign
+    them, so the kernel's card names no endpoint, header or business."""
     http, ro_schema, _ = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -1252,22 +1253,22 @@ async def test_public_desk_carries_the_agent_card(kernel, ro_read):
         assert all((block.kind, block.template, block.title) == ("prose", None, None) for block in blocks)
         return [block.text for block in blocks]
 
-    english, spanish = await card("en"), await card("es")
-    assert len(english) == len(spanish) == 6
-    assert english[0] == ("Visiting agents can talk to Turner Plumbing here too. Answers come from Claude, an AI, "
-                          "working within Mike Turner's rules, unless a message is marked as Mike Turner's own.")
-    assert english[1].startswith("What an agent can do here: get a quote from the price list, find open times, ")
-    assert english[2] == f"Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug."
-    assert all(header in english[3] for header in ("X-Agent-Key-Id", "X-Agent-Ts", "X-Agent-Nonce", "X-Agent-Sig"))
-    assert spanish[0].startswith("Los agentes también pueden hablar aquí con Turner Plumbing. ")
-    assert spanish[2] == (f"Envía cada solicitud a POST /api/a2a/{slug} en este sitio; {slug} es el identificador de "
-                          "este Desk.")
+    assert await card("en") == [
+        "Get a quote from the price list", "Find open times", "Book a visit", "Get a payment link for a quote",
+        "Pay for a quote within the limit of a signed mandate", "Leave contact details", "Ask for a callback",
+        "Verify a customer with a code sent to their contact on record", "Receive a verified customer's own documents",
+        "List a verified customer's own charges"]
+    assert await card("es") == [
+        "Pedir una cotización de la lista de precios", "Buscar horarios libres", "Reservar una visita",
+        "Pedir un enlace de pago para una cotización", "Pagar una cotización dentro del límite de un mandato firmado",
+        "Dejar datos de contacto", "Pedir que te devuelvan la llamada",
+        "Verificar a un cliente con un código enviado a su contacto registrado",
+        "Recibir los documentos propios de un cliente verificado", "Ver los cargos propios de un cliente verificado"]
 
     await http.owner(copy.owner_token).call("PUT /desks/{id}/answering", DeskAnsweringRequest(on=False),
                                             path={"id": copy.desk_ids[0]})
-    assert (await card("en"))[1] == "What an agent can do here: leave contact details and ask for a callback."
-    assert (await card("es"))[1] == ("Lo que un agente puede hacer aquí: dejar datos de contacto y pedir que te "
-                                     "devuelvan la llamada.")
+    assert await card("en") == ["Leave contact details", "Ask for a callback"]
+    assert await card("es") == ["Dejar datos de contacto", "Pedir que te devuelvan la llamada"]
 
 
 @pytest.mark.kernel_plan("01a")

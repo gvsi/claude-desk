@@ -18,20 +18,33 @@ export const MOCK_PUBLIC_ORIGIN = 'https://desk.example';
 
 /**
  * What agents can do at Turner's Desk, as the kernel renders the Agent Card's blocks (kernel plan
- * 01c): prose, by plain label and without amounts.
+ * 01c): one prose block for each tool an agent may be given there, by its plain label, with no
+ * amount and nothing about the protocol, which `agentCardOut` carries.
  */
 export const AGENT_CARD_BLOCKS: Readonly<Record<Language, readonly RenderedBlock[]>> = {
   en: [
     proseBlock('Get a quote from the price list'),
-    proseBlock('Find open times and book a visit'),
-    proseBlock('Pay the service call deposit within a signed limit'),
-    proseBlock('Ask Mike for a callback'),
+    proseBlock('Find open times'),
+    proseBlock('Book a visit'),
+    proseBlock('Get a payment link for a quote'),
+    proseBlock('Pay for a quote within the limit of a signed mandate'),
+    proseBlock('Leave contact details'),
+    proseBlock('Ask for a callback'),
+    proseBlock('Verify a customer with a code sent to their contact on record'),
+    proseBlock("Receive a verified customer's own documents"),
+    proseBlock("List a verified customer's own charges"),
   ],
   es: [
-    proseBlock('Pedir un presupuesto con la lista de precios'),
-    proseBlock('Ver horarios libres y reservar una visita'),
-    proseBlock('Pagar el depósito de la visita dentro de un límite firmado'),
-    proseBlock('Pedir que Mike devuelva la llamada'),
+    proseBlock('Pedir una cotización de la lista de precios'),
+    proseBlock('Buscar horarios libres'),
+    proseBlock('Reservar una visita'),
+    proseBlock('Pedir un enlace de pago para una cotización'),
+    proseBlock('Pagar una cotización dentro del límite de un mandato firmado'),
+    proseBlock('Dejar datos de contacto'),
+    proseBlock('Pedir que te devuelvan la llamada'),
+    proseBlock('Verificar a un cliente con un código enviado a su contacto registrado'),
+    proseBlock('Recibir los documentos propios de un cliente verificado'),
+    proseBlock('Ver los cargos propios de un cliente verificado'),
   ],
 };
 

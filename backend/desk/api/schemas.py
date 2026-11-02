@@ -243,7 +243,7 @@ class AgentCardSigning(BaseModel):
 
 class AgentCardOut(BaseModel):
     """`GET /api/public/desks/{slug}/agent_card`: built by code from `PUBLIC_ORIGIN` and the slug, with no model
-    text; what agents may do here, and the AI disclosure, are the kernel's `PublicDesk.agent_card`."""
+    text; what agents may do here, one block per ability, is the kernel's `PublicDesk.agent_card`."""
 
     endpoint: str
     signing: AgentCardSigning

@@ -56,6 +56,37 @@ const TASKS = ['Book the earliest visit', 'Ask about heater flushes', 'Get a quo
 /** The panel's lead before a run, as boards 03 to 05 write it. */
 const LEAD = 'A built-in agent visits Turner Plumbing for Alex Kim. It’s simulated.';
 
+/**
+ * What the kernel's Agent Card lists for Turner Plumbing's seed, as its contract test pins it
+ * (`test_public_desk_carries_the_agent_card`): one block per ability, by its plain label.
+ */
+const TURNER_ABILITIES = {
+  en: [
+    'Get a quote from the price list',
+    'Find open times',
+    'Book a visit',
+    'Get a payment link for a quote',
+    'Pay for a quote within the limit of a signed mandate',
+    'Leave contact details',
+    'Ask for a callback',
+    'Verify a customer with a code sent to their contact on record',
+    "Receive a verified customer's own documents",
+    "List a verified customer's own charges",
+  ],
+  es: [
+    'Pedir una cotización de la lista de precios',
+    'Buscar horarios libres',
+    'Reservar una visita',
+    'Pedir un enlace de pago para una cotización',
+    'Pagar una cotización dentro del límite de un mandato firmado',
+    'Dejar datos de contacto',
+    'Pedir que te devuelvan la llamada',
+    'Verificar a un cliente con un código enviado a su contacto registrado',
+    'Recibir los documentos propios de un cliente verificado',
+    'Ver los cargos propios de un cliente verificado',
+  ],
+};
+
 /** The signed limit panel's values and source, as the agents boards write them. */
 const LIMIT_VALUES = ['$20', '$100', 'One hour'];
 const LIMIT_SOURCE = 'Signed limit from Alex Kim’s demo wallet';
@@ -260,10 +291,13 @@ describe('agents page', () => {
     const card = agentCardOut(RIVERA.slug);
     const { screen } = await renderRoute(PAGE);
 
-    // What agents can do here: the kernel's blocks, each as written.
+    // What agents can do here: the kernel's blocks, each as written, one list item per ability and
+    // nothing about the protocol, which the API's card below carries.
     const canDo = screen.getByRole('region', { name: 'What agents can do here' });
     await expect.element(canDo).toBeVisible();
     for (const block of AGENT_CARD_BLOCKS.en) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
+    expect([...canDo.element().querySelectorAll('li')].map((li) => li.textContent)).toEqual(TURNER_ABILITIES.en);
+    for (const protocol of ['POST /api/a2a', 'X-Agent-Sig']) expect(canDo.element().textContent).not.toContain(protocol);
 
     // Connecting your own: the API's address, its signing rules in plain lines and its example request.
     const connect = screen.getByRole('region', { name: 'Connect your own agent' });
@@ -413,6 +447,7 @@ describe('agents page', () => {
     await expect.element(es.screen.getByText('Turner Plumbing responde con Claude, una IA.', { exact: true })).toBeVisible();
     const canDo = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
     for (const block of AGENT_CARD_BLOCKS.es) await expect.element(canDo.getByText(block.text, { exact: true })).toBeVisible();
+    expect([...canDo.element().querySelectorAll('li')].map((li) => li.textContent)).toEqual(TURNER_ABILITIES.es);
     await expectScreenBasics(es.screen.container, { owner: false });
     // The signed limit and a run in Spanish: the panel's words and the signed request's pill.
     expect(limitIn(es.screen, 'Enviar un agente', 'Límite firmado')).toEqual({
@@ -1884,6 +1919,22 @@ describe('agents page', () => {
     await screen.getByRole('button', { name: 'Book the earliest visit' }).click();
     await expect.element(screen.getByText('The agent finished.', { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
+  });
+
+  it('agent_card_with_no_abilities_shows_the_page_empty_line', async () => {
+    // A Desk with no tool an agent may be given yet: the kernel sends no blocks, and the card says so
+    // in the page's own words, in either language, with no empty list.
+    await plantDesk({ agent_card: [] });
+    const { screen } = await renderRoute(PAGE);
+    const canDo = screen.getByRole('region', { name: 'What agents can do here' });
+    await expect.element(canDo.getByText('Nothing is listed here yet. An agent can still ask what this Desk can help with.', { exact: true })).toBeVisible();
+    expect(canDo.element().querySelector('ul')).toBeNull();
+    await cleanup();
+    await plantDesk({ agent_card: [] });
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    const vacio = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
+    await expect.element(vacio.getByText('Todavía no hay nada en esta lista. Un agente puede preguntar en qué ayuda este Desk.', { exact: true })).toBeVisible();
+    expect(vacio.element().querySelector('ul')).toBeNull();
   });
 
   it('business_name_is_marked_as_its_own_words', async () => {

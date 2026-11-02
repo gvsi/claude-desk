@@ -713,7 +713,7 @@ export interface VerifyChecked {
   state: SessionState;
 }
 
-/** The static, code-built half of the Agent Card (skills and disclosure are `PublicDesk`'s). */
+/** The static, code-built half of the Agent Card (what agents can do is `PublicDesk.agent_card`). */
 export interface AgentCardOut {
   endpoint: string;
   signing: {

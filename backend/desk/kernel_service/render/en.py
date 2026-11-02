@@ -302,35 +302,19 @@ def open_status(is_open: bool, boundary: datetime | None, as_of: datetime) -> st
     return f"Closed now. Opens {_day(boundary, as_of)} at {clock(boundary)}"
 
 
-# The Agent Card on the public page (`render.agent_card`): plain prose the kernel writes, with no
-# amount, key, mandate or private field. A tool reads by what an agent can ask for, never by name.
+# The Agent Card on the public page (`render.agent_card`): one block for each thing an agent can ask
+# for, in plain words the kernel writes, with no amount, key, mandate, name or private field. A tool
+# reads by what an agent can ask for, never by name. Where to send requests and how to sign them is
+# the API's code-built card (`AgentCardOut`), and the page itself says who answers.
 AGENT_TOOLS: dict[str, str] = {
-    "native.quote": "get a quote from the price list",
-    "native.find_slots": "find open times",
-    "native.book": "book a visit",
-    "native.payment_link": "get a payment link for a quote",
-    "native.charge_mandate": "pay for a quote within the limit of a signed mandate",
-    "native.capture_lead": "leave contact details",
-    "native.request_callback": "ask for a callback",
-    "native.start_verification": "verify a customer with a code sent to their contact on record",
-    "native.release_document": "receive a verified customer's own documents",
-    "payments.list_charges": "list a verified customer's own charges",
+    "native.quote": "Get a quote from the price list",
+    "native.find_slots": "Find open times",
+    "native.book": "Book a visit",
+    "native.payment_link": "Get a payment link for a quote",
+    "native.charge_mandate": "Pay for a quote within the limit of a signed mandate",
+    "native.capture_lead": "Leave contact details",
+    "native.request_callback": "Ask for a callback",
+    "native.start_verification": "Verify a customer with a code sent to their contact on record",
+    "native.release_document": "Receive a verified customer's own documents",
+    "payments.list_charges": "List a verified customer's own charges",
 }
-
-AGENT_CARD: tuple[str, ...] = (
-    "Visiting agents can talk to {business} here too. Answers come from Claude, an AI, working within "
-    "{owner}'s rules, unless a message is marked as {owner}'s own.",
-    "What an agent can do here: {tools}.",
-    "Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug.",
-    "Sign every request with Ed25519 and send the headers X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce and "
-    "X-Agent-Sig. The signature covers the RFC 8785 canonical JSON of desk_slug, ts, nonce and body_sha256, the "
-    "lowercase hex SHA-256 of the raw request body.",
-    "A signature counts for 5 minutes either side of its timestamp, and each nonce covers one turn of the "
-    "conversation.",
-    "Agent keys only say which agent is asking. They are not business credentials: they can't change {owner}'s "
-    "rules or show anyone's private data, and money moves only as those rules and a signed mandate allow.",
-)
-AGENT_CARD_NO_TOOLS = "nothing for now"
-# What the card says for a business or owner name the public page withholds (`public.header_of`)
-AGENT_CARD_BUSINESS = "this business"
-AGENT_CARD_OWNER = "the owner"

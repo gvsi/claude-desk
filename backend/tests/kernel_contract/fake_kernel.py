@@ -654,63 +654,28 @@ REFRESH_WITHIN = timedelta(hours=25)    # the latest the line is asked for again
 WEEKDAYS = {"en": ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"),
             "es": ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")}
 AGENT_TOOLS = {
-    "en": {"native.quote": "get a quote from the price list", "native.find_slots": "find open times",
-           "native.book": "book a visit", "native.payment_link": "get a payment link for a quote",
-           "native.charge_mandate": "pay for a quote within the limit of a signed mandate",
-           "native.capture_lead": "leave contact details", "native.request_callback": "ask for a callback",
-           "native.start_verification": "verify a customer with a code sent to their contact on record",
-           "native.release_document": "receive a verified customer's own documents",
-           "payments.list_charges": "list a verified customer's own charges"},
-    "es": {"native.quote": "pedir una cotización de la lista de precios", "native.find_slots": "buscar horarios libres",
-           "native.book": "reservar una visita", "native.payment_link": "pedir un enlace de pago para una cotización",
-           "native.charge_mandate": "pagar una cotización dentro del límite de un mandato firmado",
-           "native.capture_lead": "dejar datos de contacto",
-           "native.request_callback": "pedir que te devuelvan la llamada",
-           "native.start_verification": "verificar a un cliente con un código enviado a su contacto registrado",
-           "native.release_document": "recibir los documentos propios de un cliente verificado",
-           "payments.list_charges": "ver los cargos propios de un cliente verificado"},
+    "en": {"native.quote": "Get a quote from the price list", "native.find_slots": "Find open times",
+           "native.book": "Book a visit", "native.payment_link": "Get a payment link for a quote",
+           "native.charge_mandate": "Pay for a quote within the limit of a signed mandate",
+           "native.capture_lead": "Leave contact details", "native.request_callback": "Ask for a callback",
+           "native.start_verification": "Verify a customer with a code sent to their contact on record",
+           "native.release_document": "Receive a verified customer's own documents",
+           "payments.list_charges": "List a verified customer's own charges"},
+    "es": {"native.quote": "Pedir una cotización de la lista de precios", "native.find_slots": "Buscar horarios libres",
+           "native.book": "Reservar una visita", "native.payment_link": "Pedir un enlace de pago para una cotización",
+           "native.charge_mandate": "Pagar una cotización dentro del límite de un mandato firmado",
+           "native.capture_lead": "Dejar datos de contacto",
+           "native.request_callback": "Pedir que te devuelvan la llamada",
+           "native.start_verification": "Verificar a un cliente con un código enviado a su contacto registrado",
+           "native.release_document": "Recibir los documentos propios de un cliente verificado",
+           "payments.list_charges": "Ver los cargos propios de un cliente verificado"},
 }
-AGENT_CARD = {
-    "en": ("Visiting agents can talk to {business} here too. Answers come from Claude, an AI, working within "
-           "{owner}'s rules, unless a message is marked as {owner}'s own.",
-           "What an agent can do here: {tools}.",
-           "Send each request to POST /api/a2a/{slug} on this site; {slug} is this Desk's slug.",
-           "Sign every request with Ed25519 and send the headers X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce and "
-           "X-Agent-Sig. The signature covers the RFC 8785 canonical JSON of desk_slug, ts, nonce and body_sha256, the "
-           "lowercase hex SHA-256 of the raw request body.",
-           "A signature counts for 5 minutes either side of its timestamp, and each nonce covers one turn of the "
-           "conversation.",
-           "Agent keys only say which agent is asking. They are not business credentials: they can't change {owner}'s "
-           "rules or show anyone's private data, and money moves only as those rules and a signed mandate allow."),
-    "es": ("Los agentes también pueden hablar aquí con {business}. Las respuestas vienen de Claude, una IA, que sigue "
-           "las reglas de {owner}, salvo los mensajes marcados como de {owner}.",
-           "Lo que un agente puede hacer aquí: {tools}.",
-           "Envía cada solicitud a POST /api/a2a/{slug} en este sitio; {slug} es el identificador de este Desk.",
-           "Firma cada solicitud con Ed25519 y envía los encabezados X-Agent-Key-Id, X-Agent-Ts, X-Agent-Nonce y "
-           "X-Agent-Sig. La firma cubre el JSON canónico RFC 8785 de desk_slug, ts, nonce y body_sha256, el SHA-256 en "
-           "hexadecimal minúscula del cuerpo exacto de la solicitud.",
-           "Una firma vale 5 minutos antes o después de su marca de tiempo, y cada nonce cubre un turno de la "
-           "conversación.",
-           "Las claves de agente solo dicen qué agente pregunta. No son credenciales del negocio: no cambian las "
-           "reglas de {owner} ni muestran datos privados de nadie, y el dinero solo se mueve como lo permiten esas "
-           "reglas y un mandato firmado."),
-}
-AGENT_CARD_NO_TOOLS = {"en": "nothing for now", "es": "nada por ahora"}
 
 
-def listing(parts: list[str], language: str) -> str:
-    """"a", "a and b", "a, b and c" ("y" in Spanish)."""
-    last = " and " if language == "en" else " y "
-    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])}{last}{parts[-1]}"
-
-
-def agent_card(language: str, *, business: str, owner: str, slug: str, tools: set[str]) -> list[RenderedBlock]:
-    """The Agent Card in `language`: the kernel's prose blocks, naming what an agent may ask for there by the labels of
-    `tools`, in the card's order."""
-    labels = [label for tool, label in AGENT_TOOLS[language].items() if tool in tools]
-    listed = listing(labels, language) if labels else AGENT_CARD_NO_TOOLS[language]
-    return [RenderedBlock(kind="prose", text=line.format(business=business, owner=owner, slug=slug, tools=listed))
-            for line in AGENT_CARD[language]]
+def agent_card(language: str, tools: set[str]) -> list[RenderedBlock]:
+    """The Agent Card in `language`: the kernel's prose blocks, one for each of `tools` an agent may ask for there, by
+    its label in the card's order, and none when there are none."""
+    return [RenderedBlock(kind="prose", text=label) for tool, label in AGENT_TOOLS[language].items() if tool in tools]
 
 
 def open_window(hours: list[HoursWindow], tz: ZoneInfo, now: datetime) -> tuple[bool, datetime | None, datetime] | None:
@@ -2391,8 +2356,7 @@ class FakeKernelState:
         while refused := public_policy_fields([
                 (block.fact_id, block.text) for block in charter if block.template == "policy"]):
             charter = [block for block in charter if block.fact_id not in refused]
-        card = agent_card(language, business=desk.business_name, owner=desk.owner_display_name, slug=desk.slug,
-                          tools=self._agent_tools(desk))
+        card = agent_card(language, self._agent_tools(desk))
         return PublicDesk(business_name=desk.business_name, desk_name=desk.name,
                           owner_display_name=desk.owner_display_name, brand=effective_brand(desk.brand), charter=charter,
                           agent_card=card, open_status=self._open_status(desk, language),
