@@ -197,6 +197,37 @@ def test_a2a_request_body_is_documented():
     assert "Mandate" in schemas
 
 
+def referenced(node, schemas: dict, found: set[str] | None = None) -> set[str]:
+    """The names of every component schema `node` refers to, directly or through other schemas."""
+    found = set() if found is None else found
+    if isinstance(node, dict):
+        ref = node.get("$ref", "")
+        if ref.startswith("#/components/schemas/") and (name := ref.rpartition("/")[2]) not in found:
+            found.add(name)
+            referenced(schemas[name], schemas, found)
+        for value in node.values():
+            referenced(value, schemas, found)
+    elif isinstance(node, list):
+        for value in node:
+            referenced(value, schemas, found)
+    return found
+
+
+def test_visitor_words_quoted_for_the_owner_reach_only_owner_routes():
+    """A model that quotes a visitor's words back (`from_the_visitor`: Needs you's cards, Safety's entries) is the
+    owner's alone: no visitor, agent, payment or document route sends or takes one."""
+    document = export_openapi()
+    schemas = document["components"]["schemas"]
+    quoting = {name for name, schema in schemas.items() if "from_the_visitor" in schema.get("properties", {})}
+    assert {"Attempt", "NeedsYouItem"} <= quoting
+    for path, item in document["paths"].items():
+        for method, operation in item.items():
+            if not operation["operationId"].startswith("owner_"):
+                assert not referenced(operation, schemas) & quoting, (method, path)
+    safety = document["paths"]["/api/owner/desks/{desk_id}/safety"]["get"]
+    assert "Attempt" in referenced(safety, schemas)
+
+
 # Path parameters are named after their resource, `id` for a setup interview (master plan, "Shared seams").
 PATH_PARAMETERS = {"desk_id", "session_id", "decision_id", "handoff_id", "slug", "token", "version", "run_id", "tool",
                    "id", "proposal_id", "key", "item_id"}

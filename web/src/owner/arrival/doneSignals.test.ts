@@ -97,6 +97,7 @@ function attempt(seq: number, kind: Attempt['kind'] = 'reply_blocked'): Attempt 
     triage: null,
     ledger_seq: seq,
     cause: null,
+    from_the_visitor: null,
   };
 }
 

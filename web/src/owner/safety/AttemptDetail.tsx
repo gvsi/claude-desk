@@ -55,7 +55,8 @@ function Toggle({ label, open, controls, onToggle, buttonRef }: ToggleProps) {
 
 /**
  * One attempt open beside the list, in tiers: what was stopped and why, in plain words, where its
- * entry came from and when; Claude's summary, labelled as written by Claude; then, on request, the
+ * entry came from and when; for a refused request, the visitor's words that made it, quoted; Claude's
+ * summary, labelled as written by Claude; then, on request, the
  * checkpoints it went through and the signed entry it is kept in; and its conversation.
  */
 export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: AttemptDetailProps) {
@@ -113,6 +114,18 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
           <p className="cd-attempt__origin cd-type-caption">{originCopy(attempt.origin)}</p>
           {replayed ? <p className="cd-attempt__origin cd-type-caption">{REPLAYED_LABEL}</p> : null}
         </div>
+        {/* The visitor's own untrusted words that made the request, from the chat, not the signed
+            record: a part of their own, labelled as Claude's summary below is, and text only. An
+            agent's words are labelled the same. An older API sends no field at all, so any
+            missing or empty value shows nothing. */}
+        {attempt.from_the_visitor ? (
+          <div className="cd-attempt__part">
+            <p className="cd-attempt__label cd-type-caption">From the visitor</p>
+            <p className="cd-attempt__visitor cd-type-body">
+              “<span data-copy="user">{attempt.from_the_visitor}</span>”
+            </p>
+          </div>
+        ) : null}
         {triage !== null ? (
           <div className="cd-attempt__part">
             <p className="cd-attempt__label cd-type-caption">Summary written by Claude</p>

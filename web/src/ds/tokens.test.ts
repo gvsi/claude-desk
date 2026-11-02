@@ -167,10 +167,13 @@ describe('design tokens', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a_focused_fields_edge_is_the_tertiary_ink', () => {
-    // A text field with focus shows its caret and its own border one step stronger, never a ring and
-    // never blue (owner, 2026-11-01, WCAG 2.4.7): line-field-focus, the tertiary ink.
-    expect(tokenValue('line-field-focus')).toBe('{text-tertiary}');
+  test('focused_field_edges_use_the_control_focus_token_on_every_ground', () => {
+    expect(colorNames).not.toContain('line-field-focus');
+    for (const ground of ['bg-app', 'bg-surface']) {
+      const pair = CONTRAST_PAIRS.find((p) => p.fg === 'line-focus' && p.ground === ground);
+      expect(pair).toBeDefined();
+      for (const theme of THEMES) expect(pairContrast(pair!, theme)).toBeGreaterThanOrEqual(3);
+    }
   });
 
   test('focus_edge_is_the_secondary_ink', () => {
@@ -377,7 +380,7 @@ describe('design tokens', () => {
     // The light theme's values, as the design system set them: warm paper, the dark theme's ink at its
     // alpha steps, an ink primary button, darker steps of the status hues, a darker clay, a lighter
     // scrim and shadows, and Stripe's mark in Stripe's own purple, since its white would vanish on
-    // paper. The aliases (line-field-focus, line-focus, button-primary-text, status-info) follow the
+    // paper. The aliases (line-focus, button-primary-text, status-info) follow the
     // light values by themselves; the mark, Google Calendar's blue, the illustration's other inks, the
     // QR tile and its hairline, and the inks on an owner's colour are the same in both themes. The
     // illustration's ink and the QR code's, which alias bg-app in dark, stay dark ink on paper.
@@ -521,7 +524,7 @@ describe('design tokens', () => {
     // card; and the primary's, drawn in bg-app on its fill, at rest and hovered.
     add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'bg-app');
     add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'fill-card', 'bg-app');
-    add(['line-focus'], ['fill-secondary', 'fill-secondary-hover'], 3, 'bg-surface');
+    add(['line-focus'], ['fill-secondary', 'fill-secondary-hover', 'button-danger-fill', 'button-danger-fill-hover'], 3, 'bg-surface');
     add(['bg-app'], ['button-primary', 'button-primary-hover'], 3);
     // The mark without its tile: its light ink and clay dome on the app, the sidebar and the phone
     // top bar, and the intro dialog's surface, in the dark theme; its dark ink on the same grounds in
@@ -556,7 +559,7 @@ describe('design tokens', () => {
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
     // A text field's border while it has focus, one step stronger than its outline.
-    add(['line-field-focus'], ['bg-surface', 'bg-app'], 3);
+    add(['line-focus'], ['bg-surface', 'bg-app'], 3);
     // The outlined value of an inline CopyField, in a card on the agents page.
     add(['line-field'], ['fill-card'], 3, 'bg-app');
     // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,
@@ -567,6 +570,8 @@ describe('design tokens', () => {
     // The same buttons straight on the app background.
     add(['button-danger-text'], ['bg-app'], 4.5);
     add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover', 'fill-hover'], 4.5, 'bg-app');
+    // A delete that cannot be undone, in its confirmation dialog: label at rest, hover and busy.
+    add(['button-danger-text'], ['button-danger-fill', 'button-danger-fill-hover'], 4.5, 'bg-surface');
     // Every answer while it is sent, in its card: a busy danger answer on its hover fill or the
     // hover ground (listed above), a busy secondary answer's text-secondary label on its fill.
     add(['text-secondary'], ['fill-secondary'], 4.5, 'fill-card', 'bg-app');
@@ -583,7 +588,7 @@ describe('design tokens', () => {
     // A busy button's spinner, a graphic (3:1) in its busy label color, on every ground its busy pair
     // is listed for: the primary's on its own fill, a secondary's on its fill on a page, a dialog and
     // a card, a ghost's on the page, the sidebar, a dialog, the reviewer bar and a card, and the red
-    // answers' on their busy grounds on a page and in a card (danger-ghost in a dialog too).
+    // buttons' on their busy grounds on a page, in a card and in a dialog.
     add(['button-primary-text'], ['button-primary-hover'], 3);
     for (const over of ['bg-app', 'bg-surface']) add(['text-secondary'], ['fill-secondary'], 3, over);
     add(['text-secondary'], ['fill-secondary'], 3, 'fill-card', 'bg-app');
@@ -591,7 +596,7 @@ describe('design tokens', () => {
     add(['text-secondary'], ['fill-card'], 3, 'bg-app');
     add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'bg-app');
     add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'fill-card', 'bg-app');
-    add(['button-danger-text'], ['fill-hover'], 3, 'bg-surface');
+    add(['button-danger-text'], ['button-danger-fill-hover', 'fill-hover'], 3, 'bg-surface');
 
     // Every required pair is listed, at no lower a minimum and in every theme it is required in, so
     // dropping one can't pass.
@@ -634,6 +639,16 @@ describe('design tokens', () => {
       const dark = CONTRAST_PAIRS.find((p) => p.fg === exempt.fg && p.ground === exempt.ground && p.themes?.join() === 'dark');
       expect(dark, `${label(exempt)} is listed for the dark theme`).toBeDefined();
       expect(pairContrast(exempt, 'light'), label(exempt)).toBeLessThan(dark?.min ?? 0);
+    }
+  });
+
+  test('state_change_pairs_compare_each_edge_on_the_same_ground_without_a_3_to_1_floor', () => {
+    for (const theme of THEMES) {
+      const resting = pairContrast({ fg: 'line-field', ground: 'bg-app' }, theme);
+      const before = pairContrast({ fg: 'text-tertiary', ground: 'bg-app' }, theme) / resting;
+      const after = pairContrast({ fg: 'line-focus', ground: 'bg-app' }, theme) / resting;
+      expect(after).toBeGreaterThan(before);
+      expect(after).toBeCloseTo(theme === 'light' ? 1.46 : 2.27, 2);
     }
   });
 

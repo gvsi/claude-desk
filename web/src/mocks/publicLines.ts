@@ -9,7 +9,7 @@ import { SETUP_PUBLIC_LINE_KEYS } from '../api/views.ts';
 
 /** The signed Chen & Co. starter lines, including the approved public-text revisions. */
 const CPA_LINES = [
-  ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
+  ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping.'],
   ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
   ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
   ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],

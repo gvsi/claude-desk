@@ -1,26 +1,32 @@
 /**
  * A person's page under Customers (N-Run2-People-Person): the way back to the list, their name, the
- * rules just for them, read only, with the way to change them on Rules, and beside them the contact
- * on record as the API masked it, where codes go and nowhere else. The page reads the same polled
- * list as Customers, and the Desk's active rules. Someone the list doesn't hold is outside the
- * copy: the not-found screen.
+ * rules just for them, read only, with the way to change them on Rules, and under them the chats
+ * they had once verified, each a link into it; beside them the contact on record as the API masked
+ * it, where codes go and nowhere else. The page reads the same polled list as Customers, the
+ * Desk's active rules, and the conversations and Needs you as Conversations polls them. Someone
+ * the list doesn't hold is outside the copy: the not-found screen.
  */
 import { useQuery } from '@tanstack/react-query';
+import { useId } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import type { RuleCard } from '../../api/contracts.ts';
-import type { PeopleOut } from '../../api/views.ts';
+import { request } from '../../api/http.ts';
+import type { ConversationSummary, PeopleOut } from '../../api/views.ts';
 import { OutsideTheCopy } from '../../app/NotFound.tsx';
 import { pollMs } from '../../app/poll.ts';
-import { Breadcrumb, Card, LoadingLine, PageHeader, PersonRules, type PersonRuleView } from '../../ds/index.ts';
-import { formatCents } from '../../lib/format.ts';
+import { Breadcrumb, Card, ConversationListItem, LoadingLine, PageHeader, PersonRules, SectionHeader, type PersonRuleView } from '../../ds/index.ts';
+import { conversationDay, formatCents, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { NO_BUSINESS_TOOLS, businessTools, type BusinessTools } from '../connectors/catalog.ts';
+import { conversationsKey } from '../conversations/ConversationsPage.tsx';
+import { conversationListStatus, conversationPath, whoLabel } from '../conversations/status.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { ReadFailed } from '../ReadFailed.tsx';
 import { rulesQuery } from '../rules/RuleDraftReview.tsx';
 import { ruleWords, targetWords } from '../rules/ruleWords.ts';
+import { firstName, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { PEOPLE_LABEL, peoplePath, usePeople } from './PeoplePage.tsx';
 
@@ -62,6 +68,93 @@ function TheirRules({ deskId, personId, name, people }: { deskId: string; person
   );
 }
 
+/** The words for a person with no chat they verified in: an unverified chat isn't theirs to list. */
+export const NO_CONVERSATIONS = 'No verified conversations yet.';
+
+/** One day's chats, under the day Conversations groups them by. */
+export interface ConversationGroup {
+  day: ConversationDay;
+  items: ConversationSummary[];
+}
+
+/**
+ * The chats `personId` had once verified (`person_id` theirs), newest first by their last
+ * activity, in the day groups Conversations draws on the business's clock, so a row's time reads
+ * as it does there.
+ */
+export function personConversations(items: readonly ConversationSummary[], personId: string, timezone: string, now: Date): ConversationGroup[] {
+  const theirs = items
+    .filter((s) => s.person_id != null && s.person_id === personId)
+    .sort((a, b) => Date.parse(b.last_activity) - Date.parse(a.last_activity));
+  const groups: ConversationGroup[] = [];
+  for (const item of theirs) {
+    const day = conversationDay(item.last_activity, timezone, now);
+    const last = groups.at(-1);
+    if (last?.day === day) last.items.push(item);
+    else groups.push({ day, items: [item] });
+  }
+  return groups;
+}
+
+/**
+ * The chats this person had once verified, as the Conversations list draws them, each a link into
+ * it, from the same polled reads as that list: the conversations, and Needs you for a chat's open
+ * handoff. Only a visitor's own chat has a person, never an agent's or the owner's preview, so a
+ * row quotes the visitor's newest words. Until both first reads settle, the loading line; a failed
+ * read says so with Try again.
+ */
+function TheirConversations({ deskId, personId }: { deskId: string; personId: string }) {
+  const { business } = useOwnerDesk();
+  const titleId = useId();
+  const list = useQuery({
+    queryKey: conversationsKey(deskId),
+    queryFn: () => request('conversations', { params: { desk_id: deskId } }),
+    refetchInterval: pollMs('list'),
+  });
+  const needsYou = useNeedsYou(deskId);
+  const failure = useReadFailure(list);
+  const needsFailure = useReadFailure(needsYou);
+  // Needs you says which chats have a handoff open ("Wants you"), so its first read settles before
+  // the rows draw, as on Conversations; a failed one leaves those rows their usual status.
+  if (list.data === undefined || (needsYou.data === undefined && needsFailure === null)) {
+    return failure === null ? <LoadingLine>Loading their conversations</LoadingLine> : <ReadFailed failure={failure} />;
+  }
+  const handoffs = new Set((needsYou.data ?? []).flatMap((item) => (item.handoff === null ? [] : [item.handoff.session_id])));
+  const now = new Date();
+  const groups = personConversations(list.data, personId, business.timezone, now);
+  return (
+    <>
+      <ReadFailed failure={failure} />
+      <section className="cd-person__conversations" aria-labelledby={titleId}>
+        <SectionHeader id={titleId} title="Conversations" />
+        {groups.length === 0 ? (
+          <p className="cd-person__none cd-type-body">{NO_CONVERSATIONS}</p>
+        ) : (
+          groups.map((group) => (
+            <div key={group.day} className="cd-person__day-group">
+              <h3 className="cd-person__day cd-type-caption">{group.day}</h3>
+              <ul className="cd-person__chats">
+                {group.items.map((s) => (
+                  <li key={s.session_id}>
+                    <ConversationListItem
+                      name={whoLabel(s)}
+                      time={formatListTime(s.last_activity, business.timezone, now)}
+                      status={conversationListStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id), firstName(business.owner_display_name)) ?? undefined}
+                      href={conversationPath(deskId, s.session_id)}
+                      recorded={s.replayed === true}
+                      quote={s.latest_visitor_text ?? undefined}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+      </section>
+    </>
+  );
+}
+
 export function PersonDetail() {
   const { personId = '' } = useParams();
   const { desk } = useOwnerDesk();
@@ -99,6 +192,7 @@ export function PersonDetail() {
       <div className="cd-person__columns">
         <div className="cd-person__main">
           <TheirRules deskId={deskId} personId={personId} name={name} people={people.data} />
+          <TheirConversations deskId={deskId} personId={personId} />
         </div>
         <div className="cd-person__aside">
           <Card as="section" label="Contact on record">

@@ -1344,7 +1344,7 @@ describe('app source guards', () => {
     expect(hits(CAPS_BADGE_NAMES, outsideTheDs)).toEqual([]);
   });
 
-  it('a_systems_light_preference_never_overrides_a_chosen_dark', () => {
+  it('a_systems_preference_never_overrides_a_chosen_theme', () => {
     // The app follows the device until a person chooses, and a chosen Dark marks the root: a
     // stylesheet turns light for a system that prefers it only on a root not marked dark. Every
     // stylesheet in src/, the design system's included.
@@ -1365,6 +1365,11 @@ describe('app source guards', () => {
       'ds/tokens.css',
     ]);
     expect(stylesheets.flatMap(unscoped)).toEqual([]);
+    // Dark is the base the tokens are written in, so no stylesheet follows a system that prefers
+    // dark: such a rule would override a chosen Light on a dark device.
+    const darkPreference = /@media[^{]*prefers-color-scheme\s*:\s*dark/;
+    expect(sample('@media (prefers-color-scheme: dark) { .x { color: red } }').filter(({ text }) => darkPreference.test(text))).toHaveLength(1);
+    expect(stylesheets.filter(({ text }) => darkPreference.test(withoutCssComments(text))).map(({ file }) => file)).toEqual([]);
   });
 
   it('mark_and_clay_colors_stay_in_their_components', () => {
