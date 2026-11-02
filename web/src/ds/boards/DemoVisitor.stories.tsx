@@ -300,7 +300,7 @@ const SINCE_THE_BAR =
 
 /** What the web app's Things to try draws differently from the REV-DEMO Today boards, by the owner's later choices. */
 const SINCE_THE_CHOICES =
-  "The other cards keep the board's words, where the web app's have since moved on: a hold past an automatic rule's limit has no “Held by your rule” line, since its headline already quotes that rule (owner decision, 2026-11-02, #671); “Try to break it” points at each reply's receipt, a hold by a named rule reads “A request is waiting for your answer: {rule}.”, and every card fits in three lines (owner, 2026-11-02, #867).";
+  "The other cards keep the board's words, where the web app's have since moved on: a hold past an automatic rule's limit has no “Held by your rule” line, since the held card's headline in Needs you already quotes that rule (owner decision, 2026-11-02, #671); “Try to break it” points at each reply's receipt, and a hold by a named rule reads “A request is waiting for your answer: {rule}.” (owner, 2026-11-02, #867).";
 
 const meta = {
   title: 'Boards/Demo visitor',
