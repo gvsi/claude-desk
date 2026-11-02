@@ -611,6 +611,55 @@ async def test_handback_ignores_a_fenced_turn_end_until_the_resumed_turn_ends(
     assert "Check the available times for Riley." not in last_input(visitor_model.requests[1])
 
 
+async def test_handback_kernel_failure_ends_the_wait_without_a_reply(
+        app, browser, fake, visitors, visitor_model, desk_model, copy, sleeps, monkeypatch):
+    from desk.api import loop
+
+    owner = owner_of(app, browser, copy)
+    release = asyncio.Event()
+    asking = gated(step("Is a visit this week possible?"), release)
+    visitor_model.add(step("Can you fix a leaking sink?"), asking, step("", done=True))
+    desk_model.add(say("Yes, we can help."))
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(asking.entered.wait(), 5)
+    await change_mode(owner, fake, started.session_id, "takeover")
+    release.set()
+    assert await sleeps.waiting(NUDGE_AFTER_S) == NUDGE_AFTER_S
+    await owner_writes(owner, started.session_id, "Check the available times for Riley.", kind="whisper")
+
+    events = []
+    ended = asyncio.Event()
+    emit = loop.emit
+
+    async def record_event(conn, ids, event):
+        events.append(event)
+        if event.type == "turn_end":
+            ended.set()
+        return await emit(conn, ids, event)
+
+    async def kernel_unavailable(caller):
+        # Fail before the resumed turn captures its generation, as a failed kernel lookup does.
+        return "kernel_unavailable"
+
+    monkeypatch.setattr(loop, "emit", record_event)
+    monkeypatch.setattr(loop, "_session", kernel_unavailable)
+    await change_mode(owner, fake, started.session_id, "handback")
+    await asyncio.wait_for(ended.wait(), 5)
+    await app.state.runtime.runner.drain()
+    assert [(event.type, getattr(event, "code", None), getattr(event, "generation", None))
+            for event in events] == [("error", "kernel_unavailable", None), ("turn_end", None, 0)]
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 2)
+    assert sleeps.timers == []  # No owner-silence or fifteen-minute timer had to expire.
+    assert len(desk_model.requests) == 1  # The resumed turn produced no reply or model call.
+    assert last_input(visitor_model.requests[2]) == wrap(
+        DESK_REPLY_TAG, "Mike Turner (the owner, a person) joined the chat.\n"
+                        "The owner left the chat, and Claude (the business's AI) answers again.\n"
+                        + demo_visitors_module.DEMO_VISITOR_LINES["error"])
+
+
 async def turn_ends(engine, session_id: str) -> int:
     async with engine.connect() as conn:
         return (await conn.execute(text("SELECT count(*) FROM app.run_events WHERE session_id = :s AND kind = 'sse'"

@@ -286,9 +286,9 @@ class _Answer:
 
 
 def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
-    """Whether the events after `mark` (the feed's length when the message went) answer it: Claude's turn ending while
-    Claude has the chat, or the owner's words or an idle hand-back. A hand-back resuming work waits for Claude's
-    own generation's turn to end. An unanswered handoff waits under the owner-silence rule.
+    """Whether the events after `mark` (the feed's length when the message went) answer it: a turn failing, Claude's
+    turn ending while Claude has the chat, or the owner's words or an idle hand-back. A hand-back resuming work waits
+    for Claude's own generation's turn to end. An unanswered handoff waits under the owner-silence rule.
     The stream's `session` error ends the chat."""
     mode, heard, handoff = "ai", None, False
     for index, seen in _unfenced_events(events):
@@ -300,8 +300,10 @@ def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
             mode = "ai"
         if index < mark:
             continue
-        if kind == "error" and event.code == "session":
-            raise _Ended("chat_ended")
+        if kind == "error":
+            if event.code == "session":
+                raise _Ended("chat_ended")
+            return _Answer(True, mode, heard)
         if kind in ("owner_joined", "owner_typing"):
             heard = seen.at
         elif kind == "message":
