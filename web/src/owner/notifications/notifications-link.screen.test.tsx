@@ -1,8 +1,7 @@
 /**
- * The Demo inbox's "Open the request" in a real browser against the mock API: a hold's alert links
- * to its request only while the request still waits for the owner, in its Desk's Needs you. Once
- * it is answered, here or anywhere, the alert stays and the link goes: Today would have no card to
- * open.
+ * Notifications' request rows in a real browser against the mock API: a hold's alert is a link to
+ * its request only while the request still waits for the owner, in its Desk's Needs you. Once it is
+ * answered, here or anywhere, the alert stays and the link goes: Today would have no card to open.
  */
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
@@ -39,8 +38,6 @@ function heldCard(screen: RenderResult, reason: string) {
   return screen.getByRole('article', { name: `Held for you: ${reason}`, exact: true });
 }
 
-const inboxButton = (screen: RenderResult) => screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ });
-
 /** Where a held request's alert links to: its card on Today. */
 const requestLink = (decisionId: string) => `${TODAY}#request-${encodeURIComponent(decisionId)}`;
 
@@ -75,13 +72,23 @@ async function answerElsewhere(decisionId: string): Promise<void> {
   if ('network' in reply || reply.status !== 200) throw new Error('the mock takes the answer');
 }
 
-/** Opens the Demo inbox's sheet, once its alert for `decisionId` shows. */
-async function openInbox(screen: RenderResult, decisionId: string) {
-  await inboxButton(screen).click();
-  const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-  await expect.element(sheet.getByText(alertFor(decisionId).body)).toBeVisible();
-  return sheet;
+/** Goes to Notifications from the sidebar, once its alert for `decisionId` shows. */
+async function openNotifications(screen: RenderResult, decisionId: string) {
+  await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Notifications/ }).click();
+  const page = screen.getByRole('main');
+  await expect.element(page.getByRole('heading', { level: 1, name: 'Notifications' })).toBeVisible();
+  await expect.element(page.getByText(alertFor(decisionId).body)).toBeVisible();
+  return page;
 }
+
+/** Leaves Notifications for Today, from the sidebar. */
+async function leaveNotifications(screen: RenderResult) {
+  await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Today/ }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).not.toBeInTheDocument();
+}
+
+/** The rows that link to a held request: each says "Open the request" under its alert. */
+const requestRows = (page: ReturnType<RenderResult['getByRole']>) => page.getByRole('link', { name: /Open the request/ });
 
 beforeEach(() => {
   localStorage.clear();
@@ -92,40 +99,31 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('Demo inbox request link', () => {
-  it.each([[1440, 900], [390, 844]])('sheet_wraps_long_alerts_inside_the_demo_bar_at_%sx%s', async (width, height) => {
+describe('Notifications request link', () => {
+  it.each([[1440, 900], [390, 844]])('long_alerts_wrap_inside_the_column_at_%sx%s', async (width, height) => {
     const held = seededHold();
     const entry = alertFor(held.decision_id);
     entry.body = 'A stranger asked to get a quote for $153 with 15% off. It goes past your rule, so it waits for you: “Quotes from your price list, at list price.” ' + 'LongReference'.repeat(30);
-    const { screen } = await renderRoute(TODAY, { viewport: { width, height } });
-    const button = inboxButton(screen);
-    await expect.element(button).toBeVisible();
-    expect(getComputedStyle(button.element().closest('.cd-reviewer-bar__actions')!).whiteSpace).toBe('nowrap');
-    const label = button.element().querySelector('.cd-demo-inbox-sheet__button > span')!;
-    const words = document.createRange();
-    words.selectNodeContents(label);
-    expect(new Set([...words.getClientRects()].map(rect => Math.round(rect.top))).size).toBe(1);
-    const sheet = (await openInbox(screen, held.decision_id)).element();
-    expect(getComputedStyle(sheet).whiteSpace).toBe('normal');
-    const edge = sheet.getBoundingClientRect();
-    const text = sheet.querySelectorAll<HTMLElement>('h2, p, span, a, button');
+    const { screen } = await renderRoute(`/app/${RIVERA.deskId}/notifications`, { viewport: { width, height } });
+    const page = screen.getByRole('main');
+    await expect.element(page.getByText(entry.body)).toBeVisible();
+    const column = page.element().querySelector<HTMLElement>('.cd-notifications')!;
+    const edge = column.getBoundingClientRect();
+    const text = column.querySelectorAll<HTMLElement>('h1, h2, p, span, a');
     expect(text.length).toBeGreaterThan(5);
     for (const element of text) {
       expect(element.scrollWidth, element.className).toBeLessThanOrEqual(element.clientWidth);
-      expect(element.getBoundingClientRect().right, element.className).toBeLessThanOrEqual(edge.right);
+      expect(element.getBoundingClientRect().right, element.className).toBeLessThanOrEqual(edge.right + 0.5);
     }
-    // The bar's meta type does not change the sheet's explicit body and heading styles.
-    const body = sheet.querySelector('.cd-demo-inbox__body')!;
-    const bodyStyle = getComputedStyle(body);
-    expect([bodyStyle.fontSize, bodyStyle.lineHeight, bodyStyle.fontWeight]).toEqual(['14px', '20px', '380']);
-    const heading = getComputedStyle(sheet.querySelector('h2')!);
-    expect([heading.fontSize, heading.lineHeight, heading.fontWeight]).toEqual(['15px', '20px', '520']);
+    // The time keeps its line at the right, beside the words.
+    const time = page.getByText(/^\d{1,2}:\d{2} [ap]m$/).first().element();
+    expect(time.getBoundingClientRect().right).toBeLessThanOrEqual(edge.right);
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   });
 
   it('answered_and_dismissed_request_has_no_link', async () => {
-    // Denied and dismissed on Today, the request is no longer held: its alert stays in the inbox,
-    // with no "Open the request" that would only close the sheet.
+    // Denied and dismissed on Today, the request is no longer held: its alert stays in
+    // Notifications, and isn't a link to a card Today no longer has.
     const held = seededHold();
     const { screen } = await renderRoute(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
@@ -136,14 +134,13 @@ describe('Demo inbox request link', () => {
 
     // Its request read, and Today's Needs you read again (Today polls it).
     const read = readsAnswered({ decision: 1, needsYou: 1 });
-    const sheet = await openInbox(screen, held.decision_id);
+    const page = await openNotifications(screen, held.decision_id);
     await read;
-    expect(sheet.getByRole('link', { name: 'Open the request' }).elements()).toHaveLength(0);
+    expect(requestRows(page).elements()).toHaveLength(0);
   });
 
   it('held_request_keeps_its_link', async () => {
-    // Beside one answered and dismissed, a request still held keeps its link, which closes the
-    // sheet and lands on its card.
+    // Beside one answered and dismissed, a request still held keeps its link, which lands on its card.
     const answered = seededHold();
     const refund = mockStore.world.addHeldRefund();
     const { screen, router } = await renderRoute(TODAY);
@@ -155,29 +152,30 @@ describe('Demo inbox request link', () => {
 
     // Both requests read, and Today's Needs you read again (Today polls it).
     const read = readsAnswered({ decision: 2, needsYou: 1 });
-    const sheet = await openInbox(screen, refund.decision_id);
-    await expect.element(sheet.getByText(alertFor(answered.decision_id).body)).toBeVisible();
+    const page = await openNotifications(screen, refund.decision_id);
+    await expect.element(page.getByText(alertFor(answered.decision_id).body)).toBeVisible();
     await read;
-    // Under the held request's alert only.
-    const links = sheet.getByRole('link', { name: 'Open the request' });
+    // The held request's alert only: the whole row, with "Open the request" under its body.
+    const links = requestRows(page);
     expect(links.elements()).toHaveLength(1);
     const link = links.first();
-    expect(link.element().closest('li')?.textContent).toContain(alertFor(refund.decision_id).body);
+    expect(link.element().textContent).toContain(alertFor(refund.decision_id).body);
     expect(link.element().getAttribute('href')).toBe(requestLink(refund.decision_id));
+    expect(link.element().querySelectorAll('a')).toHaveLength(0);
 
     await link.click();
-    await expect.element(sheet).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).not.toBeInTheDocument();
     expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(refund.decision_id)}`);
     const card = heldCard(screen, rivera.heldRefund.reason_plain);
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
   });
 
   it('another_desks_answered_request_has_no_link', async () => {
-    // The Demo inbox is the whole copy's. On Emergencies, Main line's requests are read in Main
+    // The notifications are the whole copy's. On Emergencies, Main line's requests are read in Main
     // line's Needs you: the one answered elsewhere (another tab) has no link, the one still held
     // links to Main line's Today.
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
-    await expect.element(inboxButton(screen)).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1 })).toBeVisible();
     const answered = seededHold();
     const refund = mockStore.world.addHeldRefund(RIVERA.deskId);
     await answerElsewhere(answered.decision_id);
@@ -185,68 +183,68 @@ describe('Demo inbox request link', () => {
     // Both requests read; the held one's link shows once Main line's Needs you, which holds both, is
     // read too, so the answered one's is decided by then.
     const decided = readsAnswered({ decision: 2 });
-    const sheet = await openInbox(screen, refund.decision_id);
-    await expect.element(sheet.getByText(alertFor(answered.decision_id).body)).toBeVisible();
-    const links = sheet.getByRole('link', { name: 'Open the request' });
+    const page = await openNotifications(screen, refund.decision_id);
+    await expect.element(page.getByText(alertFor(answered.decision_id).body)).toBeVisible();
+    const links = requestRows(page);
     await expect.element(links.first()).toHaveAttribute('href', requestLink(refund.decision_id));
     await decided;
     expect(links.elements()).toHaveLength(1);
-    expect(links.first().element().closest('li')?.textContent).toContain(alertFor(refund.decision_id).body);
+    expect(links.first().element().textContent).toContain(alertFor(refund.decision_id).body);
   });
 
   it('another_desks_answer_while_open_drops_its_link', async () => {
-    // On Emergencies, with the sheet open on Main line's held request, the request is answered
-    // elsewhere. Main line's Needs you is read again on the sheet's poll once it is no longer fresh,
-    // and the link goes while the sheet stays open.
+    // On Emergencies, with Notifications open on Main line's held request, the request is answered
+    // elsewhere. Main line's Needs you is read again on the page's poll once it is no longer fresh,
+    // and the link goes while the page stays open.
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
-    await expect.element(inboxButton(screen)).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1 })).toBeVisible();
     const held = seededHold();
-    const sheet = await openInbox(screen, held.decision_id);
-    const link = sheet.getByRole('link', { name: 'Open the request' });
+    const page = await openNotifications(screen, held.decision_id);
+    const link = requestRows(page);
     await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
     const before = mainLineReads();
 
     await answerElsewhere(held.decision_id);
     await expect.element(link, { timeout: FRESH_MS + 3_000 }).not.toBeInTheDocument();
-    await expect.element(sheet).toBeVisible();
+    await expect.element(page.getByText(alertFor(held.decision_id).body)).toBeVisible();
     expect(mainLineReads()).toBeGreaterThan(before);
   });
 
   it('another_desks_list_read_before_and_now_failing_draws_no_link', async () => {
-    // The sheet linked Main line's held request, then closed. The request is answered elsewhere,
-    // and every read of Needs you fails from then on. Opened again once the list read before is no
-    // longer fresh, the sheet draws no link from it, before or after its own read fails.
+    // Notifications linked Main line's held request, then the owner left it. The request is
+    // answered elsewhere, and every read of Needs you fails from then on. Opened again once the
+    // list read before is no longer fresh, the page draws no link from it, before or after its own
+    // read fails.
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks', retryScale: 0 });
-    await expect.element(inboxButton(screen)).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1 })).toBeVisible();
     const held = seededHold();
-    let sheet = await openInbox(screen, held.decision_id);
-    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toBeVisible();
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    await expect.element(sheet).not.toBeInTheDocument();
+    let page = await openNotifications(screen, held.decision_id);
+    await expect.element(requestRows(page)).toBeVisible();
+    await leaveNotifications(screen);
 
     await answerElsewhere(held.decision_id);
     mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
     // Past the freshness of the last read that worked: a rule about time, waited out.
     await new Promise((resolve) => setTimeout(resolve, FRESH_MS + 500));
     const before = mainLineReads();
-    sheet = await openInbox(screen, held.decision_id);
-    expect(sheet.getByRole('link', { name: 'Open the request' }).elements()).toHaveLength(0);
+    page = await openNotifications(screen, held.decision_id);
+    expect(requestRows(page).elements()).toHaveLength(0);
     // Its read as it opens, and that read's one retry, both fail.
     await expect.poll(() => mainLineReads()).toBeGreaterThanOrEqual(before + 2);
     await nextFrames();
-    expect(sheet.getByRole('link', { name: 'Open the request' }).elements()).toHaveLength(0);
+    expect(requestRows(page).elements()).toHaveLength(0);
   });
 
   it('another_desks_list_whose_read_again_fails_drops_its_link', async () => {
-    // With the sheet open on Main line's held request, the request is answered elsewhere and every
-    // read of Needs you fails from then on. The list read as the sheet opened is the last that
-    // worked, and it still holds the request; once the sheet's poll reads it again and that read
+    // With Notifications open on Main line's held request, the request is answered elsewhere and
+    // every read of Needs you fails from then on. The list read as the page opened is the last that
+    // worked, and it still holds the request; once the page's poll reads it again and that read
     // fails, the link goes: a list whose latest read failed may be out of date.
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks', retryScale: 0 });
-    await expect.element(inboxButton(screen)).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1 })).toBeVisible();
     const held = seededHold();
-    const sheet = await openInbox(screen, held.decision_id);
-    const link = sheet.getByRole('link', { name: 'Open the request' });
+    const page = await openNotifications(screen, held.decision_id);
+    const link = requestRows(page);
     await expect.element(link).toBeVisible();
     const before = mainLineReads();
 

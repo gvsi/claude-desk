@@ -7,6 +7,7 @@ import { Arrival } from '../owner/Arrival.tsx';
 import { ConversationsPage } from '../owner/conversations/ConversationsPage.tsx';
 import { ProfilePage } from '../owner/profile/ProfilePage.tsx';
 import { KnowledgePage } from '../owner/knowledge/KnowledgePage.tsx';
+import { NotificationsPage } from '../owner/notifications/NotificationsPage.tsx';
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
 import { PeoplePage } from '../owner/people/PeoplePage.tsx';
 import { PersonDetail } from '../owner/people/PersonDetail.tsx';
@@ -89,6 +90,7 @@ export const routes: RouteObject[] = [
       // One route for the list and an attempt open beside it, so the page stays as it is (its filter
       // included) while the owner moves between attempts.
       { path: 'safety/:refId?', element: <SafetyPage /> },
+      { path: 'notifications', element: <NotificationsPage /> },
       { path: 'profile', element: <ProfilePage /> },
       { path: 'knowledge', element: <KnowledgePage /> },
       // Keep old Knowledge links working without leaving Settings in browser history.

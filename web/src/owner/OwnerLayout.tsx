@@ -42,9 +42,8 @@ import { writeLocal } from '../lib/storage.ts';
 import { OwnerFrameSkeleton } from './OwnerFrameSkeleton.tsx';
 import { skeletonSetupOf } from './today/TodaySkeleton.tsx';
 import { ANSWERING_CONFIRM_COPY, answeringSaveFailed, answeringSaveUnconfirmed } from './answeringCopy.ts';
-import { InboxOpenContext } from './inbox/inboxOpen.ts';
-import { OwnerInbox } from './inbox/OwnerInbox.tsx';
 import { connectorPageHref } from './connectors/pages.ts';
+import { useUnreadNotifications } from './notifications/useNotifications.ts';
 import { AskClaudeProvider, useAskClaudeHost } from './rules/askClaude.tsx';
 import { useLandingVisit } from './rules/landing.ts';
 import {
@@ -112,7 +111,7 @@ export function useOwnerDesk(): OwnerDeskContext {
   return value;
 }
 
-const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'profile', 'share', 'settings'];
+const NAV_KEYS: readonly NavKey[] = ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'notifications', 'profile', 'share', 'settings'];
 
 /**
  * The pages that lay out their own columns across the main area (`AppShell` `fill`), each with the
@@ -188,8 +187,8 @@ export function OwnerLayout() {
  */
 function DeskGate({ deskId }: { deskId: string }) {
   const desks = useDesks(deskId);
-  // The demo bar's Demo inbox is read with the Desks, so the bar draws it with the frame: nothing
-  // waits for it, and the bar's own read finds it read, or on its way.
+  // The owner's notifications are read with the Desks, so the sidebar counts the unread ones with
+  // the frame: nothing waits for them, and the frame's own read finds them read, or on their way.
   const queryClient = useQueryClient();
   if (desks.data !== undefined) startingDeskFor(queryClient, desks.data);
   useEffect(() => {
@@ -327,8 +326,6 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const [switching, setSwitching] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [answeringChange, setAnsweringChange] = useState<boolean | null>(null);
-  // Whether the bar's Demo inbox sheet is open, as it says each time it opens or closes.
-  const [inboxOpen, setInboxOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   // The Desk the owner is on is the one to come back to.
@@ -412,6 +409,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   };
 
   const live = today.data?.live.length ?? 0;
+  const unread = useUnreadNotifications();
   const current = currentNav(location.pathname);
   // Conversations lays out its own columns from the sidebar's edge, as its boards draw it; Settings
   // centers its own, with the footer at the window's foot.
@@ -435,6 +433,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       desk={desk}
       current={current}
       liveCount={live}
+      unreadCount={unread}
       switching={switching}
       onToggleSwitcher={() => setSwitching((open) => !open)}
       onCloseSwitcher={() => setSwitching(false)}
@@ -449,11 +448,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
     <AppShell
       business={business.name}
       banner={
-        <ReviewerBar
-          ownerName={business.owner_display_name}
-          onStartOver={() => setConfirming(true)}
-          actions={<OwnerInbox timezone={business.timezone} onOpenChange={setInboxOpen} />}
-        />
+        <ReviewerBar ownerName={business.owner_display_name} onStartOver={() => setConfirming(true)} />
       }
       sidebar={sidebar}
       fill={fill}
@@ -467,9 +462,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         ) : null}
         <AskClaudeProvider value={askClaude.value}>
           <OwnerDeskProvider value={deskContext}>
-            <InboxOpenContext.Provider value={inboxOpen}>
-              <Outlet />
-            </InboxOpenContext.Provider>
+            <Outlet />
           </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (
@@ -509,6 +502,8 @@ export interface OwnerSidebarProps {
   desk: DeskSummary;
   current: NavKey;
   liveCount: number;
+  /** How many of the owner's notifications they haven't seen. */
+  unreadCount: number;
   switching: boolean;
   onToggleSwitcher: () => void;
   onCloseSwitcher: () => void;
@@ -523,7 +518,7 @@ export interface OwnerSidebarProps {
  * preview of Today draws it too, so the frame it shows is the one Today opens in.
  */
 export function OwnerSidebar(props: OwnerSidebarProps) {
-  const { businesses, business, desk, liveCount } = props;
+  const { businesses, business, desk, liveCount, unreadCount } = props;
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div ref={ref} className="cd-owner-layout__sidebar">
@@ -536,11 +531,12 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         current={props.current}
         hrefs={hrefsFor(desk.desk_id)}
         peopleLabel="Customers"
-        counts={
-          liveCount > 0
+        counts={{
+          ...(liveCount > 0
             ? { conversations: { n: liveCount, label: `${liveCount} live ${liveCount === 1 ? 'conversation' : 'conversations'}` } }
-            : undefined
-        }
+            : {}),
+          ...(unreadCount > 0 ? { notifications: { n: unreadCount, label: `${unreadCount} unread` } } : {}),
+        }}
         answering={desk.answering}
         onAnsweringChange={props.onAnsweringChange}
         owner={{ name: business.owner_display_name, status: 'Available for chats' }}

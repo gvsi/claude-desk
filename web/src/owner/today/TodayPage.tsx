@@ -10,7 +10,6 @@ import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
 import { customerLink, publicLink } from '../customerLink.ts';
-import { useInboxOpen } from '../inbox/inboxOpen.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
@@ -94,8 +93,6 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     return () => window.clearTimeout(timer);
   }, [copied]);
   const cards = useRef(new Map<string, HTMLElement>());
-  // Whether the demo bar's Demo inbox sheet is open, as the frame hears it.
-  const inboxOpen = useInboxOpen();
   // The time the greeting is drawn at: the browser's, or the still picture's.
   const greetedAt = useTodayNow();
 
@@ -204,8 +201,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
   // request's card, whether it is still held or was answered here. It lands once the latest
   // read of Needs you has worked (a list kept from before a failed read may be missing the request),
-  // once the page has drawn its sections, and once the Demo inbox's sheet, whose link it may be, has
-  // closed and handed focus back to its button. A request that isn't in the list gets one more read
+  // and once the page has drawn its sections. A request that isn't in the list gets one more read
   // of Needs you, as it may have been held since the last; if it still isn't here (answered
   // elsewhere, or another Desk's), focus stays as it is. Every change of address starts a new visit,
   // Back and Forward included, each with one landing.
@@ -220,7 +216,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
-    if (opening || requested === null || inboxOpen || !readWorked) return;
+    if (opening || requested === null || !readWorked) return;
     const key = location.key;
     const card = cards.current.get(requested) ?? answeredCardFor(requested);
     if (card === undefined && visit.rereadAfter === null) {
@@ -232,7 +228,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     if (card === undefined && visit.rereadAfter !== null && readAt <= visit.rereadAfter) return;
     setVisit((now) => (now.key === key ? { ...now, spent: true } : now));
     card?.focus();
-  }, [opening, requested, inboxOpen, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
+  }, [opening, requested, readWorked, readAt, visit.rereadAfter, location.key, answeredCardFor, readNeedsYou]);
   // While it waits because Needs you can't be read, the owner's first pointer or key press spends
   // it: a read that works later doesn't pull focus from what they're doing by then. Listen in
   // the commit, before paint, so input on the new address cannot slip ahead of a passive effect.

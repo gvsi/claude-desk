@@ -5,7 +5,7 @@
  * deposit, about 40 minutes before), the seeded hold (a visitor not on record asking for 15% off, 12
  * minutes before) with the reply the check stopped (on Safety, so in no read here), Dana's chat
  * (live, booked, with Mike's whisper), the briefing and the last 7 days they make, and the hold's
- * alert in the Demo inbox. The held request and the names come from the design system's Turner
+ * alert in Notifications, unread. The held request and the names come from the design system's Turner
  * fixtures. Each part of the seed is dated back from when the copy opened as the seed dates it, and
  * counted on its own day on the business's clock as Today reads it, so just after midnight what
  * happened before it is yesterday's. Nothing here is read from the API: no copy exists yet.
@@ -76,6 +76,8 @@ export interface StillToday {
   desk: DeskSummary;
   /** The conversations live now, which the sidebar counts beside Conversations. */
   liveCount: number;
+  /** The notifications the owner hasn't seen, which the sidebar counts beside Notifications. */
+  unreadCount: number;
   /** What each of Today's reads answers, by the read's key. */
   reads: (readonly [QueryKey, unknown])[];
 }
@@ -90,7 +92,7 @@ function addDays(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
 
-/** Turner's Today, Needs you and Demo inbox as Today reads them at `readAt`, for a new copy that opened at `opened`. */
+/** Turner's Today, Needs you and notifications as Today reads them at `readAt`, for a new copy that opened at `opened`. */
 export function stillToday(opened: Date, readAt: Date): StillToday {
   // The seed is dated back from when the copy opened; the business's today is the one Today reads it on.
   const from = opened.getTime();
@@ -213,6 +215,8 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
     business,
     desk,
     liveCount: todayRead.live.length,
+    // A new copy's notifications, all unread: nothing in it has been seen.
+    unreadCount: inbox.length,
     reads: [
       [todayKey(DESK_ID), todayRead],
       [needsYouKey(DESK_ID), needsYou],
