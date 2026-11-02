@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 
 import { newIdempotencyKey } from '../api/http.ts';
-import type { SetupState } from '../api/views.ts';
+import type { SetupProposalBody, SetupState } from '../api/views.ts';
 import { businessToolRows, chenBusinessTools, seedBusinessTools } from '../mocks/businessTools.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -33,6 +33,97 @@ async function interviewAtTools() {
   desk.tools = desk.tools.filter((row) => row.source === 'business' || row.tool === 'native.start_verification');
   return { state, desk };
 }
+
+/**
+ * A Chen setup at the Tools step with each card decided in the chat as the owner would: the booking
+ * job accepted with `booking` as its choice ("on its own" or "ask"), the other jobs and apps
+ * accepted, the unpriced retainer declined. Its jobs are the mock's own business tools, made from
+ * those accepted cards.
+ */
+async function interviewWithBooking(booking: 'auto' | 'ask') {
+  const started = await mockStore.dispatch('startSetup', { body: {
+    description: 'Chen & Co. CPA. I am Linda, a CPA in San Jose.', timezone: 'America/Los_Angeles', idempotency_key: newIdempotencyKey(),
+  } });
+  if ('network' in started || started.status !== 201) throw new Error('The mock starts setup');
+  const id = (started.body as SetupState).interview_id;
+  const call = async (key: 'setupConsent' | 'setupAnswer' | 'setupProposal', body: unknown, proposal_id?: string) => {
+    const response = await mockStore.dispatch(key, { params: { id, ...(proposal_id ? { proposal_id } : {}) }, query: { cards: '1' }, body });
+    if ('network' in response || response.status !== 200) throw new Error(`The mock answers ${key}`);
+    return response.body as SetupState;
+  };
+  let state = await call('setupConsent', { allow: true });
+  state = await call('setupAnswer', { question: state.question, text: 'Both, about evenly' });
+  while (state.pending_card) {
+    const card = state.messages.find((message) => message.card?.proposal_id === state.pending_card)?.card;
+    if (!card) throw new Error('The pending card is shown');
+    const decision: SetupProposalBody = card.job?.job === 'schedule' ? { accept: true, autonomy: booking } : { accept: card.job?.job !== 'payment' };
+    state = await call('setupProposal', decision, card.proposal_id);
+  }
+  state = await call('setupAnswer', { question: state.question, text: 'Ask me before every payment' });
+  expect(state.step).toBe('tools');
+  const desk = mockStore.world.desks.find((row) => row.summary.desk_id === state.desk_id);
+  const booked = desk?.tools.find((row) => row.business?.title === 'Book a free intro call');
+  if (!desk || !booked) throw new Error('Setup made the booking job a business tool');
+  return { state, desk, booked };
+}
+
+const CHOSE_ON_ITS_OWN = 'You chose to let it run on its own. Until you confirm your rules in the next step, it asks you first.';
+const NO_RULE_YET = 'No rule of yours covers this yet, so it starts at Ask me first.';
+
+/** The lines under each tool of the open review that say what covers it. */
+const coverage = (region: { element: () => Element }) =>
+  [...region.element().querySelectorAll('.cd-connector-review__covered')].map((el) => el.textContent);
+
+it.each([1440, 390])('at %i px, a job the owner let run on its own says so, and that it asks first until the rules are confirmed', async (width) => {
+  const { state } = await interviewWithBooking('auto');
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
+  const tools = screen.getByRole('region', { name: 'Tools', exact: true });
+  expect(coverage(tools)).toEqual([CHOSE_ON_ITS_OWN]);
+  // Both still true at this step: it starts at Ask me first, and the owner approves each request.
+  await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'How it’s set up' }).getByText('You approve each request in Needs you')).toBeVisible();
+  await expectScreenBasics(screen.container, { owner: true });
+  expectNoHorizontalScroll();
+});
+
+it("keeps today's line for a job the owner accepted as asking first", async () => {
+  const { state } = await interviewWithBooking('ask');
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
+  const tools = screen.getByRole('region', { name: 'Tools', exact: true });
+  expect(coverage(tools)).toEqual([NO_RULE_YET]);
+  await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
+});
+
+it('turns on a job the owner let run on its own with the request every job sends: its tool at its hash, and no outcome', async () => {
+  const { state, desk, booked } = await interviewWithBooking('auto');
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
+  await expect.element(screen.getByRole('region', { name: 'Tools', exact: true }).getByText(CHOSE_ON_ITS_OWN, { exact: true })).toBeVisible();
+  const mark = mockStore.requests.length;
+  await screen.getByRole('button', { name: 'Turn it on', exact: true }).click();
+  await expect.element(screen.getByRole('heading', { name: 'Turn on Book a free intro call', exact: true })).toBeVisible();
+  // The review's words send nothing: no outcome or mode rides along, and the job's own rule comes
+  // only from the card the owner confirms at the Rules step.
+  expect(mockStore.requests.slice(mark).filter((r) => r.key === 'confirmTool').map((r) => r.body)).toStrictEqual([
+    { tools: [{ tool: booked.tool, definition_sha256: booked.definition_sha256 }], enable: true },
+  ]);
+  expect(desk.tools.find((row) => row.tool === booked.tool)?.status).toBe('needs_review');
+});
+
+it("leaves a built-in connector's review as it was beside a job the owner let run on its own", async () => {
+  const { state } = await interviewWithBooking('auto');
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('button', { name: 'Add Payments', exact: true }).click();
+  await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
+  const tools = screen.getByRole('region', { name: 'Tools', exact: true });
+  await expect.element(tools.getByText('Payment link', { exact: true })).toBeVisible();
+  expect(coverage(tools)).toEqual([NO_RULE_YET, NO_RULE_YET]);
+  expect(tools.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
+});
 
 it.each([1440, 1512, 390])('at %i px, reviews and turns on exactly one job at its listed hash only after confirming its rules draft', async (width) => {
   const { state, desk } = await interviewAtTools();

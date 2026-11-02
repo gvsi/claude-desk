@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import type { RuleCard } from '../api/contracts.ts';
 import { ownerErrorCopy, request } from '../api/http.ts';
-import type { BusinessToolDef, SetupState, ToolRow } from '../api/views.ts';
+import type { BusinessToolDef, SetupMessage, SetupState, ToolRow } from '../api/views.ts';
 import {
   Button,
   ConnectorReview,
@@ -73,6 +73,33 @@ export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewTool
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };
+}
+
+/** Whether two values from the API hold the same data, whatever order an object's keys come in. */
+function sameData(a: unknown, b: unknown): boolean {
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, index) => sameData(item, b[index]));
+  }
+  if (typeof a === 'object' && typeof b === 'object' && a !== null && b !== null) {
+    const one = a as Record<string, unknown>;
+    const other = b as Record<string, unknown>;
+    const keys = Object.keys(one);
+    return keys.length === Object.keys(other).length && keys.every((key) => Object.hasOwn(other, key) && sameData(one[key], other[key]));
+  }
+  return a === b;
+}
+
+/**
+ * The owner's accepted choice for one of the Desk's own jobs, read from setup's conversation: the
+ * `autonomy` of the accepted card the job was made from (setup publishes each accepted job's title
+ * and setup as its definition, so it is the card with both), or null when no accepted card matches
+ * or two that match disagree. It changes only words on the review: the job's own rule comes from
+ * the card the owner confirms at the Rules step, never from here.
+ */
+export function acceptedAutonomy(def: BusinessToolDef, messages: readonly SetupMessage[]): 'auto' | 'ask' | null {
+  const choices = new Set(messages.flatMap(({ card }) =>
+    card?.state === 'accepted' && card.job?.config && card.job.title === def.title && sameData(card.job.config, def.config) ? [card.job.autonomy] : []));
+  return choices.size === 1 ? [...choices][0] ?? null : null;
 }
 
 /** Setup supports new jobs at their listed hash; changed, delisted and turned-off jobs stay out. */
@@ -183,10 +210,14 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       const tool = reviewTool(job, cards);
       const glyph = businessGlyph(job.business.config);
       if (glyph === null) return null;
+      // The owner chose to let the job run on its own, but its own rule comes from the card they
+      // confirm at the Rules step: until then it asks first, and the review says so. Words only.
+      const chosenOnItsOwn = tool.mode === 'ask' && acceptedAutonomy(job.business, state.messages) === 'auto';
+      const shown = chosenOnItsOwn ? { ...tool, uncoveredLine: copy.chosenOnItsOwn } : tool;
       return (
         <ConnectorReview
           job={{ title: tool.name, glyph, rows: businessRows(job.business, tool.mode) }}
-          tools={[tool]}
+          tools={[shown]}
           onTurnOn={() => void flow.turnOn(view.key, [job])}
           onCancel={flow.cancel}
           pending={turningOn}
