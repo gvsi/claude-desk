@@ -137,10 +137,11 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const returnTo = useRef<string | null>(null);
   const focusRow = useRef(false);
   const reviewReady = rules.data !== undefined && tools.data !== undefined;
+  const viewKey = view.kind === 'confirm' ? `confirm:${view.draft.version}` : view.kind;
   // View swaps announce their heading. Back and Cancel return to the opener; a confirm returns
   // to its row immediately, so focus survives the refresh replacing its button with "On".
   useLayoutEffect(() => {
-    if (view.kind !== 'list') {
+    if (viewKey !== 'list') {
       titleRef.current?.focus({ preventScroll: true });
       return;
     }
@@ -156,7 +157,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
       row.addEventListener('blur', () => row.removeAttribute('tabindex'), { once: true });
       row.focus({ preventScroll: true });
     }
-  }, [view.kind, reviewReady]);
+  }, [viewKey, reviewReady]);
   const open = (key: Parameters<typeof flow.open>[0]) => {
     returnTo.current = key;
     flow.open(key);

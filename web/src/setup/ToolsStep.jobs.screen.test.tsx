@@ -52,6 +52,7 @@ it.each([1440, 1512, 390])('at %i px, reviews and turns on exactly one job at it
   await expect.element(review).toHaveFocus();
   await userEvent.keyboard('{Enter}');
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toHaveFocus();
   await expect.element(screen.getByRole('region', { name: 'How it’s set up' }).getByText('You approve each request in Needs you')).toBeVisible();
   await expect.element(screen.getByText(BUSINESS_OWNER_LINES.typed_booking, { exact: false })).toBeVisible();
   expect(screen.getByText(/A built-in connector/).elements()).toHaveLength(0);
@@ -67,6 +68,7 @@ it.each([1440, 1512, 390])('at %i px, reviews and turns on exactly one job at it
   await userEvent.tab({ shift: true });
   await userEvent.keyboard('{Enter}');
   await expect.element(screen.getByRole('heading', { name: 'Turn on Book a free intro call' })).toBeVisible();
+  await expect.element(screen.getByRole('heading', { name: 'Turn on Book a free intro call' })).toHaveFocus();
   expect(mockStore.requests.slice(mark).filter((r) => r.key === 'confirmTool').map((r) => r.body)).toEqual([
     { tools: [{ tool: 'desk.intro-call', definition_sha256: chenBusinessTools[0]?.definition_sha256 }], enable: true },
   ]);
@@ -76,6 +78,7 @@ it.each([1440, 1512, 390])('at %i px, reviews and turns on exactly one job at it
   await expect.element(screen.getByRole('heading', { name: 'What Claude can use' })).toBeVisible();
   expect(desk.tools.find((row) => row.tool === 'desk.intro-call')?.status).toBe('enabled');
   await expect.poll(() => jobs.getByText('On', { exact: true }).elements()).toHaveLength(2);
+  await expect.element(jobs.getByRole('listitem').filter({ hasText: /^Book a free intro call/ })).toHaveFocus();
   expect(jobs.getByRole('button').elements()).toHaveLength(0);
 });
 

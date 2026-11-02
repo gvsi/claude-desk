@@ -2127,8 +2127,10 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Turn it on' }).click();
     await expect.element(screen.getByRole('button', { name: 'Confirm and turn on' })).toBeVisible();
     mockStore.inject({ route: 'confirmRules', status: 409, body: { error: 'rules_changed_since_draft' } });
-    await screen.getByRole('button', { name: 'Confirm and turn on' }).click();
+    (screen.getByRole('button', { name: 'Confirm and turn on' }).element() as HTMLElement).focus();
+    await userEvent.keyboard('{Enter}');
     await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { name: 'Turn on Stripe', exact: true })).toHaveFocus();
     expect(requests('confirmTool', mark)).toHaveLength(3);
     expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
     const redrafted = [...deskOf(state).drafts.keys()].at(-1);
