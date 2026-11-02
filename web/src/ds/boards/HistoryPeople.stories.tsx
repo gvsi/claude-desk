@@ -17,6 +17,7 @@ import {
   expectRecordedLink,
   expectRecordedTags,
   expectTabOrder,
+  footerLink,
   one,
   some,
 } from './spec.ts';
@@ -154,7 +155,8 @@ export const Board: Story = {
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
 
-    // focus_order_is_logical: the business, the pages, Claude acts for you, then the caption, the page's one stop.
+    // focus_order_is_logical: the business, the pages, Claude acts for you, then the caption, the page's one
+    // stop, and the footer's author link.
     const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
     const reached = await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
@@ -162,6 +164,6 @@ export const Board: Story = {
       within(column).getByRole('switch', { name: 'Claude acts for you' }),
       caption,
     ]);
-    await expect(reached.filter((stop) => main.contains(stop))).toEqual([caption]);
+    await expect(reached.filter((stop) => main.contains(stop))).toEqual([caption, footerLink(canvasElement)]);
   },
 };

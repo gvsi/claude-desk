@@ -49,7 +49,7 @@ export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
         {/* A fill page draws the footer in its own columns, as the landed frame leaves it to the page. */}
         {fill && page !== null ? null : (
           <footer className="cd-owner-layout__footer" data-skeleton-anchor="owner-footer">
-            <ConceptFooter />
+            <ConceptFooter skeleton />
           </footer>
         )}
       </div>

@@ -462,15 +462,18 @@ describe('Arrival', () => {
     await dialog.click({ position: { x: 8, y: 8 } });
     expect(el.open).toBe(true);
 
-    // Tab and Shift+Tab go round the dialog's own controls.
+    // Tab and Shift+Tab go round the dialog's own controls and its footer's author link.
     await field.click();
     const button = dialog.getByRole('button', { name: 'Start the demo' });
+    const author = dialog.getByRole('link', { name: 'Giovanni Alcantara' });
     await userEvent.keyboard('{Tab}');
     await expect.element(button).toHaveFocus();
+    await userEvent.keyboard('{Tab}');
+    await expect.element(author).toHaveFocus();
     await userEvent.keyboard('{Tab}');
     await expect.element(field).toHaveFocus();
     await userEvent.keyboard('{Shift>}{Tab}{/Shift}');
-    await expect.element(button).toHaveFocus();
+    await expect.element(author).toHaveFocus();
     expect(el.contains(document.activeElement)).toBe(true);
 
     // Enter in the field submits.
