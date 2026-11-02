@@ -164,7 +164,7 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: false }]);
   });
 
-  it.each([YES, NO])('typing_on_%s_types_nothing_and_sends_nothing_until_an_answer_is_picked', async (answer) => {
+  it.each([[YES, 'sure'], [YES, 'no thanks'], [NO, 'no thanks']])('typing_on_%s_types_nothing_and_sends_nothing_until_an_answer_is_picked: %s', async (answer, words) => {
     // Its answers are the only way to answer it: words typed with one highlighted go nowhere, so a typed
     // "sure" can't be taken as either answer. Only the message box, reached by Esc or by "No, I'll type
     // it", takes words.
@@ -175,7 +175,8 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     await userEvent.keyboard(answer === YES ? '1' : '2');
     const row = screen.getByRole('button', { name: answer, exact: true });
     await expect.element(row).toHaveFocus();
-    await userEvent.keyboard('sure');
+    // A space among the words presses neither answer.
+    await userEvent.keyboard(words);
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect.element(row).toHaveFocus();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveValue('');

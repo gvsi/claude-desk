@@ -27,6 +27,13 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
   /** The rows the keys move between: the choices, and "Something else…" where it is offered. */
   const rows = choices.length + (offersOther ? 1 : 0);
   const root = useRef<HTMLDivElement>(null);
+  const otherRef = useRef<HTMLInputElement>(null);
+  /**
+   * What the owner has typed on a highlighted row since they last moved or sent: row digits that may be
+   * the start of their words ("12 clients"), and whether a word has begun. A key that isn't a character
+   * starts afresh.
+   */
+  const typed = useRef({ digits: '', word: false });
   const questionId = useId();
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
@@ -41,10 +48,13 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       if (!inside && target !== document.body) return;
       // So do Dismiss and a link in Claude's question: Enter opens the link.
       if (target.closest('.cd-icon-button, a[href]')) return;
-      const otherInput = target instanceof HTMLInputElement;
+      const otherInput = target === otherRef.current;
+      if (event.key.length !== 1) typed.current = { digits: '', word: false };
       const move = (index: number) => {
         setActive(index);
-        const control = root.current?.querySelectorAll<HTMLElement>('.cd-setup-q3__list button, .cd-setup-q3__list input')[index];
+        const control = index === choices.length
+          ? otherRef.current
+          : root.current?.querySelectorAll<HTMLElement>('.cd-setup-q3__list button.cd-setup-q3__row')[index];
         control?.focus({ preventScroll: true });
         const area = root.current?.querySelector<HTMLElement>('.cd-setup-q3__scroll');
         const row = control?.closest('.cd-setup-q3__row');
@@ -58,15 +68,26 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         move((active + (event.key === 'ArrowDown' ? 1 : rows - 1)) % rows);
-      } else if (!otherInput && /^[1-9]$/.test(event.key) && Number(event.key) <= rows) {
-        event.preventDefault(); move(Number(event.key) - 1);
-      } else if (offersOther && inside && !otherInput && event.key.length === 1 && event.key !== ' ') {
-        // A highlighted row is a button, which takes no text: what the owner types goes to "Something
-        // else…", this key first, so Enter sends their words and never the row they were on. Space stays
-        // the row's own key. The memory question has no such field, and its keys pick only its answers.
+      } else if (!otherInput && !typed.current.word && /^[1-9]$/.test(event.key) && Number(event.key) <= rows) {
         event.preventDefault();
-        setOther((words) => `${words}${event.key}`.slice(0, maxLength));
+        const index = Number(event.key) - 1;
+        move(index);
+        // A row digit may begin the owner's words; the next key says which.
+        typed.current.digits = offersOther && index < choices.length ? typed.current.digits + event.key : '';
+      } else if (offersOther && inside && !otherInput && event.key.length === 1 && (event.key !== ' ' || typed.current.digits !== '')) {
+        // A highlighted row is a button, which takes no text: what the owner types goes to "Something
+        // else…", with any row digits typed just before it, so Enter sends their words and never the row
+        // they were on. Space on its own stays the row's key.
+        event.preventDefault();
+        const words = typed.current.digits + event.key;
+        typed.current = { digits: '', word: false };
+        setOther((text) => `${text}${words}`.slice(0, maxLength));
         move(choices.length);
+      } else if (!offersOther && inside && event.key.length === 1) {
+        // The memory question takes only its two answers: words typed on one do nothing, and a space among
+        // them presses neither, so "no thanks" can't be taken as yes.
+        if (event.key !== ' ') typed.current.word = true;
+        else if (typed.current.word) event.preventDefault();
       } else if (event.key === 'Enter') {
         // Reading the owner's memory and website takes a choice made in the panel, never an Enter from the page.
         if (!offersOther && !inside) return;
@@ -97,7 +118,7 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
           </li>)}
           {offersOther ? <li><label className={`cd-setup-q3__row cd-setup-q3__row--other cd-type-body${active === choices.length ? ' is-active' : ''}`}>
             <kbd className="cd-setup-kbd cd-type-meta" aria-hidden="true">{choices.length + 1}</kbd>
-            <input className="cd-type-body" aria-label={copy.other} placeholder={copy.other} value={other}
+            <input ref={otherRef} className="cd-type-body" aria-label={copy.other} placeholder={copy.other} value={other}
               maxLength={maxLength} disabled={disabled} onFocus={() => setActive(choices.length)} onChange={(event) => setOther(event.target.value)} />
           </label></li> : null}
         </ol>

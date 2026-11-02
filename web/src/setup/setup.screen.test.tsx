@@ -4709,6 +4709,71 @@ describe('consultant setup', () => {
     expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: 'We use Xero' });
   });
 
+  it.each(['12 clients', '150 an hour'])('an_answer_starting_with_digits_typed_on_a_choice_arrives_whole: %s', async (words) => {
+    // The digits first move between rows, as row keys do, then go into "Something else…" with the words
+    // that follow them.
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.first().element() as HTMLElement).focus();
+    await userEvent.keyboard(words);
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveFocus();
+    await expect.element(other).toHaveValue(words);
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: words });
+  });
+
+  it('space_on_a_choice_still_sends_it', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.nth(1).element() as HTMLElement).focus();
+    await userEvent.keyboard(' ');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: question.choices![1]!.text });
+  });
+
+  it('typing_on_a_choice_adds_to_words_already_in_something_else', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await other.fill('Half and ');
+    await userEvent.keyboard('{ArrowUp}');
+    await expect.element(other).not.toHaveFocus();
+    await userEvent.keyboard('half');
+    await expect.element(other).toHaveFocus();
+    await expect.element(other).toHaveValue('Half and half');
+    expect(requests('setupAnswer')).toHaveLength(0);
+  });
+
+  it('typing_with_nothing_focused_leaves_the_question_alone', async () => {
+    // Only a highlighted choice hands its keys to "Something else…": with focus on the page, typing
+    // moves nothing into the question and sends nothing.
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    await userEvent.keyboard('s');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.activeElement).toBe(document.body);
+    await expect.element(panel.getByRole('textbox', { name: 'Something else…', exact: true })).toHaveValue('');
+    expect(requests('setupAnswer')).toHaveLength(0);
+  });
+
   it('docks_only_the_live_question_above_the_composer_without_repeating_it', async () => {
     const state = await consultantAt();
     const question = state.messages.findLast((message) => message.choices?.length)!;
