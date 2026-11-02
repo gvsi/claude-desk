@@ -380,7 +380,8 @@ export class MockWorld {
     const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
       brand: { ...BUSINESS.brand },
-      summary: { ...summary, business_name: BUSINESS.name, answering: true },
+      // The copy's first Desk is the seed, which keeps its own words; one added later has no setup type.
+      summary: { ...summary, business_name: BUSINESS.name, answering: true, business_type: this.desks.length === 0 ? 'rivera' : 'other' },
       policy,
       versions: new Map(),
       ledger: [],

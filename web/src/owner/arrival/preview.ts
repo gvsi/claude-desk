@@ -113,6 +113,7 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
     hours: [],
     answering: true,
     setup: null,
+    business_type: 'rivera',
   };
   const business: BusinessOut = {
     business_id: 'preview-business',

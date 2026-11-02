@@ -2863,6 +2863,41 @@ async def test_setup_messages_mark_only_the_cards_the_owner_decided(proposals, m
     assert all(message["owner_decided"] is False for message in reply.json()["messages"] if not message["card"])
 
 
+async def test_a_card_pressed_as_the_web_does_is_marked_where_the_tools_step_reads_it(proposals, model, engine, fake):
+    """The web's own walk: "Set it up" posts only `accept` to the card's proposals route, setup closes, and the Tools
+    step reads the setup state with its cards beside the business tools. The message of the card the booking job was
+    made from, found as the Tools step finds it (accepted, with the job's title and setup), says the owner decided it,
+    with the autonomy the card showed them."""
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    # The booking card runs on its own, as the one the web's walk shows.
+    row = await stored(engine, interview_id)
+    for entry in row["transcript"]:
+        for card in [*entry.get("planned", []), *([entry["card"]] if entry.get("card") else [])]:
+            if card["proposal_id"] == ids[0]:
+                card["job"]["autonomy"] = "auto"
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET transcript = CAST(:transcript AS jsonb) WHERE interview_id = :id"),
+                           {"transcript": json.dumps(row["transcript"]), "id": interview_id})
+    path = f"/api/owner/setup/{interview_id}"
+    pressed = await owner.browser.post(path + f"/proposals/{ids[0]}?cards=1", json={"accept": True})
+    assert pressed.status_code == 200, pressed.text
+    finished = await owner.browser.post(path + "/suggestions?cards=1", json={})
+    assert finished.status_code == 200 and finished.json()["step"] == "tools", finished.text
+    read = await owner.browser.get(path + "?cards=1")
+    assert read.status_code == 200, read.text
+    tools = await owner.browser.get(path + "/tools")
+    assert tools.status_code == 200, tools.text
+    booking = next(row["business"] for row in tools.json()["tools"]
+                   if row["source"] == "business" and row["business"]["config"]["block"] == "typed_booking")
+    made_from = [message for message in read.json()["messages"]
+                 if message["card"] and message["card"]["state"] == "accepted" and message["card"]["job"]
+                 and message["card"]["job"]["title"] == booking["title"]
+                 and message["card"]["job"]["config"] == booking["config"]]
+    assert [(message["card"]["proposal_id"], message["owner_decided"], message["card"]["job"]["autonomy"])
+            for message in made_from] == [(ids[0], True, "auto")]
+
+
 @pytest.mark.parametrize("app_key, declined", [("stripe", False), ("stripe", True), ("square", False), ("google_calendar", False)])
 async def test_finish_and_after_finish_never_connect(monkeypatch, app_key, declined):
     from types import SimpleNamespace

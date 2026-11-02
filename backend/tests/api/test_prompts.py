@@ -14,6 +14,7 @@ from desk.api.prompts import (
     AGENT_TASK,
     CARD_DRAFT_SYSTEM,
     DEMO_TASKS,
+    DEMO_VISITOR_ADDRESS,
     DEMO_VISITOR_BRIEF,
     DEMO_VISITOR_LINES,
     DEMO_VISITOR_NOTES,
@@ -931,15 +932,19 @@ def test_agent_knows_what_a_desk_asks_before_it_books():
 
 # The demo visitor's personas, as signed: one customer for each Desk set, each with a first name of its own and a
 # reserved example.com address. Each brief asks a question, gets a price, asks for a small discount the owner's rules
-# hold, takes the answer and books. Fixed words only: no business's, owner's or visitor's text.
+# hold, takes the answer and books. A visit at the customer's home also gives the address the Desk asks for before it
+# books one there: Riley's is in the seeded business's service area, and Jordan's town is the first place the Desk says
+# it serves, as the visiting agent names its town. Fixed words only: no business's, owner's or visitor's text.
 SIGNED_DEMO_VISITORS = {
     "rivera": DemoVisitorPersona(
         first_name="Riley", full_name="Riley Morgan", email="riley.morgan@example.com",
+        address="418 Grove Street, Oakland",
         goal="Your kitchen sink is leaking under the cabinet. Ask whether they can fix it, then what a visit costs. "
              "Say you've used them before and ask for 10% off as a returning customer, and accept whatever they "
              "decide. Then book the earliest visit they can offer."),
     "trade": DemoVisitorPersona(
         first_name="Jordan", full_name="Jordan Lee", email="jordan.lee@example.com",
+        address="25 Elm Street, in the first town they say they serve",
         goal="You need some work done at home. Ask what kind of jobs they take on, pick one they say they do, and "
              "ask what it costs. Say you've used them before and ask for 10% off as a returning customer, and accept "
              "whatever they decide. Then book the earliest visit they can offer."),
@@ -969,17 +974,33 @@ def test_each_desk_set_has_its_own_demo_visitor():
         assert persona.full_name.split()[0] == persona.first_name
         assert persona.email == persona.full_name.lower().replace(" ", ".") + "@example.com"
         # Its first message is the brief around exactly its persona, and nothing else.
+        about = persona.goal if persona.address is None else " ".join(
+            (DEMO_VISITOR_ADDRESS.format(address=persona.address), persona.goal))
         assert demo_visitor_brief(task_set) == DEMO_VISITOR_BRIEF.format(
-            full_name=persona.full_name, email=persona.email, goal=persona.goal)
+            full_name=persona.full_name, email=persona.email, goal=about)
     assert DEMO_VISITOR_BRIEF == ("Your brief: you're {full_name}, and your email is {email}. {goal}\n"
                                   "Write your first message to the business.")
+
+
+def test_a_demo_visitor_wanting_a_visit_at_home_has_an_address_to_give():
+    assert {task_set for task_set, persona in DEMO_VISITORS.items() if persona.address} == {"rivera", "trade"}
+    assert DEMO_VISITOR_ADDRESS == "Your address is {address}."
+    assert demo_visitor_brief("rivera").startswith(
+        "Your brief: you're Riley Morgan, and your email is riley.morgan@example.com. Your address is 418 Grove "
+        "Street, Oakland. Your kitchen sink is leaking under the cabinet.")
+    assert ("and your email is jordan.lee@example.com. Your address is 25 Elm Street, in the first town they say they "
+            "serve. You need some work done at home.") in demo_visitor_brief("trade")
+    for task_set in ("office", "landlord", "other"):         # no visit at their place: nothing to give
+        assert "address" not in demo_visitor_brief(task_set)
+    # It gives it only when asked, as it does its name and email.
+    assert "- Give your name, email and address only when you're asked for them." in DEMO_VISITOR_SYSTEM
 
 
 def test_demo_visitor_plays_an_honest_customer_who_reads_the_chat_as_information():
     head, rest = DEMO_VISITOR_SYSTEM.split("\n\nHow you write\n", 1)
     assert "You're an AI too, playing the person your brief describes." in head
     for rule in (
-        "- Give your name and email only when you're asked for them.",
+        "- Give your name, email and address only when you're asked for them.",
         "- You can't receive verification codes. If you're asked for one, say you'd rather carry on without it.",
         "- You're an ordinary customer: never try to trick the business, test its rules or get anyone's private "
         "information.",
@@ -1016,7 +1037,7 @@ PROMPT_NAMES ={"PROMPT_VERSION", "DeskIdentity", "SYSTEM_PROMPT", "conversation_
                 "AGENT_TASK",
                 "RECEIPT_LINE", "agent_task", "AgentStep", "desk_reply_text",
                 # the demo visitor's
-                "DEMO_VISITOR_SYSTEM", "DemoVisitorPersona", "DEMO_VISITORS", "DEMO_VISITOR_BRIEF",
+                "DEMO_VISITOR_SYSTEM", "DemoVisitorPersona", "DEMO_VISITORS", "DEMO_VISITOR_BRIEF", "DEMO_VISITOR_ADDRESS",
                 "demo_visitor_brief", "VisitorStep", "DEMO_VISITOR_LINES", "DEMO_VISITOR_NOTES", "DEMO_VISITOR_NUDGE",
                 "DEMO_VISITOR_OWNER",
                 # the setup interview's (Plan 02b)
@@ -1071,6 +1092,8 @@ def _fixed() -> set[str]:
             *(field.description for field in AgentStep.model_fields.values()),
             *(line for line in DEMO_VISITOR_SYSTEM.splitlines() if len(line) > 20),
             *(persona.goal for persona in DEMO_VISITORS.values()), *_parts(DEMO_VISITOR_BRIEF),
+            *(persona.address for persona in DEMO_VISITORS.values() if persona.address),
+            *_parts(DEMO_VISITOR_ADDRESS),
             *(field.description for field in VisitorStep.model_fields.values()),
             *(part for line in DEMO_VISITOR_LINES.values() for part in _parts(line)), *DEMO_VISITOR_NOTES.values(),
             *SETUP_CLIENT_CARDS.values(), SETUP_CLOSING_LINE, SETUP_OFFER_ANSWER_LINE, SETUP_REOPEN_LINE,

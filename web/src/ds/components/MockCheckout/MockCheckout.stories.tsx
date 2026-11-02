@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
+import { CHECKOUT_COPY } from './checkoutCopy.ts';
 import { MockCheckout } from './MockCheckout.tsx';
 
 const BOARD = 'N-Checkout-Run2';
@@ -376,12 +377,17 @@ export const Paying: Story = {
  * test card go, and one line with its dot says what happened and where to go next. There is
  * nothing to press, so nothing can pay twice.
  */
-async function expectFinal(root: HTMLElement, line: string, dot: 'handled' | 'held' | 'info') {
-  const { card, title, footnote } = await expectChrome(root, 'en');
+async function expectFinal(
+  root: HTMLElement,
+  line: string,
+  dot: 'handled' | 'held' | 'info',
+  language: 'en' | 'es' = 'en',
+) {
+  const { card, title, footnote } = await expectChrome(root, language);
   // final_states_have_no_pay_button: no button of any kind, and none of the open link's parts.
   await expect(within(card).queryAllByRole('button')).toHaveLength(0);
   await expect(card.textContent).not.toContain(AMOUNT);
-  await expect(within(card).queryByText('This link works once.')).toBeNull();
+  await expect(within(card).queryByText(CHECKOUT_COPY[language].worksOnce)).toBeNull();
   await expect(within(card).queryByRole('group')).toBeNull();
   await expect(card.textContent).not.toContain('4242');
 
@@ -462,6 +468,33 @@ export const Expired: Story = {
   },
 };
 
+/** The unchanged final sentence, with only its chat words linked in the same tab. */
+async function expectChatWordsLink(root: HTMLElement, line: string, language: 'en' | 'es') {
+  const { state } = await expectFinal(root, line, 'info', language);
+  const back = within(state).getByRole('link', { name: language === 'en' ? 'the chat' : 'el chat' });
+  await expect(state.querySelectorAll('a')).toHaveLength(1);
+  await expect(back).toHaveAttribute('href', CHAT_HREF);
+  await expect(back).not.toHaveAttribute('target');
+  await expect(back).toHaveClass('cd-text-link', 'cd-text-link--running-text');
+  expectComputed(back, { color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
+}
+
+export const ExpiredBackToTheChat: Story = {
+  args: { state: 'expired', chatHref: CHAT_HREF },
+  parameters: { canvasNote: 'Expired with a known chat: “the chat” links there in the same tab, with the sentence unchanged. Owner signed it on 2026-11-02.' },
+  play: async ({ canvasElement }) => {
+    await expectChatWordsLink(canvasElement, 'This payment link expired. Ask in the chat for a new one.', 'en');
+  },
+};
+
+export const ExpiredBackToTheChatSpanish: Story = {
+  args: { state: 'expired', chatHref: CHAT_HREF, language: 'es' },
+  parameters: { canvasNote: 'Expired in Spanish with a known chat: “el chat” links there in the same tab, with the sentence unchanged. Owner signed it on 2026-11-02.' },
+  play: async ({ canvasElement }) => {
+    await expectChatWordsLink(canvasElement, 'Este enlace de pago venció. Pide uno nuevo en el chat.', 'es');
+  },
+};
+
 /** The line for a link the visitor or the chat cancelled. */
 const CANCELLED_LINE = 'This payment was cancelled. Nothing was charged.';
 
@@ -470,6 +503,43 @@ export const Cancelled: Story = {
   parameters: { canvasNote: `${BOARD}'s "Cancelled": the hollow info dot, and that nothing was charged.` },
   play: async ({ canvasElement }) => {
     await expectFinal(canvasElement, CANCELLED_LINE, 'info');
+  },
+};
+
+export const CancelledBackToTheChat: Story = {
+  args: { state: 'cancelled', chatHref: CHAT_HREF },
+  parameters: {
+    canvasNote: 'Cancelled for any reason but a rule change, with a known chat: keeps the cancelled sentence and appends the paid state’s same-tab return link. Owner signed it on 2026-11-02.',
+  },
+  play: async ({ canvasElement }) => {
+    const { state } = await expectFinal(canvasElement, `${CANCELLED_LINE} Go back to the chat.`, 'info');
+    const back = within(state).getByRole('link', { name: 'Go back to the chat' });
+    await expect(state.querySelectorAll('a')).toHaveLength(1);
+    await expect(back).toHaveAttribute('href', CHAT_HREF);
+    await expect(back).not.toHaveAttribute('target');
+    await expect(back).toHaveClass('cd-text-link', 'cd-text-link--running-text');
+    expectComputed(back, { color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
+  },
+};
+
+export const CancelledBackToTheChatSpanish: Story = {
+  args: { state: 'cancelled', chatHref: CHAT_HREF, language: 'es' },
+  parameters: {
+    canvasNote: 'Cancelled for any reason but a rule change, in Spanish: appends the paid state’s “Vuelve al chat” link. Owner signed it on 2026-11-02.',
+  },
+  play: async ({ canvasElement }) => {
+    const { state } = await expectFinal(
+      canvasElement,
+      'Este pago se canceló. No se cobró nada. Vuelve al chat.',
+      'info',
+      'es',
+    );
+    const back = within(state).getByRole('link', { name: 'Vuelve al chat' });
+    await expect(state.querySelectorAll('a')).toHaveLength(1);
+    await expect(back).toHaveAttribute('href', CHAT_HREF);
+    await expect(back).not.toHaveAttribute('target');
+    await expect(back).toHaveClass('cd-text-link', 'cd-text-link--running-text');
+    expectComputed(back, { color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
   },
 };
 
@@ -487,6 +557,22 @@ export const CancelledRulesChanged: Story = {
       'info',
     );
     await expect(card.textContent).not.toContain(CANCELLED_LINE);
+  },
+};
+
+export const RulesChangedBackToTheChat: Story = {
+  args: { state: 'cancelled', cancelReason: 'rules_changed', chatHref: CHAT_HREF },
+  parameters: { canvasNote: 'Cancelled by a rule change with a known chat: “the chat” links there in the same tab, with the sentence unchanged. Owner signed it on 2026-11-02.' },
+  play: async ({ canvasElement }) => {
+    await expectChatWordsLink(canvasElement, 'This link was cancelled because the business changed its rules. Nothing was charged. Ask in the chat if you still want to pay.', 'en');
+  },
+};
+
+export const RulesChangedBackToTheChatSpanish: Story = {
+  args: { state: 'cancelled', cancelReason: 'rules_changed', chatHref: CHAT_HREF, language: 'es' },
+  parameters: { canvasNote: 'Cancelled by a rule change in Spanish with a known chat: “el chat” links there in the same tab, with the sentence unchanged. Owner signed it on 2026-11-02.' },
+  play: async ({ canvasElement }) => {
+    await expectChatWordsLink(canvasElement, 'Este enlace se canceló porque el negocio cambió sus reglas. No se cobró nada. Pregunta en el chat si todavía quieres pagar.', 'es');
   },
 };
 

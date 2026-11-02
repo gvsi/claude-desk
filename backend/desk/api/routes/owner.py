@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from desk.api.agents import demo_task_set
 from desk.api.cookies import set_owner_cookie, set_visitor_cookie
 from desk.api.deliver import NOT_FINAL, Reply, Status, deliver, run_lock, status_shown, visitor_safe
 from desk.api.demo_visitors import KeyReused, TooManyStarts
@@ -28,9 +27,10 @@ from desk.api.deps import (ApiProblem, OwnerCtx, Runtime, client_ip, owner_conte
 from desk.api.idempotency import IdempotencyKey
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
 from desk.api import owner_reads
+from desk.api.agents import demo_task_set, demo_task_sets
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
-from desk.api.prompts import NOTES
+from desk.api.prompts import NOTES, DemoTaskSet
 from desk.api.ratelimit import RateLimited, RateLimitLedger
 from desk.api.ro import KernelRO
 from desk.api.schemas import (
@@ -95,27 +95,29 @@ class CopyRequest(BaseModel):
     passcode: Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
-async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup]]:
+async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup], dict[str, DemoTaskSet]]:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
-    unfinished setup interviews by Desk ID, from the API's own rows."""
+    unfinished setup interviews and business types by Desk ID, from the API's own rows."""
     # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
     all_desks = await ctx.ro.desks()
     desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
-    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks)
+    types = await demo_task_sets(ctx.ro.conn, ctx.ro, [desk["desk_id"] for desk in desks], all_desks=all_desks)
+    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks), types
 
 
-def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup]) -> DeskSummary:
+def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup], types: dict[str, DemoTaskSet]) -> DeskSummary:
     return DeskSummary(desk_id=desk["desk_id"], slug=desk["slug"], name=desk["name"], business_name=business["name"],
-                       hours=desk["hours"], answering=desk["answering"], setup=setups.get(desk["desk_id"]))
+                       hours=desk["hours"], answering=desk["answering"], setup=setups.get(desk["desk_id"]),
+                       business_type=types[desk["desk_id"]])
 
 
 async def copy_out(ctx: OwnerCtx) -> CopyOut:
     """The copy's Desks, from its kernel_ro rows, in the order they were made, each with its unfinished setup."""
-    desks, businesses, setups = await _desks(ctx)
+    desks, businesses, setups, types = await _desks(ctx)
     return CopyOut(copy_id=ctx.copy_id,
-                   desks=[_summary(desk, businesses[desk["business_id"]], setups) for desk in desks])
+                   desks=[_summary(desk, businesses[desk["business_id"]], setups, types) for desk in desks])
 
 
 # A replayed visitor's words, by the kind of session they were said in; and the record each event kind carries
@@ -282,7 +284,7 @@ async def me(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> CopyOut:
 async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOut]:
     """The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk
     names its setup interview while that isn't finished."""
-    found, businesses, setups = await _desks(ctx)
+    found, businesses, setups, types = await _desks(ctx)
     listed: dict[str, BusinessOut] = {}
     for desk in found:
         business = businesses[desk["business_id"]]
@@ -291,7 +293,7 @@ async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOu
                 business_id=business["business_id"], name=business["name"],
                 owner_display_name=business["owner_display_name"], timezone=business["timezone"],
                 brand=effective_brand(business["brand"] or {}), desks=[])
-        listed[business["business_id"]].desks.append(_summary(desk, business, setups))
+        listed[business["business_id"]].desks.append(_summary(desk, business, setups, types))
     return list(listed.values())
 
 

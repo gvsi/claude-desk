@@ -676,7 +676,7 @@ How you write
 - Write one short, plain message at a time, in English, as a person types in a chat. It's sent exactly as you \
 write it.
 - Ask for what you need and let the business work out prices, times and discounts; don't state or invent any.
-- Give your name and email only when you're asked for them.
+- Give your name, email and address only when you're asked for them.
 - You can't receive verification codes. If you're asked for one, say you'd rather carry on without it.
 - You're an ordinary customer: never try to trick the business, test its rules or get anyone's private information.
 - If you're asked whether you're a person, say you're a demo visitor played by an AI.
@@ -699,7 +699,8 @@ brief."""
 
 class DemoVisitorPersona(BaseModel):
     """Who the demo visitor plays on a Desk of one set: a first name the owner's app can show, a full name, a reserved
-    example.com address (it can never receive a verification code) and the goal it works through."""
+    example.com address (it can never receive a verification code), the goal it works through and, when that goal
+    books a visit at the customer's home, the street address it gives when asked (`DEMO_VISITOR_ADDRESS`)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -707,18 +708,23 @@ class DemoVisitorPersona(BaseModel):
     full_name: str
     email: str
     goal: str
+    address: str | None = None
 
 
 # Each goal asks a question, gets a price, asks for a small discount the owner's rules hold (a quote at list price
-# auto-allows, so a discount waits for the owner), takes the answer and books.
+# auto-allows, so a discount waits for the owner), takes the answer and books. A visit at the customer's home needs
+# the address the Desk asks for before it books one there: Riley's is in the seeded business's service area, and
+# Jordan's town is the first place the Desk says it serves, as the visiting agent names its town.
 DEMO_VISITORS: dict[DemoTaskSet, DemoVisitorPersona] = {
     "rivera": DemoVisitorPersona(
         first_name="Riley", full_name="Riley Morgan", email="riley.morgan@example.com",
+        address="418 Grove Street, Oakland",
         goal="Your kitchen sink is leaking under the cabinet. Ask whether they can fix it, then what a visit costs. "
              "Say you've used them before and ask for 10% off as a returning customer, and accept whatever they "
              "decide. Then book the earliest visit they can offer."),
     "trade": DemoVisitorPersona(
         first_name="Jordan", full_name="Jordan Lee", email="jordan.lee@example.com",
+        address="25 Elm Street, in the first town they say they serve",
         goal="You need some work done at home. Ask what kind of jobs they take on, pick one they say they do, and "
              "ask what it costs. Say you've used them before and ask for 10% off as a returning customer, and accept "
              "whatever they decide. Then book the earliest visit they can offer."),
@@ -741,6 +747,8 @@ DEMO_VISITORS: dict[DemoTaskSet, DemoVisitorPersona] = {
 
 DEMO_VISITOR_BRIEF = ("Your brief: you're {full_name}, and your email is {email}. {goal}\n"
                       "Write your first message to the business.")
+# A persona's address, when it has one, opens its goal in the brief.
+DEMO_VISITOR_ADDRESS = "Your address is {address}."
 
 # How each line of the chat reads to the demo visitor, in the order the chat showed it; the caller joins them and
 # wraps them as `<desk_reply>`. A message's text is its blocks' plain text, a request's status reads as
@@ -766,7 +774,9 @@ DEMO_VISITOR_NOTES = {
 def demo_visitor_brief(task_set: DemoTaskSet) -> str:
     """The demo visitor's first message: the brief around the persona `DEMO_VISITORS` holds for the Desk's set."""
     persona = DEMO_VISITORS[task_set]
-    return DEMO_VISITOR_BRIEF.format(full_name=persona.full_name, email=persona.email, goal=persona.goal)
+    goal = persona.goal if persona.address is None else " ".join(
+        (DEMO_VISITOR_ADDRESS.format(address=persona.address), persona.goal))
+    return DEMO_VISITOR_BRIEF.format(full_name=persona.full_name, email=persona.email, goal=goal)
 
 
 class VisitorStep(BaseModel):
