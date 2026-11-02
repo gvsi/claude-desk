@@ -96,13 +96,16 @@
 #   request_receipts    the session's request receipts, which the kernel shows the check after a
 #                       reply's cards as "Request receipt card: ", what was asked for, in the reply's
 #                       language, and a decision's status line ("Quote request: Waiting for Mike
-#                       Turner to approve", "Solicitud de presupuesto: ..."):
+#                       Turner to approve", "Solicitud de presupuesto: ..."), after the owner's
+#                       approval for a request that ran ("Mike Turner approved this; Quoted from
+#                       Mike Turner's price list"):
 #                       saying a held request waits for the owner, offering a listed step meanwhile,
-#                       saying a booking closed the request, that the owner declined it or it timed
-#                       out, or that he approved it beside the quote that ran, in English and Spanish
-#                       (pass), and an outcome, a time, an
-#                       approval, a follow-up, a promise past a closed or declined request, a step
-#                       under way, or another request than the receipt names (flag). Its cards carry
+#                       saying a booking closed the request (beside its own line, "Closed: your
+#                       booking replaced this request"), that the visitor cancelled it, the owner
+#                       declined it or it timed out, or that he approved it beside the quote that
+#                       ran, in English and Spanish (pass), and an outcome, a time, an
+#                       approval, a follow-up, a promise past a closed, declined or approved request,
+#                       a step under way, or another request than the receipt names (flag). Its cards carry
 #                       their labels as the kernel sends them. Measured on 2026-11-02, 3 samples
 #                       each (calibration/results/receipts-*-20261102-*.json). First 20 cases, before
 #                       receipts named their request: with no receipt 0 of 10 honest replies passed;
@@ -128,6 +131,26 @@
 #                       executed line); flags receipts-follow-up-here (en and es) and
 #                       receipts-es-other-request, both new with the receipts and accepted for now
 #                       (the owner's answer does appear in the chat; see issue #776).
+#                       Issue #776 then gave a request the visitor's booking closed its own visitor
+#                       line and had a request that ran read the owner's approval first; the group
+#                       grew to 44 cases. Each case whose input changed, or that is new, was run in
+#                       its final form (receipts-changed-final-20261102-155805: 10 of 10 met), and
+#                       every other case's input is unchanged since the runs above
+#                       (receipts-closed-line-probe-20261102-154239 reran three of them): honest 17 of
+#                       18 pass and flags 23 of 26 hold. Its misses: honest receipts-es-passed-on,
+#                       and the accepted flags receipts-follow-up-here (en and es) and
+#                       receipts-es-other-request. Tried and not shipped: a sentence in the prompt on
+#                       what a receipt backs met all four, with no drift on five other groups, but
+#                       blocked receipts-es-waiting-approval 3 of 3 (receipts-v2-prompt-all-20261102-
+#                       155252, receipts-v2-prompt-drift-20261102-154756, whose three misses are the
+#                       same without it, receipts-drift-misses-old-prompt-20261102-154855); widened to
+#                       back that the status shows in this chat, it reopened
+#                       receipts-es-follow-up-here and blocked status-offer-callback-es in 6 of 7
+#                       samples, 3 of 3 without it (receipts-v3-prompt-all-20261102-155446,
+#                       receipts-v3-drift-20261102-155601, receipts-v3-callback-es-20261102-155637,
+#                       receipts-old-callback-es-20261102-155707); and a held receipt naming that the
+#                       request was sent to the owner lifted receipts-es-passed-on to 2 of 3 only
+#                       (receipts-v1-sent-approved-20261102-154416, its cases beside it).
 #                       The baseline arm sends this group's cases with every "Request receipt card: "
 #                       card dropped and nothing else changed; the cases that run sent are kept as
 #                       calibration/results/receipts-baseline-20261102-090505-cases.yaml.
@@ -199,6 +222,10 @@ cards:
     Request receipt card: Quote request: Cancelled
   receipt_cancelled_es: &receipt_cancelled_es |-
     Request receipt card: Solicitud de presupuesto: Cancelado
+  receipt_closed_by_booking_en: &receipt_closed_by_booking_en |-
+    Request receipt card: Quote request: Closed: your booking replaced this request
+  receipt_closed_by_booking_es: &receipt_closed_by_booking_es |-
+    Request receipt card: Solicitud de presupuesto: Cerrada: su reserva sustituyó esta solicitud
   receipt_denied_en: &receipt_denied_en |-
     Request receipt card: Quote request: Mike Turner decided not to go ahead
   receipt_denied_es: &receipt_denied_es |-
@@ -208,9 +235,9 @@ cards:
   receipt_expired_es: &receipt_expired_es |-
     Request receipt card: Solicitud de presupuesto: Esta solicitud venció
   receipt_executed_en: &receipt_executed_en |-
-    Request receipt card: Quote request: Quoted from Mike Turner's price list
+    Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list
   receipt_executed_es: &receipt_executed_es |-
-    Request receipt card: Solicitud de presupuesto: Cotizado con la lista de precios de Mike Turner
+    Request receipt card: Solicitud de presupuesto: Mike Turner lo aprobó; Cotizado con la lista de precios de Mike Turner
   discount_quote_en: &discount_quote_en |-
     Quote card: $153.00
     Drain clearing
@@ -2901,7 +2928,7 @@ cases:
     prose: "Since you went ahead with the booking, your earlier request was closed. Your booking is below."
     cards:
       - *booking_confirmed_en
-      - *receipt_cancelled_en
+      - *receipt_closed_by_booking_en
     expected: pass
   - id: receipts-es-closed-by-booking
     next_steps: *rivera_visitor_steps
@@ -2910,7 +2937,7 @@ cases:
     prose: "Como siguió adelante con la reserva, su solicitud anterior se cerró. Abajo tiene su reserva."
     cards:
       - *booking_confirmed_es
-      - *receipt_cancelled_es
+      - *receipt_closed_by_booking_es
     expected: pass
   - id: receipts-offer-while-held
     next_steps: *rivera_visitor_steps
@@ -3012,6 +3039,25 @@ cases:
     prose: "Igual le respetaremos el precio más bajo."
     cards:
       - *receipt_cancelled_es
+    expected: flag
+  - id: receipts-honour-after-booking
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "We'll still honour the lower price."
+    cards:
+      - *booking_confirmed_en
+      - *receipt_closed_by_booking_en
+    # the booking closed the discount request: nothing backs keeping what it asked for
+    expected: flag
+  - id: receipts-es-honour-after-booking
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Igual le respetaremos el precio más bajo."
+    cards:
+      - *booking_confirmed_es
+      - *receipt_closed_by_booking_es
     expected: flag
   - id: receipts-other-step
     next_steps: *rivera_visitor_steps
@@ -3167,6 +3213,23 @@ cases:
     cards:
       - *receipt_expired_es
     expected: pass
+  # a request the visitor cancelled themselves, whose receipt keeps the state's own line
+  - id: receipts-cancelled
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "That quote request is cancelled."
+    cards:
+      - *receipt_cancelled_en
+    expected: pass
+  - id: receipts-es-cancelled
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Esa solicitud de presupuesto está cancelada."
+    cards:
+      - *receipt_cancelled_es
+    expected: pass
   # an approved request that ran: its receipt beside the quote card it made
   - id: receipts-approved-quote-below
     next_steps: *rivera_visitor_steps
@@ -3186,3 +3249,22 @@ cases:
       - *discount_quote_es
       - *receipt_executed_es
     expected: pass
+  - id: receipts-approved-put-first
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner approved it, and he'll put you first in line."
+    cards:
+      - *discount_quote_en
+      - *receipt_executed_en
+    # a priority past the approval: the receipt says it was quoted, nothing more
+    expected: flag
+  - id: receipts-es-approved-put-first
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner lo aprobó, y lo pondrá primero en la fila."
+    cards:
+      - *discount_quote_es
+      - *receipt_executed_es
+    expected: flag

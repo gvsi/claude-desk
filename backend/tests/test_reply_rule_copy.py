@@ -45,6 +45,19 @@ def test_a_request_receipt_reaches_the_soft_checks_with_a_label_no_card_has():
         "Request receipt card: Solicitud de datos: Cancelado")
 
 
+def test_a_held_request_that_ran_names_the_owners_approval_before_what_it_did():
+    """A request receipt is a held request's, so one that ran was approved by the owner first: its line says
+    what was done ("Quoted from Mike Turner's price list"), and the check reads the approval the chat showed
+    before it, in the reply's language, so "Mike Turner approved it" is backed."""
+    assert render.receipt_check_text("native.quote", "Quoted from Mike Turner's price list", "en",
+                                     approved_by="Mike Turner") == (
+        "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list")
+    assert render.receipt_check_text("native.quote", "Cotizado con la lista de precios de Mike Turner", "es",
+                                     approved_by="Mike Turner") == (
+        "Request receipt card: Solicitud de presupuesto: Mike Turner lo aprobó; "
+        "Cotizado con la lista de precios de Mike Turner")
+
+
 def test_every_tool_and_business_block_a_decision_can_hold_has_a_receipt_subject():
     """Any enabled tool can be held (the compiler's default ask covers every tool no card for anyone does), so
     every native and payments tool, and every business tool's block (`block:<name>`), names what was asked

@@ -918,7 +918,8 @@ async def test_the_soft_check_reads_a_held_requests_receipt(app, client, reviewe
 
 async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app, client, reviewer, frozen_clock):
     """A held discount quote the visitor's own booking closed (`decide.supersede_if_booked`, settled by
-    the next read of it) is no longer a held request: the check is shown its update's receipt ("Cancelled")
+    the next read of it) is no longer a held request: the check is shown its update's receipt ("Closed: your
+    booking replaced this request")
     beside the booking's card, so "your earlier request was closed" is backed, until Claude's next reply
     that passes has told the visitor."""
     from .test_approvals import read_id
@@ -932,7 +933,8 @@ async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app
     verdict = await checked(client, visitor, prose, [clause("booking_confirmed", booking.fact_id)])
     card = verdict.blocks[-1]
     assert reviewer.soft_inputs[-1].cards == [f"Booking confirmed card: {card.text}",
-                                              "Request receipt card: Quote request: Cancelled"]
+                                              "Request receipt card: Quote request: Closed: your booking replaced "
+                                              "this request"]
     assert verdict.ok and [(block.kind, block.template) for block in verdict.blocks] == [
         ("prose", None), ("card", "booking_confirmed")]
 
@@ -1069,6 +1071,23 @@ async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(
     monkeypatch.delitem(render.RECEIPT_SUBJECTS["en"], "native.book")       # a tool the table doesn't name
     assert (await checked(client, visitor, CLEAN)).ok
     assert reviewer.soft_inputs[-1].cards == [HELD_SEEN]
+
+
+async def test_a_hold_the_owner_approved_and_that_ran_reads_his_approval_then_what_it_did(app, client, reviewer):
+    """A held request the owner approved, which then ran, shows what it did (`executed_status`); the check
+    reads the approval before that line, as the chat showed it, so "Mike Turner approved it; your quote is
+    below" is backed, until a reply that passes has told the visitor."""
+    from .test_approvals import answered
+
+    copy, visitor = await visitor_of(app, client)
+    held = await held_quote(client, visitor)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert result.decision.state == "executed", result
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == [
+        "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"]
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == []
 
 
 async def test_a_denied_hold_backs_the_reply_after_it_until_a_reply_passes(app, client, reviewer):
