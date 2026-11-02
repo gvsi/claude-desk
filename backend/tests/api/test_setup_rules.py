@@ -822,9 +822,56 @@ def test_a_test_client_phone_is_one_number_without_the_hours(said, contact):
     ("No, don't add anyone", False), ("No thanks, don't add any test clients", False),
     ("No, don't set up anything", False), ("No, do not set up anything", False),
     ("No thanks, maybe later", False), ("Not now", False), ("Skip", False),
+    # One word at a time: each answer below fires one word of `TEST_CLIENT_REQUEST` and nothing else.
+    ("Yes, add gift vouchers", None), ("Yes, adding gift vouchers", None), ("Sí, añade cupones", None),
+    ("Sí, quiero añadir cupones", None), ("Sí, agrega cupones", None), ("Sí, quiero agregar cupones", None),
+    ("Yes, set up gift vouchers", None), ("Yes, create gift vouchers", None), ("Sí, crea cupones", None),
+    ("Sí, quiero crear cupones", None), ("Sí, configura cupones", None), ("Sí, quiero configurar cupones", None),
+    ("Yes please, configure gift vouchers", None), ("Yes please, one more job", None), ("Sí, conecta Stripe", None),
+    ("Yes, I'd like changes", None), ("Yes, changing my hours", None), ("Yes, remove the gift vouchers", None),
+    ("Sí, quita los cupones", None), ("Sí, elimina los cupones", None), ("Sí, un trabajo más", None),
+    ("Sí, tambien cupones", None), ("Yes, also gift vouchers", None),
+    ("Yes, take deposits too", None), ("Sure, send payment links too", None), ("Yes please, retainers too", None),
+    ("Yes, invoices too", None), ("Yes, bookings too", None), ("Sí, depósitos por favor", None),
+    ("Sí, pagos por favor", None), ("Sí, reservas por favor", None), ("Sí, quiero cobrar", None),
+    # A short request after a comma, with no "add": the Desk's own jobs, or wanting a change.
+    ("Yes please, take retainer payments too", None), ("No, take deposits instead", None),
+    ("Sí, cobra depósitos", None), ("Sí, quiero cobrar depósitos", None), ("Yes, please configure payments", None),
+    ("Yes, add deposits too", None), ("Yes, set up deposits", None), ("Sí, añade depósitos", None),
+    ("Yes, remove the booking", None), ("Sí, quita las reservas", None), ("Sí, elimina el depósito", None),
+    ("Yes, I want to change my hours", None), ("No, I want to change my hours first", None),
+    # More after a yes or a no, with no request word: each word that joins it, after "please" or "thanks" too.
+    ("Sí, y una cosa más", None), ("No, pero una cosa más", None), ("Not now, but one more thing", None),
+    ("Yes please, and one more thing", None), ("No thanks, but one more thing", None),
+    ("Yes, thank you, and one more thing", None), ("Sí, gracias, y una cosa más", None),
+    ("Sí, por favor, y una cosa más", None), ("No, but thanks, one more thing", None),
+    # The offer named in a longer answer, a polite ending, and the other words a request leaves out.
+    ("No, I don't want to be a test client", False), ("Sure, go ahead and add me as a test client", True),
+    ("Yes please, set me up as a test client", True), ("No, no quiero ser un cliente de prueba ahora mismo", False),
+    ("Not now, but maybe later", False), ("No, but thanks", False), ("Yes, and thank you!", True),
+    ("Sí, y gracias", True), ("No, pero gracias", False), ("No thanks, but maybe later", False),
+    ("No, but later", False), ("No, pero más tarde", False),
+    ("No, I do not want to change anything", False), ("No, do not add anyone", False),
+    ("No, don't connect anything", False), ("Good job, yes", True), ("Yes, add us", True), ("Sure, add it", True),
+    ("Yes, add that", True), ("Yes, add this", True), ("Yes, add my number", True), ("Yes, add my phone", True),
+    ("Yes, add my contact", True), ("Sí, agrega mi número", True), ("Sí, agrega mi teléfono", True),
+    ("Sí, agrega mi contacto", True), ("Yes, add a test client", True), ("Yes, add my test client", True),
+    ("Yes, I'd also like that", True), ("Yes, I'll also try it", True), ("Yes, I'll also check it", True),
+    ("Nope, I'll add anything else later", False), ("Sí, también cupones", None),
+    # More than 8 words is no plain answer, but the offer's own words aren't counted.
+    ("Sure, send gift voucher links too, no Stripe for now", None),
+    ("No thanks, I really don't want to be a test client", False),
+    ("No thanks, I really don't need the test client right now", False),
+    ("Yes please, I'd like you to set up my test client", True),
 ])
 def test_a_request_besides_the_offer_is_neither_a_yes_nor_a_no(said, read):
     assert setup._reads_yes(said) is read
+
+
+@pytest.mark.parametrize("opening", setup.TEST_CLIENT_TYPED_YES + setup.TEST_CLIENT_TYPED_NO)
+def test_any_yes_or_no_word_that_goes_on_is_neither(opening):
+    # Each yes or no code reads, with more after it, so the words that open an answer can't drift from those lists.
+    assert setup._reads_yes(f"{opening}, and one more thing") is None
 
 
 @pytest.mark.parametrize("said, again", [
@@ -899,6 +946,10 @@ def consultant(reply: str = CONSULTANT_REPLY, **fields) -> Callable:
     ("Add a deposit job too; I'll set the amount later", "other"), ("Also add a booking job, no deposits", "other"),
     ("Add a retainer payment link, not connected to Stripe yet", "other"),
     ("Yes please, and add a retainer job", "other"),
+    # Any yes or no code reads, going on with a request; the same yes alone stays a yes.
+    ("Yup, and take retainer payments", "other"), ("Dale, y cobra depósitos", "other"),
+    ("Sounds good, and send payment links", "other"), ("Go ahead, but take deposits too", "other"),
+    ("Yup", "yes"), ("Dale", "yes"), ("Sounds good", "yes"), ("Go ahead", "yes"),
 ])
 async def test_a_typed_answer_to_the_test_client_offer_is_read_by_code(app, browser, fake, kernel_http, model,
                                                                        typed, read):
