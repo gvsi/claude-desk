@@ -35,11 +35,11 @@ const hrefs = {
   today: '/app/desk-rivera-main/today',
   conversations: '/app/desk-rivera-main/conversations',
   people: '/app/desk-rivera-main/people',
-  knowledge: '/app/desk-rivera-main/knowledge',
   rules: '/app/desk-rivera-main/rules',
   safety: '/app/desk-rivera-main/safety',
   profile: '/app/desk-rivera-main/profile',
   share: '/app/desk-rivera-main/share',
+  knowledge: '/app/desk-rivera-main/knowledge',
   settings: '/app/desk-rivera-main/settings',
 } satisfies SidebarHrefs;
 

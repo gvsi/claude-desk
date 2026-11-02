@@ -103,11 +103,11 @@ it('connectors_row_only_with_its_href', () => {
   // Without its href there is no Connectors row, and no link without a destination.
   expect(labels(without)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings']);
   expect([...without.querySelectorAll('.cd-sidebar__nav > a')].every((link) => link.getAttribute('href'))).toBe(true);
-  // With it, the tenth row, sixth.
+  // With it, the tenth row, fifth.
   expect(labels(withConnectors)).toEqual(['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings']);
   // The labels the rows draw are the ones exported for pages to name themselves by; people's row is the consumer's.
   const { today, conversations, knowledge, rules, connectors, safety, profile, share, settings } = NAV_LABELS;
-  expect(labels(withConnectors)).toEqual([today, conversations, 'Customers', knowledge, rules, connectors, safety, profile, share, settings]);
+  expect(labels(withConnectors)).toEqual([today, conversations, 'Customers', rules, connectors, safety, profile, share, knowledge, settings]);
 
   // Nothing else moves: the top, the rows down to Rules and the pinned foot are where they were,
   // and the rows after Rules close up, one 38 px row apart as always, with no gap where it was.
@@ -121,8 +121,8 @@ it('connectors_row_only_with_its_href', () => {
   expect(boxes(without, fixed)).toEqual(boxes(withConnectors, fixed));
   const rowsWithout = boxes(without, '.cd-sidebar__nav > a');
   const rowsWith = boxes(withConnectors, '.cd-sidebar__nav > a');
-  expect(rowsWithout.slice(0, 5)).toEqual(rowsWith.slice(0, 5));
-  expect(rowsWithout.slice(5)).toEqual(rowsWith.slice(5, 9));
+  expect(rowsWithout.slice(0, 4)).toEqual(rowsWith.slice(0, 4));
+  expect(rowsWithout.slice(4)).toEqual(rowsWith.slice(4, 9));
   const tops = rowsWithout.map((box) => box[1] ?? 0);
   expect(tops.slice(1).map((top, index) => top - (tops[index] ?? 0))).toEqual([38, 38, 38, 38, 38, 38, 38, 38]);
 
