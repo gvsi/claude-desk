@@ -5,7 +5,7 @@
  * a way back to the list. The list is polled.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useId } from 'react';
+import { useId, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
 import { request } from '../../api/http.ts';
@@ -68,6 +68,17 @@ export function ConversationsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const titleId = useId();
+  const listRef = useRef<HTMLElement>(null);
+  const previousSession = useRef(sessionId);
+  useLayoutEffect(() => {
+    const previous = previousSession.current;
+    previousSession.current = sessionId;
+    if (sessionId !== undefined || previous === undefined || !window.matchMedia('(max-width: 1023.98px)').matches) return;
+    // The phone list kept its place while the chat had the page. Both ways back return to its row.
+    const href = conversationPath(deskId, previous);
+    const row = [...(listRef.current?.querySelectorAll<HTMLAnchorElement>('a[href]') ?? [])].find((link) => link.getAttribute('href') === href);
+    row?.focus();
+  }, [sessionId, deskId]);
   // The list's title names the tab, with a conversation open beside it or on its own too.
   useDocumentTitle(inApp(TITLE));
 
@@ -133,7 +144,7 @@ export function ConversationsPage() {
       className={`cd-conversations${sessionId === undefined ? '' : ' cd-conversations--open'}`}
       onClick={followInAppLinks(navigate)}
     >
-      <nav className="cd-conversations__list" aria-labelledby={titleId}>
+      <nav ref={listRef} className="cd-conversations__list" aria-labelledby={titleId}>
         <h1 id={titleId} className="cd-conversations__title cd-type-page-title">
           {TITLE}
         </h1>

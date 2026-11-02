@@ -5,7 +5,7 @@
  * back or resume, whisper to Claude, or write to the visitor in their own words. Polled while open.
  */
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useId, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -198,6 +198,16 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
   // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
   // way the pane ends up draws inside the one region, so it stays mounted as they change.
   const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
+  const opened = useRef(false);
+  useLayoutEffect(() => {
+    if (loading || opened.current) return;
+    opened.current = true;
+    // On a phone the focused list row steps aside. Announce the chat once it is read, unless
+    // the owner has already moved on to another control while it was opening.
+    if (!window.matchMedia('(max-width: 1023.98px)').matches) return;
+    const active = document.activeElement;
+    if (active === null || active === document.body || active.closest('.cd-conversations__list')) nameRef.current?.focus();
+  }, [loading]);
   const pane = (content: ReactNode) => (
     <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
       {content}
