@@ -1618,7 +1618,7 @@ describe('OwnerLayout', () => {
     // Safety's record. Each page is measured once every read on it is in, so nothing loads in above
     // a control, or below it, while the column is being scrolled. The built-in agent's charge over
     // its signed limit is refused first, so Safety's count of refused requests loads in above the
-    // record too. From 1280 px Safety fits the window, so its column doesn't scroll there and
+    // record too. At the desktop size Safety fits the window, so its column doesn't scroll there and
     // nothing can pass under the bar: focus coming back is checked where the controls are.
     const refused = () => [...mockStore.world.decisions.values()].filter((d) => d.decision.state === 'refused').length;
     await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });

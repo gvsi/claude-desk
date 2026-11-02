@@ -262,6 +262,9 @@ function recordRow(screen: RenderResult, seq: number) {
  */
 const NOW = new Date('2026-10-30T17:30:00Z');
 
+/** 9:00 am that Friday, in Los Angeles: an attempt this week's count takes in. */
+const THIS_MORNING = '2026-10-30T16:00:00.000000Z';
+
 beforeEach(() => {
   localStorage.clear();
   // Only `Date` is faked, and it runs on from NOW, so the page's polls and waits keep real time.
@@ -620,6 +623,50 @@ describe('Safety', () => {
     expectPageFits(main);
     expect(column.scrollHeight).toBeGreaterThan(column.clientHeight);
     expect(box(column).bottom).toBeLessThanOrEqual(box(main).bottom);
+  });
+
+  it('a_long_reason_keeps_its_meter_inside_the_card_at_1280x600', async () => {
+    // A short laptop window and a reason long enough that "See how it was stopped" opens its meter
+    // below the card's visible part. The meter's words only a screen reader reads sit out of the
+    // flow; they stay inside the card, which scrolls, rather than stretching the page under it.
+    const reason = Array.from({ length: 12 }, () => REFUND_REASON).join(' ');
+    injectLedger(ledgerPage(threeEntries()));
+    // Refused this week, so the count heads the page rather than the empty state.
+    injectAttempts([attempt({ reason_plain: reason, created_at: THIS_MORNING })]);
+    await stoppedThisWeek(1);
+    const { screen } = await renderRoute(`${SAFETY}/dec-refund`, { viewport: { width: 1280, height: 600 } });
+    const open = detail(screen);
+    await expect.element(open.getByText(reason, { exact: true })).toBeVisible();
+    await open.getByRole('button', { name: 'See how it was stopped' }).click();
+    await expect.element(open.getByText('Stopped by: Action checkpoint', { exact: true })).toBeInTheDocument();
+    const card = open.element();
+    card.scrollTop = 0;
+    await frames();
+    const meter = open.getByText('Stopped by: Action checkpoint', { exact: true }).element();
+    expect(box(meter).top).toBeGreaterThan(box(card).bottom);
+    const main = card.closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expectPageFits(main);
+    expect(card.scrollHeight).toBeGreaterThan(card.clientHeight);
+  });
+
+  it('a_very_short_window_keeps_the_card_six_controls_tall_and_scrolls_the_page', async () => {
+    // Under about 530 px of window the list and the open entry would show little of either, so they
+    // keep six controls' height and the page scrolls instead.
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts([attempt({ created_at: THIS_MORNING })]);
+    await stoppedThisWeek(1);
+    const { screen } = await renderRoute(`${SAFETY}/dec-refund`, { viewport: { width: 1280, height: 480 } });
+    const open = detail(screen);
+    await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeInTheDocument();
+    await frames();
+    const control = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--size-control'));
+    expect(control).toBeGreaterThan(0);
+    expect(box(open.element()).height).toBeGreaterThanOrEqual(6 * control - 1);
+    const main = open.element().closest<HTMLElement>('.cd-app-shell__main');
+    if (!main) throw new Error('the owner app scrolls its main area');
+    expect(main.scrollHeight).toBeGreaterThan(main.clientHeight);
+    expectNoWindowScroll();
   });
 
   it('an_open_entry_on_a_phone_scrolls_with_the_page', async () => {
