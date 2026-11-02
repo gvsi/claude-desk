@@ -2007,6 +2007,40 @@ describe('public chat page', () => {
     expect(requests('sendMessage').at(-1)?.body).toEqual({ text: expect.stringContaining('Mike Turner') });
   });
 
+  it('a_stream_lost_while_claude_writes_frees_send_once_the_chat_gives_up_on_it', async () => {
+    const native = window.EventSource;
+    let source: EventSource | undefined;
+    window.EventSource = class extends native {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        source = this;
+      }
+    };
+    onTestFinished(() => {
+      window.EventSource = native;
+    });
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const send = () => screen.getByRole('button', { name: 'Send', exact: true }).element() as HTMLButtonElement;
+    await chatBox(screen).fill('Are you still there?');
+    // Claude starts writing: Send waits for the reply.
+    mockStore.emit(RIVERA.slug, { type: 'writing' });
+    await expect.poll(() => send().disabled).toBe(true);
+
+    // The stream drops, and every reopen fails until the chat gives up on it. With no way to hear the
+    // reply, Send no longer waits for it.
+    useTimers();
+    mockStore.inject({ route: 'events', status: 503, times: 3 });
+    source?.close();
+    source?.dispatchEvent(new Event('error'));
+    for (const wait of [2_000, 5_000, 10_000]) {
+      await settle();
+      await vi.advanceTimersByTimeAsync(wait + MARGIN_MS);
+    }
+    await until(() => expect(screen.getByRole('alert').getByText(UNREACHABLE_COPY.en, { exact: true }).query()).not.toBeNull());
+    expect(send().disabled).toBe(false);
+  });
+
   it('a_reply_from_history_shows_whole_with_its_card_and_receipt_at_once', async () => {
     const first = await renderRoute(PAGE);
     await ready(first.screen);

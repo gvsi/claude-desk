@@ -881,7 +881,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
     state.connection === 'open' &&
     waitedOn?.kind === 'visitor' &&
     waitedOn.status === 'sent';
-  const sendHeld = ready && (replyOnItsWay || state.writing || replyComingIn);
+  // While the stream is down, reconnecting or given up, no reply can be heard: nothing waits for one.
+  const sendHeld = ready && (replyOnItsWay || (state.writing && state.connection === 'open') || replyComingIn);
   // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
   // so it stays with the request however far the chat goes on. One cancel is out at a time: while
   // it is, the others wait, their words shown and their clicks ignored, so none goes unanswered.
