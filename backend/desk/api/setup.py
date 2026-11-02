@@ -413,7 +413,7 @@ QUESTIONS_DONE = "That's everything I need to ask. Next, the tools your Desk can
 # (`offers_not_set_up`).
 OFFERS_NOT_SET_UP = "Offers you mentioned aren't set up yet:"
 OFFERS_NOT_SET_UP_WHY = ("Your Desk won't offer them to customers, since a discount reaches customers only through "
-                         "your rules.")
+                         "your rules. You can add one in Rules.")
 PAYMENT_LINE = ("I'll ask you before any payment. You can set an amount I handle on my own, "
                 "now or later in Rules.")
 AMOUNT_FIRST_LINE = "I need the amount first. Add it on the card above."
