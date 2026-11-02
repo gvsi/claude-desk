@@ -83,6 +83,18 @@ function log(screen: RenderResult) {
   return screen.getByRole('log');
 }
 
+/**
+ * The scroll region around the conversation's transcript. When the first read is slow enough for
+ * the pane's skeleton to show, its shapes fade over the conversation for a moment after it lands,
+ * and their own region of this class comes first in the page until they go; so take the one that
+ * holds the log.
+ */
+function transcriptRegion(screen: RenderResult): Element {
+  const region = log(screen).element().closest('.cd-conversation__scroll');
+  if (!region) throw new Error('the transcript scrolls in its own region');
+  return region;
+}
+
 /** Makes `chat` longer than the window: `count` more messages from the visitor. Returns the last. */
 function lengthen(chat: SessionRecord, count = 30): string {
   let last = '';
@@ -221,6 +233,14 @@ afterEach(() => {
 
 describe('Conversations', () => {
   it.each([[1512, 982], [390, 844]])('day_rules_and_visitor_previews_fit_at_%sx%s', async (width, height) => {
+    // The rows below are a day apart from a fixed afternoon on the Desk's clock, so the list's day
+    // groups never depend on when the test runs (near midnight, or on a 25-hour day as clocks go back).
+    // Only Date is faked: the page's timers and polling stay real.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const summaries = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
     const base = summaries[0]!;
     const longName = DANA.repeat(16);
@@ -285,6 +305,83 @@ describe('Conversations', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each([[1440, 900], [390, 844]])('agent_rows_say_what_the_agent_did_at_%sx%s', async (width, height) => {
+    const summaries = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const base = summaries[0]!;
+    const now = Date.now();
+    const at = (ago: number) => new Date(now - ago).toISOString();
+    const facts = { latest_outcome: null, latest_outcome_starts_at: null, latest_outcome_cents: null, latest_outcome_cause: null };
+    const agent: ConversationSummary = {
+      ...base, ...facts, kind: 'agent', display_name: "Alex Kim's assistant", verified: false, mode: 'ai', owner_preview: false,
+      latest_visitor_text: 'These are the agent’s own words.', outcome_counts: {}, replayed: false,
+    };
+    const rows: ConversationSummary[] = [
+      { ...agent, session_id: 'agent-booked', last_activity: at(0), latest_outcome: 'visit_booked', latest_outcome_starts_at: '2026-11-02T18:00:00Z' },
+      { ...agent, session_id: 'agent-paid', last_activity: at(1000), latest_outcome: 'deposit_paid', latest_outcome_cents: 2000 },
+      { ...agent, session_id: 'agent-limit', last_activity: at(2000), latest_outcome: 'turned_down', latest_outcome_cause: 'agent_limit' },
+      { ...agent, session_id: 'agent-refused', last_activity: at(3000), latest_outcome: 'turned_down', latest_outcome_cause: 'owner_rule' },
+      { ...agent, session_id: 'agent-quiet', last_activity: at(4000) },
+      { ...agent, session_id: 'agent-booking-missing', last_activity: at(4100), latest_outcome: 'visit_booked' },
+      { ...agent, session_id: 'agent-payment-missing', last_activity: at(4200), latest_outcome: 'deposit_paid' },
+      { ...base, ...facts, session_id: 'visitor', kind: 'visitor', display_name: null, verified: false, owner_preview: false, replayed: false,
+        latest_visitor_text: 'Tuesday at 2 works.', outcome_counts: {}, last_activity: at(5000) },
+    ];
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: /^Alex Kim's assistant/ }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const row = (id: string) => document.querySelector<HTMLAnchorElement>(`.cd-conversations__items a[href="${conversation(id)}"]`)!;
+    const lineOf = (id: string) => row(id).querySelector<HTMLElement>('.cd-conversation-item__quote');
+
+    // What each agent did, from its outcome and the facts behind it, on the business's clock.
+    expect(lineOf('agent-booked')?.textContent).toBe('Booked Mon, Nov 2, 10:00 am.');
+    const bookedLine = lineOf('agent-booked')!;
+    expect(bookedLine.scrollWidth).toBeLessThanOrEqual(bookedLine.clientWidth);
+    expect(lineOf('agent-paid')?.textContent).toBe('Paid $20 up front.');
+    expect(lineOf('agent-limit')?.textContent).toBe('Asked to pay more than its limit, and was turned down.');
+    expect(lineOf('agent-refused')?.textContent).toBe('A request was turned down.');
+    // An agent without an outcome or its required fact has no line, even if it wrote a message.
+    for (const id of ['agent-quiet', 'agent-booking-missing', 'agent-payment-missing']) {
+      expect(lineOf(id)).toBeNull();
+    }
+
+    // The app's words, unquoted, drawn where and as a visitor's quote is, above the status line.
+    const visitor = lineOf('visitor')!;
+    expect(visitor.textContent).toBe('“Tuesday at 2 works.”');
+    expect(visitor.dataset.copy).toBe('user');
+    for (const id of ['agent-booked', 'agent-paid', 'agent-limit', 'agent-refused']) {
+      const line = lineOf(id)!;
+      await expect.element(line).toBeVisible();
+      expect(line.dataset.copy).toBeUndefined();
+      expect(line.className).toBe(visitor.className);
+      const style = getComputedStyle(line);
+      expect(style.fontSize).toBe('13px');
+      expect(style.fontStyle).toBe('normal');
+      expect(style.color).toBe(tokenColor('--text-secondary'));
+      expect(style.whiteSpace).toBe('nowrap');
+      expect(style.textOverflow).toBe('ellipsis');
+      expect(line.getBoundingClientRect().height).toBe(18);
+      expect(line.getBoundingClientRect().left).toBe(visitor.getBoundingClientRect().left);
+      const status = row(id).querySelector('.cd-conversation-item__status')!;
+      expect(status.textContent).toContain('Agent');
+      expect(status.getBoundingClientRect().top).toBeGreaterThanOrEqual(line.getBoundingClientRect().bottom);
+      expect(row(id).scrollWidth).toBeLessThanOrEqual(row(id).clientWidth);
+    }
+    expectNoHorizontalScroll();
+  });
+
+  it('agent_rows_from_its_runs_say_what_it_did', async () => {
+    const booked = await bookTheEarliestVisit();
+    const paid = await bookTheEarliestVisit('quote_and_deposit');
+    const refused = await bookTheEarliestVisit('push_the_limit');
+    const { screen } = await renderRoute(LIST);
+    const lineOf = (id: string) => document.querySelector(`a[href="${conversation(id)}"] .cd-conversation-item__quote`)?.textContent;
+    await expect.poll(() => lineOf(booked)).toBe('Booked Tue, Nov 3, 2:00 pm.');
+    expect(lineOf(paid)).toBe('Paid $20 up front.');
+    expect(lineOf(refused)).toBe('Asked to pay more than its limit, and was turned down.');
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
   it.each([[1440, 900], [1800, 1009], [390, 844]])('open_conversation_centres_its_reading_column_at_%sx%s', async (width, height) => {
     const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width, height } });
     const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });
@@ -292,6 +389,7 @@ describe('Conversations', () => {
     const chat = log(screen);
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
     await expect.element(chat.getByText(first ?? '', { exact: true })).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
     const pane = document.querySelector<HTMLElement>('.cd-conversations__open');
     if (!pane) throw new Error('the conversation opens in its pane');
     const style = getComputedStyle(pane);
@@ -314,7 +412,7 @@ describe('Conversations', () => {
     }
     fills(transcript, 'transcript');
     fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
-    const scroll = document.querySelector('.cd-conversation__scroll')!.getBoundingClientRect();
+    const scroll = transcriptRegion(screen).getBoundingClientRect();
     expect(Math.abs(scroll.right - paneRect.right), 'scroll bar stays at the pane edge').toBeLessThanOrEqual(1);
     expect(inner.left - scroll.left, 'focus rings have side clearance').toBeGreaterThanOrEqual(16);
     // Her bubble ends at the transcript's right edge, at most 85% of its width.
@@ -345,7 +443,7 @@ describe('Conversations', () => {
     const last = lengthen(chat);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     // The long chat overflows its region first: until it has, the region's end reads as its latest
     // and a place 300 px down can't be set.
     await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
@@ -370,14 +468,20 @@ describe('Conversations', () => {
     if (place === 'focus') expect(document.activeElement).toBe(focused);
   });
 
-  it('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals', async () => {
+  it.each(['immediate', 'held'] as const)('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals_after_%s_first_read', async (firstRead) => {
     // The chat opens once Needs you's first read is in, since it draws the requests held in it, so a
     // callback comes late on a later read: she is still where the chat opened, at its latest.
     const chat = named(DANA_LIVE, DANA);
     const last = lengthen(chat);
+    const read = firstRead === 'held' ? holdReads(ROUTES.conversation.path.replace('{session_id}', DANA_LIVE)) : null;
     const { screen } = await renderRoute(conversation(DANA_LIVE));
+    if (read) {
+      // Force the slow opening: the skeleton will fade over the real transcript after release.
+      await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+      read.release();
+    }
     await expect.element(log(screen).getByText(last, { exact: true })).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     const endGap = () => region.scrollHeight - region.clientHeight - region.scrollTop;
     // As above, the long chat overflows its region first; until then its end reads as its latest at 0.
     await expect.poll(() => region.scrollHeight - region.clientHeight).toBeGreaterThan(300);
@@ -420,7 +524,7 @@ describe('Conversations', () => {
     await row.click();
     const card = screen.getByRole('article', { name: 'Wants you', exact: true });
     await expect.element(card).toBeInTheDocument();
-    const region = screen.container.querySelector('.cd-conversation__scroll')!;
+    const region = transcriptRegion(screen);
     await expect.poll(() => card.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(region.getBoundingClientRect().top);
     expect(card.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(region.getBoundingClientRect().bottom);
     expect(region.scrollHeight).toBeGreaterThan(region.clientHeight);
@@ -592,7 +696,8 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
     await card.getByRole('button', { name: 'Mark done' }).click();
     await expect.element(card).not.toBeInTheDocument();
-    await expect.element(row.getByText('Visitor', { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Mike called back', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
     const heading = screen.getByRole('heading', { level: 2, name: DANA });
     await expect.poll(() => document.activeElement).toBe(heading.element());
     expect(getComputedStyle(heading.element()).outlineStyle).toBe('none');
@@ -659,6 +764,16 @@ describe('Conversations', () => {
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /^Agent/ });
     await expect.element(row.getByText('Agent · Visit booked', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-status-dot--info')).not.toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('seeded_visitor_rows_show_the_booking_with_its_handled_dot', async () => {
+    named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(LIST);
+    const row = screen.getByRole('navigation', { name: 'Conversations' })
+      .getByRole('link', { name: new RegExp(DANA) });
+    await expect.element(row.getByText('Booked', { exact: true })).toBeVisible();
+    expect(row.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
     await expectScreenBasics(screen.container, { owner: true });
   });
 
@@ -793,17 +908,23 @@ describe('Conversations', () => {
     // it again in a pill, as the list leaves out its status line. The signed pill stays.
     const booked = await bookTheEarliestVisit();
     session(booked).displayName = null;
+    const firstRead = holdReads(ROUTES.conversation.path.replace('{session_id}', booked));
     const { screen } = await renderRoute(conversation(booked));
+    await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+    firstRead.release();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Agent', exact: true })).toBeVisible();
-    const head = screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    const head = screen.getByRole('heading', { level: 2, name: 'Agent', exact: true }).element().closest('.cd-conversation__head')!;
     expect([...head.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Signed']);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Named, the pill says what the name doesn't.
     session(booked).displayName = rivera.conversations.alexAgent.name;
+    const namedRead = holdReads(ROUTES.conversation.path.replace('{session_id}', booked));
     const withName = await renderRoute(conversation(booked));
+    await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+    namedRead.release();
     await expect.element(withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
-    const namedHead = withName.screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    const namedHead = withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name, exact: true }).element().closest('.cd-conversation__head')!;
     expect([...namedHead.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Agent', 'Signed']);
   });
 
@@ -1195,7 +1316,16 @@ describe('Conversations', () => {
     (lastReceipt.element() as HTMLElement).focus({ preventScroll: true });
     const column = scrollerOf(log(screen).element());
     expect(column.contains(head.element())).toBe(true);
-    const on = Math.round(lastReceipt.element().getBoundingClientRect().top);
+    // Take her place once the opening has settled: the head's lines can still reflow after the
+    // list's read names Dana, and the open-at-end scroll follows them.
+    let seen = Number.NaN;
+    await expect.poll(() => {
+      const now = Math.round(lastReceipt.element().getBoundingClientRect().top);
+      const settled = now === seen;
+      seen = now;
+      return settled;
+    }, { interval: 100 }).toBe(true);
+    const on = seen;
 
     // A message arrives while focus is in the transcript: nothing moves under her. The held cards
     // now quote her two latest lines, so the one above her can change height; the receipt she's on
@@ -1205,7 +1335,7 @@ describe('Conversations', () => {
     await expect.poll(() => heldCard(screen, REFUND_REASON).first().element().textContent).toContain('Are you still there?');
     await readsMore('conversation', 2);
     expect(column.contains(lastReceipt.element())).toBe(true);
-    expect(Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
+    await expect.poll(() => Math.round(lastReceipt.element().getBoundingClientRect().top)).toBe(on);
     expect(document.activeElement).toBe(lastReceipt.element());
   });
 

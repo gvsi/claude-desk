@@ -92,10 +92,10 @@ export interface VisitorChatSnapshot {
   /**
    * The owner is in the chat (a take-over), which the chat's head says in the AI disclosure's place:
    * only from the kernel's session mode (`session.mode === 'owner'`, `ownerInChatNow`). Only the
-   * read the chat opens with (when the stored conversation doesn't say she is out) and the stream's
-   * `owner_joined` put the chat in her hands; her leave, Claude writing and any later answer can
-   * only take it out of them. It shows only while the chat is ready, follows the stream, and knows
-   * the mode since it last lost track of it. The page passes it to PublicShell as it is.
+   * opening read, the stream's `owner_joined` and guarded confirming reads put the chat in her hands;
+   * her leave, Claude writing and other later answers can only take it out of them. It shows only
+   * while the chat is ready, follows the stream, and knows the mode since it last lost track of it.
+   * The page passes it to PublicShell as it is.
    */
   ownerInChat: boolean;
 }
@@ -103,7 +103,7 @@ export interface VisitorChatSnapshot {
 export interface VisitorChatActions {
   send: (text: string) => void;
   /** Sends a failed message again ("Try again"). */
-  resend: (id: string) => void;
+  resend: (id: string) => Promise<void>;
   /** Loads the Desk again, or reopens a stream the chat gave up on. */
   retry: () => void;
   /** Starts a new chat after this one ended. */
@@ -242,14 +242,16 @@ class VisitorChat {
    * reopened. A join it replays while catching up doesn't count: a hand-back may still be on its way.
    */
   private modeKnown = false;
-  /** Bumped each time the chat loses track of the stream (a drop, the page going away), so a read sent before then confirms nothing. */
+  /** A cursorless verify answer lowered owner mode; confirm it once the stream can be followed. */
+  private verifyModeUnconfirmed = false;
+  /** Bumped on a stream gap or a cursorless mode downgrade, so a read sent before then confirms nothing. */
   private tracked = 0;
   /** The stream is open again since the chat last lost track of it: a read sent now can confirm the mode. */
   private following = false;
-  /** The `tracked` count the last confirming read was sent for. */
-  private confirming = -1;
-  /** The mode cursor that read was sent to confirm; a later replayed join needs another read. */
-  private confirmingAt = -1;
+  /** The in-flight read's tracking count and mode cursor; a later replayed join needs another read. */
+  private confirming: { since: number; at: number } | null = null;
+  private confirmTimer: ReturnType<typeof setTimeout> | null = null;
+  private confirmRetries = 0;
 
   constructor(
     private readonly slug: string,
@@ -273,6 +275,7 @@ class VisitorChat {
       ...next,
       ownerInChat: ownerInChatNow({ session: next.session, state: next.state, ready: next.status === 'ready', modeKnown: this.modeKnown }),
     };
+    if (!this.needsModeConfirmation()) this.clearConfirmRetry();
     for (const listener of [...this.listeners]) listener();
   }
 
@@ -282,6 +285,7 @@ class VisitorChat {
    * says otherwise. The caller sets the state next, which says so.
    */
   private loseTrack(): void {
+    this.clearConfirmRetry();
     this.tracked += 1;
     this.modeKnown = false;
     this.following = false;
@@ -296,6 +300,7 @@ class VisitorChat {
   private openedSession(transcript: VisitorTranscript): SessionState {
     this.observeSession(transcript.state);
     this.modeKnown = true;
+    this.verifyModeUnconfirmed = false;
     this.modeAt = transcript.last_seq;
     return transcript.state;
   }
@@ -369,6 +374,7 @@ class VisitorChat {
   }
 
   private stop(): void {
+    this.clearConfirmRetry();
     this.stopStream?.();
     this.stopStream = null;
     if (this.reopenTimer !== null) clearTimeout(this.reopenTimer);
@@ -491,13 +497,17 @@ class VisitorChat {
     // Older than a read the chat took the mode from: that read already counts it.
     if (mode === null || session === null || seq <= this.modeAt) return;
     this.modeAt = seq;
+    this.verifyModeUnconfirmed = false;
     // A join the chat follows live confirms her. One it replays while catching up may be older than
     // a hand-back still on its way, so only a read of the session sent now can confirm it.
     const confirm = ev.type === 'owner_joined' && state.catchingUp;
     if (confirm) this.modeKnown = false;
     if (ev.type === 'owner_joined' && !state.catchingUp) this.modeKnown = true;
     this.set({ session: { ...session, mode } });
-    if (confirm) void this.confirmMode(this.epoch);
+    if (confirm) {
+      this.clearConfirmRetry();
+      void this.confirmMode(this.epoch);
+    }
   }
 
   private clearOwnerTypingTimer(): void {
@@ -531,7 +541,7 @@ class VisitorChat {
     // Back on the stream with the chat in the owner's hands, as it last knew: the stream's silence
     // doesn't say she is still there, and the stream has no word for "that was everything you
     // missed", so the chat reads the session to confirm it, or to learn she has left.
-    if (!this.modeKnown && this.snapshot.session?.mode === 'owner') void this.confirmMode(epoch);
+    if (this.needsModeConfirmation()) void this.confirmMode(epoch);
     this.reopens = 0;
     // The server answers again: a good moment to settle any message whose answer was lost.
     this.checkRetries = 0;
@@ -539,25 +549,56 @@ class VisitorChat {
   }
 
   /**
-   * Reads the session to confirm the owner's mode, once the stream has reopened after the chat lost
-   * track of it, and again if a replayed join advances beyond that read. Until it answers (or if it never does), the head shows the
+   * Reads the session to confirm the owner's mode after a cursorless verify downgrade or a reopened
+   * stream, and again if a replayed join advances beyond that read. A failed or stale read retries on
+   * the stream's backoff while the owner remains unconfirmed. Until it answers, the head shows the
    * AI disclosure. Sent after the stream reopened, with nothing lost since and no older than what the
    * stream has said of the mode, it is the session as it stands, as the opening read is.
    */
   private async confirmMode(epoch: number): Promise<void> {
-    if (this.confirming === this.tracked && this.confirmingAt >= this.modeAt) return;
-    this.confirming = this.tracked;
-    this.confirmingAt = this.modeAt;
+    if (!this.following || this.users === 0 || this.snapshot.state.connection !== 'open' || this.snapshot.state.error === 'session') return;
+    if (this.confirming?.since === this.tracked && this.confirming.at >= this.modeAt) return;
+    if (this.confirmTimer !== null) clearTimeout(this.confirmTimer);
+    this.confirmTimer = null;
     const since = this.tracked;
+    const attempt = { since, at: this.modeAt };
+    this.confirming = attempt;
     try {
       const transcript = await request('visitorSession', { params: { slug: this.slug } });
       if (epoch !== this.epoch) return;
       this.observeSession(transcript.state);
       if (since === this.tracked && transcript.last_seq >= this.modeAt && transcript.state.generation >= this.sessionGeneration) this.set({ session: this.openedSession(transcript) });
       else this.set({ session: this.laterRead(transcript, since, false) });
-    } catch {
+    } catch (err) {
       // Unanswered: nothing is confirmed, and the head keeps the AI disclosure.
+      if (epoch === this.epoch && sessionGone(err)) this.end();
+    } finally {
+      // An older read must not release or schedule a retry for the newer one.
+      if (this.confirming === attempt) {
+        this.confirming = null;
+        if (epoch === this.epoch && since === this.tracked && this.needsModeConfirmation()) {
+          const delay = REOPEN_DELAYS_MS[this.confirmRetries];
+          if (delay === undefined) return;
+          this.confirmRetries += 1;
+          this.confirmTimer = setTimeout(() => {
+            this.confirmTimer = null;
+            if (epoch === this.epoch && since === this.tracked && this.needsModeConfirmation()) void this.confirmMode(epoch);
+          }, delay);
+        }
+      }
     }
+  }
+
+  private needsModeConfirmation(): boolean {
+    return (this.verifyModeUnconfirmed || (!this.modeKnown && this.snapshot.session?.mode === 'owner'))
+      && this.following && this.users > 0
+      && this.snapshot.state.connection === 'open' && this.snapshot.state.error !== 'session';
+  }
+
+  private clearConfirmRetry(): void {
+    if (this.confirmTimer !== null) clearTimeout(this.confirmTimer);
+    this.confirmTimer = null;
+    this.confirmRetries = 0;
   }
 
   /**
@@ -617,6 +658,7 @@ class VisitorChat {
     // The old session goes before the chat empties, so no state holds its mode beside an empty chat.
     this.loseTrack();
     this.modeAt = 0;
+    this.verifyModeUnconfirmed = false;
     this.set({ session: null, status: 'loading', cancelling: null, cancelFailed: null, verifyStatus: 'idle', paymentLinks: paymentLinkMemory() });
     this.dispatch({ type: 'reset' });
     this.loading = true;
@@ -642,11 +684,11 @@ class VisitorChat {
     if (this.snapshot.state.rows.some((row) => row.live === true)) this.dispatch({ type: 'shown' });
   };
 
-  readonly resend = (id: string): void => {
+  readonly resend = async (id: string): Promise<void> => {
     const row = this.snapshot.state.rows.find((r) => r.item.kind === 'visitor' && r.item.id === id && r.item.status === 'failed');
     if (row?.item.kind !== 'visitor' || this.snapshot.state.error === 'session') return;
     this.dispatch({ type: 'resent', id });
-    void this.post(id, row.item.text);
+    await this.post(id, row.item.text);
   };
 
   private async post(id: string, text: string): Promise<void> {
@@ -783,7 +825,17 @@ class VisitorChat {
       if (generation !== this.generation) return;
       this.observeSession(state);
       // The answer may have been taken before a hand-back the stream has shown since: it may lower the mode only.
+      const loweredOwner = state.verified && this.snapshot.session?.mode === 'owner' && state.mode !== 'owner';
+      if (loweredOwner) {
+        // With no cursor this answer may also predate a join. Invalidate older confirming reads,
+        // keep the AI disclosure, and let a fresh read establish which mode the kernel holds now.
+        this.tracked += 1;
+        this.modeKnown = false;
+        this.verifyModeUnconfirmed = true;
+        this.clearConfirmRetry();
+      }
       this.set(state.verified ? { verifyStatus: 'idle', session: this.laterSession(state, state.mode) } : { verifyStatus: 'failed' });
+      if (loweredOwner) void this.confirmMode(this.epoch);
     } catch (err) {
       if (generation !== this.generation) return;
       if (sessionGone(err)) {

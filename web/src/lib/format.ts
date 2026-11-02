@@ -127,6 +127,17 @@ export function formatDate(iso: string, timeZone: string): string {
   return `${MONTHS[local.month - 1] ?? ''} ${local.day}`;
 }
 
+/**
+ * A short day and time on the business's clock, as a booking's start reads in a list:
+ * "Mon, Nov 2, 10:00 am". A time that can't be read shows as nothing.
+ */
+export function formatDayAndTime(iso: string, timeZone: string): string {
+  const at = readDate(iso);
+  if (at === null) return '';
+  const local = localTime(at, timeZone);
+  return `${local.weekday.slice(0, 3)}, ${MONTHS[local.month - 1] ?? ''} ${local.day}, ${clock(local)}`;
+}
+
 /** Whole days from `at`'s local date to `now`'s, on the business's clock: 0 today, 1 yesterday. */
 function daysBefore(at: Date, now: Date, timeZone: string): number {
   const day = (t: LocalTime) => Date.UTC(t.year, t.month - 1, t.day);

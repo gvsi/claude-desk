@@ -5,11 +5,13 @@
  * with the public page always a new tab away and never opened on Today itself.
  */
 import { http, HttpResponse, type JsonBodyType } from 'msw';
+import type { RouteObject } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import { newIdempotencyKey, observeRequests } from '../api/http.ts';
+import { routes } from '../app/routes.tsx';
 import { proseBlock, rivera } from '../ds/fixtures/index.ts';
 import { settled } from '../ds/test/settled.ts';
 import { ROUTES, type RouteKey } from '../api/routes.ts';
@@ -24,7 +26,7 @@ import { RIVERA } from '../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { holdReads } from '../test/holdReads.ts';
-import { renderRoute, VIEWPORTS } from '../test/renderRoute.tsx';
+import { renderRoute, VIEWPORTS, type RenderedRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 import { pageNow, watchFor, watchPages } from '../test/watch.ts';
 import { FRESH_MS, READ_AHEAD_MS } from './useDesks.ts';
@@ -279,6 +281,250 @@ describe('Arrival', () => {
     // Past the read-ahead's 3 s cap, by when the page would have gone on to Today.
     await new Promise((resolve) => setTimeout(resolve, 3_500));
     expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('returning_owner_going_back_while_today_is_read_stays_back', async () => {
+    // Mike Turner opens the first visit's page from Turner Plumbing's public page, and goes Back while
+    // his Today is still read ahead. The read's answer comes before the public page has drawn: the
+    // router has moved on, but it draws a navigation in a transition, so the first visit's page is
+    // still on screen. It doesn't take him on to Today.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { routes: publicPage.routes });
+    const welcome = screen.getByRole('heading', { name: 'How can Turner Plumbing help?' });
+    await expect.element(welcome).toBeVisible();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await router.navigate('/');
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, still on screen').not.toBeNull();
+
+    const answered = nextAnswerTo('needsYou');
+    needsYou.release();
+    await answered.settled;
+    // The page's own code after the answer runs in the microtasks that follow it: a task later, it has.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, still on screen when the answer comes').not.toBeNull();
+    publicPage.draw();
+    await expect.element(welcome).toBeVisible();
+    expect(document.querySelector('.cd-today-preview')).toBeNull();
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('returning_owner_back_again_before_the_page_went_opens_today', async () => {
+    // Mike Turner goes Back while his Today is read ahead, and Forward again before Turner Plumbing's
+    // public page has drawn, so the first visit's page never went. It opens his Today, drawn.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { routes: publicPage.routes });
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await router.navigate('/');
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    const preview = document.querySelector('.cd-today-preview');
+    expect(preview).not.toBeNull();
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, never gone').toBe(preview);
+
+    needsYou.release();
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    // Back doesn't return to the first visit's page, which would only send him on again.
+    expect(router.state.historyAction).toBe('REPLACE');
+  });
+
+  it('returning_owner_back_again_after_today_was_read_away_opens_today', async () => {
+    // Mike Turner goes Back while his Today is read ahead, and its answer comes while he is away,
+    // before Turner Plumbing's public page has drawn: the first visit's page waits. Forward again,
+    // it carries on and opens his Today, drawn.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { routes: publicPage.routes });
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await router.navigate('/');
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+
+    const answered = nextAnswerTo('needsYou');
+    needsYou.release();
+    await answered.settled;
+    // Well past the page's own code after the answer, had it gone on while he was away.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(document.querySelector('.cd-today-preview'), 'the first visit’s page, still on screen').not.toBeNull();
+
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(router.state.historyAction).toBe('REPLACE');
+  });
+
+  it('going_back_while_the_new_copy_is_read_stays_back', async () => {
+    // Mike Turner opens the first visit's page from Turner Plumbing's public page, starts the demo,
+    // and goes Back while the new copy's Today is read ahead. The read's answer comes before the
+    // public page has drawn, with the first visit's page still on screen: its dialog doesn't leave
+    // onto Today, and nothing takes him there.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+    const welcome = screen.getByRole('heading', { name: 'How can Turner Plumbing help?' });
+    await expect.element(welcome).toBeVisible();
+    await router.navigate('/');
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(dialog.elements(), 'the first visit’s dialog, still on screen').toHaveLength(1);
+
+    const answered = nextAnswerTo('needsYou');
+    needsYou.release();
+    await answered.settled;
+    // Well after the dialog's exit would have ended, had it started to leave.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(handOff.steps()).toEqual(['open']);
+    publicPage.draw();
+    await expect.element(welcome).toBeVisible();
+    await expect.element(dialog).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('back_again_while_the_passcode_is_tried_opens_today', async () => {
+    // Mike Turner starts the demo, goes Back while the passcode is still being tried, and Forward
+    // again before Turner Plumbing's public page has drawn, so the first visit's page never went.
+    // The copy is made once he is back: the dialog leaves onto its Today, as it always does, and
+    // nothing asks him for the passcode again.
+    const publicPage = holdingRoutes('/d/:slug');
+    const { screen, router } = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    await router.navigate('/');
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    const copy = holdTheCopy();
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(copy.sent()).toBe(true));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe('/');
+    // Time for the page to ask for this browser's copy again, had it started over: with none made
+    // yet, the answer would be no copy.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    copy.release();
+    await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    expect(requests('copies')).toHaveLength(1);
+  });
+
+  it('back_again_after_the_copy_was_made_away_opens_it_as_the_passcode_does', async () => {
+    // Mike Turner's demo session ended after he saw Today, whose Demo inbox held a note the next
+    // copy's doesn't. He starts the demo again, goes Back while the passcode is tried, and the copy
+    // is made while he is away, before Turner Plumbing's public page has drawn: the page does
+    // nothing with it meanwhile. Forward again, it opens the copy as the passcode does, the old
+    // copy's inbox dropped and its Today read ahead, and the dialog leaves onto that Today, which
+    // never shows the old copy's inbox.
+    const publicPage = holdingRoutes('/d/:slug');
+    mockStore.world.inbox.push({
+      entry: { entry_id: 'inbox-left-behind', to: 'owner', kind: 'alert', body: 'A note in the copy that ended.', created_at: new Date().toISOString(), decision_id: null },
+      deskId: RIVERA.deskId,
+      sessionId: null,
+    });
+    const { screen, router } = await renderRoute(TODAY, { routes: publicPage.routes });
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 2 entries', exact: true })).toBeVisible();
+    await router.navigate(PUBLIC_PAGE);
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    // The session ends, and he opens the first visit's page again.
+    mockStore.reset('rivera', { signedIn: false });
+    await router.navigate('/');
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    // Whether the old copy's inbox, its count on the Demo inbox button, ever shows from now on.
+    const oldInbox = '.cd-owner-inbox [aria-label="2 entries"]';
+    let sawTheOldInbox = false;
+    const look = new MutationObserver(() => {
+      if (document.querySelector(oldInbox) !== null) sawTheOldInbox = true;
+    });
+    look.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label'] });
+    onTestFinished(() => look.disconnect());
+    const copy = holdTheCopy();
+    await startTheDemo(screen);
+    await vi.waitFor(() => expect(copy.sent()).toBe(true));
+    publicPage.hold();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(PUBLIC_PAGE);
+
+    const made = nextAnswerTo('copies');
+    copy.release();
+    await made.settled;
+    // Well past anything the page would do with the copy, had it carried on while he was away.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(handOff.steps()).toEqual(['open']);
+    expect(requests('desks')).toEqual([]);
+
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname, { timeout: 5_000 }).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Demo inbox 1 entry', exact: true })).toBeVisible();
+    expect(sawTheOldInbox, 'the old copy’s inbox, on the new copy’s Today').toBe(false);
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    expect(requests('copies')).toHaveLength(1);
+  });
+
+  it('going_back_as_the_dialog_leaves_stays_back', async () => {
+    // Mike Turner's new copy is read ahead and the dialog starts to leave onto its Today. He goes
+    // Back before it has closed, and it closes before Turner Plumbing's public page has drawn, with
+    // the first visit's page still on screen: closed, it doesn't take him to Today.
+    const { screen, router, publicPage, handOff } = await goBackAsTheDialogLeaves();
+    // Time for the page to go on to Today, had it.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed']);
+    publicPage.draw();
+    await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+  });
+
+  it('back_again_after_the_dialog_closed_away_opens_today', async () => {
+    // As above, Mike Turner goes Back as the dialog starts to leave, and it closes while he is away,
+    // before Turner Plumbing's public page has drawn. Forward again, the first visit's page, never
+    // gone, goes on to his new copy's Today.
+    const { screen, router, handOff } = await goBackAsTheDialogLeaves();
+    // Time for the page to go on to Today, had it gone on while he was away.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(router.state.location.pathname).toBe(PUBLIC_PAGE);
+    await router.navigate(1);
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+  });
+
+  it('returning_owner_in_strict_mode_reads_today_ahead_once', async () => {
+    // Under StrictMode, as in development, the page's effects run twice as it opens. The first run's
+    // read ahead stops with it, so Mike Turner's Today is read ahead once, and opens drawn.
+    const { screen, router } = await renderRoute('/', { strict: true, pollScale: 100 });
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    // Time for a second read ahead's reads to go out, had there been one.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const reads = (['me', 'desks', 'today', 'needsYou'] as const).map((key) => [key, requests(key).length]);
+    expect(Object.fromEntries(reads)).toEqual({ me: 1, desks: 1, today: 1, needsYou: 1 });
   });
 
   it('start_the_demo_reads_today_once', async () => {
@@ -849,6 +1095,56 @@ describe('The preview behind the intro dialog', () => {
     });
   }
 
+  it.each([
+    ['the copy answers', false],
+    ['the copy is made but its answer is lost, so the copy this browser has answers', true],
+  ])('preview_is_redrawn_from_when_the_copy_opened: %s', async (_case, lost) => {
+    // Only Date is faked: the page's timers and polling stay real. The page is drawn a minute before
+    // midnight on Friday, on the business's clock.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    vi.setSystemTime(new Date('2026-10-30T23:59:00-07:00'));
+    const { screen, router } = await renderRoute('/', { seed: { name: 'rivera', signedIn: false } });
+    const dialog = introDialog(screen);
+    await expect.element(dialog).toBeVisible();
+    const preview = () => document.querySelector('.cd-today-preview');
+    const asDrawn = timesIn(preview());
+    expect(asDrawn.days.at(-1)).toMatch(/^Fri: .* \(today\)$/);
+
+    // The passcode goes in 20 minutes later, after midnight, and the copy opens then: the mock made
+    // its copy as the test began, where the API makes one as the passcode goes in, so it is made
+    // again now. Today's read ahead is held, so the dialog stays up, busy, over the preview.
+    vi.setSystemTime(new Date('2026-10-31T00:19:00-07:00'));
+    mockStore.reset('rivera', { signedIn: false });
+    if (lost) mockStore.inject({ route: 'copies', status: 'network', afterCommit: true });
+    const today = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
+    const handOff = watchTheHandOff(dialog.element() as HTMLDialogElement);
+    const pages = watchPages();
+    await startTheDemo(screen);
+    await expect.poll(today.held).toBe(1);
+
+    // The preview is drawn again from when the copy opened: Saturday's, with what came after midnight on it.
+    await expect.poll(() => timesIn(preview()).days.at(-1)).toMatch(/^Sat: .* \(today\)$/);
+    const redrawn = timesIn(preview());
+    expect(redrawn.briefing).not.toEqual(asDrawn.briefing);
+    const redrawnLayout = layoutOf(preview() ?? document.body);
+
+    // Today reads the copy a moment later and opens, already drawn, onto the same times and days,
+    // every part where the preview drew it.
+    vi.setSystemTime(new Date('2026-10-31T00:19:02-07:00'));
+    today.release();
+    await expect.poll(() => router.state.location.pathname).toBe(TODAY);
+    await expect.element(heldCard(screen)).toBeVisible();
+    expect(timesIn(document.querySelector('.cd-today'))).toEqual(redrawn);
+    expect(handOff.steps()).toEqual(['open', 'leaving', 'closed', 'today']);
+    expect(pages()).toEqual(['preview', 'today']);
+    expect(misplaced(redrawnLayout, layoutOf(document.body))).toEqual([]);
+    // Since the copy was made again: only a lost answer asks for the copy this browser has.
+    expect(requests('me')).toHaveLength(lost ? 1 : 0);
+  });
+
   it('a_preview_that_throws_leaves_the_dialog_usable', async () => {
     // React reports the error on the console, as it should; only the page must not show it.
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -905,16 +1201,16 @@ describe('OwnerLayout', () => {
       'Today',
       'Conversations',
       'Customers',
-      'Knowledge',
       'Rules',
       'Safety',
       'Profile',
       'Share',
+      'Knowledge',
       'Settings',
     ]);
     const base = `/app/${RIVERA.deskId}`;
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['today', 'conversations', 'people', 'knowledge', 'rules', 'safety', 'profile', 'share', 'settings'].map((page) => `${base}/${page}`),
+      ['today', 'conversations', 'people', 'rules', 'safety', 'profile', 'share', 'knowledge', 'settings'].map((page) => `${base}/${page}`),
     );
     await expect.element(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
 
@@ -2177,7 +2473,8 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__check')).not.toBeNull();
     await expect.element(thingsToTry(screen).getByText('2 of 4 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was refused and why.", { exact: true })).toBeVisible();
+    // Safety lists what was stopped, not every request Claude declines in its own words.
+    await expect.element(row.getByText("Ask for a discount, another customer's address or Mike's home number. Safety shows what was stopped and why.", { exact: true })).toBeVisible();
     expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
     expect(row.getByRole('button').elements()).toHaveLength(0);
     // Its words don't say it's done, so the Done pill is read out.
@@ -2624,6 +2921,21 @@ function layoutOf(root: ParentNode): Record<string, Placed> {
   return out;
 }
 
+/**
+ * The times and days Today draws under `root`: each held request's wait, each briefing row's time,
+ * Live now's clock times, and each of the last 7 days by name, today's marked.
+ */
+function timesIn(root: Element | null): { waiting: string[]; briefing: string[]; live: string[]; days: string[] } {
+  const all = (selector: string) => [...(root?.querySelectorAll(selector) ?? [])];
+  const texts = (selector: string) => all(selector).map((el) => el.textContent.trim());
+  return {
+    waiting: texts('.cd-approval-card__waiting'),
+    briefing: texts('.cd-briefing-row__when'),
+    live: texts('.cd-live .cd-conversation-item__time'),
+    days: all('.cd-week__day').map((day) => `${day.querySelector('.cd-sr-only')?.textContent ?? ''}${day.getAttribute('aria-current') === 'date' ? ' (today)' : ''}`),
+  };
+}
+
 /** Every measure in `after` more than 2 px from where `before` put it, as a line each. */
 function misplaced(before: Record<string, Placed>, after: Record<string, Placed> | null): string[] {
   if (after === null) return ['Today never drew'];
@@ -2729,6 +3041,105 @@ function holdTheAnswerTo(key: RouteKey): { sent: () => boolean; release: () => v
     }),
   );
   return { sent: () => sent, release };
+}
+
+/**
+ * The next passcode's request, held before it reaches the mock, so no copy is made until
+ * `release()`, or the test's end, lets it through. `sent()` says whether it came.
+ */
+function holdTheCopy(): { sent: () => boolean; release: () => void } {
+  let sent = false;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  onTestFinished(() => release());
+  worker.use(
+    http.post(ROUTES.copies.path, async () => {
+      if (sent) return undefined;
+      sent = true;
+      await released;
+      return undefined;
+    }),
+  );
+  return { sent: () => sent, release };
+}
+
+/**
+ * Mike Turner on the first visit's page, signed out, from Turner Plumbing's public page, which can
+ * wait before it draws: he starts the demo, and goes Back the moment the dialog starts to leave
+ * onto the new copy's Today, with the public page held from drawing. Settles once the dialog has
+ * closed on the first visit's page, still on screen, having checked the dialog was still open as
+ * the router left that page.
+ */
+async function goBackAsTheDialogLeaves(): Promise<
+  RenderedRoute & { publicPage: ReturnType<typeof holdingRoutes>; handOff: ReturnType<typeof watchTheHandOff> }
+> {
+  const publicPage = holdingRoutes('/d/:slug');
+  const rendered = await renderRoute(PUBLIC_PAGE, { seed: { name: 'rivera', signedIn: false }, routes: publicPage.routes });
+  const { screen, router } = rendered;
+  await expect.element(screen.getByRole('heading', { name: 'How can Turner Plumbing help?' })).toBeVisible();
+  await router.navigate('/');
+  const dialog = introDialog(screen);
+  await expect.element(dialog).toBeVisible();
+  const el = dialog.element() as HTMLDialogElement;
+  const handOff = watchTheHandOff(el);
+  const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  await startTheDemo(screen);
+  await vi.waitFor(() => expect(needsYou.held()).toBeGreaterThan(0));
+
+  // Back the moment the dialog starts to leave, well inside its exit; and whether it is still open
+  // as the router moves to the public page.
+  let wentBack = false;
+  let openAsTheRouterLeft: boolean | null = null;
+  const stop = router.subscribe((state) => {
+    if (openAsTheRouterLeft === null && state.location.pathname === PUBLIC_PAGE) openAsTheRouterLeft = el.open;
+  });
+  onTestFinished(stop);
+  const watch = new MutationObserver(() => {
+    if (wentBack || !el.classList.contains('cd-intro--leaving')) return;
+    wentBack = true;
+    publicPage.hold();
+    void router.navigate(-1);
+  });
+  watch.observe(el, { attributes: true, attributeFilter: ['class'] });
+  onTestFinished(() => watch.disconnect());
+  needsYou.release();
+  await expect.poll(() => handOff.steps()).toContain('closed');
+  expect(openAsTheRouterLeft, 'the dialog, still open as the router left the page').toBe(true);
+  return { ...rendered, publicPage, handOff };
+}
+
+/**
+ * The app's routes with the page at `path` able to wait before it draws: from `hold()` until
+ * `draw()`, a navigation to it isn't drawn, and the page before it stays on screen (the router draws
+ * a navigation in a transition). Before `hold()` it draws as the app has it.
+ */
+function holdingRoutes(path: string): { routes: RouteObject[]; hold: () => void; draw: () => void } {
+  let held: Promise<void> | null = null;
+  let draw = () => {};
+  onTestFinished(() => draw());
+  const swap = (route: RouteObject): RouteObject => {
+    if (route.path !== path) return route;
+    const own = route.element;
+    function HeldPage() {
+      if (held !== null) throw held;
+      return <>{own}</>;
+    }
+    return { ...route, element: <HeldPage /> };
+  };
+  return {
+    routes: routes.map(swap),
+    hold: () => {
+      held = new Promise<void>((resolve) => {
+        draw = () => {
+          held = null;
+          resolve();
+        };
+      });
+    },
+    draw: () => draw(),
+  };
 }
 
 /** Links to the owner's preview of Turner's public page. */

@@ -57,7 +57,7 @@ from desk.api.schemas import (
     operation_ids,
 )
 from desk.api.sse import OWNER, RUN_EVENTS, ControlRow, Wakeup, emit_inbox, event_stream
-from desk.api.store import MESSAGES, append_message, append_note_once, transcript
+from desk.api.store import MESSAGES, append_message, append_note_once, mode_for_message, transcript
 from desk.contracts import DemoAgentIssued, DemoInboxEntry, LedgerEvent, SessionState
 from desk.kernel_api import (
     CancelRequest,
@@ -204,10 +204,12 @@ async def send_message(body: MessageIn, request: Request,
     conn, caller = ctx.conn, ctx.caller
     await conn.commit()
     await state.runner.handle_controls(conn, caller)
-    n = await append_message(conn, ctx.ids, "visitor_text", text=body.text, wake=ctx.state.mode != "owner")
+    # The mode now, not the one the request was named in: a hand-back since then has already looked for this message.
+    mode = await mode_for_message(ctx.ro, ctx.ids.session_id, ctx.state.mode)
+    n = await append_message(conn, ctx.ids, "visitor_text", text=body.text, wake=mode != "owner")
     message_id = (await conn.execute(select(MESSAGES.c.message_id).where(MESSAGES.c.n == n))).scalar_one()
     await conn.commit()
-    if ctx.state.mode != "paused":                # the owner's English copy, if it needs one (none in a paused chat)
+    if mode != "paused":                          # the owner's English copy, if it needs one (none in a paused chat)
         await defer_translation(state.jobs, ctx.ids, message_id, limiter=state.limiter, ledger=ctx.ledger())
     state.runner.start(caller)
     return MessageAccepted(message_id=message_id)

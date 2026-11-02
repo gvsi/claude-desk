@@ -47,7 +47,7 @@ const meta = {
     canvas: 'N-Docs-Sidebar',
     canvasNote: [
       'The sidebar with the “About this prototype” group just above the Claude acts for you block, behind its hairline: “Capability prediction” and “Product proposal”, nav rows with the document icon.',
-      'The nav includes Knowledge after Customers and Connectors after Rules; the group and pinned foot keep their layout.',
+      'The nav includes Connectors after Rules and Knowledge just above Settings; the group and pinned foot keep their layout.',
       'The board marks no row current; here the owner is reading the capability prediction, so its row is the current page, on the selected fill, and the main nav marks none.',
       'The board draws the mark 1 px and every row’s icon 2 px higher than the other signed boards do; the sidebar keeps their placement, so all its icons, the group’s included, sit as on Today and the recorded-history boards.',
     ].join(' '),
@@ -89,22 +89,22 @@ export const Board: Story = {
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(within(nav).queryAllByRole('link', { current: 'page' })).toEqual([]);
 
-    // Knowledge follows Customers; Connectors is sixth, one row lower than its original board.
+    // Connectors is fifth, after Rules, and Knowledge sits just above Settings.
     const pages = within(nav).getAllByRole('link');
     await expect(pages.map((page) => page.querySelector('.cd-sidebar__label')?.textContent)).toEqual([
       'Today',
       'Conversations',
       'Customers',
-      'Knowledge',
       'Rules',
       'Connectors',
       'Safety',
       'Profile',
       'Share',
+      'Knowledge',
       'Settings',
     ]);
-    const connectors = pages[5] as HTMLElement;
-    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(308);
+    const connectors = pages[4] as HTMLElement;
+    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(270);
 
     // focus_order_is_logical: the business, the main nav, the about links, then Claude acts for you.
     await expectTabOrder(userEvent, [

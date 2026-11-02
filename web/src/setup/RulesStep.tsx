@@ -26,7 +26,7 @@ import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { moneyLimitLine, ruleWords } from '../owner/rules/ruleWords.ts';
 import { SETUP_COPY } from './copy.ts';
 import { useLanding } from './landing.ts';
-import { aroundBusiness, setupRulesQuery, useOpensAtTop } from './shared.ts';
+import { aroundBusiness, setupRulesQuery, useChangeSomething, useOpensAtTop } from './shared.ts';
 import { PublicLinesStep } from './PublicLinesStep.tsx';
 import { DraftRulesSkeleton, SituationsSkeleton } from './StepSkeletons.tsx';
 
@@ -113,6 +113,8 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
     refetchOnWindowFocus: false,
   });
   const situationRows = useRef<HTMLUListElement>(null);
+  // "Change something": back to the chat with Claude, over Real situations.
+  const changeSomething = useChangeSomething(id);
   const landing = useLanding(situationRows, situations, live, situations.data?.length ?? 0);
 
   const saveAndExit = (
@@ -179,6 +181,9 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
             </Card>
           )}
           <div className="cd-setup-step__actions">
+            <Button variant="secondary" size="main" onClick={changeSomething}>
+              {SETUP_COPY.changeSomething}
+            </Button>
             <Button variant="primary" size="main" onClick={() => setView('public_lines')}>
               {s.looksRight}
             </Button>

@@ -232,11 +232,11 @@ export async function demoPath(page: Page, { passcode, live }: DemoPathOptions):
     await expectNoAxeViolations(publicTab, 'the public page');
   });
 
-  await test.step('Safety: every entry of the record matches the chain', async () => {
+  await test.step('Safety: no entry of the record has been changed since it was written', async () => {
     await page.bringToFront();
     await page.getByRole('navigation').getByRole('link', { name: /^Safety/ }).click();
     await page.waitForURL(`**/app/${encodeURIComponent(deskId)}/safety`);
-    await expect(page.getByText('Every entry matches the chain', { exact: true })).toBeVisible({ timeout: wait.update });
+    await expect(page.getByText('No entry has been changed since it was written', { exact: true })).toBeVisible({ timeout: wait.update });
     await expectNoAxeViolations(page, 'Safety');
   });
 }

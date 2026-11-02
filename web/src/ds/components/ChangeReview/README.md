@@ -31,8 +31,9 @@
 
 ## Types
 
-- `ChangeSide = { appliesTo?: string; mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }`. `appliesTo` is the screen's words for what the rule covers ("Payment link", "Every tool that charges money"); the design system formats none.
-- `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on'; title: string; connector?: ConnectorView; shared?: boolean; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`. `shared` marks a rule on a group of tools, by the rule above; the screen decides it, as `RuleRow`'s `shared` does.
+- `RuleTarget = ToolTitles | string`: what a rule is about. Tools are named by their titles, `{ titles: ['Payment link', 'Refund'] }`, drawn "Payment link and Refund" with each title its own `data-copy="user"` span (`ToolTitleList`), since a tool's title is its own words (a business's job from setup), not the app's; it looks the same as the words around it. A string is the screen's own words for a group of tools, "Every tool that charges money", drawn as it is.
+- `ChangeSide = { appliesTo?: RuleTarget; mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }`. `appliesTo` is what the rule covers (`{ titles: ['Payment link'] }`, "Every tool that charges money"); the design system formats none.
+- `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on'; title: RuleTarget; connector?: ConnectorView; shared?: boolean; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`. `shared` marks a rule on a group of tools, by the rule above; the screen decides it, as `RuleRow`'s `shared` does.
 
 ## Diffing rules: `ruleDiff`
 

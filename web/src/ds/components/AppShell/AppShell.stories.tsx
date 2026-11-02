@@ -35,11 +35,11 @@ const hrefs = {
   today: '/app/desk-rivera-main/today',
   conversations: '/app/desk-rivera-main/conversations',
   people: '/app/desk-rivera-main/people',
-  knowledge: '/app/desk-rivera-main/knowledge',
   rules: '/app/desk-rivera-main/rules',
   safety: '/app/desk-rivera-main/safety',
   profile: '/app/desk-rivera-main/profile',
   share: '/app/desk-rivera-main/share',
+  knowledge: '/app/desk-rivera-main/knowledge',
   settings: '/app/desk-rivera-main/settings',
 } satisfies SidebarHrefs;
 
@@ -77,10 +77,10 @@ const sidebar = (
 );
 
 /** The nine pages, including Knowledge, without Connectors. */
-const PAGES = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings'];
+const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
-/** The ten pages with Knowledge after Customers and Connectors after Rules. */
-const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Settings'];
+/** The ten pages with Connectors after Rules and Knowledge just above Settings. */
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
 /** The words of each page row in a nav, in order (a row's count is read separately). */
 function pageNames(nav: HTMLElement): string[] {

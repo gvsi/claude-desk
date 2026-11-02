@@ -2,9 +2,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { Button, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
+import { Button, COPIED_FOR_MS, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
 import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
@@ -20,9 +21,10 @@ import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
-import { SinceLastNight } from './SinceLastNight.tsx';
+import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
-import { TodaySkeleton } from './TodaySkeleton.tsx';
+import { useTodayNow } from './todayClock.ts';
+import { skeletonSetupOf, TodaySkeleton } from './TodaySkeleton.tsx';
 
 import './Today.css';
 
@@ -41,13 +43,16 @@ type PendingFocus =
   | { kind: 'dismiss'; next: string | undefined }
   | { kind: 'done'; handoffId: string; readAt: number; failedAt: number };
 
+// As Rules remembers the control that opened a review, retain the briefing's opener only for
+// the Desk and history entry that opened it. A new briefing replaces the previous one.
+let briefingOpener: { deskId: string; key: string } | null = null;
+
 const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   copied: 'Your Desk link is copied.',
   failed: "Copy didn't work. Select the link and copy it yourself.",
 };
 
-/** How long the link's pill says "Copied" after a copy that worked. */
-export const COPIED_FOR_MS = 1_600;
+export { COPIED_FOR_MS } from '../../ds/index.ts';
 
 /**
  * `/app/:deskId/today`: a band across the page with the greeting, who is here now, the Desk's public
@@ -91,11 +96,19 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const cards = useRef(new Map<string, HTMLElement>());
   // Whether the demo bar's Demo inbox sheet is open, as the frame hears it.
   const inboxOpen = useInboxOpen();
+  // The time the greeting is drawn at: the browser's, or the still picture's.
+  const greetedAt = useTodayNow();
 
-  const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
+  // The owner's first name, or '' when they gave none: setup's fallback ("Owner") stands in for a
+  // name then, and the greeting names no one rather than greet them by it.
+  const given = givenOwnerName(business.owner_display_name);
+  const name = given === null ? '' : (today.data?.greeting_name ?? firstName(given)).trim();
+  const greeting = greetingFor(greetedAt, business.timezone);
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
   // and for a Desk listed without it (an API from before it).
   const setup = isLive(desk) ? null : desk.setup;
+  // Today's skeleton draws the "Not live yet" card where it will land.
+  const skeletonSetup = skeletonSetupOf(desk);
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
@@ -134,9 +147,21 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const needsYouSection = useRef<HTMLElement>(null);
   const liveNow = useRef<HTMLElement>(null);
   const sinceLastNight = useRef<HTMLElement>(null);
+  const [returning] = useState(() => briefingOpener?.deskId === deskId && briefingOpener.key === location.key ? briefingOpener : null);
+  // This return spends the hash landing for the entry that opened the briefing.
+  // Fresh hash entries and returns from other pages still land as usual.
+  const returningFromBriefing = returning?.key === location.key;
+  const refocused = useRef(false);
+  useLayoutEffect(() => {
+    if (opening || returning === null || refocused.current || sinceLastNight.current === null) return;
+    refocused.current = true;
+    if (briefingOpener === returning) briefingOpener = null;
+    const target = sinceLastNight.current.querySelector<HTMLElement>('.cd-since__all a') ?? sinceLastNight.current;
+    target.focus({ preventScroll: true });
+  }, [opening, returning]);
   useEffect(() => {
-    if (!opening && location.hash === '#needs-you') needsYouSection.current?.focus();
-  }, [opening, location.key, location.hash]);
+    if (!opening && !returningFromBriefing && location.hash === '#needs-you') needsYouSection.current?.focus();
+  }, [opening, returningFromBriefing, location.key, location.hash]);
   const pendingFocus = useRef<PendingFocus | null>(null);
   const dismissAnswer = (id: string, next: string | undefined) => {
     pendingFocus.current = { kind: 'dismiss', next };
@@ -190,8 +215,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     rereadAfter: null,
   });
   if (visit.key !== location.key) setVisit({ key: location.key, spent: false, rereadAfter: null });
-  const requested = visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
-  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused;
+  const requested = !returningFromBriefing && visit.key === location.key && !visit.spent ? requestInHash(location.hash) : null;
+  const readWorked = needsYou.data !== undefined && needsYou.errorUpdatedAt <= needsYou.dataUpdatedAt && !needsYou.isPaused && readFailure === null;
   const { cardFor: answeredCardFor } = answeredFocus;
   const { refetch: readNeedsYou } = needsYou;
   useEffect(() => {
@@ -244,12 +269,19 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   return (
     <>
       {opening ? <h1 className="cd-sr-only">Today</h1> : null}
-      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton />} className="cd-today-opening">
-        <div className="cd-today" onClick={followInAppLinks(navigate)}>
+      <SkeletonScreen loading={opening} status="Opening your Desk" skeleton={<TodaySkeleton setup={skeletonSetup} />} className="cd-today-opening">
+        <div className="cd-today" onClick={followInAppLinks(navigate)} onClickCapture={(event) => {
+          if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+          if (!(link instanceof HTMLAnchorElement) || link.target !== '' || link.getAttribute('href') !== briefingPath(deskId)) return;
+          event.preventDefault();
+          briefingOpener = { deskId, key: location.key };
+          void navigate(briefingPath(deskId), { state: { fromToday: true } });
+        }}>
           <div className="cd-today__band">
             <div className="cd-today__greeting">
               <Greeting
-                text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
+                text={name ? `${greeting}, ${name}` : greeting}
                 presence={today.data ? greetingPresence(live) : undefined}
                 link={{ label: link, onCopy: copyLink, copied: copied !== null }}
                 actions={
@@ -269,6 +301,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               deskId={deskId}
               business={desk.business_name}
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
+              heldCount={readWorked ? listed.length : undefined}
+              callbackCount={callbacks.length}
               firstHeldId={firstHeld?.decision.decision_id ?? null}
             />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
