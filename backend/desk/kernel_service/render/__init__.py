@@ -135,12 +135,12 @@ def owner_line(key: str) -> str:
 
 def agent_card(lang: str, tools: Collection[str]) -> list[RenderedBlock]:
     """The Agent Card of a Desk in `lang`: one prose block for each of `tools` an agent can ask
-    for, by its plain label, in the order the card lists them, or one block saying there is nothing
-    yet. A tool without a label is left out rather than named; no block carries an amount, a key or
-    a name. Where to send requests and how to sign them is the API's card, not this one."""
+    for, by its plain label, in the order the card lists them; none when there is nothing yet, so
+    the page says so in its own words. A tool without a label is left out rather than named; no
+    block carries an amount, a key or a name. Where to send requests and how to sign them is the
+    API's card, not this one."""
     module = en if lang == "en" else es
-    labels = [label for tool, label in module.AGENT_TOOLS.items() if tool in tools]
-    return [RenderedBlock(kind="prose", text=label) for label in labels or [module.AGENT_CARD_NO_TOOLS]]
+    return [RenderedBlock(kind="prose", text=label) for tool, label in module.AGENT_TOOLS.items() if tool in tools]
 
 
 def owner_preview(kind: str) -> str:

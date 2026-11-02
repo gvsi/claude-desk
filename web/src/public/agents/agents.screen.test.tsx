@@ -1864,6 +1864,22 @@ describe('agents page', () => {
     expectNoHorizontalScroll();
   });
 
+  it('agent_card_with_no_abilities_shows_the_page_empty_line', async () => {
+    // A Desk with no tool an agent may be given yet: the kernel sends no blocks, and the card says so
+    // in the page's own words, in either language, with no empty list.
+    await plantDesk({ agent_card: [] });
+    const { screen } = await renderRoute(PAGE);
+    const canDo = screen.getByRole('region', { name: 'What agents can do here' });
+    await expect.element(canDo.getByText('Nothing is listed here yet. An agent can still ask what this Desk can help with.', { exact: true })).toBeVisible();
+    expect(canDo.element().querySelector('ul')).toBeNull();
+    await cleanup();
+    await plantDesk({ agent_card: [] });
+    const es = await renderRoute(PAGE, { language: 'es-MX' });
+    const vacio = es.screen.getByRole('region', { name: 'Qué pueden hacer los agentes aquí' });
+    await expect.element(vacio.getByText('Todavía no hay nada en esta lista. Un agente puede preguntar en qué ayuda este Desk.', { exact: true })).toBeVisible();
+    expect(vacio.element().querySelector('ul')).toBeNull();
+  });
+
   it('business_name_is_marked_as_its_own_words', async () => {
     // The business's name is its own words wherever the page writes it, the panel's lead included,
     // so the copy check never reads it as the page's (all capitals and an exclamation mark here).

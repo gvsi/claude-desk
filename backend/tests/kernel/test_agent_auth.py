@@ -770,10 +770,10 @@ async def test_public_agent_card_is_kernel_rendered(app, client, frozen_clock):
     assert [block.text for block in card] == [label for label in AGENT_TOOL_LABELS["en"] if label != "Book a visit"]
 
 
-def test_an_agent_card_with_nothing_to_offer_says_so():
-    # a Desk with no tool an agent may be given yet: one block saying so, never an empty card
-    for lang, nothing in (("en", "Nothing for now"), ("es", "Nada por ahora")):
-        assert [(block.kind, block.text) for block in render.agent_card(lang, set())] == [("prose", nothing)]
+def test_an_agent_card_with_nothing_to_offer_is_empty():
+    # a Desk with no tool an agent may be given yet has no blocks, so the page shows its own empty line
+    for lang in ("en", "es"):
+        assert render.agent_card(lang, set()) == []
     # a tool with no label for agents is left out rather than named
     assert [block.text for block in render.agent_card("en", {"native.web_search", "native.book"})] == ["Book a visit"]
 

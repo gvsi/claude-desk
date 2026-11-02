@@ -318,4 +318,3 @@ AGENT_TOOLS: dict[str, str] = {
     "native.release_document": "Receive a verified customer's own documents",
     "payments.list_charges": "List a verified customer's own charges",
 }
-AGENT_CARD_NO_TOOLS = "Nothing for now"

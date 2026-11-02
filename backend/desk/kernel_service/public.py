@@ -9,9 +9,9 @@ stored before that check could carry it. Nothing else is read: no people, prices
 bookings or documents. `agent_card` is what a visiting agent can do on the Desk, in prose the kernel
 writes (`render.agent_card`): one block for each tool an agent session may be given on this Desk now
 (its enabled tools with an adapter, of those an agent declares, kept to lead capture and callbacks
-while Answering is off), by plain label, and a block carrying a canary is left out. It names no one:
-the page shows the AI disclosure, and the API's code-built card where to send requests and how to
-sign them.
+while Answering is off), by plain label, none when there are none, and a block carrying a canary is
+left out. It names no one: the page shows the AI disclosure, and the API's code-built card where to
+send requests and how to sign them.
 
 `open_status` is the header's open-now line ("Open status"), computed from the same `charter:hours`
 fact in the business's time zone on the kernel's clock (`desks.open_window_status`), with its text

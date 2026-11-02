@@ -670,14 +670,12 @@ AGENT_TOOLS = {
            "native.release_document": "Recibir los documentos propios de un cliente verificado",
            "payments.list_charges": "Ver los cargos propios de un cliente verificado"},
 }
-AGENT_CARD_NO_TOOLS = {"en": "Nothing for now", "es": "Nada por ahora"}
 
 
 def agent_card(language: str, tools: set[str]) -> list[RenderedBlock]:
     """The Agent Card in `language`: the kernel's prose blocks, one for each of `tools` an agent may ask for there, by
-    its label in the card's order, or one saying there is nothing yet."""
-    labels = [label for tool, label in AGENT_TOOLS[language].items() if tool in tools]
-    return [RenderedBlock(kind="prose", text=label) for label in labels or [AGENT_CARD_NO_TOOLS[language]]]
+    its label in the card's order, and none when there are none."""
+    return [RenderedBlock(kind="prose", text=label) for tool, label in AGENT_TOOLS[language].items() if tool in tools]
 
 
 def open_window(hours: list[HoursWindow], tz: ZoneInfo, now: datetime) -> tuple[bool, datetime | None, datetime] | None:
