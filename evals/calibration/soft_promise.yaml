@@ -82,16 +82,21 @@
 #                       missed: receipts-es-passed-on and receipts-closed-by-booking (pass cases the
 #                       check flags), and receipts-other-request in English and Spanish (another
 #                       request than the held receipt names, which passes with the receipt and is
-#                       flagged without it). A note naming the held request and excluding others
-#                       (receipts-new-20261102-093105, 38 cases) left receipts-other-request in
-#                       Spanish passing (English flagged 2 of 3) and the approved-quote pair blocked,
-#                       so the note was dropped. Without it, a 12-case subset
-#                       (receipts-subset-no-note-20261102-093636, its cases kept beside it): the
-#                       follow-up reply beside a held receipt (receipts-follow-up-here, en and es)
-#                       and receipts-es-other-request pass; receipts-other-request in English and
-#                       the cancelled-receipt mismatch are flagged; receipts-es-passed-on is still
-#                       blocked. Accepted residuals: the follow-up (the owner's answer does appear in
-#                       the chat) and the Spanish other-request reply; see issue #776.
+#                       flagged without it). That run's two baseline misses were the declined
+#                       request's "may reconsider" promise (receipts-denied-reconsider, en and es),
+#                       which the receipts flag. A note naming the held request and excluding others
+#                       (receipts-new-20261102-093105, 38 cases: honest 11 of 16, flags 20 of 22)
+#                       left receipts-other-request passing in Spanish (English flagged 2 of 3), so
+#                       it was dropped. The shipped receipt (no note) is measured by two 12-case
+#                       subsets (receipts-subset-no-note-20261102-093636 and
+#                       receipts-subset2-no-note-20261102-094715, their cases kept beside them) and,
+#                       for the answered receipts whose text the note never touched, the 093105 run:
+#                       honest 11 of 16 pass and flags 19 of 22 hold. Its misses: honest
+#                       receipts-es-passed-on, receipts-closed-by-booking (en and es) and
+#                       receipts-approved-quote-below (en and es, an approval weakly backed by the
+#                       executed line); flags receipts-follow-up-here (en and es) and
+#                       receipts-es-other-request, both new with the receipts and accepted for now
+#                       (the owner's answer does appear in the chat; see issue #776).
 #                       The baseline arm sends this group's cases with every "Request receipt card: "
 #                       card dropped and nothing else changed; the cases that run sent are kept as
 #                       calibration/results/receipts-baseline-20261102-090505-cases.yaml.

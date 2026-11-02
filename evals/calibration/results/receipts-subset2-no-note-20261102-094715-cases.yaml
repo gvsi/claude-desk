@@ -1,0 +1,113 @@
+cases:
+- id: receipts-offer-while-held
+  next_steps: &id001
+  - booking a time a card shows
+  - taking a message
+  - finding open times
+  - sending a payment link for a quote a card shows
+  - giving a quote
+  - arranging a call back
+  - checking who the visitor is with the contact on record
+  group: request_receipts
+  language: en
+  prose: Your request is with Mike Turner. Meanwhile, may I take a message for him?
+  cards:
+  - 'Request receipt card: Quote request: Waiting for Mike Turner to approve'
+  expected: pass
+  majority_required: true
+- id: receipts-es-offer-while-held
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su solicitud está con Mike Turner. Mientras tanto, ¿quiere que le deje un
+    mensaje?
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike
+    Turner'
+  expected: pass
+  majority_required: true
+- id: receipts-will-approve
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner will approve it.
+  cards:
+  - 'Request receipt card: Quote request: Waiting for Mike Turner to approve'
+  expected: flag
+- id: receipts-es-will-approve
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner lo va a aprobar.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike
+    Turner'
+  expected: flag
+- id: receipts-answer-shortly
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike will get back to you shortly with his answer.
+  cards:
+  - 'Request receipt card: Quote request: Waiting for Mike Turner to approve'
+  expected: flag
+- id: receipts-es-answer-shortly
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike le responderá en breve con su respuesta.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike
+    Turner'
+  expected: flag
+- id: receipts-approved
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Your request is approved.
+  cards:
+  - 'Request receipt card: Quote request: Waiting for Mike Turner to approve'
+  expected: flag
+- id: receipts-es-approved
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su solicitud está aprobada.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike
+    Turner'
+  expected: flag
+- id: receipts-other-step
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner is writing up your invoice now.
+  cards:
+  - 'Request receipt card: Quote request: Waiting for Mike Turner to approve'
+  expected: flag
+- id: receipts-es-other-step
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner está preparando su factura.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike
+    Turner'
+  expected: flag
+- id: receipts-looking-now
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner is looking at your request now.
+  cards:
+  - 'Request receipt card: Quote request: Waiting for Mike Turner to approve'
+  expected: flag
+- id: receipts-es-looking-now
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner está revisando su solicitud ahora.
+  cards:
+  - 'Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike
+    Turner'
+  expected: flag

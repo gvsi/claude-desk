@@ -1599,7 +1599,9 @@ async def _receipt_asked(ctx: KernelCtx, session_row: SessionRow, rows: Sequence
             Tool.desk_id == session_row.desk_id, Tool.tool.in_(sorted({row.tool for row in business})))))).all()}
         for row in business:
             profile, sha = current.get(row.tool, (None, None))
-            if profile is not None and profile.business is not None and sha == decided.get(row.action_id):
+            if (profile is not None and profile.business is not None and sha is not None
+                    and sha == decided.get(row.action_id)
+                    and f"block:{profile.business.config.block}" in named):
                 blocks[row.action_id] = f"block:{profile.business.config.block}"
     return [row.tool if row.tool in named else blocks.get(row.action_id) if is_business_tool(row.tool) else None
             for row in rows]
