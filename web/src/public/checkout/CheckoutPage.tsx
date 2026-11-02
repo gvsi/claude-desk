@@ -10,9 +10,10 @@
  * reads the link again before it says the request didn't go through. The token in the address is
  * the only credential: the page sends nothing typed on it.
  *
- * Once paid or cancelled for any reason but a rule change, "Go back to the chat" links to their
- * chat in the same tab, when this browser's public chat noted it showing this link (`payChats.ts`):
- * only that token's entry, and only a public chat's own path. Otherwise the line has no link.
+ * Closed checkout lines link back to their chat in the same tab with a valid `chatHref`: paid
+ * and cancelled use "Go back to the chat"; expired and rule-change lines use their own "the chat"
+ * / "el chat" words. This browser's public chat notes it showing this link (`payChats.ts`):
+ * only that token's entry, and only a public chat's own path.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useParams } from 'react-router';
