@@ -1,7 +1,7 @@
 /* ConversationListItem: a row link at the control radius, at least 48 px tall: the name and the
-   time on the first line, an optional visitor preview next, then the status dot and its words,
-   with a replayed conversation's Recorded tag at that line's end. Live now keeps status in place
-   of the quote. With neither quote nor status it has no second line,
+   time on the first line, an optional preview next (a visitor's quote, or the app's own line),
+   then the status dot and its words, with a replayed conversation's Recorded tag at that line's
+   end. Live now keeps status in place of the quote. With neither quote nor status it has no second line,
    and its one line sits centered in the row. Each line stays on one line with an ellipsis,
    and the status words give way before the tag. The open conversation is on the selected fill; others fill on hover at
    motion-instant. Nothing moves under reduced motion. */
@@ -72,7 +72,7 @@
 }
 
 /* What the person last wrote, quoted under who it is, 2 px down: their own words on one line,
-   ellipsized when they don't fit. */
+   ellipsized when they don't fit. The app's own line (what an agent did) is drawn the same way. */
 .cd-conversation-item__quote {
   display: block;
   min-width: 0;

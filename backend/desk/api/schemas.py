@@ -411,6 +411,14 @@ class NeedsYouItem(BaseModel):
         return self
 
 
+RefusalCause = Literal[
+    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
+    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
+    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
+    "agent_limit", "other_copy", "no_rule",
+]
+
+
 class ConversationSummary(BaseModel):
     """A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
     anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
@@ -425,7 +433,14 @@ class ConversationSummary(BaseModel):
     entries: an executed quote (`quoted`), booking (`visit_booked`), lead (`lead_captured`) or document release
     (`document_sent`), a payment link paid (`deposit_paid`), a refusal at decide/execution (`turned_down`), the
     owner declining a held request (`owner_declined`), or a call-back the owner marked done (`called_back`); a later
-    request still held, expired or cancelled, or a handoff card opening, clears it to null."""
+    request still held, expired or cancelled, or a handoff card opening, clears it to null.
+
+    An agent's outcome carries the facts behind it, read from the kernel's rows, never from anyone's words:
+    `latest_outcome_starts_at`, the booking's start (`visit_booked`, from the booking decision's action);
+    `latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored
+    payment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide
+    (`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its
+    outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview."""
 
     session_id: str
     kind: ActorKind
@@ -439,6 +454,9 @@ class ConversationSummary(BaseModel):
     latest_outcome: Literal["visit_booked", "deposit_paid", "turned_down", "quoted", "lead_captured",
                             "owner_declined", "called_back", "document_sent"] | None
     replayed: bool = False                  # recorded history written into the copy (`owner_reads.history_sessions`)
+    latest_outcome_starts_at: AwareDatetime | None = None
+    latest_outcome_cents: int | None = None
+    latest_outcome_cause: RefusalCause | None = None
 
 
 class OwnerTranscript(BaseModel):
@@ -473,14 +491,6 @@ class OwnerMessageIn(BaseModel):
 
     text: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
     kind: Literal["say", "whisper"]
-
-
-RefusalCause = Literal[
-    "owner_rule", "not_verified", "not_their_record", "recipient", "no_such_slot", "unknown_item", "over_quote_ceiling",
-    "quote_unpayable", "no_such_charge", "not_refundable", "no_such_document", "no_amount",
-    "tool_not_available", "incomplete_request", "paused", "no_rules", "rules_unchecked", "agent_pay_out",
-    "agent_limit", "other_copy", "no_rule",
-]
 
 
 class BriefingItem(BaseModel):

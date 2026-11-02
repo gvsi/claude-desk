@@ -11,27 +11,42 @@ from desk.api.sse import append_metric, emit
 from desk.api.store import Ids, NOTES, append_message
 from desk.contracts import Decision, RenderedBlock, ReplyVerdict
 from desk.events import EvTurnEnd
-from tests.api.test_owner_reads import app, model, scene, local  # noqa: F401 (shared fixtures)
+from tests.api.test_owner_reads import app, model, scene, local, stamp  # noqa: F401 (shared fixtures)
 from tests.kernel_contract.fake_kernel import signed_time
 
 
 async def record(scene, ids, at, *, state="executed", tool="native.book", card="booking_confirmed",
-                 author="claude", receipt=True, created_at=None, outcome=None):
+                 author="claude", receipt=True, created_at=None, outcome=None, action=None, policy_ids=()):
+    """A decision of the session's in `state`, its receipt and its card. With `action` (the action's fields), the
+    kernel's action row too and the `decide` entry naming it, as the kernel ledgers one; a refusal at decide then stays
+    on that entry, with its deciding `policy_ids`."""
     fake, owner = scene.fake, scene.owner
     fake.now = at
     decision_id = f"outcome-{at.timestamp()}-{tool}"
-    entry = fake.append(fake.desks[owner.desk_id], "execute", {"decision_id": decision_id, "state": state},
-                        session_id=ids.session_id, ref_id=decision_id)
     outcome = outcome or ("refuse" if state == "refused" else "hold" if state == "held" else "allow")
+    desk = fake.desks[owner.desk_id]
+    if action is not None:
+        action_id = f"action-{decision_id}"
+        fake._put("actions", (action_id,), {
+            "action_id": action_id, "copy_id": ids.copy_id, "desk_id": ids.desk_id, "session_id": ids.session_id,
+            "generation": 0, "tool": tool, "effects": [], "resource_kind": "desk", "list_cents": None,
+            "discount_bp": None, "amount_cents": None, "recipient": None, "starts_at": None, "created_at": at,
+            **action})
+        entry = fake.append(desk, "decide", {"decision_id": decision_id, "action_id": action_id, "tool": tool,
+                                             "outcome": outcome, "card_ids": [], "policy_version": 1},
+                            session_id=ids.session_id, ref_id=decision_id)
+    if action is None or state != "refused":
+        entry = fake.append(desk, "execute", {"decision_id": decision_id, "state": state},
+                            session_id=ids.session_id, ref_id=decision_id)
     fake._put("decisions", (decision_id,), {
         "decision_id": decision_id, "copy_id": ids.copy_id, "desk_id": ids.desk_id,
         "session_id": ids.session_id, "tool": tool, "effects": [], "outcome": outcome, "state": state,
         "answers": [], "policy_version": 1, "card_ids": [], "review": None, "reason_plain": "Recorded result",
         "visitor_plain": "Checked", "expires_at": at + timedelta(hours=1), "ledger_seq": entry.seq,
-        "created_at": created_at or at, "policy_ids": []})
+        "created_at": created_at or at, "policy_ids": list(policy_ids)})
     fake.flush()
     decision = Decision(decision_id=decision_id, session_id=ids.session_id, call_id=decision_id, action=None,
-                        outcome=outcome, state=state, policy_version=1, policy_ids=[], card_ids=[],
+                        outcome=outcome, state=state, policy_version=1, policy_ids=list(policy_ids), card_ids=[],
                         reason_plain="Recorded result", visitor_plain="Checked", expires_at=at + timedelta(hours=1),
                         ledger_seq=entry.seq, signature="fake:outcome")
     async with scene.engine.connect() as conn:
@@ -153,6 +168,169 @@ async def test_agent_latest_outcome(scene, case, expected):
     assert result.status_code == 200, result.text
     summary = next(row for row in result.json() if row["session_id"] == session.session_id)
     assert summary["latest_outcome"] == expected
+
+
+FACTS = ("latest_outcome", "latest_outcome_starts_at", "latest_outcome_cents", "latest_outcome_cause")
+
+
+async def agent(scene, at):
+    """A visiting agent's session on the Desk, opened at `at`."""
+    fake, owner = scene.fake, scene.owner
+    fake.now = at
+    session, _ = fake._new_session(owner.copy_id, owner.desk_id, "agent")
+    fake.flush()
+    return Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=session.session_id)
+
+
+async def facts(scene, ids) -> tuple:
+    """The session's outcome and the facts behind it, as the owner's list gives them."""
+    result = await scene.owner.get(f"desks/{scene.owner.desk_id}/conversations")
+    assert result.status_code == 200, result.text
+    summary = next(row for row in result.json() if row["session_id"] == ids.session_id)
+    return tuple(summary[key] for key in FACTS)
+
+
+async def test_agent_booking_carries_its_start(scene):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    starts = local(2026, 11, 2, 10)
+    await record(scene, ids, at, action={"resource_kind": "slot", "starts_at": starts})
+    assert await facts(scene, ids) == ("visit_booked", stamp(starts), None, None)
+
+
+async def test_agent_charge_carries_its_amount(scene):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    await record(scene, ids, at, tool="native.charge_mandate", card="charge_confirmed",
+                 action={"resource_kind": "quote", "amount_cents": 2000})
+    assert await facts(scene, ids) == ("deposit_paid", None, 2000, None)
+
+
+@pytest.mark.parametrize("mismatch", ["session", "tool"])
+@pytest.mark.parametrize("tool,card,outcome", [
+    ("native.book", "booking_confirmed", "visit_booked"),
+    ("native.charge_mandate", "charge_confirmed", "deposit_paid"),
+])
+async def test_agent_outcome_drops_mismatched_action_facts(scene, mismatch, tool, card, outcome):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    action = {"resource_kind": "slot", "starts_at": local(2026, 11, 2, 10), "amount_cents": 2000}
+    if mismatch == "session":
+        other = await agent(scene, at)
+        action["session_id"] = other.session_id
+    else:
+        action["tool"] = "native.quote"
+    # The decision and its decide entry belong to this agent; the referenced action doesn't match.
+    await record(scene, ids, at, tool=tool, card=card, action=action)
+    assert await facts(scene, ids) == (outcome, None, None, None)
+
+
+async def confirm_payment(scene, ids, at, cents, *, confirmed=True, refused_retry_link=None) -> str:
+    """One of the agent's payment links paid at `at`, its move to `paid` ledgered as the kernel ledgers one, then, when
+    `confirmed`, the Desk's own payment confirmation, ledgered after it. Optionally ledger a refused retry of an
+    older link just before that confirmation. Return the paid link's ID."""
+    fake, owner = scene.fake, scene.owner
+    fake.now = at
+    desk = fake.desks[owner.desk_id]
+    link_id = f"link-{at.timestamp()}"
+    fake._put("payment_links", (link_id,), {
+        "link_id": link_id, "copy_id": ids.copy_id, "desk_id": ids.desk_id, "session_id": ids.session_id,
+        "quote_id": None, "action_id": None, "amount_cents": cents, "state": "paid",
+        "expires_at": at + timedelta(hours=1)})
+    fake.append(desk, "payment", {"link_id": link_id, "state": "paid", "charge_id": f"charge-{link_id}"},
+                session_id=ids.session_id, ref_id=link_id)
+    fake.flush()
+    if not confirmed:
+        return link_id
+    if refused_retry_link is not None:
+        fake.append(desk, "payment", {"link_id": refused_retry_link, "state": "paid", "refused": True},
+                    session_id=ids.session_id, ref_id=refused_retry_link)
+    reply = fake.append(desk, "reply", {"message_id": f"confirm-{link_id}", "author": "desk", "ok": True},
+                        session_id=ids.session_id, ref_id=f"confirm-{link_id}")
+    fake.flush()
+    verdict = ReplyVerdict(ok=True, language="en",
+                           blocks=[RenderedBlock(kind="card", template="payment_confirmed", text="Checked card")],
+                           violations=[], message_id=f"confirm-{link_id}", generation=0, visitor_plain="Checked",
+                           ledger_seq=reply.seq, signature="fake:outcome")
+    async with scene.engine.connect() as conn:
+        await deliver(conn, ids, Reply(verdict, "desk", "kernel"), ro_schema="fake_kernel_ro")
+        await conn.commit()
+
+    return link_id
+
+
+async def test_agent_payment_confirmation_carries_its_own_links_amount(scene):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    await confirm_payment(scene, ids, at, 18000)
+    await confirm_payment(scene, ids, at + timedelta(minutes=1), 2000)
+    # A link paid after the newest confirmation, with no confirmation of its own, isn't the one it confirmed.
+    await confirm_payment(scene, ids, at + timedelta(minutes=2), 5000, confirmed=False)
+    assert await facts(scene, ids) == ("deposit_paid", None, 2000, None)
+
+
+@pytest.mark.parametrize("state", ["cancelled", "expired"])
+async def test_agent_payment_confirmation_drops_unpaid_link_amount(scene, state):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    link_id = await confirm_payment(scene, ids, at, 2000)
+    scene.admin.execute("UPDATE fake_kernel_ro.payment_links SET state = %s WHERE link_id = %s", (state, link_id))
+    assert await facts(scene, ids) == ("deposit_paid", None, None, None)
+
+
+@pytest.mark.parametrize("older_cents", [5000, 18000])
+async def test_agent_payment_confirmation_ignores_refused_retry(scene, older_cents):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    older_link = await confirm_payment(scene, ids, at, older_cents)
+    # The older link's refused retry is the last payment entry before the newer confirmation.
+    await confirm_payment(scene, ids, at + timedelta(minutes=1), 2000, refused_retry_link=older_link)
+    assert await facts(scene, ids) == ("deposit_paid", None, 2000, None)
+
+
+@pytest.mark.parametrize("policy_ids,cause", [
+    (["B.agent_charge_within_mandate"], "agent_limit"),
+    (["F.never.rv-refunds"], "owner_rule"),
+    ([], "no_rule"),
+])
+async def test_agent_refusal_carries_its_cause(scene, policy_ids, cause):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    await record(scene, ids, at, state="refused", tool="native.charge_mandate", card=None, receipt=False,
+                 action={"resource_kind": "quote", "amount_cents": 18500}, policy_ids=policy_ids)
+    assert await facts(scene, ids) == ("turned_down", None, None, cause)
+
+
+async def test_agent_refusal_at_execution_has_no_cause(scene):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    await record(scene, ids, at, state="refused_at_execution", tool="native.charge_mandate", card=None, receipt=False,
+                 action={"resource_kind": "quote", "amount_cents": 18500},
+                 policy_ids=["B.agent_charge_within_mandate"])
+    assert await facts(scene, ids) == ("turned_down", None, None, None)
+
+
+@pytest.mark.parametrize("later", ["hold", "handoff"])
+async def test_agent_later_hold_or_handoff_clears_the_outcome_and_its_facts(scene, later):
+    at = local(2026, 10, 30, 9)
+    ids = await agent(scene, at)
+    starts = local(2026, 11, 2, 10)
+    await record(scene, ids, at, action={"resource_kind": "slot", "starts_at": starts})
+    assert await facts(scene, ids) == ("visit_booked", stamp(starts), None, None)
+    if later == "hold":
+        await record(scene, ids, at + timedelta(minutes=1), state="held", tool="native.quote", card=None,
+                     action={"resource_kind": "quote", "amount_cents": 18000})
+    else:
+        await record(scene, ids, at + timedelta(minutes=1), tool="native.quote", card="handoff")
+    assert await facts(scene, ids) == (None, None, None, None)
+
+
+@pytest.mark.parametrize("preview", [False, True])
+async def test_visitor_and_preview_outcomes_carry_no_agent_facts(scene, preview):
+    at = local(2026, 10, 30, 9)
+    who = await scene.visitor(at, preview=preview)
+    await record(scene, who.ids, at, action={"resource_kind": "slot", "starts_at": local(2026, 11, 2, 10)})
+    assert await facts(scene, who.ids) == (None if preview else "visit_booked", None, None, None)
 
 
 # Visitors -----------------------------------------------------------------------------------------------------

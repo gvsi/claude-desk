@@ -38,3 +38,5 @@ The header has no outer margin; the `AppShell` pads the page above it, and the p
 ## Loading shapes
 
 `PageHeaderSkeleton` draws the title's line box, subtitle lines and an optional control-sized action block using this header's classes. `subtitleLines` defaults to 1 and accepts a number or `{ wide, phone }`; phone applies below 640 px. `actions`, `actionsBelowOnPhone` and `hideSubtitleOnPhone` follow the real header's placement rules. Use it for full-page loads; in-app loads keep the real header. It draws no heading landmark or words, so the loading page supplies its own hidden heading outside the layer. Companion stories compare both action layouts within 2 px at 1512 and 390.
+
+When the subtitle is known, pass `subtitle` instead of `subtitleLines`: its words are measured without drawing them, giving the text column its natural flex basis and the subtitle its actual line count, including on a phone. Pass `actions={true}` for the default control shape, or an action shape using `Skeleton.measure` to match the real control's width. Safety uses both so its held action wraps beneath its long subtitle at narrow desktop widths.
