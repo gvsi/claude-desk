@@ -110,6 +110,25 @@ it('send_held_keeps_typing_and_focus_but_holds_send_and_enter_until_it_lifts', a
   expect(box.value).toBe('');
 });
 
+it('a_composer_drawn_hidden_fits_its_words_once_shown', async () => {
+  // A screen can hide its message box for a while, as setup does while a question docks: shown again,
+  // the box is as tall as its words, the ones given back while it was hidden too, never 0 px.
+  const props = { variant: 'owner', label: 'Your answer', placeholder: 'Answer in your own words', onSend: () => {} } as const;
+  const shown = await render(<div style={{ width: 600 }}><Composer {...props} label="Shown" /></div>);
+  const oneLine = (shown.getByRole('textbox', { name: 'Shown' }).element() as HTMLTextAreaElement).getBoundingClientRect().height;
+  expect(oneLine).toBeGreaterThan(0);
+  const screen = await render(<div style={{ width: 600 }} hidden><Composer {...props} /></div>);
+  const box = screen.container.querySelector('textarea')!;
+  await screen.rerender(<div style={{ width: 600 }}><Composer {...props} /></div>);
+  await expect.poll(() => box.getBoundingClientRect().height).toBe(oneLine);
+  await screen.rerender(<div style={{ width: 600 }} hidden><Composer {...props} /></div>);
+  // Words put back while hidden, as a refused answer's are.
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, 'Leaks and drains.\nAround Oakland.');
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+  await screen.rerender(<div style={{ width: 600 }}><Composer {...props} /></div>);
+  await expect.poll(() => box.getBoundingClientRect().height).toBeGreaterThan(oneLine * 1.5);
+});
+
 /** Where a press on `variant`'s box lands away from its controls: the owner's tools row, or the single row's padding. */
 async function clickBoxSurface(variant: 'owner' | 'visitor' | 'whisper', input: HTMLElement): Promise<void> {
   const box = input.closest<HTMLElement>('.cd-composer__box')!;

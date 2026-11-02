@@ -1,22 +1,28 @@
 import { SETUP_COPY } from './copy.ts';
 import type { Choice, ProposalCard, SetupMessage, SetupProposalBody, SetupState } from '../api/views.ts';
 
+/** The owner's message the API writes from picks (its own module, so the mock's dev server can load it too). */
+export { pickedAnswer } from './pickedAnswer.ts';
+
 /** Older API messages omit card and choices until the consultant conversation is served. */
-type CompatibleMessage = Pick<SetupMessage, 'role' | 'text'> & Partial<Pick<SetupMessage, 'card' | 'choices'>>;
+type CompatibleMessage = Pick<SetupMessage, 'role' | 'text'> & Partial<Pick<SetupMessage, 'card' | 'choices' | 'several'>>;
 
 /** Cards render as their own messages, never as empty text bubbles. */
 export function isCard(message: CompatibleMessage): boolean {
   return message.card != null;
 }
 
-/** The latest Claude choices remain live until any owner message follows them. */
-export function liveChoices(state: Omit<SetupState, 'messages'> & { messages: CompatibleMessage[] }): { index: number; choices: Choice[] } | null {
+/**
+ * The latest Claude choices remain live until any owner message follows them; `several` when the
+ * owner may pick more than one of them.
+ */
+export function liveChoices(state: Omit<SetupState, 'messages'> & { messages: CompatibleMessage[] }): { index: number; choices: Choice[]; several: boolean } | null {
   if (state.step !== 'questions' || state.consent === null || state.question === null) return null;
   for (let index = state.messages.length - 1; index >= 0; index -= 1) {
     const message = state.messages[index];
     if (!message) continue;
     if (message.role === 'owner') return null;
-    if (message.role === 'claude' && !isCard(message) && message.choices?.length) return { index, choices: message.choices };
+    if (message.role === 'claude' && !isCard(message) && message.choices?.length) return { index, choices: message.choices, several: message.several === true };
   }
   return null;
 }
