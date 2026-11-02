@@ -137,6 +137,31 @@ export function Composer({
     input.style.height = `${input.scrollHeight}px`;
   }, [value, isFailed]);
 
+  // A box drawn while hidden measures 0 px tall: once shown, it fits its words again.
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!input || typeof ResizeObserver === 'undefined') return;
+    let drawn = input.getClientRects().length > 0;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      const now = input.getClientRects().length > 0;
+      // Refit after this observation, so the new height isn't observed in the same loop.
+      if (now && !drawn) {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() => {
+          input.style.height = 'auto';
+          input.style.height = `${input.scrollHeight}px`;
+        });
+      }
+      drawn = now;
+    });
+    observer.observe(input);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [isFailed]);
+
   // After the swap, focus follows to the control in the removed one's place ("Try again", or the
   // text box) only when the composer's own control had it. Focus the owner left elsewhere, on
   // another control or on the page itself, stays there, and a composer that opens failed takes none.

@@ -181,9 +181,10 @@ function Receipt({ width, anchor }: { width: number; anchor?: string }) {
 
 /**
  * Where the owner's controls will be, for a live chat as Claude answers it: the line about
- * whispers, then the whisper box (Take over is in the bar). Nothing is drawn there, since a
- * recorded chat has none and an agent's differ, but the room is kept, so the transcript's region
- * over it is as tall as the chat's, and what lands at its foot lands where its shapes were.
+ * whispers, then the whisper box and its helper line (Take over is in the bar). Nothing is drawn
+ * there, since a recorded chat has none and an agent's differ, but the room is kept, so the
+ * transcript's region over it is as tall as the chat's, and what lands at its foot lands where
+ * its shapes were.
  */
 function ControlsRoom() {
   return (
@@ -199,7 +200,18 @@ function ControlsRoom() {
           />
         </div>
       </div>
-      <div className="cd-conversation-skeleton__composer" />
+      <div className="cd-composer cd-composer--whisper">
+        <div className="cd-conversation-skeleton__composer" />
+        <div className="cd-composer__meta">
+          <MeasuredLines
+            parts={[VISITOR, " isn't in the chat now. Claude will use your whisper when they next write."]}
+            className="cd-composer__helper cd-type-caption"
+            text="caption"
+            drawn={false}
+            boxClassName="cd-composer__helper"
+          />
+        </div>
+      </div>
     </div>
   );
 }

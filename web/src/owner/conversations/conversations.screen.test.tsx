@@ -49,6 +49,10 @@ const conversation = (sessionId: string) => `${LIST}/${sessionId}`;
 
 const DRAFTED = 'Your answer also drafted a rule. Review it before it applies.';
 
+/** The whisper box's line while the visitor is in the chat, and while they aren't. */
+const HERE = (name: string) => `${name} is in the chat now. Claude will use your whisper in its reply right away.`;
+const AWAY = (name: string) => `${name} isn't in the chat now. Claude will use your whisper when they next write.`;
+
 /** The line under the take-over box: what was its placeholder before it gave an example. */
 const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';
 
@@ -239,6 +243,106 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it.each([[1440, 900], [390, 844]])('backward_keyboard_focus_stays_below_the_sticky_day_at_%sx%s', async (width, height) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const [base] = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const rows = Array.from({ length: 36 }, (_, i): ConversationSummary => ({
+      ...base!, session_id: `keyboard-${i}`, display_name: `${DANA} ${i}`,
+      replayed: false, outcome_counts: {}, last_activity: new Date(Date.now() - i * 1000).toISOString(),
+    }));
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: new RegExp(`^${DANA}`) }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const list = document.querySelector<HTMLElement>('.cd-conversations__list')!;
+    const days = list.querySelectorAll<HTMLElement>('.cd-conversations__day');
+    expect(days).toHaveLength(1);
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(parseFloat(getComputedStyle(list).scrollPaddingTop)).toBe(days[0]!.getBoundingClientRect().height);
+    const links = [...list.querySelectorAll<HTMLElement>('.cd-conversation-item')];
+    links.at(-1)!.focus();
+    expect(list.scrollTop).toBeGreaterThan(0);
+    for (const link of links.slice(0, -1).reverse()) {
+      await userEvent.tab({ shift: true });
+      expect(document.activeElement).toBe(link);
+      expect(link.getBoundingClientRect().top).toBeGreaterThanOrEqual(days[0]!.getBoundingClientRect().bottom);
+      expect(link.getBoundingClientRect().bottom).toBeLessThanOrEqual(list.getBoundingClientRect().bottom);
+    }
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
+
+  it.each([[1440, 900], [390, 844]])('day_headers_keep_their_resting_layout_and_push_each_other_out_at_%sx%s', async (width, height) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const [base] = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const rows = Array.from({ length: 36 }, (_, i): ConversationSummary => ({
+      ...base!, session_id: `sticky-${i}`, display_name: DANA, latest_visitor_text: 'Tuesday at 2 works.',
+      replayed: false, outcome_counts: {},
+      last_activity: new Date(Date.now() - Math.floor(i / 12) * 86_400_000 - i * 1000).toISOString(),
+    }));
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: new RegExp(`^${DANA}`) }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const list = document.querySelector<HTMLElement>('.cd-conversations__list')!;
+    const days = [...list.querySelectorAll<HTMLElement>('.cd-conversations__day')];
+    expect(days).toHaveLength(3);
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    expect(getComputedStyle(list).paddingTop).toBe('24px');
+
+    // Recreate the old spacing in this same browser: all label boxes, rule centres and rows
+    // must stay exactly where they were, despite the new opaque band around each label.
+    const legacy = document.createElement('style');
+    legacy.textContent = `
+      .cd-conversations__list .cd-conversations__group > .cd-conversations__day { position: static; padding-block: 0; margin-top: 0; }
+      .cd-conversations__group + .cd-conversations__group { margin-top: var(--space-8); }
+      .cd-conversations__day + .cd-conversations__items { margin-top: 0; }
+    `;
+    document.head.append(legacy);
+    onTestFinished(() => legacy.remove());
+    const resting = () => ({
+      labels: days.map(day => day.firstElementChild!.getBoundingClientRect().toJSON()),
+      rules: days.map(day => day.getBoundingClientRect().top + day.getBoundingClientRect().height / 2),
+      rows: [...list.querySelectorAll('.cd-conversations__items .cd-conversation-item')].map(row => row.getBoundingClientRect().toJSON()),
+    });
+    const before = resting();
+    legacy.remove();
+    expect(resting()).toEqual(before);
+
+    const edge = list.getBoundingClientRect().top;
+    const tops = days.map(day => day.getBoundingClientRect().top - edge);
+    const scrollTo = async (top: number) => {
+      list.scrollTop = top;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    };
+    for (let i = 0; i < 2; i += 1) {
+      const day = days[i]!;
+      await scrollTo(tops[i]! + 100);
+      expect(day.getBoundingClientRect().top).toBe(edge);
+      expect(getComputedStyle(day).backgroundColor).toBe(tokenColor('--bg-app'));
+      expect(getComputedStyle(day).zIndex).toBe('1');
+      expect(getComputedStyle(day).paddingBlock).toBe('8px');
+      // The band's opaque ground paints over rows reaching the top, across the whole row.
+      for (const x of [day.getBoundingClientRect().left + 2, day.getBoundingClientRect().right - 2]) {
+        expect(document.elementFromPoint(x, edge + 1)?.closest('.cd-conversations__day')).toBe(day);
+      }
+
+      const next = days[i + 1]!;
+      await scrollTo(tops[i + 1]! - day.getBoundingClientRect().height / 2);
+      expect(day.getBoundingClientRect().top).toBeLessThan(edge);
+      expect(day.getBoundingClientRect().bottom).toBeLessThanOrEqual(next.getBoundingClientRect().top);
+      await scrollTo(tops[i + 1]! + 1);
+      expect(next.getBoundingClientRect().top).toBe(edge);
+      expect(day.getBoundingClientRect().bottom).toBeLessThanOrEqual(edge);
+    }
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
+
   it.each([[1512, 982], [390, 844]])('day_rules_and_visitor_previews_fit_at_%sx%s', async (width, height) => {
     // The rows below are a day apart from a fixed afternoon on the Desk's clock, so the list's day
     // groups never depend on when the test runs (near midnight, or on a 25-hour day as clocks go back).
@@ -289,8 +393,8 @@ describe('Conversations', () => {
     }
     const groups = [...document.querySelectorAll<HTMLElement>('.cd-conversations__under > .cd-conversations__group')];
     expect(groups).toHaveLength(2);
-    expect(getComputedStyle(groups[1]!).marginTop).toBe('8px');
-    expect(groups[1]!.getBoundingClientRect().top - groups[0]!.getBoundingClientRect().bottom).toBe(24);
+    expect(getComputedStyle(groups[1]!).marginTop).toBe('0px');
+    expect(groups[1]!.getBoundingClientRect().top - groups[0]!.getBoundingClientRect().bottom).toBe(16);
     for (const group of groups) {
       const day = group.querySelector<HTMLElement>('.cd-conversations__day')!;
       const style = getComputedStyle(day);
@@ -966,7 +1070,7 @@ describe('Conversations', () => {
     await expect.element(chat.getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).first()).toBeVisible();
     const whisper = session(DANA_LIVE).items.find((item) => item.kind === 'whisper');
     await expect
-      .element(chat.getByText(`Your whisper, ${formatClock(whisper?.created_at ?? '', LA)}. Only Claude sees this.`, { exact: true }))
+      .element(chat.getByText(`Your whisper, ${formatClock(whisper?.created_at ?? '', LA)}. Only Claude sees this, and uses it in its next reply.`, { exact: true }))
       .toBeVisible();
     await expect.element(chat.getByText('offer Thursday morning too', { exact: true })).toBeVisible();
 
@@ -1600,7 +1704,7 @@ describe('Conversations', () => {
     const { screen } = await renderRoute(`/app/${deskId}/conversations/${chat.state.session_id}`);
     const box = screen.getByRole('textbox', { name: 'Whisper to Claude', exact: true });
     await expect.element(box).toHaveAttribute('placeholder', "Ask what they've tried so far");
-    expect(box.element().hasAttribute('aria-describedby')).toBe(false);
+    await expect.element(box).toHaveAccessibleDescription(AWAY('The visitor'));
   });
 
   it('whisper_in_ai_mode', async () => {
@@ -1622,7 +1726,7 @@ describe('Conversations', () => {
     const kept = chat.items.filter((item) => item.kind === 'whisper').at(-1);
     expect(kept?.text).toBe(words);
     await expect
-      .element(log(screen).getByText(`Your whisper, ${formatClock(kept?.created_at ?? '', LA)}. Only Claude sees this.`, { exact: true }).last())
+      .element(log(screen).getByText(`Your whisper, ${formatClock(kept?.created_at ?? '', LA)}. Only Claude sees this, and uses it in its next reply.`, { exact: true }).last())
       .toBeVisible();
     await expect.element(box).toHaveValue('');
 
@@ -1630,6 +1734,78 @@ describe('Conversations', () => {
     expect(chat.events.length).toBe(streamed);
     expect(requests('ownerTyping')).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_says_a_visitor_with_no_name_is_away', async () => {
+    // No one is on the chat's stream, and it has no name on record: a whisper waits for their next message.
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    await expect.element(box).toHaveAccessibleDescription(AWAY('The visitor'));
+    await expect.element(screen.getByText(AWAY('The visitor'), { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_says_an_agent_with_no_name_is_away', async () => {
+    const chat = session('ses-alex-agent');
+    chat.displayName = null;
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const line = "The agent isn't in the chat now. Claude will use your whisper when it next writes.";
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toHaveAccessibleDescription(line);
+    await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_names_an_agent_as_the_header_does', async () => {
+    const name = "Alex Kim's assistant";
+    const chat = named('ses-alex-agent', name);
+    const { screen } = await renderRoute(conversation(chat.state.session_id));
+    const line = `${name} isn't in the chat now. Claude will use your whisper when it next writes.`;
+    await expect.element(screen.getByRole('heading', { level: 2, name, exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toHaveAccessibleDescription(line);
+    await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_keeps_the_owner_preview_as_the_visitor', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    chat.ownerPreview = true;
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Your preview', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toHaveAccessibleDescription(AWAY('The visitor'));
+    await expect.element(screen.getByText(AWAY('The visitor'), { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('whisper_helper_says_when_the_visitor_is_here', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const box = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    await expect.element(box).toHaveAccessibleDescription(AWAY(DANA));
+
+    // Dana opens the chat: her stream listens, and the next read says Claude will use a whisper at once.
+    const listening = () => {};
+    chat.listeners.add(listening);
+    await expect.element(box, { timeout: 2_000 }).toHaveAccessibleDescription(HERE(DANA));
+    await expect.element(screen.getByText(HERE(DANA), { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // She leaves: away again.
+    chat.listeners.delete(listening);
+    await expect.element(box, { timeout: 2_000 }).toHaveAccessibleDescription(AWAY(DANA));
+  });
+
+  it('whisper_helper_is_absent_during_take_over', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    chat.listeners.add(() => {});
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(screen.getByText(HERE(DANA), { exact: true })).toBeVisible();
+
+    // Once the owner has the chat, her words go to Dana: the box says nothing about whispers.
+    await screen.getByRole('button', { name: 'Take over' }).click();
+    const box = screen.getByRole('textbox', { name: 'Write to them' });
+    await expect.element(box).toBeVisible();
+    await expect.element(box).not.toHaveAccessibleDescription(HERE(DANA));
+    expect(screen.getByText(/in the chat now/).elements()).toHaveLength(0);
   });
 
   it('stale_generation_refetches', async () => {

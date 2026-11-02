@@ -86,6 +86,7 @@ APP_COLUMNS = {
                   "through_seq", "created_at", "updated_at"},
     "model_calls": {"model_call_id", "copy_id", "session_id", "route", "model", "input_tokens", "cached_tokens",
                     "cache_write_tokens", "output_tokens", "latency_ms", "stop_reason", "created_at"},
+    "conversation_reads": {"copy_id", "desk_id", "session_id", "read_through_n", "read_at", "created_at"},
 }
 
 
@@ -141,6 +142,9 @@ def test_migration_sets_app_columns(db):
         "INSERT INTO app.setup_interviews (interview_id, copy_id, start_error)"
         " VALUES ('setup-1', 'c-1', '{\"status\": 500}')",
         "INSERT INTO app.setup_interviews (interview_id, copy_id, desk_requested_at) VALUES ('setup-1', 'c-1', now())",
+        # the owner's read marker is a transcript cursor
+        "INSERT INTO app.conversation_reads (copy_id, desk_id, session_id, read_through_n)"
+        " VALUES ('c-1', 'd-1', 's-1', -1)",
     ):
         with pytest.raises(psycopg.errors.CheckViolation), db.transaction(force_rollback=True):
             db.execute(statement)

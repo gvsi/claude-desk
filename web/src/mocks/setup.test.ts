@@ -17,7 +17,7 @@ import { businessToolRows, replaceBusinessTools, seedBusinessTools } from './bus
 import { EVENT_GAP_MS } from './script.ts';
 import { RIVERA } from './seed.ts';
 import {
-  holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet,
+  holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SALON_TIME, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet,
   thanksTo, TEST_CLIENT_ADDED, TEST_CLIENT_NO, TEST_CLIENT_OFFER, TEST_CLIENT_YES,
 } from './setup.ts';
 import { MockStore, mockStore, type MockAnswer } from './store.ts';
@@ -586,6 +586,55 @@ describe('setup consultant run and decisions', () => {
     expect(new Set(ids).size).toBe(6);
     expect(state.messages.at(-1)?.choices.map(({ text }) => text)).toEqual(['Ask me before every payment', 'Set an amount now']);
     expect(await setupState('setup', state.interview_id)).toEqual(state);
+  });
+});
+
+describe('a question whose choices can be picked together, as the API asks it', () => {
+  const SALON = 'I’m Priya Shah. Juniper Hair Studio is a four-chair salon in Oakland doing cuts, color and balayage.';
+
+  it('the_salon_is_asked_what_eats_up_its_time_with_choices_it_can_pick_together', async () => {
+    const id = (await startState(SALON)).interview_id;
+    const state = await setupState('setupConsent', id, { allow: false });
+    expect(state.question).toBe('what_you_do');
+    expect(state.messages.at(-1)).toEqual({ role: 'claude', text: SALON_TIME.text, choices: SALON_TIME.choices.map((text) => ({ text, recommended: false })), several: true, card: null });
+    // Every other question takes one answer, and says nothing of picking several.
+    const cpa = await setupState('setupConsent', (await startState()).interview_id, { allow: false });
+    expect(cpa.messages.every((message) => message.several === undefined)).toBe(true);
+  });
+
+  it('picks_are_kept_in_the_listed_order_then_the_typed_words_on_their_own_line', async () => {
+    const id = (await startState(SALON)).interview_id;
+    await setupState('setupConsent', id, { allow: false });
+    const [first, , third] = SALON_TIME.choices;
+    const state = await setupState('setupAnswer', id, { question: 'what_you_do', picks: [third, first], text: '  Walk-ins asking for a slot  ' });
+    expect(state.messages.at(-2)).toEqual({ role: 'owner', text: `${first}, ${third}\nWalk-ins asking for a slot`, choices: [], card: null });
+    expect([state.question, state.messages.at(-1)?.text]).toEqual(['hours_and_area', `Got it. ${SETUP_QUESTIONS[1]!.text}`]);
+    // One pick and no words reads as the choice itself, as a click always did; typed words alone as typed.
+    for (const [body, said] of [[{ picks: [first] }, first], [{ text: 'Mostly color', picks: [] }, 'Mostly color']] as const) {
+      const again = (await startState(SALON)).interview_id;
+      await setupState('setupConsent', again, { allow: false });
+      expect((await setupState('setupAnswer', again, { question: 'what_you_do', ...body })).messages.at(-2)?.text).toBe(said);
+    }
+  });
+
+  it('refuses_picks_that_are_not_the_questions_own_or_several_where_it_takes_one', async () => {
+    const id = (await startState(SALON)).interview_id;
+    await setupState('setupConsent', id, { allow: false });
+    const [first, second] = SALON_TIME.choices;
+    for (const body of [
+      { question: 'what_you_do' },
+      { question: 'what_you_do', picks: [] },
+      { question: 'what_you_do', picks: ['Something it never offered'] },
+      { question: 'what_you_do', picks: [first, first] },
+      { question: 'what_you_do', picks: [first, second, 'a', 'b', 'c'] },
+      { question: 'what_you_do', picks: first },
+    ]) expect(await mockStore.dispatch('setupAnswer', { params: { id }, body }), JSON.stringify(body)).toMatchObject({ status: 422 });
+    // A question that takes one answer takes one pick, never two.
+    const cpa = (await startState()).interview_id;
+    const asked = await setupState('setupConsent', cpa, { allow: true });
+    const [both, individuals] = asked.messages.at(-1)!.choices.map(({ text }) => text);
+    expect(await mockStore.dispatch('setupAnswer', { params: { id: cpa }, body: { question: 'what_you_do', picks: [both, individuals] } })).toMatchObject({ status: 422 });
+    expect((await setupState('setupAnswer', cpa, { question: 'what_you_do', picks: [individuals] })).messages.findLast(({ role }) => role === 'owner')?.text).toBe(individuals);
   });
 });
 

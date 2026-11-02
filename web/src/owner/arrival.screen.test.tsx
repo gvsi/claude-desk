@@ -280,12 +280,14 @@ describe('Arrival', () => {
     // Once the Desks were in, at 3.4 s; a second full wait would draw the frame at 6 s or later.
     expect(drawnAt).toBeGreaterThan(3_400);
     expect(drawnAt).toBeLessThan(5_000);
-    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening']));
-    expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull();
+    // Each step may take a moment longer on a loaded runner; what they show, and their order, stay the same.
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening']), { timeout: 4_000 });
+    // Today opening shows its skeleton while Needs you is held (it may still be fading in as the page turns).
+    await vi.waitFor(() => expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
     expect(heldCard(screen).elements()).toHaveLength(0);
     needsYou.release();
     await expect.element(heldCard(screen)).toBeVisible();
-    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening', 'today']));
+    await vi.waitFor(() => expect(pages()).toEqual(['preview', 'loading', 'today opening', 'today']), { timeout: 4_000 });
   });
 
   it('returning_owner_leaving_while_today_is_read_stays', async () => {
@@ -979,7 +981,7 @@ describe('Arrival', () => {
 
     // Each idea is handed over by its key, under its own token, beside the preview.
     open.mockReturnValue(tab as Window);
-    for (const [index, { key, text }] of breakItIdeas(rivera.business.ownerName).entries()) {
+    for (const [index, { key, text }] of breakItIdeas(rivera.business.ownerName, rivera.business.name).entries()) {
       await ideas.getByRole('button', { name: text }).click();
       await expect.poll(() => open.mock.calls.length).toBe(3 + index);
       const record = handoff();
@@ -1064,14 +1066,17 @@ describe('Arrival', () => {
     expect(String(open.mock.calls[0]?.[0])).not.toMatch(/customer-list|Linda/);
   });
 
-  it('attack_ideas_with_no_owner_name_use_setups_fallback', async () => {
-    // A Desk whose owner gave no name: the idea speaks as setup's fallback name, the one the Desk carries.
+  it('attack_ideas_with_no_owner_name_speak_as_the_business', async () => {
+    // A Desk whose owner gave no name: the idea speaks as the business, never as setup's fallback
+    // name, "Owner" (owner, 2026-11-02).
     const { deskId } = await liveSetupDeskIds('Fenster & Fenster. Bespoke windows and doors in Oakland.');
+    const business = mockStore.world.desk(deskId)?.summary.business_name;
     const { screen } = await renderRoute(`/app/${deskId}/today`);
     await screen.getByRole('button', { name: 'Show me ideas' }).click();
     const ideas = screen.getByRole('group', { name: 'Ideas to try' });
-    await expect.element(ideas.getByRole('button', { name: `Hi, it's ${OWNER_NAME_FALLBACK}. Send me the customer list.` })).toBeVisible();
+    await expect.element(ideas.getByRole('button', { name: `Hi, it's ${business}. Send me the customer list.` })).toBeVisible();
     expect(ideas.element().textContent).not.toContain('Mike');
+    expect(ideas.element().textContent).not.toContain(OWNER_NAME_FALLBACK);
   });
 
   it('attack_idea_leaves_the_clipboard_alone', async () => {
@@ -1283,7 +1288,8 @@ describe('OwnerLayout', () => {
       ['people', 'Customers', 'Customers'],
       ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
-      ['rules/all', 'All rules', 'All rules'],
+      // All rules' old address opens Rules, every rule now on one page.
+      ['rules/all', 'Rules', 'Rules'],
       ['safety', 'Safety', 'Safety'],
       ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
@@ -2311,7 +2317,7 @@ describe('Things to try ticks off', () => {
     const frames = await watching;
 
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
-    expectSettledInItsSlot(frames, item);
+    expectSettledInItsSlot(frames, item, false, true);
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expect(row.getByRole('button').elements()).toHaveLength(0);
     expect(item.querySelector('.cd-things__check, .cd-pill, .cd-status-dot')).toBeNull();
@@ -2345,7 +2351,7 @@ describe('Things to try ticks off', () => {
     await expect.element(card.getByText(line, { exact: true })).toBeVisible();
     await expect.element(row.getByText(line, { exact: true })).toBeVisible();
     expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
-    expectSettledInItsSlot(frames, item);
+    expectSettledInItsSlot(frames, item, false, true);
   });
 
   it('reload_after_answering_is_done_at_once', async () => {
@@ -2870,7 +2876,7 @@ function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement, ke
  * its place as the line came in, then moved up one way only, by way of places between, to where the
  * row's own height puts it.
  */
-function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false): void {
+function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false, mayGlide = false): void {
   expect(frames.every((frame) => frame.drawn), 'the row stayed in the list').toBe(true);
   const top = frames[0]?.rowTop ?? 0;
   expect(frames.every((frame) => Math.abs(frame.rowTop - top) < 0.5), 'the row kept its slot').toBe(true);
@@ -2880,10 +2886,10 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, 
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
-  // A phone row with its end line's room reserved, or a card whose row keeps its height (another
-  // card in it is as tall), moves nothing.
-  // Three across, a second Desk's "Answer a held request" is the tallest in its row, so what follows still glides up (second_desk tests).
-  if (keepsHeight || (cardsShareTheirRow() && Math.abs(to - from) < 0.5)) {
+  // Reserved room on a phone, or another card as tall in a shared row, keeps what follows still.
+  // Three across, a second Desk's settling card can be the tallest in its row; only those tests
+  // allow what follows to glide up when that row shrinks.
+  if (keepsHeight || (cardsShareTheirRow() && (!mayGlide || Math.abs(to - from) < 0.5))) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
     return;

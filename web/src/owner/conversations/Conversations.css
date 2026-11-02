@@ -41,6 +41,8 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  /* The caption line and both padded edges of the stuck day band stay above keyboard focus. */
+  scroll-padding-top: calc(var(--size-caption-line) + 2 * var(--space-8));
   padding: var(--space-24) var(--space-12);
 }
 
@@ -108,11 +110,27 @@
 }
 
 .cd-conversations__day {
+  position: sticky;
+  top: calc(-1 * var(--space-24));
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: var(--space-8);
+  padding-block: var(--space-8);
+  background: var(--bg-app);
   color: var(--text-tertiary);
   font-weight: 520;
+}
+
+/* Give the band's padding back at rest: the first label and every row stay in their old slots.
+   Later groups use the next band's top padding in place of their old 8 px top margin. */
+.cd-conversations__group:first-child > .cd-conversations__day,
+:not(.cd-conversations__group) + .cd-conversations__group > .cd-conversations__day {
+  margin-top: calc(-1 * var(--space-8));
+}
+
+.cd-conversations__day + .cd-conversations__items {
+  margin-top: calc(-1 * var(--space-8));
 }
 
 .cd-conversations__day::after {
@@ -124,7 +142,7 @@
 }
 
 .cd-conversations__group + .cd-conversations__group {
-  margin-top: var(--space-8);
+  margin-top: 0;
 }
 
 .cd-conversations__items {
@@ -518,7 +536,7 @@
 
 /* The pane's shapes: the transcript's region opens at its end, as the chat's does, but never
    scrolls. The owner's controls keep their room with nothing drawn in it: the line about whispers
-   and the whisper box at their heights. */
+   and the whisper box with its helper line at their heights. */
 .cd-conversation-skeleton .cd-conversation__scroll {
   overflow: hidden;
 }
