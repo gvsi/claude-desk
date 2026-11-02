@@ -1,8 +1,8 @@
-import { useContext, type ReactNode } from 'react';
-import { UNSAFE_NavigationContext, useLocation, useNavigate } from 'react-router';
+import { useContext, useLayoutEffect, type ReactNode } from 'react';
+import { UNSAFE_DataRouterContext, UNSAFE_NavigationContext, useLocation, useNavigate } from 'react-router';
 
 import { usePagePlace } from '../about/usePagePlace.ts';
-import { openedVisionCard } from '../about/vision/cardReturn.ts';
+import { forgetVisionCard, openedVisionCard } from '../about/vision/cardReturn.ts';
 import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { followInAppLinks } from '../owner/inAppLinks.ts';
@@ -28,9 +28,19 @@ export interface VisionFrameProps {
  */
 export function VisionFrame({ title, children }: VisionFrameProps) {
   const navigate = useNavigate();
-  const { pathname, state } = useLocation();
+  const { pathname, key, state } = useLocation();
   const { navigator } = useContext(UNSAFE_NavigationContext);
+  const router = useContext(UNSAFE_DataRouterContext)?.router;
   usePagePlace(pathname);
+
+  useLayoutEffect(() => () => {
+    if (!router || typeof state?.fromVision !== 'string' || router.state.location.key === key) return;
+    // Only leaving this page for its own article entry can refocus its opener.
+    // A StrictMode cleanup while this entry is still current leaves the record alone.
+    if (router.state.historyAction !== 'POP' || router.state.location.key !== state.fromVision) {
+      forgetVisionCard(navigator, state.fromVision);
+    }
+  }, [router, navigator, key, state]);
 
   useDocumentTitle(title);
 

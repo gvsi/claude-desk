@@ -10,3 +10,7 @@ export function rememberVisionCard(navigator: object, key: string, href: string)
 export function openedVisionCard(navigator: object, key: string): string | undefined {
   return OPENED_CARDS.get(navigator)?.get(key);
 }
+
+export function forgetVisionCard(navigator: object, key: string): void {
+  OPENED_CARDS.get(navigator)?.delete(key);
+}

@@ -4,6 +4,24 @@ import { userEvent } from 'vitest/browser';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { nextFrames } from '../test/screen.ts';
 
+it.each(['desktop', 'phone'] as const)('returning from Product proposal does not refocus a spent Vision card on %s', async (viewport) => {
+  const { screen, router } = await renderRoute('/about/vision', { viewport, strict: true });
+  await expect.element(screen.getByRole('heading', { name: 'See each one up close', exact: true })).toBeVisible();
+  const opener = () => screen.container.querySelector<HTMLAnchorElement>('a.va-card[href="/vision/city-office"]')!;
+  opener().focus();
+  await userEvent.keyboard('{Enter}');
+  await screen.getByRole('link', { name: 'Back to Vision', exact: true }).click();
+  await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+  await expect.poll(() => document.activeElement?.getAttribute('href')).toBe('/vision/city-office');
+  await screen.getByRole('link', { name: 'Product proposal', exact: true }).click();
+  await expect.poll(() => router.state.location.pathname).toBe('/about/proposal');
+  await router.navigate(-1);
+  await expect.poll(() => router.state.location.pathname).toBe('/about/vision');
+  await expect.element(screen.getByRole('heading', { name: 'See each one up close', exact: true })).toBeVisible();
+  await nextFrames();
+  expect(document.activeElement).not.toBe(opener());
+});
+
 it.each(['desktop', 'phone'] as const)('Back to Vision after a reload lands at the cards and focuses the opener on %s', async (viewport) => {
   const original = await renderRoute('/about/vision', { viewport, strict: true });
   await expect.element(original.screen.getByRole('heading', { name: 'See each one up close', exact: true })).toBeVisible();
