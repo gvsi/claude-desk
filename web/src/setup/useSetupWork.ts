@@ -13,12 +13,13 @@ import { useLeavingSignal } from '../app/useLeavingSignal.ts';
 export const SETUP_WORK_GIVE_UP_MS = 140_000;
 
 /**
- * Polls only work still running on the questions step. `reread` updates the page's interview.
+ * Polls only a turn still running: on the questions step, or a change sent from a later step ("Change
+ * something"), which runs at that step until it lands. `reread` updates the page's interview.
  * `progress` counts what the turn's stream has said so far: the whole wait starts again with each,
  * so a turn that is visibly writing never reads as given up.
  */
 export function useSetupWork(state: SetupState, reread: () => Promise<SetupState | null>, progress = 0) {
-  const working = state.step === 'questions' && state.busy === true;
+  const working = state.busy === true;
   const [gaveUp, setGaveUp] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [visit, setVisit] = useState(0);
@@ -57,7 +58,7 @@ export function useSetupWork(state: SetupState, reread: () => Promise<SetupState
       void reread()
         .then((next) => {
           if (controller.signal.aborted) return;
-          if (next !== null && (next.busy !== true || next.step !== 'questions')) stop();
+          if (next !== null && next.busy !== true) stop();
         })
         .catch(() => {
           // A failed read waits for the next tick.

@@ -992,6 +992,15 @@ export interface SetupPublicLinesConfirmIn {
   revision: string;
 }
 /**
+ * `POST /api/owner/setup/{id}/reopen`: "Change something", the owner's message to Claude from a step after the
+ * questions, which takes setup back to its chat. The `idempotency_key`, one per send and required (422 without one),
+ * makes a repeat answer the interview as the first left it instead of sending the message twice.
+ */
+export interface SetupReopenIn {
+  text: string;
+  idempotency_key: string;
+}
+/**
  * `POST /api/owner/setup`: the owner's own words about the business, the business's time zone (an IANA name)
  * and, if they give it, the name customers should see for them, which wins over one taken from the words. A name
  * the owner types is used as typed (extra spaces aside), so it must fit the kernel's owner name pattern (letters,
@@ -1290,6 +1299,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/setup/{id}/consent": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/answer": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/proposals/{proposal_id}": { 200: "SetupState", 202: "SetupState" },
+  "POST /api/owner/setup/{id}/reopen": { 200: "SetupState", 202: "SetupState" },
   "POST /api/owner/setup/{id}/suggestions": { 200: "SetupState", 202: "SetupState" },
   "GET /api/owner/setup/{id}/tools": { 200: "SetupTools" },
   "POST /api/owner/setup/{id}/tools/connect": { 200: "ToolRow[]" },
