@@ -787,14 +787,17 @@ def test_schema_export_marks_the_fields_a_model_leaves_out_while_they_hold_their
     # A turn end's generation and a hand-back's resume fields are sent only when they say something, so the web's
     # check of the mock's payloads (which takes every other field as always sent) may find them missing.
     from desk import events
-    from scripts.export_openapi import export_openapi
 
     left_out = {(model.__name__, name) for model in vars(events).values()
                 if isinstance(model, type) and issubclass(model, BaseModel) and model.__module__ == events.__name__
                 for name, field in model.model_fields.items() if field.exclude_if is not None}
     assert left_out == {("EvTurnEnd", "generation"), ("EvOwnerLeft", "resuming"), ("EvOwnerLeft", "generation")}
-    # Marked so in both exports, wherever the model is in them (the API's document has no turn end).
-    for defs in (export_schema()["$defs"], export_openapi()["components"]["schemas"]):
+    # Marked so in both exports, wherever the model is in them (the API's document has no turn end). The API's is read
+    # as committed (`test_openapi.py` keeps it current): building the API app here would install its log redaction
+    # for the rest of this process, outside the API tests that put the record factory back
+    # (`tests/test_log_record_factory.py`).
+    openapi = json.loads((Path(__file__).resolve().parents[1] / "desk" / "api" / "openapi.json").read_text())
+    for defs in (export_schema()["$defs"], openapi["components"]["schemas"]):
         marked = {(name, field) for name, model in defs.items()
                   for field, prop in (model.get("properties") or {}).items() if prop.get("x-omitted-when-default")}
         assert marked == {(name, field) for name, field in left_out if name in defs}
