@@ -2311,7 +2311,7 @@ describe('Things to try ticks off', () => {
     const frames = await watching;
 
     await expect.element(card.getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
-    expectSettledInItsSlot(frames, item);
+    expectSettledInItsSlot(frames, item, false, true);
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expect(row.getByRole('button').elements()).toHaveLength(0);
     expect(item.querySelector('.cd-things__check, .cd-pill, .cd-status-dot')).toBeNull();
@@ -2345,7 +2345,7 @@ describe('Things to try ticks off', () => {
     await expect.element(card.getByText(line, { exact: true })).toBeVisible();
     await expect.element(row.getByText(line, { exact: true })).toBeVisible();
     expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
-    expectSettledInItsSlot(frames, item);
+    expectSettledInItsSlot(frames, item, false, true);
   });
 
   it('reload_after_answering_is_done_at_once', async () => {
@@ -2870,7 +2870,7 @@ function expectHeldThenGlided(frames: readonly ListFrame[], row: HTMLElement, ke
  * its place as the line came in, then moved up one way only, by way of places between, to where the
  * row's own height puts it.
  */
-function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false): void {
+function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, keepsHeight = false, mayGlide = false): void {
   expect(frames.every((frame) => frame.drawn), 'the row stayed in the list').toBe(true);
   const top = frames[0]?.rowTop ?? 0;
   expect(frames.every((frame) => Math.abs(frame.rowTop - top) < 0.5), 'the row kept its slot').toBe(true);
@@ -2880,10 +2880,10 @@ function expectSettledInItsSlot(frames: readonly ListFrame[], row: HTMLElement, 
   expect(first).toBeGreaterThan(-1);
   expect(Math.abs((frames[first]?.below ?? 0) - from), 'held as the line came in').toBeLessThan(0.5);
   expect(frames.some((frame) => frame.checkDrawing), 'no check drew').toBe(false);
-  // A phone row with its end line's room reserved, or a card whose row keeps its height (another
-  // card in it is as tall), moves nothing.
-  // Three across, a second Desk's "Answer a held request" is the tallest in its row, so what follows still glides up (second_desk tests).
-  if (keepsHeight || (cardsShareTheirRow() && Math.abs(to - from) < 0.5)) {
+  // Reserved room on a phone, or another card as tall in a shared row, keeps what follows still.
+  // Three across, a second Desk's settling card can be the tallest in its row; only those tests
+  // allow what follows to glide up when that row shrinks.
+  if (keepsHeight || (cardsShareTheirRow() && (!mayGlide || Math.abs(to - from) < 0.5))) {
     expect(frames.every((frame) => Math.abs(frame.below - from) < 0.5), 'what follows the cards never moved').toBe(true);
     expect(row.style.minHeight).toBe('');
     return;
