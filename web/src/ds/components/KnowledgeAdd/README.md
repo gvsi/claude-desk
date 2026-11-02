@@ -71,4 +71,4 @@
 | `onPublicChange` | `(makePublic: boolean) => void` | Required. The switch was turned. |
 | `note` | `ReactNode` | The screen's line under the switch, in its own words. |
 
-Under the file caption, “A website” holds a local value. Its example is supplied by the screen through `websitePlaceholder`; without it, the field has no placeholder. “Add a website” is a secondary button beside a Mock pill. It is inert and sends no request. The caption explains: “Claude doesn’t read websites you add in this prototype yet.”
+Under the file caption, “A website” holds a local value. Its example is supplied by the screen through `websitePlaceholder`; without it, the field has no placeholder. “Add a website” is a secondary button. It is inert and sends no request, and carries no pill of its own: the screen says the page is a mock once, beside its title (Knowledge's `PageHeader` `badge`). The caption explains: “Claude doesn’t read websites you add in this prototype yet.”

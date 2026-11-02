@@ -42,7 +42,11 @@ it.each(['desktop', 'phone'] as const)('knowledge_examples_belong_only_to_the_st
   await expect.element(salonNote).toHaveAccessibleDescription(NOTE_HINT);
   const more = screen.getByRole('region', { name: 'More sources', exact: true });
   await expect.element(more.getByText(MORE_NOTE, { exact: true })).toBeVisible();
-  await expect.element(more.getByText('Mock', { exact: true })).toBeVisible();
+  // Its one "Mock" is beside the page's title, not on the note.
+  expect.soft(more.getByText('Mock', { exact: true }).query()).toBeNull();
+  const mocks = screen.getByRole('main').getByText('Mock', { exact: true }).elements();
+  expect.soft(mocks).toHaveLength(1);
+  expect.soft(mocks[0]?.previousElementSibling).toBe(screen.getByRole('heading', { level: 1, name: 'Knowledge', exact: true }).element());
   expect(more.getByRole('listitem').elements().map((row) => row.querySelector('.cd-knowledge-list__title')?.textContent)).toEqual([
     'Google Drive', 'Notion', 'Your website, kept fresh',
   ]);

@@ -74,6 +74,9 @@ export const AddSomething: Story = {
     expectComputed(filesLine, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
     await expect(Math.round(filesLine.getBoundingClientRect().top - addNote.getBoundingClientRect().bottom)).toBe(12);
 
+    // No pill of its own: the screen says the page is a mock, beside its title.
+    await expect(canvasElement.querySelector('.cd-pill')).toBeNull();
+
     // knowledge_note_is_the_screens: typing passes the raw text up; "Add a note" asks the screen to add it.
     await userEvent.type(note, 'x');
     await expect(args.onNoteChange).toHaveBeenLastCalledWith(`${NOTE}x`);

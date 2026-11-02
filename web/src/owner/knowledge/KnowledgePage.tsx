@@ -13,7 +13,7 @@ import { useRef, useState } from 'react';
 import type { KnowledgeItem } from '../../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../../api/http.ts';
 import type { KnowledgeRow } from '../../api/views.ts';
-import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
+import { Button, KnowledgeAdd, KnowledgeList, NAV_LABELS, Notice, PageHeader, Pill, errorCopy, type KnowledgeRowView } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { formatDate } from '../../lib/format.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
@@ -355,7 +355,8 @@ export function KnowledgePage() {
 
   return (
     <>
-      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} />
+      {/* The page's sample rows, previews and website field are mocks in this prototype: it says so once, beside its title. */}
+      <PageHeader title={NAV_LABELS.knowledge} subtitle={KNOWLEDGE_SUMMARY} badge={<Pill>Mock</Pill>} />
       <div className="cd-knowledge">
         <div className="cd-knowledge__known"><WhatIKnow deskId={deskId} timeZone={business.timezone} isStartingDesk={isStartingDesk} /></div>
         <div className="cd-knowledge__add">
@@ -391,7 +392,7 @@ export function KnowledgePage() {
 /** Static examples share the real source list’s card and row markup. */
 export function KnowledgePreviews({ showSampleQuestions = true }: { showSampleQuestions?: boolean } = {}) {
   return <div className="cd-knowledge__previews">
-    {showSampleQuestions ? <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} /> : null}
-    <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
+    {showSampleQuestions ? <KnowledgeList title="Questions Claude couldn’t answer" items={SAMPLE_QUESTIONS} note={<VisionNote pill={false}>Sample questions, to show what this will do. It doesn’t work in this prototype yet.</VisionNote>} /> : null}
+    <KnowledgeList title="More sources" items={MORE_SOURCES} note={<VisionNote pill={false}>Connecting these doesn’t work in this prototype yet.</VisionNote>} />
   </div>;
 }
