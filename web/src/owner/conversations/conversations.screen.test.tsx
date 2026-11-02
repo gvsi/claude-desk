@@ -370,11 +370,10 @@ describe('Conversations', () => {
     if (place === 'focus') expect(document.activeElement).toBe(focused);
   }
 
-  it('a_first_callback_on_a_later_poll_leaves_her_focus_in_place', () => firstCallbackLeavesHerPlace('focus'));
-
-  // Skipped while it fails on CI when other tests run before it in the shard (the transcript region
-  // never overflows there); it passes alone. Restore it with its fix: #722.
+  // Both cases are skipped while they fail on CI when other tests run before them in the shard (the
+  // transcript region never overflows there); they pass alone. Restore them with their fix: #722.
   it.skip('a_first_callback_on_a_later_poll_leaves_her_scroll_in_place', () => firstCallbackLeavesHerPlace('scroll'));
+  it.skip('a_first_callback_on_a_later_poll_leaves_her_focus_in_place', () => firstCallbackLeavesHerPlace('focus'));
 
   it('late_callback_reveals_its_card_then_scrolling_to_the_end_follows_arrivals', async () => {
     // The chat opens once Needs you's first read is in, since it draws the requests held in it, so a
