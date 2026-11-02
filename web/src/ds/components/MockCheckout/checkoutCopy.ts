@@ -42,6 +42,7 @@ export interface CheckoutCopy {
   /**
    * The paid line (`final.paid`) in its three parts: the words before the way back to the chat, the
    * way back itself, a link when the page knows the visitor's chat, and the words after it.
+   * A visitor-cancelled checkout appends the same `back` words and a period to its own line.
    */
   paid: PaidLine;
   /** A cancelled link that a change to the business's rules cancelled. */

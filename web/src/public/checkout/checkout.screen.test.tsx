@@ -318,6 +318,51 @@ describe('mock checkout', () => {
     expectNoHorizontalScroll();
   });
 
+  it.each([
+    ['en', 'Cancel payment', 'This payment was cancelled. Nothing was charged.', 'Go back to the chat'],
+    ['es', 'Cancelar pago', 'Este pago se canceló. No se cobró nada.', 'Vuelve al chat'],
+  ] as const)('cancelled_line_links_back_to_the_chat_in_%s', async (language, cancel, cancelled, label) => {
+    const token = language === 'en' ? await linkFromTheChat() : issueLink('es');
+    if (language === 'es') recordPayChat(token, CHAT);
+    const { screen } = await renderRoute(`/pay/${token}`, { language: 'en-US' });
+    await screen.getByRole('button', { name: cancel, exact: true }).click();
+    const back = screen.getByRole('link', { name: label, exact: true });
+    await expect.element(back).toBeVisible();
+    expect(back.element().getAttribute('href')).toBe(CHAT);
+    expect(back.element().getAttribute('target')).toBeNull();
+    expect(back.element().closest('[lang]')?.getAttribute('lang')).toBe(language);
+    expect(screen.container.querySelector('.cd-checkout__state')?.textContent).toBe(`${cancelled} ${label}.`);
+    expect(back.element().closest('.cd-checkout__state')).not.toBeNull();
+    expect(requests('cancelPayment')).toHaveLength(1);
+    expect(screen.container.querySelectorAll('button')).toHaveLength(0);
+
+    // A plain click follows the same-tab link normally; stop it only to keep the test loaded.
+    let followed: boolean | null = null;
+    const stop = (event: MouseEvent) => {
+      followed = !event.defaultPrevented;
+      event.preventDefault();
+    };
+    window.addEventListener('click', stop);
+    try {
+      await back.click();
+    } finally {
+      window.removeEventListener('click', stop);
+    }
+    expect(followed).toBe(true);
+    await expectScreenBasics(screen.container, { owner: false });
+
+    // Reopening the cancelled checkout on a phone keeps the return link and fits the screen.
+    const phone = await renderRoute(`/pay/${token}`, { viewport: 'phone' });
+    await expect.element(phone.screen.getByRole('link', { name: label, exact: true })).toBeVisible();
+    expectNoHorizontalScroll();
+
+    // With no recorded chat, the original cancelled sentence remains without a return link.
+    const unknown = await renderRoute(`/pay/${issueLink(language)}`);
+    await unknown.screen.getByRole('button', { name: cancel, exact: true }).click();
+    await expect.element(unknown.screen.getByText(cancelled, { exact: true })).toBeVisible();
+    expect(unknown.screen.container.querySelector('.cd-checkout__state a')).toBeNull();
+  });
+
   it('paid_line_links_back_in_spanish', async () => {
     // A link in Spanish, from a chat this browser showed: "Vuelve al chat" is the link, whatever
     // the browser's language.

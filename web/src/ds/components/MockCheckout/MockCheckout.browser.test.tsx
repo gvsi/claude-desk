@@ -283,6 +283,37 @@ it('a_state_this_build_does_not_know_can_not_be_paid', () => {
   expect(line?.querySelector('.cd-status-dot--held')).not.toBeNull();
 });
 
+it('the_cancelled_line_reuses_the_paid_link_in_every_language', () => {
+  const CHAT = '/d/turner-plumbing-abc123';
+  const { container, update } = render({ state: 'paid', chatHref: CHAT });
+  const region = () => resultRegion(container);
+  for (const [language, paid, cancelled, label] of [
+    ['en', 'Paid. Go back to the chat to see it there.', 'This payment was cancelled. Nothing was charged.', 'Go back to the chat'],
+    ['es', 'Pagado. Vuelve al chat para verlo allí.', 'Este pago se canceló. No se cobró nada.', 'Vuelve al chat'],
+  ] as const) {
+    update({ state: 'paid', language });
+    expect(region().textContent).toBe(paid);
+    const paidLink = region().querySelector('a');
+    expect(paidLink?.getAttribute('href')).toBe(CHAT);
+    expect(paidLink?.getAttribute('target')).toBeNull();
+
+    update({ state: 'cancelled', language });
+    const back = region().querySelector('a');
+    expect(back).not.toBeNull();
+    expect(back?.textContent).toBe(label);
+    expect(back?.getAttribute('href')).toBe(paidLink?.getAttribute('href'));
+    expect(back?.getAttribute('target')).toBeNull();
+    expect(back?.classList.contains('cd-text-link--running-text')).toBe(true);
+    expect(region().textContent).toBe(`${cancelled} ${label}.`);
+
+    for (const chatHref of [undefined, '', 'https://evil.example/d/rivera', '//evil.example', '/d/rivera?preview=desk-1', '/d/rivera#about', '/d/rivera/agents', '/d/Turner', 'javascript:alert(1)', '/pay/k7Hq2vX9']) {
+      update({ state: 'cancelled', language, chatHref });
+      expect(region().querySelector('a'), chatHref).toBeNull();
+      expect(region().textContent).toBe(cancelled);
+    }
+  }
+});
+
 it('the_paid_line_links_back_only_to_a_public_chat', () => {
   // Paid, with the visitor's chat known: the line's own words, with "Go back to the chat" a text
   // link in the sentence to that chat, in the same tab.
@@ -306,8 +337,8 @@ it('the_paid_line_links_back_only_to_a_public_chat', () => {
   expect(line()?.textContent).toBe('Pagado. Vuelve al chat para verlo allí.');
   expect(links().map((link) => [link.textContent, link.getAttribute('href')])).toEqual([['Vuelve al chat', CHAT]]);
 
-  // Every other state keeps its line with no link, whatever chat the page knows.
-  for (const state of ['issued', 'expired', 'cancelled', 'unknown'] as const) {
+  // States without a return link keep their line, whatever chat the page knows.
+  for (const state of ['issued', 'expired', 'unknown'] as const) {
     update({ state, chatHref: CHAT });
     expect(links(), state).toHaveLength(0);
   }

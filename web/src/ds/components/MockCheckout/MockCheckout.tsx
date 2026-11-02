@@ -22,7 +22,7 @@ const FINAL_DOT = {
   unknown: 'held',
 } as const satisfies Record<FinalPaymentState, StatusTone>;
 
-/** A public chat's own path, `/d/` and a Desk's slug: the one place the paid line links to. */
+/** A public chat's own path, `/d/` and a Desk's slug: the one place the return link goes. */
 const CHAT_PATH = /^\/d\/[a-z0-9-]+$/;
 
 /** True for the states with a line of their own: every known state but `issued`. */
@@ -66,9 +66,9 @@ export interface MockCheckoutProps {
    */
   customerName?: string;
   /**
-   * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Once paid,
-   * the line's "Go back to the chat" links there, in the same tab. Anything but a public chat's
-   * path is ignored, and the line keeps its words with no link.
+   * The visitor's chat, as its own path (`/d/turner-plumbing`), when the page knows it. Once paid
+   * or cancelled by the visitor, "Go back to the chat" links there, in the same tab. Anything
+   * but a public chat's path is ignored, and the line keeps its original words with no link.
    */
   chatHref?: string;
   /** A request to pay or cancel is in flight. The pressed button spins; Pay does when none was pressed here. */
@@ -145,16 +145,17 @@ export function MockCheckout({
   const final: FinalPaymentState = isFinal(state) ? state : 'unknown';
   // A blank name is no name: the card then asks for one.
   const nameOnCard = customerName?.trim();
-  // Paid, with the visitor's chat known: the same words, with the way back a link in the sentence.
-  const back = final === 'paid' && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
+  // The visitor's completed or cancelled checkout uses the same link back to a known chat.
+  const canReturn = final === 'paid' || (final === 'cancelled' && cancelReason !== 'rules_changed');
+  const back = canReturn && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
   const finalLine =
     back !== null ? (
       <span>
-        {copy.paid.before}
+        {final === 'paid' ? copy.paid.before : `${copy.final.cancelled} `}
         <TextLink href={back} runningText>
           {copy.paid.back}
         </TextLink>
-        {copy.paid.after}
+        {final === 'paid' ? copy.paid.after : '.'}
       </span>
     ) : final === 'cancelled' && cancelReason === 'rules_changed' ? (
       copy.cancelledRulesChanged

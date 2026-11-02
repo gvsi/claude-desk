@@ -10,7 +10,7 @@
  * reads the link again before it says the request didn't go through. The token in the address is
  * the only credential: the page sends nothing typed on it.
  *
- * Once paid, the line's "Go back to the chat" links to the visitor's chat in the same tab, when
+ * Once paid or cancelled by the visitor, "Go back to the chat" links to their chat in the same tab, when
  * this browser's public chat noted it showing this link (`payChats.ts`): only that token's entry,
  * and only a public chat's own path. Otherwise the line has no link.
  */
@@ -63,7 +63,7 @@ export function CheckoutPage() {
   // names it, when the kernel sends it. Before a link shows, the app's own name stays.
   const shown = load.kind === 'ready' ? load.link : null;
   useDocumentTitle(shown === null ? null : shown.business_name ? `${shown.title} · ${shown.business_name}` : shown.title);
-  // The chat this link's card was shown in, as this browser noted it: the paid line's way back.
+  // The chat this link's card was shown in, as this browser noted it: the checkout's way back.
   const chat = useMemo(() => payChatFor(token), [token]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);

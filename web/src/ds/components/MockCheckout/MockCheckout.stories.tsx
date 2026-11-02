@@ -473,6 +473,39 @@ export const Cancelled: Story = {
   },
 };
 
+export const CancelledBackToTheChat: Story = {
+  args: { state: 'cancelled', chatHref: CHAT_HREF },
+  parameters: {
+    canvasNote: 'Visitor cancellation with a known chat: keeps the cancelled sentence and appends the paid state’s same-tab return link. Copy and design await owner sign-off.',
+  },
+  play: async ({ canvasElement }) => {
+    const { state } = await expectFinal(canvasElement, `${CANCELLED_LINE} Go back to the chat.`, 'info');
+    const back = within(state).getByRole('link', { name: 'Go back to the chat' });
+    await expect(state.querySelectorAll('a')).toHaveLength(1);
+    await expect(back).toHaveAttribute('href', CHAT_HREF);
+    await expect(back).not.toHaveAttribute('target');
+    await expect(back).toHaveClass('cd-text-link', 'cd-text-link--running-text');
+    expectComputed(back, { color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
+  },
+};
+
+export const CancelledBackToTheChatSpanish: Story = {
+  args: { state: 'cancelled', chatHref: CHAT_HREF, language: 'es' },
+  parameters: {
+    canvasNote: 'Visitor cancellation in Spanish: appends the paid state’s “Vuelve al chat” link. Copy and design await owner sign-off.',
+  },
+  play: async ({ canvasElement }) => {
+    const { card } = await expectChrome(canvasElement, 'es');
+    const state = card.querySelector<HTMLElement>('.cd-checkout__state');
+    if (!state) throw new globalThis.Error('no cancelled line');
+    await expect(state.textContent).toBe('Este pago se canceló. No se cobró nada. Vuelve al chat.');
+    const back = within(state).getByRole('link', { name: 'Vuelve al chat' });
+    await expect(back).toHaveAttribute('href', CHAT_HREF);
+    await expect(back).not.toHaveAttribute('target');
+    await expect(back).toHaveClass('cd-text-link', 'cd-text-link--running-text');
+  },
+};
+
 export const CancelledRulesChanged: Story = {
   args: { state: 'cancelled', cancelReason: 'rules_changed' },
   parameters: {
