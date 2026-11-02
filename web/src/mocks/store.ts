@@ -24,6 +24,7 @@
  */
 import type { SseEvent } from '../api/contracts.ts';
 import { ROUTES, apiPath, type RouteKey, type RouteParams } from '../api/routes.ts';
+import type { DemoVisitorRuns } from './demoVisitors.ts';
 import { DOCUMENT_TOKEN, lookAtDocument, openDocument, type DocumentAnswer, type DocumentLink } from './documents.ts';
 import { PAYMENT_TOKEN } from './script.ts';
 import { MODEL_PACE, TEST_PACE, type OwnerStreamPlan, type StreamSettings } from './ownerStreams.ts';
@@ -356,6 +357,11 @@ export class MockStore {
   /** The copy as it stands, for tests that check what a route changed. */
   get world(): MockWorld {
     return this.oneCopy().server.world;
+  }
+
+  /** The copy's demo visitor runs, for tests that end one as the API's run can end. */
+  get demoVisitors(): DemoVisitorRuns {
+    return this.oneCopy().server.demoVisitors;
   }
 
   /**

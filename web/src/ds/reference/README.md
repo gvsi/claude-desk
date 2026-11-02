@@ -196,3 +196,19 @@ Signed on 2026-10-30 ("Locked · Oct 30 · signed · run 2"), and rebuilt from t
 | N-R2-Setup-04-Answer-Failed | Boards/Setup, an answer failed | 2026-10-30 | 1512×982, 1440×900, 390×844, keyboard | Claude's question is a `ClaudeMessage` in the `Transcript`; the owner `Composer`'s failed state draws the line as an error `Notice` 20 px over the box, then the box at 720 by 56 px with the kept answer in body type and "Try again" 14 px from its right, without the composer's hairline, as the render draws it. | The subtitle's 2 px: the box sits at 285 px, not 287. |
 | N-R2-Setup-05-Tools | Boards/Setup, tools | 2026-10-30 | 1512×1100, 1440×900, 390×844, keyboard | `SetupToolsList`: two cards 20 px apart, padded 16 px, with 65 px rows; the "Built in" card is 454 px, as the render draws it. Each row ends in "On" or "Always on" beside a dot, "Add", or "2 tools" before "Connect"; Stripe's badge sits 8 px from its name. | Stripe has two tools, as on the Connectors boards, where this board draws "3 tools". The rows use `ConnectorIcon`, where the board draws Quotes with a bookmark, Leads and callbacks with a phone, and Documents with the page Quotes has elsewhere. The connectors' lines are the fixtures', with straight apostrophes. The subtitle's 2 px. |
 | N-R2-Setup-09-Situations | Boards/Setup, real situations | 2026-10-30 | 1512×1100, keyboard | `SituationRow`: 69 px rows, the outcome column at 300 px, "Not what we planned" beside its bar; the card, the answer and the footer where the render draws them. | "Change a rule" removed (owner ruling, 2026-10-30), where the render draws it beside "Looks right". The subtitle's 2 px. |
+
+### The demo visitor, in review
+
+The REV-DEMO boards (canvas row REV-DEMO, entry A), drawn on 2026-11-01 from the built app and in review: an AI that plays a customer on the owner's own Desk, started from Today's things to try, so the owner can take over or whisper while it chats. Every story is in `Boards/Demo visitor` and its `canvasNote` opens "Built against the board in review; sign-off pending." Riley's chat is the Turner fixture's live chat, which the boards draw under the persona's name.
+
+| Board | Artboard | Story | Viewports | What it checks |
+|---|---|---|---|---|
+| N-Live-REV-DEMO-today-1512 | `#artboard-cdae4f209f2e` | Things to try | 1512×982 | "Watch a demo visitor" second of five cards, three across in two rows, its button "Start a demo visitor". Only the band's Things to try is drawn. |
+| N-Live-REV-DEMO-error-1512 | `#artboard-d691001ca787` | Start error | 1512×982 | The card's line "The demo visitor couldn’t start. Try again in a few minutes." after a refused dot, as an alert; the button stays. |
+| N-Live-REV-DEMO-chat-1512 | `#artboard-4ae3b66fd4f0` | Running laptop | 1512×982, keyboard | The row's pill right after the name; the head's "Public" then "Demo visitor"; the info note 8 px under the head with "Stop the demo visitor"; Riley's typing bubble. |
+| N-Live-REV-DEMO-chat-390 | `#artboard-b6a3eaf4a777` | Running phone | 390×844 | The same head and note with the conversation on the page alone. |
+| N-Live-REV-DEMO-whisper-1512 | `#artboard-b5079e9ac81c` | After a whisper | 1512×982 | The whisper, then Claude's open times, under the same note. |
+| N-Live-REV-DEMO-takeover-1512 | `#artboard-894cee1ec120` | After a take-over | 1512×982 | Mike joined, Riley answers him, Hand back and the owner's composer, under the same note. |
+| N-Live-REV-DEMO-ended-1512 | `#artboard-2e93bf1904b9` | Ended | 1512×982 | "The demo visitor finished." with no button; the row keeps its pill. |
+
+Not built: entry B, a button under the Conversations title (`#artboard-e0787e262f78`).

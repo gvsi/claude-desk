@@ -1,5 +1,5 @@
 /**
- * When each of Today's four things to try is done, as pure functions of reads the owner app already
+ * When each of Today's five things to try is done, as pure functions of reads the owner app already
  * makes. A thing is done only on what the reads show the owner did in this copy: never on replayed
  * history, never on the seed's own stopped reply or hold, and never on a click alone.
  */
@@ -7,8 +7,8 @@ import type { Decision, DecisionState, LedgerEntry, LedgerPage } from '../../api
 import type { Attempt, BusinessOut, ConversationSummary, OwnerTranscript } from '../../api/views.ts';
 import { isLive } from '../useDesks.ts';
 
-/** The four things, in the intro dialog's order. */
-export const THINGS = ['chat', 'break', 'answer', 'create'] as const;
+/** The five things, in the list's order: the intro dialog's four, with "Watch a demo visitor" second. */
+export const THINGS = ['chat', 'demo', 'break', 'answer', 'create'] as const;
 
 export type Thing = (typeof THINGS)[number];
 
@@ -62,7 +62,7 @@ export function remember(memory: DoneMemory, now: Record<Thing, Reading>): DoneM
 
 /**
  * The list's line under its heading: how long the tour takes until something is done, then how many
- * of the four are, always "of 4", the intro dialog's four, even before "Answer a held request" shows.
+ * of the five are, always "of 5", even before "Answer a held request" shows.
  */
 export function doneCaption(count: number): string {
   if (count <= 0) return 'About 10 minutes. No real customer sees any of it.';
@@ -99,6 +99,14 @@ export function chattedAsCustomer(transcripts: readonly (OwnerTranscript | undef
 function isReplayed(entry: LedgerEntry): boolean {
   const marker = entry.event.summary.replayed;
   return marker !== undefined && marker !== null && marker !== false;
+}
+
+/**
+ * "Watch a demo visitor": the Desk's conversations list a demo visitor's chat, which the owner
+ * started in this copy. A replayed chat is history, not the owner's.
+ */
+export function demoVisitorRan(conversations: readonly ConversationSummary[]): boolean {
+  return conversations.some((c) => c.demo_visitor === true && c.replayed !== true);
 }
 
 /**

@@ -651,7 +651,7 @@ class _Turn:
             decide_ms=self.decide_ms, execute_ms=self.execute_ms, total_ms=_ms(self.started), outcome=outcome,
             rebound=self.rebound))
         if self.visitor:
-            await emit(conn, ids, EvTurnEnd(type="turn_end"))
+            await emit(conn, ids, EvTurnEnd(type="turn_end", generation=self.generation))
         await conn.commit()
         if not self.annotates:
             return

@@ -658,13 +658,13 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
         "held_at": fake.decisions[seeded].created_at.isoformat().replace("+00:00", "Z"),
         "handoff": None,
         "session": {"session_id": fake.decisions[seeded].decision.session_id, "kind": "visitor",
-                    "display_name": None, "verified": False, "assurance": "none"},
+                    "display_name": None, "verified": False, "assurance": "none", "demo_visitor": False},
         "from_the_visitor": None, "claude_summary": None}
     assert first["decision"]["answers"] == ["allow_once", "deny_once"]        # a limit hold: no "Deny always"
     assert second["decision"]["decision_id"] == dana_hold.decision_id and second["handoff"] is None
     assert second["decision"]["answers"] == ["allow_once", "allow_person", "deny_once"]
     assert second["session"] == {"session_id": dana.session_id, "kind": "visitor", "display_name": "Dana Whitfield",
-                                 "verified": True, "assurance": "demo_code"}
+                                 "verified": True, "assurance": "demo_code", "demo_visitor": False}
     assert second["from_the_visitor"] == "Could you do 10% off the drain clearing?"
     assert third == {
         "decision": None, "held_by": None, "held_at": None,
@@ -672,7 +672,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                     "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None,
                     "status": "open", "kind": "callback"},
         "session": {"session_id": caller.session_id, "kind": "visitor", "display_name": "Sam Ortiz",
-                    "verified": False, "assurance": "none"},
+                    "verified": False, "assurance": "none", "demo_visitor": False},
         "from_the_visitor": "Water everywhere, please call me · It's the heater in the garage",   # the last two
         "claude_summary": None}
     # each held request was read from the kernel, with the owner's credential, which applies expiry
@@ -681,6 +681,30 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                                                          for decision_id in (seeded, dana_hold.decision_id))
     assert all(call.headers[OWNER] == owner.token for call in reads)
 
+
+
+async def test_needs_you_tags_a_demo_visitors_requests_by_its_persona(app, browser, fake, kernel_http, engine, db):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    seeded = seeded_hold(fake, owner)
+    fake.now += timedelta(minutes=5)
+    demo = await guest(kernel_http, fake, owner)
+    await write(engine, db, demo.ids, "demo_visitor", text="Riley")        # the mark its run writes as it opens
+    await write(engine, db, demo.ids, "visitor_text", text="Could I get 10% off as a returning customer?")
+    held = await demo.decide("native.quote", discounted_quote(fake, owner))
+    await demo.run("native.request_callback", {"name": "Riley Morgan", "contact": "riley.morgan@example.com",
+                                               "reason": "Kitchen sink leaking"})
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    # Its held request and its call-back request say it's the demo visitor, named by its persona as Conversations
+    # names it; the seed's real visitor's request never does.
+    seeded_item, held_item, callback = listed.json()
+    assert seeded_item["decision"]["decision_id"] == seeded and seeded_item["session"]["demo_visitor"] is False
+    assert held_item["decision"]["decision_id"] == held.decision_id
+    assert held_item["session"] == {"session_id": demo.session_id, "kind": "visitor", "display_name": "Riley",
+                                    "verified": False, "assurance": "none", "demo_visitor": True}
+    assert callback["handoff"]["session_id"] == demo.session_id and callback["session"] == held_item["session"]
 
 
 async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(app, browser, fake, kernel_http,
@@ -758,7 +782,7 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
                     "reason": "The Desk handed this to you.", "callback_window": None, "status": "open",
                     "kind": "card"},
         "session": {"session_id": handed.session_id, "kind": "visitor", "display_name": None, "verified": False,
-                    "assurance": "none"},
+                    "assurance": "none", "demo_visitor": False},
         "from_the_visitor": "How much is a new water heater?", "claude_summary": None}
     assert handoffs[caller.session_id]["handoff"] == {
         "handoff_id": opened[caller.session_id], "session_id": caller.session_id,
@@ -1006,11 +1030,12 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert brief["newest"] == {
         "turned_down": {"kind": "turned_down", "at": stamp(local(2026, 10, 29, 20)),
                         "session_id": refused_chat.session_id, "display_name": None,
-                        "ref_id": refused.decision_id, "line": refused.reason_plain, "cause": "tool_not_available"},
+                        "ref_id": refused.decision_id, "line": refused.reason_plain, "cause": "tool_not_available", "demo_visitor": False},
         "booking": {"kind": "booking", "at": stamp(local(2026, 10, 29, 22)), "session_id": booked_chat.session_id,
-                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain, "cause": None},
+                    "display_name": None, "ref_id": booked.decision_id, "line": booked.reason_plain, "cause": None, "demo_visitor": False},
         "lead_or_answer": {"kind": "answer", "at": stamp(local(2026, 10, 30, 7, 1)), "session_id": answered.session_id,
-                           "display_name": None, "ref_id": answered.session_id, "line": None, "cause": None}}
+                           "display_name": None, "ref_id": answered.session_id, "line": None, "cause": None,
+                           "demo_visitor": False}}
     listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()
     assert listed["since"] == brief["since"]
     assert [(item["kind"], item["ref_id"]) for item in listed["items"]] == [
@@ -1019,7 +1044,7 @@ async def test_briefing_counts_and_newest_rows(scene, clock):
     assert listed["items"][3]["line"] == refused.reason_plain
     assert listed["items"][4] == {"kind": "lead", "at": stamp(local(2026, 10, 29, 18)),
                                   "session_id": lead_chat.session_id, "display_name": "Sam Ortiz", "ref_id": lead_id,
-                                  "line": "Call after 5, the side gate", "cause": None}
+                                  "line": "Call after 5, the side gate", "cause": None, "demo_visitor": False}
     # computed from the rows on each read: polling gives the same briefing
     assert (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"] == brief
 
@@ -1286,6 +1311,63 @@ async def test_typed_booking_and_its_note_reach_today_with_default_notifications
     listed = (await owner.get(f'desks/{owner.desk_id}/conversations')).json()
     assert [row['latest_outcome'] for row in listed if row['session_id'] == visitor.session_id] == ['visit_booked']
 
+
+
+async def test_a_demo_visitors_booking_answer_and_lead_are_flagged_and_named_by_its_persona(scene, clock):
+    # Two demo visitors' chats since last night: one books and leaves a lead, the other is answered by Claude alone;
+    # beside them a real visitor's lead.
+    booking_demo = await scene.visitor(local(2026, 10, 29, 19))
+    await write(scene.engine, scene.admin, booking_demo.ids, "demo_visitor", local(2026, 10, 29, 19), text="Riley",
+                ref_id="visitor-one")
+    await scene.text(booking_demo, local(2026, 10, 29, 19))
+    booked = await scene.booking(booking_demo, local(2026, 10, 29, 19, 1))
+    demo_lead = await scene.lead(booking_demo, local(2026, 10, 29, 19, 2), name="Riley Morgan")
+    answered_demo = await scene.visitor(local(2026, 10, 29, 20))
+    await write(scene.engine, scene.admin, answered_demo.ids, "demo_visitor", local(2026, 10, 29, 20), text="Riley",
+                ref_id="visitor-two")
+    await scene.text(answered_demo, local(2026, 10, 29, 20))
+    await scene.reply(answered_demo, local(2026, 10, 29, 20, 1))
+    real = await scene.visitor(local(2026, 10, 29, 21))
+    real_lead = await scene.lead(real, local(2026, 10, 29, 21))
+    clock.now = local(2026, 10, 30, 9)
+    owner = scene.owner
+
+    listed = (await owner.get(f"desks/{owner.desk_id}/briefing")).json()["items"]
+    flagged = {(item["kind"], item["ref_id"]): (item["demo_visitor"], item["display_name"]) for item in listed}
+    # Its booking and answer say they're a demo visitor's, named by its persona where it gave no name of its own.
+    assert flagged[("booking", booked.decision_id)] == (True, "Riley Morgan")
+    assert flagged[("answer", answered_demo.session_id)] == (True, "Riley")
+    assert flagged[("lead", demo_lead)] == (True, "Riley Morgan")
+    assert flagged[("lead", real_lead)] == (False, "Sam Ortiz")
+    newest = (await owner.get(f"desks/{owner.desk_id}/today")).json()["briefing"]["newest"]
+    assert (newest["booking"]["demo_visitor"], newest["lead_or_answer"]["demo_visitor"]) == (True, False)
+    # People's leads too.
+    people = (await owner.get(f"desks/{owner.desk_id}/people")).json()
+    leads = {lead["lead_id"]: lead["demo_visitor"] for lead in people["leads"]}
+    assert (leads[demo_lead], leads[real_lead]) == (True, False)
+
+
+async def test_today_reads_the_demo_visitors_marks_once_for_its_briefing_and_live_rows(scene, clock, monkeypatch):
+    demo = await scene.visitor(local(2026, 10, 30, 8, 58))
+    await write(scene.engine, scene.admin, demo.ids, "demo_visitor", local(2026, 10, 30, 8, 58), text="Riley",
+                ref_id="visitor-one")
+    await scene.text(demo, local(2026, 10, 30, 8, 58))
+    await scene.reply(demo, local(2026, 10, 30, 8, 59))
+    clock.now = local(2026, 10, 30, 9)
+    reads = []
+    real = owner_reads.demo_visitors
+
+    async def counted(*args, **kwargs):
+        reads.append(args[1:])
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(owner_reads, "demo_visitors", counted)
+    today = (await scene.owner.get(f"desks/{scene.owner.desk_id}/today")).json()
+    # Needs you reads them for itself, first; the briefing and Live now share one read.
+    assert len(reads) == 2
+    assert [(row["session_id"], row["demo_visitor"]) for row in today["live"]] == [(demo.session_id, True)]
+    assert (today["briefing"]["newest"]["lead_or_answer"]["demo_visitor"],
+            today["briefing"]["newest"]["lead_or_answer"]["display_name"]) == (True, "Riley")
 
 
 async def test_briefing_list_is_the_window_newest_first(scene, clock):

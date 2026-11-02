@@ -33,6 +33,7 @@ from desk.api.prompts import (
     SetupUnderstanding,
     Translation,
     Triage,
+    VisitorStep,
 )
 
 SCHEMA_OPTIONAL_MAX, SCHEMA_UNION_MAX = 8, 6
@@ -54,6 +55,7 @@ OUTPUTS: dict[str, tuple[type[BaseModel], ...]] = {
     "situations": (DraftedSituations,),
     "rules_chat": (RuleChat,),
     "visiting_agent": (AgentStep,),
+    "demo_visitor": (VisitorStep,),
     "triage": (Triage,),
     "translation": (Translation,),
 }

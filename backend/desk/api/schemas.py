@@ -296,6 +296,38 @@ class DemoAgentRun(BaseModel):
     turns: list[AgentTurn]
 
 
+# How a demo visitor's run ended: its brief done (`finished`), the owner stopped it, the chat's session closed or its
+# stream ended (`chat_ended`), a cap (`limit`: ten messages, twelve model calls or fifteen minutes), the owner who took
+# the chat over stayed quiet (`owner_silent`), today's model budget (`budget`), or a model or HTTP failure (`failed`).
+DemoVisitorEnded = Literal["finished", "stopped_by_owner", "chat_ended", "limit", "owner_silent", "budget", "failed"]
+
+
+class DemoVisitorRun(BaseModel):
+    """A demo visitor's run: an AI that plays a customer in a visitor chat on the owner's own Desk
+    (`demo_visitors.py`), kept in the process's memory for an hour. `first_name` is its persona's, fixed text;
+    `session_id` is its visitor session, None until it is open; `messages_sent` counts the messages it sent the Desk;
+    `ended` says how a run that is no longer `running` ended (`done`: finished, limit or owner_silent; `stopped`:
+    stopped_by_owner or chat_ended; `failed`: budget or failed)."""
+
+    run_id: str
+    desk_id: str
+    first_name: str
+    session_id: str | None
+    state: Literal["running", "done", "stopped", "failed"]
+    messages_sent: int
+    ended: DemoVisitorEnded | None
+
+
+class DemoVisitorStarted(BaseModel):
+    """202 from `POST /api/owner/desks/{desk_id}/demo_visitor`: the demo visitor's run and its open visitor session,
+    on `desk_id`. While one runs in the copy, starting another answers that one, so `desk_id` can be another of the
+    copy's Desks. Poll `GET /api/owner/desks/{desk_id}/demo_visitor` for how it stands."""
+
+    run_id: str
+    desk_id: str
+    session_id: str
+
+
 # The owner's answers (Task 8) ------------------------------------------------------------------------------------
 
 
@@ -350,13 +382,16 @@ class AnsweringIn(BaseModel):
 
 class NeedsYouSession(BaseModel):
     """Who a held request or a callback request came from. `display_name` is the verified person's, else the name
-    the session's lead gave (untrusted text), else None."""
+    the session's lead gave (untrusted text), else a demo visitor's persona's first name, else None. `demo_visitor`
+    is true for a demo visitor's chat (`owner_reads.demo_visitors`), so Needs you never passes it off as a real
+    customer's."""
 
     session_id: str
     kind: ActorKind
     display_name: str | None
     verified: bool
     assurance: Assurance
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
 
 
 class Handoff(BaseModel):
@@ -440,7 +475,12 @@ class ConversationSummary(BaseModel):
     `latest_outcome_cents`, the amount paid (`deposit_paid`: a mandate charge's action amount, or, for a Desk-authored
     payment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide
     (`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its
-    outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview."""
+    outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview.
+
+    `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
+    `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
+    persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
+    runs were recorded there."""
 
     session_id: str
     kind: ActorKind
@@ -457,6 +497,8 @@ class ConversationSummary(BaseModel):
     latest_outcome_starts_at: AwareDatetime | None = None
     latest_outcome_cents: int | None = None
     latest_outcome_cause: RefusalCause | None = None
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
+    demo_visitor_run_id: str | None = None  # the demo visitor run that opened the chat, when its mark names one
 
 
 class OwnerTranscript(BaseModel):
@@ -469,6 +511,8 @@ class OwnerTranscript(BaseModel):
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
     replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
+    demo_visitor: bool = False              # a demo visitor's chat: an AI the owner started plays the customer
+    demo_visitor_run_id: str | None = None  # the demo visitor run that opened it (`GET …/demo_visitor/{run_id}`)
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------
@@ -498,7 +542,9 @@ class BriefingItem(BaseModel):
     the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
     refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
     and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
-    refusals. Stopped drafts stay on Safety and out of the briefing."""
+    refusals. Stopped drafts stay on Safety and out of the briefing. `demo_visitor` is true for a thing in a demo
+    visitor's chat (`owner_reads.demo_visitors`), whose `display_name` is then its persona's first name when the chat
+    gave no name of its own."""
 
     kind: Literal["turned_down", "booking", "lead", "answer"]
     at: AwareDatetime
@@ -507,6 +553,7 @@ class BriefingItem(BaseModel):
     ref_id: str
     line: str | None
     cause: RefusalCause | None
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
 
 
 class BriefingNewest(BaseModel):
@@ -985,6 +1032,7 @@ class Lead(BaseModel):
     note: str | None
     created_at: AwareDatetime
     replayed: bool = False                  # recorded history: left in a session written into the copy, not a live one
+    demo_visitor: bool = False              # left in a demo visitor's chat (`owner_reads.demo_visitors`)
 
 
 class PeopleOut(BaseModel):

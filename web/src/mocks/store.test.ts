@@ -2331,9 +2331,10 @@ describe('rules and tools', () => {
 
     const people = (await call('people', { params: { desk_id: deskId } })).body as PeopleOut;
     const byId = new Map(people.leads.map((row) => [row.lead_id, row]));
-    // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one.
-    expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true });
-    expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String) });
+    // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one. Neither
+    // is a demo visitor's.
+    expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true, demo_visitor: false });
+    expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String), demo_visitor: false });
   });
 
   it('draft_rules_hold_only_money_rules_to_the_payment_limit', async () => {
@@ -2907,6 +2908,7 @@ describe("Today's windows", () => {
       ref_id: preview?.state.session_id,
       line: null,
       cause: null,
+      demo_visitor: false,
     });
     expect(answered.this_week).toMatchObject({ conversations: 5, stepped_in: 1, handled: 4 });
 

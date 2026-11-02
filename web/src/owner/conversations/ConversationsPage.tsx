@@ -44,6 +44,13 @@ function arrivalNotice(state: unknown): string | null {
   return typeof notice === 'string' && notice !== '' ? notice : null;
 }
 
+/** The demo visitor run the page that opened the chat started there, if it did. */
+function arrivalRun(state: unknown): string | null {
+  if (typeof state !== 'object' || state === null) return null;
+  const run = (state as Partial<ConversationArrival>).demoVisitorRun;
+  return typeof run === 'string' && run !== '' ? run : null;
+}
+
 interface Group {
   day: ConversationDay;
   items: ConversationSummary[];
@@ -132,6 +139,7 @@ export function ConversationsPage() {
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
                 recorded={s.replayed === true}
+                demoVisitor={s.demo_visitor === true}
                 quote={s.kind === 'visitor' && !s.owner_preview ? s.latest_visitor_text ?? undefined : undefined}
                 line={s.kind === 'agent' ? agentLine(s, business.timezone) ?? undefined : undefined}
               />
@@ -194,7 +202,14 @@ export function ConversationsPage() {
             >
               <TextLink href={conversationsPath(deskId)}>All conversations</TextLink>
             </p>
-            <ConversationDetail key={sessionId} sessionId={sessionId} summary={open} listRead={listRead} notice={arrivalNotice(location.state)} />
+            <ConversationDetail
+              key={sessionId}
+              sessionId={sessionId}
+              summary={open}
+              listRead={listRead}
+              notice={arrivalNotice(location.state)}
+              demoVisitorRun={arrivalRun(location.state)}
+            />
           </>
         )}
       </div>

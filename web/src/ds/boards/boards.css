@@ -1505,3 +1505,17 @@
     padding-left: var(--space-16);
   }
 }
+
+/* The demo visitor's boards (REV-DEMO): Today's Things to try drawn alone, the footer under it; and a
+   demo visitor's conversation, whose note sits 8 px under its head. */
+.board-demo-today {
+  display: grid;
+  gap: var(--space-32);
+  min-width: 0;
+}
+
+.board-demo-top {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}

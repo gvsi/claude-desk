@@ -201,7 +201,9 @@ export interface BriefingNewest {
  * the decision for a booking, the `lead_id`, the session for an answer. `line` is the kernel's owner text for a
  * refusal or a booking, a lead's note (untrusted, as the visitor or Claude wrote it), else None. `cause` is required
  * and nullable: the refused request's closed cause code for `turned_down`, null for other kinds and unmapped
- * refusals. Stopped drafts stay on Safety and out of the briefing.
+ * refusals. Stopped drafts stay on Safety and out of the briefing. `demo_visitor` is true for a thing in a demo
+ * visitor's chat (`owner_reads.demo_visitors`), whose `display_name` is then its persona's first name when the chat
+ * gave no name of its own.
  */
 export interface BriefingItem {
   kind: "turned_down" | "booking" | "lead" | "answer";
@@ -235,6 +237,7 @@ export interface BriefingItem {
         | "no_rule"
       )
     | null;
+  demo_visitor?: boolean;
 }
 /**
  * `GET /api/owner/desks/{desk_id}/briefing`: every item since last night, newest first.
@@ -353,6 +356,11 @@ export interface ConnectorProposal {
  * payment confirmation, its payment link's); and `latest_outcome_cause`, why its request was refused at decide
  * (`turned_down`, the closed code `BriefingItem.cause` uses; null for a refusal at execution). Each is null when its
  * outcome isn't the newest, when the fact can't be read, and for a visitor's conversation or the owner's preview.
+ *
+ * `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
+ * `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
+ * persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
+ * runs were recorded there.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -406,6 +414,8 @@ export interface ConversationSummary {
         | "no_rule"
       )
     | null;
+  demo_visitor?: boolean;
+  demo_visitor_run_id?: string | null;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -438,6 +448,35 @@ export interface DemoAgentRun {
   task: "book_visit" | "ask_question" | "quote_and_deposit" | "push_the_limit";
   state: "running" | "done" | "failed";
   turns: AgentTurn[];
+}
+export interface DemoVisitorIn {
+  idempotency_key: string;
+}
+/**
+ * A demo visitor's run: an AI that plays a customer in a visitor chat on the owner's own Desk
+ * (`demo_visitors.py`), kept in the process's memory for an hour. `first_name` is its persona's, fixed text;
+ * `session_id` is its visitor session, None until it is open; `messages_sent` counts the messages it sent the Desk;
+ * `ended` says how a run that is no longer `running` ended (`done`: finished, limit or owner_silent; `stopped`:
+ * stopped_by_owner or chat_ended; `failed`: budget or failed).
+ */
+export interface DemoVisitorRun {
+  run_id: string;
+  desk_id: string;
+  first_name: string;
+  session_id: string | null;
+  state: "running" | "done" | "stopped" | "failed";
+  messages_sent: number;
+  ended: ("finished" | "stopped_by_owner" | "chat_ended" | "limit" | "owner_silent" | "budget" | "failed") | null;
+}
+/**
+ * 202 from `POST /api/owner/desks/{desk_id}/demo_visitor`: the demo visitor's run and its open visitor session,
+ * on `desk_id`. While one runs in the copy, starting another answers that one, so `desk_id` can be another of the
+ * copy's Desks. Poll `GET /api/owner/desks/{desk_id}/demo_visitor` for how it stands.
+ */
+export interface DemoVisitorStarted {
+  run_id: string;
+  desk_id: string;
+  session_id: string;
 }
 /**
  * `POST /api/owner/desks/{desk_id}/documents`: a document for the Desk, the owner's alone or a customer's on
@@ -604,6 +643,7 @@ export interface Lead {
   note: string | null;
   created_at: string;
   replayed?: boolean;
+  demo_visitor?: boolean;
 }
 /**
  * 202: the visitor's message is stored; Claude's answer arrives on the event stream.
@@ -645,7 +685,9 @@ export interface NeedsYouItem {
 }
 /**
  * Who a held request or a callback request came from. `display_name` is the verified person's, else the name
- * the session's lead gave (untrusted text), else None.
+ * the session's lead gave (untrusted text), else a demo visitor's persona's first name, else None. `demo_visitor`
+ * is true for a demo visitor's chat (`owner_reads.demo_visitors`), so Needs you never passes it off as a real
+ * customer's.
  */
 export interface NeedsYouSession {
   session_id: string;
@@ -653,6 +695,7 @@ export interface NeedsYouSession {
   display_name: string | null;
   verified: boolean;
   assurance: "none" | "demo_code" | "owner_session";
+  demo_visitor?: boolean;
 }
 /**
  * `POST /api/owner/conversations/{session_id}/messages`: the owner's words, said to the visitor once the owner has
@@ -673,6 +716,8 @@ export interface OwnerTranscript {
   items: OwnerTranscriptItem[];
   typing_until: string | null;
   replayed?: boolean;
+  demo_visitor?: boolean;
+  demo_visitor_run_id?: string | null;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each
@@ -1293,6 +1338,10 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/resume": { 200: "SessionState" },
   "POST /api/owner/conversations/{session_id}/messages": { 200: "OwnerMessageResult" },
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
+  "POST /api/owner/desks/{desk_id}/demo_visitor": { 202: "DemoVisitorStarted" },
+  "GET /api/owner/desks/{desk_id}/demo_visitor": { 200: "DemoVisitorRun" },
+  "GET /api/owner/desks/{desk_id}/demo_visitor/{run_id}": { 200: "DemoVisitorRun" },
+  "POST /api/owner/desks/{desk_id}/demo_visitor/{run_id}/stop": { 200: "DemoVisitorRun" },
   "POST /api/owner/setup": { 201: "SetupState" },
   "GET /api/owner/setup/{id}": { 200: "SetupState" },
   "GET /api/owner/setup/{id}/events": { 200: null },
