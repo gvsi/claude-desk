@@ -6,6 +6,7 @@ import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } fro
 import type { StartSetupBody } from '../api/views.ts';
 import { retryAfterMs, sleep } from '../app/poll.ts';
 import { Button, Notice, PageHeader, SuggestionChips, TextField } from '../ds/index.ts';
+import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
 import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 
 /** Plan 02's limit on the business's description. */
@@ -71,8 +72,9 @@ export function StartStep() {
   const { pathname } = useLocation();
   // Where focus goes when "Try again" goes with its line.
   const titleRef = useRef<HTMLHeadingElement>(null);
-  // The box, which takes focus once an example is put in it.
+  // The box, which takes focus as the page opens, and once an example is put in it.
   const boxRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  useFocusOnArrival(boxRef);
   // Each example put in the box, counted, so the box takes focus after each, the same one again too.
   const [picks, setPicks] = useState(0);
   // Older Safari fits the box here; CSS keeps the same four-line floor and ten-line cap.

@@ -292,7 +292,8 @@ describe('mock checkout', () => {
     const line = screen.container.querySelector('.cd-checkout__state');
     expect(line?.textContent).toBe('Paid. Go back to the chat to see it there.');
     expect(back.element().closest('.cd-checkout__state')).toBe(line);
-    expect(screen.container.querySelectorAll('a')).toHaveLength(1);
+    // The footer's author link aside, the only link on the page.
+    expect(screen.container.querySelectorAll('a:not([data-ds="concept-footer"] a)')).toHaveLength(1);
 
     // It opens the chat in this tab: no new tab, and a plain click is left to the browser to
     // follow (the test stops it there, so this page stays loaded).
@@ -336,7 +337,7 @@ describe('mock checkout', () => {
     const unknown = await renderRoute(`/pay/${issueLink('es')}`, { language: 'en-US' });
     await unknown.screen.getByRole('button', { name: 'Pagar $20.00' }).click();
     await expect.element(unknown.screen.getByText('Pagado. Vuelve al chat para verlo allí.', { exact: true })).toBeVisible();
-    expect(unknown.screen.container.querySelectorAll('a')).toHaveLength(0);
+    expect(unknown.screen.container.querySelectorAll('a:not([data-ds="concept-footer"] a)')).toHaveLength(0);
   });
 
   it('paid_line_without_a_known_chat_has_no_link', async () => {
@@ -347,7 +348,7 @@ describe('mock checkout', () => {
       await screen.getByRole('button', { name: 'Pay $20.00' }).click();
       await expect.element(screen.getByText(PAID, { exact: true })).toBeVisible();
       expect(screen.container.querySelector('.cd-checkout__state')?.textContent, why).toBe(PAID);
-      expect(screen.container.querySelectorAll('a'), why).toHaveLength(0);
+      expect(screen.container.querySelectorAll('a:not([data-ds="concept-footer"] a)'), why).toHaveLength(0);
     }
 
     // No chat showed this link in this browser: today's line, with no link.

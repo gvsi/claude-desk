@@ -313,13 +313,19 @@ export const Default: Story = {
     // The page behind doesn't scroll while the dialog is open.
     expectComputed(document.documentElement, { overflowX: 'hidden', overflowY: 'hidden' });
 
-    // focus_stays_inside: Tab and Shift+Tab cycle between the field and the button, and nowhere else.
+    // focus_stays_inside: Tab and Shift+Tab cycle through the field, the button and the footer's author
+    // link, and nowhere else.
+    const author = canvas.getByRole('link', { name: 'Giovanni Alcantara' });
     await userEvent.type(field, 'rivera-demo');
     await expect(button).toBeEnabled();
     await userEvent.tab();
     await expect(button).toHaveFocus();
     await userEvent.tab();
+    await expect(author).toHaveFocus();
+    await userEvent.tab();
     await expect(field).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    await expect(author).toHaveFocus();
     await userEvent.tab({ shift: true });
     await expect(button).toHaveFocus();
     await userEvent.tab({ shift: true });
@@ -568,6 +574,8 @@ export const StartingFlow: Story = {
     await userEvent.click(button);
     await userEvent.keyboard('{Enter}');
     await expect(button).toHaveFocus();
+    await userEvent.tab();
+    await expect(canvas.getByRole('link', { name: 'Giovanni Alcantara' })).toHaveFocus();
     await userEvent.tab();
     await expect(field).toHaveFocus();
     await userEvent.keyboard('{Enter}');

@@ -1131,6 +1131,33 @@ describe('ReaderPage', () => {
     }
   });
 
+  it('the_authors_name_links_to_their_profile', async () => {
+    // The byline's name, beside the article or in the line under the summary on a phone, and the
+    // footer's: each opens the author's LinkedIn profile in a new tab, with the words unchanged.
+    const profile = 'https://www.linkedin.com/in/giovannialcantara/';
+    for (const id of IDS) {
+      for (const size of [DESKTOP, PHONE]) {
+        const where = `${id} at ${size.width}`;
+        const screen = await renderReader(id, { size });
+        const root = screen.container;
+        const meta =
+          size === PHONE ? root.querySelector('[data-hero] [data-byline]') : root.querySelector('aside[aria-label="About this document"] dd');
+        const footer = root.querySelector('[data-ds="concept-footer"]');
+        for (const [part, words] of [
+          [meta, /^Giovanni Alcantara(?: · |$)/],
+          [footer, /^Concept prototype by Giovanni Alcantara, not an Anthropic product$/],
+        ] as const) {
+          expect(flat(part?.textContent), where).toMatch(words);
+          const links = [...(part?.querySelectorAll('a') ?? [])];
+          expect(links.map((link) => [link.textContent, link.getAttribute('href'), link.target, link.rel]), where).toEqual([
+            ['Giovanni Alcantara', profile, '_blank', 'noopener noreferrer'],
+          ]);
+        }
+        await screen.unmount();
+      }
+    }
+  });
+
   it('prototype_link_opens_your_desk_or_the_prototype', async () => {
     const cases = [
       { lastDesk: 'desk-rivera', size: DESKTOP, to: '/app/desk-rivera/today' },

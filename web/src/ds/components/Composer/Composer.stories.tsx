@@ -253,6 +253,27 @@ export const Disabled: Story = {
   },
 };
 
+/** While a reply comes in: the words can be typed and edited, and Send and Enter wait until it lifts. */
+export const SendHeld: Story = {
+  args: { sendHeld: true },
+  parameters: {
+    canvasNote: 'The board shows the composer ready; while a reply comes in, typing works and Send waits.',
+  },
+  play: async ({ args, canvas, userEvent }) => {
+    const input = canvas.getByRole('textbox', { name: 'Message Turner Plumbing' });
+    const send = canvas.getByRole('button', { name: 'Send' });
+    await expect(input).toBeEnabled();
+    await userEvent.click(input);
+    await userEvent.keyboard('Is Thursday free?');
+    await expect(input).toHaveValue('Is Thursday free?');
+    await expect(send).toBeDisabled();
+    await userEvent.keyboard('{Enter}');
+    await expect(input).toHaveValue('Is Thursday free?');
+    await expect(input).toHaveFocus();
+    await expect(args.onSend).not.toHaveBeenCalled();
+  },
+};
+
 /** The owner's answer the setup interview couldn't take, and the page's line about it, as N-R2-Setup-04-Answer-Failed writes them. */
 const KEPT_ANSWER = '$500 is fine. Anything bigger, ask me.';
 const FAILED_LINE = 'I couldn’t answer just now. Your answer is still here; try again.';

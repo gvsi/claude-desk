@@ -629,9 +629,12 @@ describe('rules page', () => {
     expect(log.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(desk().drafts.size).toBe(0);
 
-    // Another question from the panel's own composer goes on in the same conversation.
+    // Another question from the panel's own composer goes on in the same conversation, sent once
+    // the answer before it has come in.
     const box = screen.getByRole('textbox', { name: 'Ask Claude' });
+    const send = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('button', { name: 'Send', exact: true });
     await box.fill('What can you do?');
+    await expect.element(send).toBeEnabled();
     await userEvent.keyboard('{Enter}');
     await expect.element(log.getByText(/^I can explain what a rule does/)).toBeVisible();
     expect(log.getByText('Why was this quote held?', { exact: true }).elements()).toHaveLength(1);
@@ -642,6 +645,7 @@ describe('rules page', () => {
     const long = `Stop quoting on weekends ${'and holidays '.repeat(160)}`.trim();
     expect(long.length).toBeGreaterThan(2000);
     await box.fill(long);
+    await expect.element(send).toBeEnabled();
     await userEvent.keyboard('{Enter}');
     await expect.element(log.getByText("That's over 2,000 characters. Shorten it and try again.", { exact: true })).toBeVisible();
     await expect.element(log.getByText(long, { exact: true })).toBeInTheDocument();

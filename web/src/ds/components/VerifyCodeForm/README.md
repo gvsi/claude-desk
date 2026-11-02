@@ -23,6 +23,7 @@
 - `state`: `checking` while the code is with the verify route, `failed` when it answers that the code didn't work, `idle` otherwise.
 - `onSubmit`: post the code through the API's verify route. The code goes to the kernel, never to Claude.
 - `onAskForOwner`: the same as the page's "Ask for" the owner.
+- `askWaits` while a reply is coming in: "I can't get the code" waits (`aria-disabled`, focus kept, presses do nothing) until it has, as the composer's Send does.
 - `language`: the visitor's language. The form sets `lang` to it.
 
 ## Copy (`verifyCopy.ts`)
@@ -49,6 +50,7 @@
 | `state` | `'idle' \| 'checking' \| 'failed'` | Required. `VerifyCodeState`. |
 | `onSubmit` | `(code: string) => void` | Required. Called with six ASCII digits. |
 | `onAskForOwner` | `() => void` | Required. |
+| `askWaits` | `boolean` | A reply is coming in: "I can't get the code" waits. `false` by default. |
 | `language` | `'en' \| 'es'` | Required. |
 
 ## VerifiedLine

@@ -21,15 +21,17 @@ export interface VerifyInlineProps {
   onSubmit: (code: string) => void;
   /** "I can't get the code": the visitor asks for the owner, as the page's own button does. */
   onAskForOwner: () => void;
+  /** A reply is on its way: "I can't get the code" waits, as Send does. */
+  askWaits?: boolean;
 }
 
-export function VerifyInline({ status, verified, assurance, language, onSubmit, onAskForOwner }: VerifyInlineProps) {
+export function VerifyInline({ status, verified, assurance, language, onSubmit, onAskForOwner, askWaits = false }: VerifyInlineProps) {
   if (verified) return <VerifiedLine text={PUBLIC_COPY[language].verified} assurance={assurance} language={language} />;
   // A failed code is the form's own line; no answer at all is the page's.
   const state = status === 'checking' || status === 'failed' ? status : 'idle';
   return (
     <div className="cd-verify-inline">
-      <VerifyCodeForm state={state} onSubmit={onSubmit} onAskForOwner={onAskForOwner} language={language} />
+      <VerifyCodeForm state={state} onSubmit={onSubmit} onAskForOwner={onAskForOwner} askWaits={askWaits} language={language} />
       {status === 'unreachable' ? <Notice tone="error">{UNREACHABLE_COPY[language]}</Notice> : null}
     </div>
   );

@@ -999,8 +999,10 @@ describe('public chat page', () => {
     await say(stale.screen, 'Can I get 15% off if I pay cash?');
     const cancel = stale.screen.getByRole('button', { name: 'Cancel this request' });
     mockStore.inject({ route: 'cancelRequest', status: 401, delayMs: late });
-    mockStore.inject({ route: 'sendMessage', status: 401, delayMs: late });
+    // The lost send goes first: Send waits while a message's reply is on its way, and the chat
+    // stops waiting once it is reading whether the lost one went through.
     mockStore.inject({ route: 'sendMessage', status: 'network' });
+    mockStore.inject({ route: 'sendMessage', status: 401, delayMs: late });
     mockStore.inject({ route: 'visitorSession', status: 401, delayMs: late });
     await cancel.click();
     await type(stale.screen, 'How much is drain clearing?');
@@ -1395,12 +1397,12 @@ describe('public chat page', () => {
     }
     await frames();
 
-    // Mike joins, and his row rises into place, reaching a little below the end until it settles.
-    // The visitor, at the end, scrolls to the very bottom as it lands, so the browser takes the
-    // conversation back up a pixel at a time as the row settles, each scroll's event coming only
-    // with the next frame. Between one of those scrolls and its event, a pasted message grows the
-    // composer over the end. The browser's scroll isn't the visitor leaving the end, so the end
-    // comes back above the composer.
+    // Mike joins, and his row rises into place. The visitor, at the end, scrolls to the very bottom
+    // as it lands. The row rises within the room the conversation leaves under its end, so the
+    // browser doesn't take the conversation back up as it settles. Should the browser still move it
+    // up a pixel or two in the very moment a pasted message grows the composer over the end, that
+    // scroll's event coming only with the next frame, the scroll isn't the visitor leaving the end,
+    // so the end comes back above the composer.
     const region = chatScroller();
     const box = screen.getByRole('textbox', { name: 'Message Turner Plumbing' }).element() as HTMLTextAreaElement;
     let tookBack = false;
@@ -1410,17 +1412,17 @@ describe('public chat page', () => {
         if (!document.body.textContent?.includes('Mike Turner joined the chat')) return;
         watcher.disconnect();
         region.scrollTo({ top: region.scrollHeight, behavior: 'instant' });
-        let was = region.scrollTop;
+        const bottom = region.scrollTop;
         const since = performance.now();
-        // Looked at between frames, so the paste comes right after the browser's scroll, before its event.
+        // Looked at between frames while the row is still rising, then the browser's own small
+        // scroll and the paste, together, before either's event.
         const look = (): void => {
-          const now = region.scrollTop;
-          if (now >= was && performance.now() - since < 1_000) {
-            was = now;
+          if (region.scrollTop < bottom) tookBack = true;
+          if (performance.now() - since < 60) {
             realSetTimeout(look, 0);
             return;
           }
-          tookBack = now < was;
+          region.scrollBy({ top: -2, behavior: 'instant' });
           Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(box, 'one\ntwo\nthree\nfour\nfive\nsix');
           box.dispatchEvent(new Event('input', { bubbles: true }));
           grownOver = endUnderTheComposer(screen);
@@ -1432,7 +1434,7 @@ describe('public chat page', () => {
       watcher.observe(document.body, { subtree: true, childList: true, characterData: true });
       mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
     });
-    expect(tookBack, 'the browser took the conversation back up as the row settled').toBe(true);
+    expect(tookBack, 'the browser left the conversation where it was as the row rose').toBe(false);
     expect(grownOver, 'the composer grew over the end').toBeGreaterThan(48);
     await frames();
     expect(box.value.split('\n'), 'the pasted lines are in the composer').toHaveLength(6);
@@ -1830,6 +1832,213 @@ describe('public chat page', () => {
     const frames = await reply;
     expectRevealed(frames, { cards: [0.12], lines: [0.24] });
     expect(frames.at(-1)?.words).toBe("Here's the price for clearing a drain, from Mike's price list.");
+  });
+
+  it('takes_typing_while_a_reply_is_on_its_way_and_revealed_and_sends_it_once_it_has_come_in', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const box = chatBox(screen);
+    const send = screen.getByRole('button', { name: 'Send', exact: true });
+    const sends = () => requests('sendMessage').length;
+    // The message's request waits on its way, so its reply is still to come.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' }, until: held, afterCommit: true });
+    const before = chatEvents().length;
+    await box.click();
+    await userEvent.keyboard('How much is drain clearing?{Enter}');
+    await expect.element(box).toHaveValue('');
+    // While the reply is on its way, the box keeps focus and takes typing; only Send and Enter wait.
+    await userEvent.keyboard('And on a Sunday?');
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    await expect.element(box).toBeEnabled();
+    await expect.element(box).toHaveFocus();
+    await expect.element(send).toBeDisabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    expect(sends()).toBe(1);
+
+    // The reply comes in, its words revealed, then its card, then its receipt: Send waits while it does.
+    const replyRowLanding = () => document.querySelector('.cd-transcript-row--live .cd-claude-message') !== null;
+    const whileComingIn: boolean[] = [];
+    let receiptsFollowed = false;
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector(COMING_IN) && !replyRowLanding()) return;
+      if (document.querySelector('.cd-transcript-row--following')) receiptsFollowed = true;
+      whileComingIn.push((send.element() as HTMLButtonElement).disabled);
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+    onTestFinished(() => observer.disconnect());
+    release();
+    await turnEnded(before);
+    await vi.waitFor(() => expect(replyRowLanding()).toBe(false), { timeout: 5_000 });
+    observer.disconnect();
+    expect(receiptsFollowed).toBe(true);
+    expect(whileComingIn.length).toBeGreaterThan(0);
+    expect(whileComingIn.filter((disabled) => !disabled)).toEqual([]);
+    // It has come in: the words typed meanwhile are still there, with focus, and they send.
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    await expect.element(send).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(sends).toBe(2);
+    await expect.element(box).toHaveValue('');
+  });
+
+  it('holds_send_through_a_receipt_that_comes_before_the_reply_and_lets_go_when_the_owner_joins', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 15% off if I pay cash?');
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const box = chatBox(screen);
+    const send = () => screen.getByRole('button', { name: 'Send', exact: true }).element() as HTMLButtonElement;
+    // The next message's request waits on its way, so its turn hasn't started.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' }, until: gate, afterCommit: true });
+    await box.click();
+    // Sent once the reply before it has landed, receipts and all.
+    await userEvent.keyboard('How much is drain clearing?');
+    await expect.poll(() => send().disabled).toBe(false);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('');
+    await userEvent.keyboard('And on a Sunday?');
+    await expect.poll(() => send().disabled).toBe(true);
+
+    // What came of the earlier request arrives before the reply: the reply is still on its way.
+    const expired = 'That request ran out of time.';
+    mockStore.emit(RIVERA.slug, { ...held, type: 'resolved', state: 'expired', visitor_plain: expired, ledger_seq: held.ledger_seq + 100 });
+    await vi.waitFor(() => expect(document.body.textContent).toContain(expired));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(send().disabled).toBe(true);
+
+    // Mike Turner joins the chat: he answers in his own time, so Send waits no longer.
+    mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
+    await expect.poll(() => send().disabled).toBe(false);
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('try_again_waits_for_a_reply_on_its_way_and_holds_send_until_its_own_reply_starts', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const box = chatBox(screen);
+    const send = () => screen.getByRole('button', { name: 'Send', exact: true }).element() as HTMLButtonElement;
+    const sends = () => requests('sendMessage').length;
+    /** The next message's request waits on its way until the returned function lets it go. */
+    const holdNextSend = () => {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      onTestFinished(() => release());
+      mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: `vmsg-held-${sends()}` }, until: gate, afterCommit: true });
+      return release;
+    };
+    mockStore.inject({ route: 'sendMessage', status: 500 });
+    await type(screen, 'How much is drain clearing?');
+    const retry = screen.getByRole('alert').getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(retry).toBeVisible();
+
+    // A later message's reply is on its way: "Try again" waits too, and a press sends nothing.
+    const later = holdNextSend();
+    await box.click();
+    await userEvent.keyboard('Can someone come Tuesday afternoon?{Enter}');
+    await expect.poll(sends).toBe(2);
+    await expect.element(retry).toHaveAttribute('aria-disabled', 'true');
+    (retry.element() as HTMLElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sends()).toBe(2);
+    const before = chatEvents().length;
+    later();
+    await turnEnded(before);
+    await expect.element(retry).not.toHaveAttribute('aria-disabled');
+
+    // Sent again, the message holds Send until its own reply starts, as a new message does.
+    const again = holdNextSend();
+    await box.click();
+    await userEvent.keyboard('And on a Sunday?');
+    await expect.poll(() => send().disabled).toBe(false);
+    await retry.click();
+    await expect.poll(sends).toBe(3);
+    await expect.poll(() => send().disabled).toBe(true);
+    const resent = chatEvents().length;
+    again();
+    await turnEnded(resent);
+    await expect.poll(() => send().disabled).toBe(false);
+    await expect.element(box).toHaveValue('And on a Sunday?');
+  });
+
+  it('ask_for_the_owner_waits_for_a_reply_on_its_way_and_asks_once_it_has_come_in', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const sends = () => requests('sendMessage').length;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' }, until: gate, afterCommit: true });
+    const before = chatEvents().length;
+    await chatBox(screen).click();
+    await userEvent.keyboard('How much is drain clearing?{Enter}');
+    await expect.poll(sends).toBe(1);
+    // The reply is on its way: "Ask for Mike Turner" waits, as Send does, and a press asks nothing.
+    const askFor = screen.getByRole('button', { name: 'Ask for Mike Turner' });
+    await expect.element(askFor).toHaveAttribute('aria-disabled', 'true');
+    (askFor.element() as HTMLElement).focus();
+    (askFor.element() as HTMLElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sends()).toBe(1);
+    await expect.element(askFor).toHaveFocus();
+
+    release();
+    await turnEnded(before);
+    await expect.element(askFor).not.toHaveAttribute('aria-disabled');
+    await askFor.click();
+    await expect.poll(sends).toBe(2);
+    expect(requests('sendMessage').at(-1)?.body).toEqual({ text: expect.stringContaining('Mike Turner') });
+  });
+
+  it('a_stream_lost_while_claude_writes_frees_send_once_the_chat_gives_up_on_it', async () => {
+    const native = window.EventSource;
+    let source: EventSource | undefined;
+    window.EventSource = class extends native {
+      constructor(url: string | URL, init?: EventSourceInit) {
+        super(url, init);
+        source = this;
+      }
+    };
+    onTestFinished(() => {
+      window.EventSource = native;
+    });
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const send = () => screen.getByRole('button', { name: 'Send', exact: true }).element() as HTMLButtonElement;
+    await chatBox(screen).fill('Are you still there?');
+    // Claude starts writing: Send waits for the reply.
+    mockStore.emit(RIVERA.slug, { type: 'writing' });
+    await expect.poll(() => send().disabled).toBe(true);
+
+    // The stream drops, and every reopen fails until the chat gives up on it. With no way to hear the
+    // reply, Send no longer waits for it.
+    useTimers();
+    mockStore.inject({ route: 'events', status: 503, times: 3 });
+    source?.close();
+    source?.dispatchEvent(new Event('error'));
+    for (const wait of [2_000, 5_000, 10_000]) {
+      await settle();
+      await vi.advanceTimersByTimeAsync(wait + MARGIN_MS);
+    }
+    await until(() => expect(screen.getByRole('alert').getByText(UNREACHABLE_COPY.en, { exact: true }).query()).not.toBeNull());
+    expect(send().disabled).toBe(false);
   });
 
   it('a_reply_from_history_shows_whole_with_its_card_and_receipt_at_once', async () => {
@@ -3725,10 +3934,23 @@ describe('a waiting request stays findable', () => {
   }, 30_000);
 });
 
+/** The room a conversation scrolled to its end leaves between what it shows last and the composer area: 24 px. */
+const ROOM_UNDER_THE_END = 24;
+
 /**
- * The end of the conversation (its last row, receipt or notice) sits right above the composer that
- * stays at the bottom of the window: in view, and not hidden under it, nor under the chat's head
- * that stays at the top.
+ * Where what the conversation shows last ends: its last row, receipt or card, or what the page
+ * draws under them (a notice, the Demo inbox's button).
+ */
+function shownEnd(conversation: Element): number {
+  const shown = [...conversation.children].filter((part) => getComputedStyle(part).position !== 'absolute' && part.getBoundingClientRect().height > 0);
+  return Math.max(...shown.map((part) => part.getBoundingClientRect().bottom));
+}
+
+/**
+ * The end of the conversation (its last row, receipt or notice) sits above the composer that stays
+ * at the bottom of the window, with room under it: in view, and not hidden under the composer, nor
+ * under the chat's head that stays at the top. Once the conversation has scrolled to get there, the
+ * room is exactly ROOM_UNDER_THE_END; a conversation too short to scroll keeps at least that.
  */
 function expectEndAboveTheComposer(screen: RenderResult): void {
   const { composer, conversation } = conversationAndComposer(screen);
@@ -3736,6 +3958,12 @@ function expectEndAboveTheComposer(screen: RenderResult): void {
   const top = composer.getBoundingClientRect().top;
   expect(Math.abs(end - top), `the conversation ends at ${end}, the composer starts at ${top}`).toBeLessThanOrEqual(2);
   expect(top).toBeLessThanOrEqual(innerHeight);
+  const room = top - shownEnd(conversation);
+  if (chatScroller().scrollTop > 0) {
+    expect(Math.abs(room - ROOM_UNDER_THE_END), `${room} px between the conversation's last line and the composer`).toBeLessThanOrEqual(2);
+  } else {
+    expect(room, `${room} px between the conversation's last line and the composer`).toBeGreaterThanOrEqual(ROOM_UNDER_THE_END - 2);
+  }
   const rows = conversation.querySelectorAll('.cd-transcript-row');
   const last = rows[rows.length - 1]?.getBoundingClientRect();
   expect(last?.bottom ?? 0).toBeLessThanOrEqual(top);

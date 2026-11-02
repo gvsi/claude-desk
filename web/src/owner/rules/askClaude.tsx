@@ -18,6 +18,11 @@ export interface AskClaude {
   ask: (words: string) => void;
   /** The panel is open. */
   open: boolean;
+  /**
+   * An answer is on its way: a page's composer holds Send and Enter until it has come in, so the
+   * next question waits there rather than behind it.
+   */
+  busy: boolean;
   /** Closes the panel, focus back on what opened it. */
   close: () => void;
 }
@@ -168,14 +173,15 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
     setTurns((now) => now.map((turn) => (turn.id === turnId && turn.kind === 'claude' ? { ...turn, settled: outcome } : turn)));
   }, []);
 
-  const value = useMemo(() => ({ ask, open, close }), [ask, open, close]);
+  const busy = waiting > 0;
+  const value = useMemo(() => ({ ask, open, busy, close }), [ask, open, busy, close]);
   const panel = open ? (
     <RuleChat
       ref={panelRoot}
       deskId={deskId}
       ownerName={ownerName}
       turns={turns}
-      busy={waiting > 0}
+      busy={busy}
       growing={growing}
       onSend={ask}
       onClose={close}
