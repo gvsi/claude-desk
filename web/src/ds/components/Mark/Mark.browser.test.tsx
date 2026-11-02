@@ -53,7 +53,7 @@ const asDrawn = (appInk: string) => [
 
 it('the_marks_ink_follows_the_theme_on_the_apps_grounds', async () => {
   const fills = drawMarks();
-  // The dark theme: the system's (this context prefers dark), then chosen.
+  // The dark theme: the default, then chosen.
   expect(fills()).toEqual(asDrawn(PAPER_INK));
   chooseTheme('dark');
   expect(fills()).toEqual(asDrawn(PAPER_INK));
@@ -62,9 +62,12 @@ it('the_marks_ink_follows_the_theme_on_the_apps_grounds', async () => {
   expect(fills()).toEqual(asDrawn(DARK_INK));
 });
 
-it('the_marks_ink_follows_a_system_that_prefers_light_unless_dark_is_chosen', async () => {
+it('the_marks_ink_follows_a_system_that_prefers_light_only_when_system_is_chosen', async () => {
   await systemPrefersLight();
   const fills = drawMarks();
+  // Dark, the default, whatever the system prefers.
+  expect(fills()).toEqual(asDrawn(PAPER_INK));
+  chooseTheme('system');
   expect(fills()).toEqual(asDrawn(DARK_INK));
   chooseTheme('dark');
   expect(fills()).toEqual(asDrawn(PAPER_INK));

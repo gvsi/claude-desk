@@ -171,13 +171,13 @@ describe('Settings', () => {
     expect(regions).toEqual(['Claude acts for you', 'Appearance', 'Delete this Desk']);
     await expect.element(appearance.getByText(APPEARANCE_LINE, { exact: true })).toBeVisible();
 
-    // System is chosen until the owner picks: the device's own setting, so the root carries no mark.
+    // Dark is chosen until the owner picks: the default, so the root carries no mark.
     const group = appearance.getByRole('radiogroup', { name: 'Appearance' });
     const option = (name: string) => group.getByRole('radio', { name, exact: true });
     expect(group.getByRole('radio').elements().map((radio) => [radio.textContent, radio.getAttribute('aria-checked')])).toEqual([
-      ['System', 'true'],
+      ['System', 'false'],
       ['Light', 'false'],
-      ['Dark', 'false'],
+      ['Dark', 'true'],
     ]);
     expect(root.hasAttribute('data-theme')).toBe(false);
 
@@ -187,16 +187,17 @@ describe('Settings', () => {
     expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['light', 'light']);
     expectComputed(main(screen).element(), { color: 'rgba(28, 27, 25, 0.92)' });
 
-    // As radios from the keyboard: the arrow moves to Dark and chooses it.
+    // As radios from the keyboard: the arrow moves to Dark and chooses it, the default again: no
+    // mark, nothing stored.
     await userEvent.keyboard('{ArrowRight}');
     await expect.element(option('Dark')).toHaveAttribute('aria-checked', 'true');
     await expect.element(option('Dark')).toHaveFocus();
-    expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['dark', 'dark']);
+    expect([root.hasAttribute('data-theme'), localStorage.getItem('claude-desk.theme')]).toEqual([false, null]);
 
-    // System hands it back to the device: no mark, nothing stored.
+    // System hands it to the device: the root marked for it, and kept in this browser.
     await option('System').click();
     await expect.element(option('System')).toHaveAttribute('aria-checked', 'true');
-    expect([root.hasAttribute('data-theme'), localStorage.getItem('claude-desk.theme')]).toEqual([false, null]);
+    expect([root.dataset.theme, localStorage.getItem('claude-desk.theme')]).toEqual(['system', 'system']);
 
     // A choice kept from before is the one shown when the app opens again, as index.html's first
     // script marks the root with it.
@@ -233,8 +234,8 @@ describe('Settings', () => {
     await subNav(screen).getByRole('link', { name: 'General' }).click();
     await expect.element(option('Light')).toHaveAttribute('aria-checked', 'true');
 
-    await option('System').click();
-    await expect.element(option('System')).toHaveAttribute('aria-checked', 'true');
+    await option('Dark').click();
+    await expect.element(option('Dark')).toHaveAttribute('aria-checked', 'true');
     expect(root.hasAttribute('data-theme')).toBe(false);
   });
 
@@ -526,7 +527,7 @@ describe('Settings against its boards', () => {
     const { screen } = await renderRoute(GENERAL);
     const answering = main(screen).getByRole('switch', { name: 'Claude acts for you' });
     await expect.element(answering).toBeVisible();
-    const chosenTheme = main(screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name: 'System' });
+    const chosenTheme = main(screen).getByRole('radiogroup', { name: 'Appearance' }).getByRole('radio', { name: 'Dark' });
     const remove = main(screen).getByRole('button', { name: 'Delete this Desk' });
     await expectOwnerBoard(screen.container, {
       current: 'Settings',
