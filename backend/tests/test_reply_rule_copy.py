@@ -35,8 +35,8 @@ def test_a_request_receipt_reaches_the_soft_checks_with_a_label_no_card_has():
     which no card's label shares, so the checks can tell a request's status line from a card's text."""
     assert render.RECEIPT_LABEL == "Request receipt"
     assert render.RECEIPT_LABEL not in render.CHECK_LABELS.values()
-    assert render.receipt_check_text("Waiting for Maria Rivera to approve") == (
-        "Request receipt card: Waiting for Maria Rivera to approve")
+    assert render.receipt_check_text("Waiting for Mike Turner to approve") == (
+        "Request receipt card: Waiting for Mike Turner to approve")
     assert render.receipt_check_text("Cancelado") == "Request receipt card: Cancelado"
 
 
@@ -49,8 +49,8 @@ async def test_both_soft_checkers_read_the_receipts_after_the_cards(monkeypatch)
     monkeypatch.setattr(reply_check.context, "resolved_tools", AsyncMock(return_value=[]))
     monkeypatch.setattr(reply_check, "principal_for", lambda session: None)
     monkeypatch.setattr(jev, "evaluate", evaluate)
-    prose = "Your request is with Maria Rivera now."
-    receipts = ["Request receipt card: Waiting for Maria Rivera to approve", "Request receipt card: Cancelled"]
+    prose = "Your request is with Mike Turner now."
+    receipts = ["Request receipt card: Waiting for Mike Turner to approve", "Request receipt card: Cancelled"]
 
     await reply_check.soft_promises(stub_ctx(soft_promise), SimpleNamespace(desk_id="desk"), "en", prose,
                                     DEPOSIT_CARDS[:1], receipts=receipts)

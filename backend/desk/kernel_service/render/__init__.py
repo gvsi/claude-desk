@@ -282,5 +282,5 @@ RECEIPT_LABEL = "Request receipt"
 
 def receipt_check_text(visitor_plain: str) -> str:
     """A request receipt as the soft checks read it: its label, then the decision's status line
-    ("Request receipt card: Waiting for Maria Rivera to approve")."""
+    ("Request receipt card: Waiting for Mike Turner to approve")."""
     return f"{RECEIPT_LABEL} card: {visitor_plain}"
