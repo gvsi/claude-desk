@@ -3409,6 +3409,11 @@ describe("Today's Demo inbox", () => {
     await expect.element(sheet).not.toBeInTheDocument();
     expect(router.state.location.pathname).toBe(TODAY);
     const card = heldCard(screen, SEEDED_REASON);
+    // Main line's Today draws the card once its own reads land. Wait for the card with
+    // expect.element, whose retries are cheap: card.element() on a page without the card prints the
+    // whole page into its error, and a vi.waitFor around it does that every 50 ms, which keeps the
+    // browser too busy to draw the page it waits for.
+    await expect.element(card).toBeInTheDocument();
     await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
     expectInView(card.element());
   });
