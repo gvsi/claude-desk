@@ -147,7 +147,8 @@ export function MockCheckout({
   // A blank name is no name: the card then asks for one.
   const nameOnCard = customerName?.trim();
   // Each line that sends the visitor to the chat uses the same validated, same-tab link.
-  const parts = copy.returnLine[final === 'cancelled' && cancelReason === 'rules_changed' ? 'rules_changed' : final];
+  const lineKey = final === 'cancelled' && cancelReason === 'rules_changed' ? 'rules_changed' : final;
+  const parts = copy.returnLine[lineKey];
   const back = parts !== undefined && chatHref !== undefined && CHAT_PATH.test(chatHref) ? chatHref : null;
   const finalLine =
     back !== null && parts !== undefined ? (
@@ -158,10 +159,10 @@ export function MockCheckout({
         </TextLink>
         {parts.after}
       </span>
-    ) : final === 'cancelled' && cancelReason === 'rules_changed' ? (
+    ) : lineKey === 'rules_changed' ? (
       copy.cancelledRulesChanged
     ) : (
-      copy.final[final]
+      copy.final[lineKey]
     );
 
   // Whether focus is in the checkout, kept from its own focus events. Focus that leaves for

@@ -42,15 +42,15 @@ export interface CheckoutCopy {
   /**
    * Lines with a way back to the chat in three parts: the words before the link, the link's
    * words and the words after it. A checkout cancelled for any reason but a rule change uses
-   * the paid line's same `back` words.
+   * the paid line's same `back` words. `rules_changed` is a cancel reason, not a state.
    */
-  returnLine: Readonly<Partial<Record<FinalPaymentState | 'rules_changed', PaidLine>>>;
+  returnLine: Readonly<Partial<Record<FinalPaymentState | 'rules_changed', ReturnLine>>>;
   /** A cancelled link that a change to the business's rules cancelled. */
   cancelledRulesChanged: string;
 }
 
 /** A line with a way back to the chat inside it. */
-export interface PaidLine {
+export interface ReturnLine {
   before: string;
   back: string;
   after: string;
@@ -60,7 +60,7 @@ export interface PaidLine {
 const PAID = {
   en: { before: 'Paid. ', back: 'Go back to the chat', after: ' to see it there.' },
   es: { before: 'Pagado. ', back: 'Vuelve al chat', after: ' para verlo allí.' },
-} as const satisfies Record<CopyLanguage, PaidLine>;
+} as const satisfies Record<CopyLanguage, ReturnLine>;
 
 const CANCELLED = {
   en: 'This payment was cancelled. Nothing was charged.',
@@ -70,7 +70,7 @@ const CANCELLED = {
 const EXPIRED = {
   en: { before: 'This payment link expired. Ask in ', back: 'the chat', after: ' for a new one.' },
   es: { before: 'Este enlace de pago venció. Pide uno nuevo en ', back: 'el chat', after: '.' },
-} as const satisfies Record<CopyLanguage, PaidLine>;
+} as const satisfies Record<CopyLanguage, ReturnLine>;
 
 const RULES_CHANGED = {
   en: {
@@ -83,9 +83,9 @@ const RULES_CHANGED = {
     back: 'el chat',
     after: ' si todavía quieres pagar.',
   },
-} as const satisfies Record<CopyLanguage, PaidLine>;
+} as const satisfies Record<CopyLanguage, ReturnLine>;
 
-const joined = ({ before, back, after }: PaidLine) => `${before}${back}${after}`;
+const joined = ({ before, back, after }: ReturnLine) => `${before}${back}${after}`;
 
 /** The test card every checkout shows, filled in and locked. */
 export const TEST_CARD = {
