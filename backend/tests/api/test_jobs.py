@@ -668,44 +668,81 @@ async def test_a_call_that_runs_with_nothing_waiting_reads_no_other_decision(cop
     assert reads(fake) == [booked.decision_id, quote.decision_id]
 
 
-class FailingRead:
-    """A session's kernel client whose read of one decision (`GET /decisions/{id}`) raises `error`; every other call
-    goes through."""
+class FailingKernel:
+    """A session's kernel client on which each call that `fails(route, body, path)` names an error for raises that
+    error, and is kept in `failed`; every other call goes through."""
 
-    def __init__(self, kernel, decision_id: str, error: Exception):
-        self._kernel, self._decision_id, self._error = kernel, decision_id, error
+    def __init__(self, kernel, fails):
+        self._kernel, self._fails = kernel, fails
+        self.failed: list[tuple[str, dict | None]] = []
 
     async def call(self, route: str, body=None, *, path: dict | None = None, **options):
-        if route == "GET /decisions/{id}" and path == {"id": self._decision_id}:
-            raise self._error
+        error = self._fails(route, body, path)
+        if error is not None:
+            self.failed.append((route, path))
+            raise error
         return await self._kernel.call(route, body, path=path, **options)
 
     def __getattr__(self, name: str):
         return getattr(self._kernel, name)
 
 
-@pytest.mark.parametrize("error", [KernelUnavailable("GET /decisions/{id}"), KernelFailed(409, "closed"),
-                                   RuntimeError("dana@example.com")], ids=["unreachable", "closed", "anything"])
-async def test_a_waiting_decision_that_cant_be_read_is_left_for_later(copy, engine, fake, caplog, error):
-    """A waiting decision the kernel can't be read for, whatever the failure, changes nothing the turn does: the
-    booking is shown and answered as ever, nothing reaches the visitor about the read, no row is written, and the
-    failure is logged by its type alone. The minute sweep or the owner's reads settle the quote later."""
+@pytest.mark.parametrize(("error", "tried"), [
+    (KernelUnavailable("GET /decisions/{id}"), 1),             # out of reach: the look stops at its first read
+    (KernelFailed(409, "closed"), 2), (RuntimeError("dana@example.com"), 2)], ids=["unreachable", "closed", "anything"])
+async def test_a_waiting_decision_that_cant_be_read_is_left_for_later(copy, engine, fake, caplog, error, tried):
+    """Two discount quotes wait, and the kernel can't be read for either: whatever the failure, it changes nothing the
+    turn does. The booking is shown and answered as ever, nothing reaches the visitor about the reads, no row is
+    written, and each failure is logged by its type alone. A refusal is skipped for the next decision, but a kernel out
+    of reach stops the look at its first read, so a turn never waits out the client's timeout once per waiting
+    decision. The minute sweep or the owner's reads settle the quotes later."""
     caller = await copy.visitor()
-    quote = await held_half_off(engine, fake, caller)
-    failing = replace(caller, kernel=FailingRead(caller.kernel, quote.decision_id, error))
+    assert await turn(engine, caller, "Can I get half off a drain clearing? Or 40% off, at least?",
+                      response(tool_use("native__quote", HALF_OFF),
+                               tool_use("native__quote", {**DRAIN, "requested_discount_bp": 4000})),
+                      response(reply("I've asked Mike about both."))) == "done"
+    quotes = {quote.decision_id for quote in decisions(fake, caller, "native.quote") if quote.state == "held"}
+    assert len(quotes) == 2
+    kernel = FailingKernel(caller.kernel, lambda route, body, path: (
+        error if route == "GET /decisions/{id}" and path["id"] in quotes else None))
 
-    assert await turn(engine, failing, "Never mind, book me in at list price.",
+    assert await turn(engine, replace(caller, kernel=kernel), "Never mind, book me in at list price.",
                       response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0]})),
                       response(reply("You're booked."))) == "done"
 
+    assert len(kernel.failed) == tried and {path["id"] for _, path in kernel.failed} <= quotes
     found = await session_rows(engine, caller.session_id)
-    assert [type for type, _ in found["sse"]][4:] == ["writing", "receipt", "message", "turn_end"]
-    assert found["sse"][5] == ("receipt", "executed")
+    assert [type for type, _ in found["sse"]][-4:] == ["writing", "receipt", "message", "turn_end"]
+    assert found["sse"][-3] == ("receipt", "executed") and "error" not in [type for type, _ in found["sse"]]
     assert due_rows(found) == []
     logged = [record.getMessage() for record in caplog.records
               if record.name == "desk.api.loop" and record.levelno >= logging.WARNING]
-    assert logged == [f"a waiting decision couldn't be read after a call ran ({type(error).__name__})"]
+    assert logged == [f"a waiting decision couldn't be read after a call ran ({type(error).__name__})"] * tried
     assert "dana@example.com" not in caplog.text
+
+
+async def test_a_turn_stopping_on_an_unreachable_kernel_doesnt_look(copy, engine, fake):
+    """A booking runs, but a sibling call finds the kernel out of reach, so the turn stops with the static error. It
+    doesn't look at what the session waits on, which would only wait out the client's timeout again: the quote is left
+    for the minute sweep and the owner's reads."""
+    caller = await copy.visitor()
+    quote = await held_half_off(engine, fake, caller)
+
+    def unreachable(route, body, path):         # the slots search can't reach the kernel, nor can its lookup by call ID
+        searching = route == "POST /decide" and body.call.tool == "native.find_slots"
+        return KernelUnavailable(route) if searching or route.startswith("GET /decisions/by_call") else None
+
+    fake.calls.clear()
+    assert await turn(engine, replace(caller, kernel=FailingKernel(caller.kernel, unreachable)),
+                      "Book me in at list price, and which other times are free?",
+                      response(tool_use("native__book", {"slot_id": open_slots(fake, caller)[0]}),
+                               tool_use("native__find_slots", {"days": 3}))) == "kernel_unavailable"
+
+    (booking,) = decisions(fake, caller, "native.book")
+    assert booking.state == "executed"
+    assert reads(fake) == [booking.decision_id]                 # the booking's own read, and no look at the quote
+    assert fake.decisions[quote.decision_id].decision.state == "held"
+    assert due_rows(await session_rows(engine, caller.session_id)) == []
 
 
 # A run_events table as a running Desk fills it: mostly messages and receipts, a few held events and controls.

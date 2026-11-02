@@ -183,7 +183,9 @@ async def _surface_settled(conn: AsyncConnection, caller: Caller) -> None:
     writes it, for the session's open stream or next request to show (`runner.TurnRunner.handle_control`); one not
     final gets none, which would keep the sweep from marking it later. Nothing waiting, no kernel call. It runs before
     the response's replies, while an agent's request is unspent, holds no lock across a kernel call, and never raises:
-    a failure is logged by type only and skipped, for the sweep or the owner's reads to settle."""
+    a failure is logged by type only and skipped, for the sweep or the owner's reads to settle. A kernel out of reach
+    ends the look at once, so a turn waits out the client's timeout once at most, not once per waiting decision; a
+    turn whose calls already found it out of reach doesn't look at all (`_tool_use`)."""
     try:
         waiting = [row.decision_id for row in await conn.execute(waiting_decisions(caller.ids))]
         await conn.commit()
@@ -198,6 +200,9 @@ async def _surface_settled(conn: AsyncConnection, caller: Caller) -> None:
             if decision.session_id == caller.session_id and decision.state not in NOT_FINAL:
                 await append_control(conn, caller.ids, "decision_due", {"decision_id": decision_id})
                 await conn.commit()
+        except KernelUnavailable as error:                  # the next read would wait as long: none is tried
+            logger.warning("a waiting decision couldn't be read after a call ran (%s)", type(error).__name__)
+            break
         except Exception as error:
             logger.warning("a waiting decision couldn't be read after a call ran (%s)", type(error).__name__)
             with contextlib.suppress(Exception):
@@ -507,7 +512,8 @@ class _Turn:
         the check blocked (kept for the owner: `_reply`) commits with it, unless another reply's check follows: it then
         commits before that check, so no lock of the session is held across a kernel call, and it stays before
         whatever that reply shows. When a call showed an executed receipt, what the session still waits on is read
-        before any reply is checked, while an agent's request is unspent (`_surface_settled`).
+        before any reply is checked, while an agent's request is unspent (`_surface_settled`), unless the calls found
+        the kernel out of reach and the turn is about to stop for it.
 
         A call that raised before the kernel had it didn't run, and ends the turn with the static error. One that
         raised once the kernel may have had it is found by its call ID and settled (`_recover_raised`); if nothing
@@ -545,10 +551,11 @@ class _Turn:
             self.decide_ms += outcome.decide_ms
             self.execute_ms += outcome.execute_ms
         self.tool_calls += len(calls)
-        if any(outcome.status is not None and outcome.status.phase == "receipt"
-               and outcome.status.decision.state == "executed" for outcome in outcomes.values()):
-            await _surface_settled(conn, self.caller)          # before a reply spends an agent's request
         stop = _stop([*outcomes.values(), *unread]) or ("internal" if raised else None)
+        if stop != "kernel_unavailable" and any(
+                outcome.status is not None and outcome.status.phase == "receipt"
+                and outcome.status.decision.state == "executed" for outcome in outcomes.values()):
+            await _surface_settled(conn, self.caller)          # before a reply spends an agent's request
         if len(outcomes) < len(calls):                     # a call left open: no results row until it is settled
             return stop
         shown = kept = False
