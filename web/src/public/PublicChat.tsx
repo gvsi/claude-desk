@@ -884,13 +884,15 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // kernel checks the reply; then while its words are revealed and its cards and receipts come in.
   // The visitor can type meanwhile, and Send waits.
   const waitedOn = pending === null ? undefined : state.rows.findLast(({ item }) => item.kind === 'visitor' && (pending.id === null || item.id === pending.id))?.item;
-  const replyOnItsWay =
+  const pendingTurn =
     pending !== null &&
     state.turnMarks === pending.marks &&
     !chat.ownerInChat &&
-    state.connection === 'open' &&
     waitedOn?.kind === 'visitor' &&
-    waitedOn.status === 'sent';
+    waitedOn.status !== 'failed';
+  // Start the existing dots with Send, and keep the same line when Claude's writing event arrives.
+  const writing = state.writing || (ready && state.error === null && pendingTurn);
+  const replyOnItsWay = pendingTurn && state.connection === 'open' && waitedOn?.kind === 'visitor' && waitedOn.status === 'sent';
   // While the stream is down, reconnecting or given up, no reply can be heard: nothing waits for one.
   const sendHeld = ready && (replyOnItsWay || (state.writing && state.connection === 'open') || replyComingIn);
   // "Cancel this request" under each message that holds an open hold's receipt, once it is there,
@@ -1099,7 +1101,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               after={[...cancelsUnder(shownReceipts(row, ownerPreview)), ...verifyUnder(row)]}
             />
           ))}
-          {state.writing ? <WritingIndicator language={language} /> : null}
+          {writing ? <WritingIndicator language={language} /> : null}
           {/* The owner typing after a take-over: her initials, her name and three dots, until her words come. */}
           {state.ownerTyping !== null ? (
             <TranscriptRow>
