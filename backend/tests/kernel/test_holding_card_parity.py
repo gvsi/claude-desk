@@ -7,6 +7,29 @@ from desk.api import owner_reads
 from desk.contracts import RuleCard
 from desk.kernel_service import compiler, decide
 
+from .helpers import TEST_CAP
+from .test_compiler import card, native_profile, profile
+
+
+def assert_holding_card_matches_quotes(row, *, hold_count: int):
+    cards = {card.card_id: card for card in row.cards}
+    heads = decide.policy_heads(row)
+    by_policy = {policy_id: list(head.cards) for policy_id, head in heads.items() if head.tier == "hold"}
+    policy_ids = sorted(by_policy)
+    assert len(policy_ids) == hold_count
+    call = SimpleNamespace(version_row=row)
+
+    for size in range(len(policy_ids) + 1):
+        for ids in combinations(policy_ids, size):
+            card_ids = decide._card_ids(ids, by_policy)
+            evaluation = decide.Evaluation(outcome="hold", policy_ids=list(ids), card_ids=card_ids,
+                                           review=None, usage=None, strike=False, needed_review=False)
+            _, quoted_ids = decide._rules_decided(call, "hold", evaluation)
+            # Match _reason_plain's filter: only cards in this version can be quoted.
+            quoted = [cards[card_id] for card_id in quoted_ids if card_id in cards]
+            picked = owner_reads.holding_card(cards, card_ids)
+            assert picked == (quoted[0] if quoted else None), ids
+
 
 def test_holding_card_matches_the_kernel_for_every_hold_policy_subset():
     cards = [
@@ -40,16 +63,28 @@ def test_holding_card_matches_the_kernel_for_every_hold_policy_subset():
     holds = "\n\n".join(compiler._policy(name, behind, "hold", "action", [("when", "true")])
                         for name, behind in units)
     row = SimpleNamespace(cedar={"F": "", "A": "", "H": holds}, cards=cards)
-    by_policy = decide.policy_cards(row)
-    policy_ids = sorted(by_policy)
-    assert len(policy_ids) == 12
+    assert_holding_card_matches_quotes(row, hold_count=12)
 
-    for size in range(1, len(policy_ids) + 1):
-        for ids in combinations(policy_ids, size):
-            card_ids = decide._card_ids(ids, by_policy)
-            decider = decide.hold_decider(row, ids)
-            assert decider is not None, ids
-            quoted = decider.card_ids or card_ids
-            picked = owner_reads.holding_card(by_id, card_ids)
-            assert picked is not None, ids
-            assert picked.card_id == quoted[0], ids
+
+def test_holding_card_matches_quotes_for_every_compiled_hold_policy_subset():
+    profiles = [
+        native_profile("native.quote"),
+        profile("desk.read", ["read"], "document", source="business"),
+        profile("desk.change", ["change"], "document", source="business"),
+        profile("desk.read-change", ["read", "change"], "document", source="business"),
+    ]
+    cards = [
+        card("group-tool-ask", "native.quote", mode="ask"),
+        card("person-tool-auto", "native.quote", who="person", person_id="dana"),
+        card("person-tool-ask", "native.quote", mode="ask", who="person", person_id="dana"),
+        card("person-effect-ask", "effect:change", mode="ask", who="person", person_id="dana"),
+        card("read-auto", "effect:read", who="verified"),
+        card("change-auto", "effect:change", who="verified"),
+    ]
+    compiled = compiler.compile_cards(cards, profiles, auto_money_cap_cents=TEST_CAP)
+    row = SimpleNamespace(cedar=compiled.sets(), cards=compiled.cards)
+    heads = decide.policy_heads(row)
+    assert any(head.tier == "hold" and set(head.cards) == {"read-auto", "change-auto"}
+               for head in heads.values())
+    assert any(card.is_default for card in row.cards)
+    assert_holding_card_matches_quotes(row, hold_count=10)
