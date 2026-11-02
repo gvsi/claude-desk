@@ -603,13 +603,111 @@ async def test_a_booking_reads_what_the_session_waits_on_before_its_reply_spends
     read = [call for call in fake.called("GET /decisions/{id}") if call.path.endswith(quote.decision_id)]
     assert read and {call.headers["x-agent-key-id"] for call in read} == {agent.issued.agent_key_id}
     assert fake.decisions[quote.decision_id].decision.state == "cancelled"
-    async with engine.connect() as conn:
-        due = (await conn.execute(text(
-            "SELECT payload->>'decision_id', handled_at IS NULL FROM app.run_events WHERE session_id = :s"
-            " AND kind = 'control' AND type = 'decision_due'"), {"s": agent.session_id})).all()
-    assert [tuple(row) for row in due] == [(quote.decision_id, True)]
+    assert await decisions_due(engine, agent.session_id) == [(quote.decision_id, True)]
     assert [entry.event.summary for entry in fake.desks[desk_id].ledger
             if entry.event.kind == "agent_auth" and entry.event.summary.get("reason") == "replayed"] == []
+
+
+async def held_then_booked(app, browser, fake, kernel_http, model, monkeypatch, meanwhile):
+    """An agent's discount quote waits for the owner. Then one response books the earliest weekday visit, searches
+    the open times and replies, and `meanwhile` changes the kernel once the booking has run, before the search
+    reaches it (`meanwhile(fake, agent, sent)`, `sent` being the request as signed). The agent, its quote, the
+    Desk's ID and the request's answer."""
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
+    assert (await agent.send("Can I get a discount on a drain clearing?")).status_code == 200
+    (quote,) = [record.decision for record in fake.decisions.values()
+                if record.decision.session_id == agent.session_id]
+    assert quote.state == "held"
+    desk_id = fake.sessions[agent.session_id].desk_id
+    sent = agent.sign(agent.body("Never mind, book me the earliest weekday visit at list price. Any other times?"))
+    route_call, booked = loop.route_call, asyncio.Event()
+
+    async def routing(conn, caller, generation, block):
+        if block["name"] == "native__book":
+            try:
+                return await route_call(conn, caller, generation, block)
+            finally:
+                booked.set()
+        await booked.wait()
+        meanwhile(fake, agent, sent)
+        return await route_call(conn, caller, generation, block)
+
+    monkeypatch.setattr(loop, "route_call", routing)
+    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id)}),
+                       tool_use("native__find_slots", {"days": 3}), reply("You're booked.")))
+    fake.calls.clear()
+    answer = await agent.post(sent)
+    (booking,) = [record.decision for record in fake.decisions.values()
+                  if record.decision.session_id == agent.session_id and record.decision.action is not None
+                  and record.decision.action.tool == "native.book"]
+    assert booking.state == "executed"
+    return agent, quote, desk_id, answer
+
+
+async def decisions_due(engine, session_id: str) -> list[tuple[str, bool]]:
+    """The session's `decision_due` rows: each decision's ID, and whether the row waits to be handled."""
+    async with engine.connect() as conn:
+        due = await conn.execute(text(
+            "SELECT payload->>'decision_id', handled_at IS NULL FROM app.run_events WHERE session_id = :s"
+            " AND kind = 'control' AND type = 'decision_due'"), {"s": session_id})
+        return [tuple(row) for row in due]
+
+
+def spend_the_request(fake, agent: Agent, sent: Sent) -> None:
+    """The kernel ends the request's turn under it (at its time limit, say)."""
+    fake.nonces[(agent.issued.agent_key_id, sent.headers["X-Agent-Nonce"])].spent_at = fake.now
+
+
+def close_the_session(fake, agent: Agent, sent: Sent) -> None:
+    """The kernel closes the conversation under it."""
+    session = fake.sessions[agent.session_id]
+    session.closed_at = fake.now
+    fake._put_session(session)
+    fake.flush()
+
+
+def take_over(fake, agent: Agent, sent: Sent) -> None:
+    """The owner takes the conversation over."""
+    fake.set_mode(agent.session_id, "owner")
+
+
+@pytest.mark.parametrize(("ending", "code"), [(spend_the_request, "replayed"), (close_the_session, "closed")],
+                         ids=["turn_over", "session_ended"])
+async def test_a_booking_turn_the_kernel_ended_reads_nothing_more(app, browser, fake, kernel_http, model, engine,
+                                                                  monkeypatch, ending, code):
+    """An agent's discount quote waits, then one response books a time, searches the open times and replies. The
+    booking runs, but before the search reaches the kernel it ends the request's turn (`turn_over`: the signed request
+    spent) or the conversation (`session_ended`: closed), refuses the search, and the turn stops. The turn doesn't read
+    the waiting quote: the kernel would refuse that read too and ledger the refusal, one per waiting decision. The quote
+    stays held for the owner's reads and the minute sweep."""
+    agent, quote, desk_id, answer = await held_then_booked(app, browser, fake, kernel_http, model, monkeypatch,
+                                                           ending)
+
+    disclosed_error(answer, 409, code)
+    assert [call.path for call in fake.called("GET /decisions/{id}") if call.path.endswith(quote.decision_id)] == []
+    assert fake.decisions[quote.decision_id].decision.state == "held"
+    assert await decisions_due(engine, agent.session_id) == []
+    assert [entry.event.summary["route"] for entry in fake.desks[desk_id].ledger
+            if entry.event.summary.get("reason") == code] == ["POST /decide"]     # the search's, and no read's
+
+
+async def test_a_booking_turn_a_take_over_fenced_still_reads_what_waits(app, browser, fake, kernel_http, model, engine,
+                                                                        monkeypatch):
+    """The same, but the owner takes the conversation over once the booking has run: the kernel fences the search, and
+    the turn stops silently. A take-over leaves the session's own reads working (`GET /decisions/{id}` checks neither
+    its mode nor its generation, and doesn't spend the agent's request), so the turn still reads the waiting quote
+    with the request's signature: the kernel closes it, its `decision_due` row waits, and no read is refused."""
+    agent, quote, desk_id, answer = await held_then_booked(app, browser, fake, kernel_http, model, monkeypatch,
+                                                           take_over)
+
+    assert answer.status_code == 200, answer.text
+    read = [call for call in fake.called("GET /decisions/{id}") if call.path.endswith(quote.decision_id)]
+    assert read and {call.headers["x-agent-key-id"] for call in read} == {agent.issued.agent_key_id}
+    assert fake.decisions[quote.decision_id].decision.state == "cancelled"
+    assert await decisions_due(engine, agent.session_id) == [(quote.decision_id, True)]
+    assert [entry.event.summary for entry in fake.desks[desk_id].ledger
+            if entry.event.summary.get("route") == "GET /decisions/{decision_id}"] == []      # no read refused
 
 
 # Requests sent again ------------------------------------------------------------------------------------------
