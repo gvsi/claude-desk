@@ -19,7 +19,6 @@ it('reviews every business block by its title and owner line instead of Claude-f
     expect(reviewTool(row, [])).toMatchObject({
       name: tool.business?.title,
       description: businessOwnerLine(tool.business?.config) ?? '',
-      effects: tool.effects, reversible: tool.reversible,
     });
   }
   const intro = chenBusinessTools[0];

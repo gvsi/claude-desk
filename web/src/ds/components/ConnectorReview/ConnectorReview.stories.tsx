@@ -400,7 +400,7 @@ export const AppConnectedPhone: Story = {
 };
 
 
-/** The signed setup review: each connected tool with its effect tags, and the rule each starts under, as Rules reads it. */
+/** The signed setup review: each connected tool, and the rule each starts under, as Rules reads it, with no effect badges. */
 export const SetupStartingRules: Story = {
   globals: { viewport: { value: 'desktop', isRotated: false } },
   args: {
@@ -410,15 +410,15 @@ export const SetupStartingRules: Story = {
     moneyHint: true,
   },
   render: (args) => <div style={{ maxWidth: 720 }}><ConnectorReview {...args} /></div>,
-  parameters: { canvas: 'none', canvasNote: 'REV-SETUP connector review, v343: effect tags beside each tool, and one rule line per tool in Rules’ words.' },
+  parameters: { canvas: 'none', canvasNote: 'REV-SETUP connector review, v343: one rule line per tool in Rules’ words, and no effect badges (owner ruling: effects show only in Details).' },
   play: async ({ canvas }) => {
     const rules = canvas.getByRole('region', { name: 'The rules that will cover them' });
     await expect([...rules.querySelectorAll('.cd-rule-sentence__sentence')].map((el) => el.textContent)).toEqual(['Claude asks you before showing customers their own charges', 'Claude asks you before any refund']);
     await expect(within(rules).getAllByText('Ask me first')).toHaveLength(2);
-    // Each tool's effects beside its title.
+    // No effect badges: a tool's effects show only in its Details, on Rules.
     const tools = canvas.getByRole('region', { name: 'Tools' });
-    await expect(within(tools).getAllByText('Private data').length).toBeGreaterThan(0);
-    await expect(within(tools).getByText('Money')).toBeVisible();
+    await expect(tools.querySelector('.cd-effect-tags')).toBeNull();
+    for (const tag of ['Private data', 'Money', "Can't be undone"]) await expect(within(tools).queryByText(tag)).toBeNull();
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

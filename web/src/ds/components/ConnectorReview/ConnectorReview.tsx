@@ -1,12 +1,9 @@
 import type { Ref } from 'react';
 
-import type { Effect } from '../../../api/contracts.ts';
-
 import { BUSINESS_WORDS, type BusinessSetupRow } from '../../../owner/connectors/businessWords.ts';
 import type { IconName } from '../../icons/index.tsx';
 import { Button } from '../Button/Button.tsx';
 import { useSendOnce } from '../Button/useSendOnce.ts';
-import { EffectTags } from '../EffectTags/EffectTags.tsx';
 import { RuleSentence, type RuleSentenceProps } from '../RuleSentence/RuleSentence.tsx';
 import { Card } from '../Card/Card.tsx';
 import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
@@ -32,10 +29,8 @@ export interface ReviewToolView {
   /** The tool's key on the screen: its `ToolName`. */
   key: string;
   name: string;
-  /** What it does and its effects. */
+  /** What it does. Its effects show only in its Details, on Rules. */
   description: string;
-  effects?: readonly Effect[];
-  reversible?: boolean;
   /** The outcome it starts at: "Ask me first" for every new tool, until the owner changes it. */
   mode: RuleMode;
   /** The rules that already cover it, most specific first. */
@@ -167,7 +162,7 @@ export function ConnectorReview({ connector, job, intro, connection, onConnect, 
             <li key={tool.key} className="cd-connector-review__tool">
               <div className="cd-connector-review__layout">
                 <div className="cd-connector-review__text">
-                  <p className="cd-connector-review__name cd-type-body"><span className="cd-user-name" data-copy="user">{tool.name}</span>{startingRules && tool.effects !== undefined ? <EffectTags effects={tool.effects} reversible={tool.reversible ?? false} /> : null}</p>
+                  <p className="cd-connector-review__name cd-type-body"><span className="cd-user-name" data-copy="user">{tool.name}</span></p>
                   <p className="cd-connector-review__description cd-type-meta">{tool.description}</p>
                   {(startingRules ? (tool.uncoveredLine ? [tool.uncoveredLine] : []) : coverageLines(tool)).map((line, index) => (
                     <p key={`${index}-${line}`} className="cd-connector-review__covered cd-type-meta">

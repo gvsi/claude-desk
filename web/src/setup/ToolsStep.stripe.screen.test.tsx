@@ -94,9 +94,9 @@ it.each([1440, 390])('at %i px, Stripe connected in the chat needs review, and R
     'See charges · Anyone', 'Refund · Anyone',
   ]);
   expect(rules.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
-  // Each tool's effects beside its title, as the signed review draws them.
-  await expect.element(listed.getByText('Private data', { exact: true }).first()).toBeVisible();
-  await expect.element(listed.getByText('Money', { exact: true })).toBeVisible();
+  // No effect badges: a tool's effects show only in its Details, on Rules (owner ruling).
+  expect(screen.container.querySelector('.cd-effect-tags')).toBeNull();
+  for (const tag of ['Private data', 'Money', "Can't be undone"]) expect(listed.getByText(tag, { exact: true }).elements()).toHaveLength(0);
   await expect.element(screen.getByText('Until you set a limit in Rules, every payment asks you first.', { exact: true })).toBeVisible();
   expect(requests('setupConnect', mark)).toHaveLength(0);
   await expectScreenBasics(screen.container, { owner: true });

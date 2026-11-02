@@ -71,8 +71,6 @@ export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewTool
     key: row.tool,
     name,
     description: line ?? '',
-    effects: row.effects,
-    reversible: row.reversible,
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };

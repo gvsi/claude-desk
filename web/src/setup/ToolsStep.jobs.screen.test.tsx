@@ -150,6 +150,23 @@ it.each([
   await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
 });
 
+it('a money job’s review shows its starting rule and no effect badges', async () => {
+  const { state, desk } = await interviewAtTools();
+  seedBusinessTools(desk, businessToolRows([{
+    title: 'Send a retainer link',
+    how: 'Clients you’ve priced get a secure link to pay a retainer before you start.',
+    config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: 50_000 },
+  }], desk.tools.map(({ tool }) => tool)));
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Send a retainer link' }).click();
+  const rule = screen.getByRole('region', { name: 'The rule that will cover it' });
+  await expect.element(rule.getByText('Claude asks you before sending a retainer link', { exact: true })).toBeVisible();
+  // No effect badges: a tool's effects show only in its Details, on Rules (owner ruling).
+  const tools = screen.getByRole('region', { name: 'Tools', exact: true });
+  expect(screen.container.querySelector('.cd-effect-tags')).toBeNull();
+  for (const tag of ['Money', "Can't be undone"]) expect(tools.getByText(tag, { exact: true }).elements()).toHaveLength(0);
+});
+
 it("shows the starting rule for a job the owner accepted as asking first", async () => {
   const { state } = await interviewWithBooking('ask');
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
