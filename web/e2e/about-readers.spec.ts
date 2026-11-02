@@ -289,6 +289,10 @@ test('back_from_a_contents_link_returns_to_the_readers_place', async ({ page }) 
     await page.emulateMedia({ reducedMotion });
     await page.goto('/about/prediction');
     await expect(title(page, 'Capability prediction'), reducedMotion).toBeVisible(FIRST_DRAW);
+    // The reading type and the figures settle first, so the place taken below is the page as it rests: a type swap
+    // after it would move the text above it, and the browser's scroll anchoring would move the window with it.
+    await expect.poll(() => page.evaluate(() => document.fonts.status), `${reducedMotion}: the type has loaded`).toBe('loaded');
+    await untilAtRest(page, reducedMotion);
     await scrollWindow(page, 1800);
     const before = await settledScrollY(page);
 
@@ -344,10 +348,30 @@ test('back_before_the_type_loads_keeps_the_readers_place', async ({ page }) => {
   await page.goBack();
   await page.waitForURL((url) => url.pathname === '/about/prediction' && url.hash === '');
   await expectBackAt(page, before, 'back');
+  // The text in the middle of the window is the reader's place. When the type swaps in, the text above it reflows
+  // and the browser's scroll anchoring moves the window by as much, so the window's offset changes with the type;
+  // what stays is the reader's place on screen, not the section the address named.
+  const placeTop = await page.evaluate(() => {
+    const place = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+    place?.setAttribute('data-e2e-place', '');
+    return place ? place.getBoundingClientRect().top : Number.NaN;
+  });
   release();
   await expect.poll(() => page.evaluate(() => document.fonts.status), 'the type has loaded').toBe('loaded');
   await page.waitForTimeout(500);
-  await expectBackAt(page, before, 'after the type loaded');
+  const placeMoved = () =>
+    page.evaluate((top) => {
+      const place = document.querySelector('[data-e2e-place]');
+      return place ? Math.abs(place.getBoundingClientRect().top - top) : Number.POSITIVE_INFINITY;
+    }, placeTop);
+  await expect.poll(placeMoved, "after the type loaded, the reader's place is where Back put it").toBeLessThanOrEqual(56);
+  expect(
+    await page.evaluate(() => {
+      const section = document.getElementById('why-the-limits-stay-in-code');
+      return section ? Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) : 0;
+    }),
+    'not back at the section',
+  ).toBeGreaterThan(56);
 });
 
 test('about_pages_print_without_the_pinned_bar', async ({ page }) => {
