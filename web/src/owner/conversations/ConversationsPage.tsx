@@ -4,7 +4,7 @@
  * the list and an open conversation each have the page to themselves, and the conversation offers
  * a way back to the list. The list is polled.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useId } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router';
 
@@ -15,10 +15,11 @@ import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, Record
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
+import { startingDeskFor } from '../arrival/keptCopy.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { entriesPath } from '../today/SinceLastNight.tsx';
-import { firstName, useNeedsYou } from '../useDesks.ts';
+import { firstName, useDesks, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
 import { agentLine } from './copy.ts';
@@ -65,6 +66,9 @@ export function ConversationsPage() {
   const { sessionId } = useParams();
   const { business, desk } = useOwnerDesk();
   const deskId = desk.desk_id;
+  const queryClient = useQueryClient();
+  const desks = useDesks(deskId, { passive: true });
+  const startingDesk = desks.data === undefined ? null : startingDeskFor(queryClient, desks.data);
   const navigate = useNavigate();
   const location = useLocation();
   const titleId = useId();
@@ -140,7 +144,7 @@ export function ConversationsPage() {
         <SkeletonScreen
           loading={!listRead}
           status="Reading your conversations"
-          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} />}
+          skeleton={<ConversationsSkeleton withHeader={false} open={sessionId !== undefined} recordedHistory={startingDesk === null || startingDesk === deskId} />}
           className="cd-conversations__region"
         >
           <div className="cd-conversations__under">
