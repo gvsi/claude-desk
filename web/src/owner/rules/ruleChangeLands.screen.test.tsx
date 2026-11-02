@@ -306,9 +306,10 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(inView(toolRow(root, 'Share a document'), main)).toBe(false);
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
-    // It comes to the middle of what shows, where it lights up.
+    // Its rule comes to the middle of what shows, where it lights up.
     await expect.poll(() => saysUpdated(toolRow(root, 'Share a document'))).toBe(true);
-    await expect.poll(() => offMiddle(toolRow(root, 'Share a document'), main)).toBeLessThan(2);
+    const changed = () => toolRow(root, 'Share a document').querySelector('[data-landed]')!;
+    await expect.poll(() => offMiddle(changed(), main)).toBeLessThan(2);
     expect(fillOf(toolRow(root, 'Share a document'))).not.toBe('none');
     expect(updatedRows(root)).toEqual(['Share a document']);
   });
