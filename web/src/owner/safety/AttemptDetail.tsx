@@ -2,9 +2,11 @@ import { useId, useRef, useState, type Ref } from 'react';
 
 import type { LedgerPage } from '../../api/contracts.ts';
 import type { Attempt } from '../../api/views.ts';
-import { Card, CheckpointMeter, FullTrace, Icon, OWNER_STATE_WORDS, StatusLabel, TextLink } from '../../ds/index.ts';
+import { Card, CheckpointMeter, FullTrace, Icon, OWNER_STATE_WORDS, RuleSentence, StatusLabel, TextLink } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { conversationPath } from '../conversations/status.ts';
+import { turnedDownRule } from '../rules/requestRule.ts';
+import type { RequestRules } from '../rules/useRequestRules.ts';
 import { REPLAYED_LABEL, attemptTime, categoryLabel, entryFor, originCopy, replayedOf, stoppedBy, triageOf } from './copy.ts';
 import { focusTrace } from './focusTrace.ts';
 
@@ -17,7 +19,12 @@ export interface AttemptDetailProps {
   deskId: string;
   /** The business's time zone, which the time is read in. */
   timezone: string;
+  /** The active rules, once read (`useRequestRules`), which name the rule that turned a request down. */
+  rules: RequestRules | null;
 }
+
+/** The label over the rule that turned a request down. */
+const TURNED_DOWN_BY = 'The rule that turned it down';
 
 /** What the stop itself means, and only for the stopped item: earlier actions in the chat keep their own receipts. */
 const CLAIMS: Record<Attempt['kind'], string | null> = {
@@ -55,11 +62,12 @@ function Toggle({ label, open, controls, onToggle, buttonRef }: ToggleProps) {
 
 /**
  * One attempt open beside the list, in tiers: what was stopped and why, in plain words, where its
- * entry came from and when; for a refused request, the visitor's words that made it, quoted; Claude's
- * summary, labelled as written by Claude; then, on request, the
+ * entry came from and when; for a request turned down by a rule the page can name (`turnedDownRule`),
+ * that rule in a box of its own, as REV-RULES-B5 draws it; for a refused request, the visitor's words
+ * that made it, quoted; Claude's summary, labelled as written by Claude; then, on request, the
  * checkpoints it went through and the signed entry it is kept in; and its conversation.
  */
-export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: AttemptDetailProps) {
+export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules }: AttemptDetailProps) {
   const [showHow, setShowHow] = useState(false);
   const [showTrace, setShowTrace] = useState(false);
   const traceButton = useRef<HTMLButtonElement>(null);
@@ -73,6 +81,8 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
   const claim = CLAIMS[attempt.kind] ?? null;
   const replayed = entry !== null && replayedOf(entry) !== null;
   const sessionId = entry?.event.session_id ?? null;
+  const rule = rules === null ? null : turnedDownRule(attempt, rules.cards, rules.words);
+  const ruleLabelId = useId();
 
   const toggleTrace = () => {
     const opening = !showTrace;
@@ -114,6 +124,14 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
           <p className="cd-attempt__origin cd-type-caption">{originCopy(attempt.origin)}</p>
           {replayed ? <p className="cd-attempt__origin cd-type-caption">{REPLAYED_LABEL}</p> : null}
         </div>
+        {rule !== null ? (
+          <div role="group" aria-labelledby={ruleLabelId} className="cd-attempt__rule">
+            <p id={ruleLabelId} className="cd-attempt__rule-label cd-type-caption">
+              {TURNED_DOWN_BY}
+            </p>
+            <RuleSentence parts={rule.parts} meta={rule.meta} outcome={rule.outcome} />
+          </div>
+        ) : null}
         {/* The visitor's own untrusted words that made the request, from the chat, not the signed
             record: a part of their own, labelled as Claude's summary below is, and text only. An
             agent's words are labelled the same. An older API sends no field at all, so any
