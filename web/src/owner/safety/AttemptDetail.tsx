@@ -6,7 +6,7 @@ import { Card, CheckpointMeter, FullTrace, Icon, OWNER_STATE_WORDS, StatusLabel,
 import { formatWhen } from '../../lib/format.ts';
 import { conversationPath } from '../conversations/status.ts';
 import { REPLAYED_LABEL, attemptTime, categoryLabel, entryFor, originCopy, replayedOf, stoppedBy, triageOf } from './copy.ts';
-import { focusTrace } from './focusTrace.ts';
+import { focusTrace, useSideBySide } from './focusTrace.ts';
 
 export interface AttemptDetailProps {
   attempt: Attempt;
@@ -66,6 +66,8 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
   const traceBox = useRef<HTMLDivElement>(null);
   const howId = useId();
   const traceId = useId();
+  // Beside the list the card scrolls inside itself, so Tab reaches it (Safety.css).
+  const scrollsItself = useSideBySide();
 
   const entry = entryFor(attempt, page);
   const triage = triageOf(attempt);
@@ -100,7 +102,7 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
     );
 
   return (
-    <Card as="section" label="Details">
+    <Card as="section" label="Details" tabIndex={scrollsItself ? 0 : undefined}>
       <div className="cd-attempt">
         <p className="cd-attempt__status cd-type-meta">
           {/* The owner's words for what the kernel decided, as the receipt in the conversation names it. */}

@@ -232,8 +232,19 @@ export function NotificationsPage() {
 }
 
 /**
- * One notification: a dot while it was unread as the page opened, what kind it is (with who it went
- * to, unless the owner), its body word for word, and the time at the right. An alert whose request
+ * A notification's kind line: an alert's own title when the kernel gave it one, else its kind's word.
+ * The kernel titles only the owner's own alerts, and only with their fixed preview line, never from
+ * the body ("A request needs your answer"), as the Demo inbox panel heads an owner's alert. This
+ * page is the owner's and in English, so every title it reads is shown.
+ */
+function headingOf(entry: DemoInboxEntry): string {
+  return entry.title?.trim() || COPY.kinds[entry.kind];
+}
+
+/**
+ * One notification: a dot while it was unread as the page opened, its heading (an owner's alert's
+ * title, else its kind, with who it went to unless the owner), its body word for word, and the time
+ * at the right. An alert whose request
  * still waits is a link as a whole, "Open the request" under its body.
  */
 function NotificationRow({ entry, time, unread, requestHref }: Row) {
@@ -243,7 +254,7 @@ function NotificationRow({ entry, time, unread, requestHref }: Row) {
       <div className="cd-notifications__text">
         <p className="cd-notifications__kind cd-type-body">
           {unread ? <span className="cd-sr-only">Unread: </span> : null}
-          {COPY.kinds[entry.kind]}
+          {headingOf(entry)}
           {entry.to === OWNER_RECIPIENT ? null : <span className="cd-notifications__to cd-type-meta">{` · ${COPY.to} ${entry.to}`}</span>}
         </p>
         {/* A ledger checkpoint is a signed record, so it reads in the trace's monospace. */}

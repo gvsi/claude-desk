@@ -181,7 +181,7 @@ async def test_take_over_mid_turn_blocks_everything(api_conn, engine, locks, cal
 
     await said(api_conn, caller, "Book me the earliest visit.")
     release = asyncio.Event()
-    booking = gated(response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"),
+    booking = gated(response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"),
                              reply("You're booked.", id="toolu_say")), release)
     model = ScriptedModel([booking])
     kernel = Kernel(fake)
@@ -260,7 +260,7 @@ async def test_kernel_unavailable_mid_turn(api_conn, engine, locks, caller, fake
     monkeypatch.setattr(tools, "EXECUTE_POLL_S", 0.001)       # the ten polls, a second apart in production
     await said(api_conn, caller, "Book me the earliest visit.")
     fake.fail("/execute", "connect")                          # the kernel can't be reached to run the booking
-    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"),
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"),
                                     reply("You're booked.", id="toolu_say"))])
 
     assert await pending(caller, model, engine, locks) == "kernel_unavailable"
@@ -354,7 +354,7 @@ async def test_interrupted_turn_recovers_by_call_without_redeciding(api_conn, en
         await asyncio.Event().wait()
 
     await said(api_conn, caller, "Book me the earliest visit.")
-    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"))])
     async with KernelHttp("http://fake-kernel", transport=Kernel(fake, after={"/execute": stall})) as http:
         run = asyncio.create_task(pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks))
         await asyncio.wait_for(executed.wait(), 5)
@@ -405,7 +405,7 @@ async def interrupted_after_booking(api_conn, engine, locks, caller, visitor, fa
         await asyncio.Event().wait()
 
     await said(api_conn, caller, "Book me the earliest visit.")
-    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller)},
+    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"},
                                                          id="toolu_book"))])
     async with KernelHttp("http://fake-kernel", transport=Kernel(fake, after={"/execute": stall})) as http:
         run = asyncio.create_task(pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks))
@@ -484,7 +484,7 @@ async def test_a_recovery_whose_reply_showed_only_as_the_handoff_asks_claude_not
         await asyncio.Event().wait()
 
     monkeypatch.setattr(loop, "append_tool_results", stop_before_the_results)
-    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller)},
+    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"},
                                                          id="toolu_book"), reply("Booking you in.", id="toolu_say"))])
     run = asyncio.create_task(pending(caller, model, engine, locks))
     await asyncio.wait_for(stopped.wait(), 5)
@@ -527,7 +527,7 @@ async def test_a_recovery_whose_reply_showed_opens_the_new_prompt_at_once(
         await asyncio.Event().wait()
 
     monkeypatch.setattr(loop, "append_tool_results", stop_before_the_results)
-    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller)},
+    model = ScriptedModel([response(thinking(), tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"},
                                                          id="toolu_book"), reply("Booking you in.", id="toolu_say"))])
     run = asyncio.create_task(pending(caller, model, engine, locks))
     await asyncio.wait_for(stopped.wait(), 5)
@@ -597,7 +597,7 @@ async def test_a_call_that_raised_once_the_kernel_had_it_is_found_by_its_id(api_
     failed, deliver = failing_statuses(1)
     monkeypatch.setattr(tools, "deliver", deliver)
     await said(api_conn, caller, "Book me the earliest visit.")
-    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book")),
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book")),
                            response(reply("You're booked.", id="toolu_say"))])
 
     assert await pending(caller, model, engine, locks) == "done"
@@ -633,7 +633,7 @@ async def test_a_call_that_raised_before_a_take_over_is_answered_from_what_ran(
 
     monkeypatch.setattr(tools, "deliver", deliver)
     await said(api_conn, caller, "Book me the earliest visit.")
-    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"))])
     kernel = Kernel(fake)
     async with KernelHttp("http://fake-kernel", transport=kernel) as http:
         outcome = await pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks)
@@ -694,7 +694,7 @@ async def test_a_call_whose_decision_cant_be_read_stays_open_until_it_can(api_co
     failed, deliver = failing_statuses(2)
     monkeypatch.setattr(tools, "deliver", deliver)
     await said(api_conn, caller, "Book me the earliest visit.")
-    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"))])
     assert await pending(caller, model, engine, locks) == "internal"
     assert failed == ["receipt", "receipt"]                    # the call's publication, then the recovery's
     (decision_id,) = session_decisions(fake, caller.session_id)
@@ -738,7 +738,7 @@ async def test_a_conflict_whose_decision_cant_be_read_is_never_sent_to_execute_a
     await said(api_conn, caller, "Book me the earliest visit.")
     fake.in_flight("native.book")
     fake.fail("GET /decisions/{id}", "connect", times=1)
-    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+    model = ScriptedModel([response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"))])
     kernel = Kernel(fake, after={"/decide": lost})
     async with KernelHttp("http://fake-kernel", transport=kernel) as http:
         outcome = await pending(replace(caller, kernel=http.session(visitor.token)), model, engine, locks)
@@ -780,7 +780,7 @@ async def test_recovery_after_a_take_over_and_hand_back_answers_from_what_ran(
     # the booking ran at generation 0, and the worker stopped before Claude or the visitor heard of it
     await said(api_conn, caller, "Book me the earliest visit.")
     await interrupt_after("/execute", caller, visitor, fake, engine, locks, [
-        response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+        response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"))])
     (decision_id,) = [call.body["decision_id"] for call in fake.called("/execute")]
     decision = fake.decisions[decision_id].decision
     assert decision.state == "executed"
@@ -815,7 +815,7 @@ async def test_recovery_during_a_take_over_runs_nothing_and_leaves_an_open_allow
     # the kernel allowed the booking at generation 2, and the worker stopped before it asked to run it
     await said(api_conn, caller, "Book me the earliest visit.")
     await interrupt_after("/decide", caller, visitor, fake, engine, locks, [
-        response(tool_use("native__book", {"slot_id": open_slot(fake, caller)}, id="toolu_book"))])
+        response(tool_use("native__book", {"slot_id": open_slot(fake, caller), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"))])
     (decision,) = [found.decision for found in fake.decisions.values() if found.decision.call_id == "toolu_book"]
     assert decision.state == "allowed"
     fake.set_mode(caller.session_id, "owner")                # the owner takes over: generation 3

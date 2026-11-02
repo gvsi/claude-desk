@@ -17,10 +17,13 @@ next message.
   runs late, once a later state of its decision is shown (the visitor's next request found the approval executed,
   or an `unknown` outcome reconciled): the visitor never sees a decision go back.
 - `surface_due_decisions`, each minute: every decision the visitor was shown as held, or that an unhandled
-  `decision_pending` row names, whose final state isn't shown yet, and whose kernel_ro state is final or whose
-  `expires_at` has passed (expiry is lazy: the kernel applies it on the next read) gets one `decision_due` control
-  row. The session's next request reads the decision with its own credential and shows its final state; until
-  then the decision isn't read again.
+  `decision_pending` row names, whose final state isn't shown yet (`waiting_decisions`), and whose kernel_ro state is
+  final or whose `expires_at` has passed (expiry is lazy: the kernel applies it on the next read) gets one
+  `decision_due` control row. The session's next request reads the decision with its own credential and shows its
+  final state; until then the decision isn't read again. A held quote with a discount that the session's own booking
+  closed is settled lazily too, with no `expires_at` for this scan to watch, so a turn whose call showed an executed
+  receipt reads its session's waiting decisions through the kernel at once, and leaves the same row for each one now
+  final (`loop._surface_settled`).
 - `retry_stalled_jobs`, every 10 minutes and one at a time: jobs whose worker stopped sending heartbeats (a task
   that died mid-job) go back to `todo`, as Procrastinate documents ("Retry stalled jobs").
 - `triage_attempt(copy_id, desk_id, session_id, ref_id, ref_kind)` and `translate_message(copy_id, message_id)`
@@ -313,11 +316,11 @@ async def resume_after_answer(conn: AsyncConnection, ids: Ids, decision: Decisio
     return True
 
 
-def _waiting_decisions() -> Any:
+def waiting_decisions(ids: Ids | None = None) -> Any:
     """Each decision the visitor was shown as held, or that an unhandled `decision_pending` row names, with no final
     state shown in its session yet and no unhandled `decision_due` row (it is due already: a visitor who never comes
     back leaves that row waiting, and the decision isn't read again each minute): (copy_id, desk_id, session_id,
-    decision_id)."""
+    decision_id). With `ids`, that session's alone."""
     row, shown, due = RUN_EVENTS.alias("waiting"), RUN_EVENTS.alias("shown"), RUN_EVENTS.alias("due")
     decision_id = row.c.payload["decision_id"].astext
     final_shown = exists().where(
@@ -326,10 +329,11 @@ def _waiting_decisions() -> Any:
     due_already = exists().where(
         due.c.session_id == row.c.session_id, due.c.kind == "control", due.c.type == "decision_due",
         due.c.handled_at.is_(None), due.c.payload["decision_id"].astext == decision_id)
-    return select(row.c.copy_id, row.c.desk_id, row.c.session_id, decision_id.label("decision_id")).distinct().where(
+    waiting = select(row.c.copy_id, row.c.desk_id, row.c.session_id, decision_id.label("decision_id")).distinct().where(
         or_(and_(row.c.kind == "sse", row.c.type == "held"),
             and_(row.c.kind == "control", row.c.type == "decision_pending", row.c.handled_at.is_(None))),
         ~final_shown, ~due_already)
+    return waiting if ids is None else waiting.where(row.c.copy_id == ids.copy_id, row.c.session_id == ids.session_id)
 
 
 def _due(decision: dict, now: datetime) -> bool:
@@ -344,7 +348,7 @@ async def surface_due_decisions(engine: AsyncEngine, *, now: datetime, ro_schema
     """Leave one `decision_due` control row for each waiting decision that is due (module docstring); returns how many
     it wrote. A decision already due and unhandled isn't written again."""
     async with engine.connect() as conn:
-        waiting = {row.decision_id: row for row in await conn.execute(_waiting_decisions())}
+        waiting = {row.decision_id: row for row in await conn.execute(waiting_decisions())}
         found = await due_decisions(conn, sorted(waiting), ro_schema)
         await conn.commit()
         written = 0

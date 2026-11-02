@@ -1,10 +1,10 @@
 """What the API's routes depend on: the process's runtime, the caller and the errors routes raise.
 
 `runtime(request)` is the app's `Runtime`: settings, clock, rate limits, the job queue and, once the lifespan has
-started, the kernel client, the database engine, the run events listener, the turn runner and the built-in agent's
-runs. `owner_ctx` is the owner's copy and `visitor_ctx` the visitor's session, each taken from the kernel's
-`GET /whoami` answer for its cookie; `client_ip` and `public_origin` follow Plan 06b's seam ("Client IP and public
-origin"); `require_model_budget` guards the model routes.
+started, the kernel client, the database engine, the run events listener, the turn runner, the built-in agent's runs
+and the demo visitors' runs. `owner_ctx` is the owner's copy and `visitor_ctx` the visitor's session, each taken from
+the kernel's `GET /whoami` answer for its cookie; `client_ip` and `public_origin` follow Plan 06b's seam ("Client IP
+and public origin"); `require_model_budget` guards the model routes.
 """
 
 import contextlib
@@ -19,6 +19,7 @@ from fastapi import Request, Response
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from desk.api.agents import DemoAgents
+from desk.api.demo_visitors import DemoVisitors
 from desk.api.turn_runs import TurnRuns
 from desk.api.cookies import OWNER_COOKIE, VISITOR_COOKIE, set_visitor_cookie
 from desk.api.kernel_client import CredentialView, KernelFailed, KernelHttp, KernelUnavailable
@@ -53,10 +54,11 @@ def proving_work() -> Proving:
 
 @dataclass
 class Runtime:
-    """The process's state. `kernel`, `engine`, `listener`, `runner` and `agents` are opened by the lifespan, which
-    also builds the model client unless a test injected one, and opens the job queue (`jobs`) and runs its worker.
-    `a2a_transport` is a test hook the lifespan refuses in production: the transport of the built-in agent's client
-    of the public A2A endpoint (the app itself, in process), set on the runtime before the lifespan starts."""
+    """The process's state. `kernel`, `engine`, `listener`, `runner`, `agents` and `demo_visitors` are opened by the
+    lifespan, which also builds the model client unless a test injected one, and opens the job queue (`jobs`) and runs
+    its worker. `a2a_transport` is a test hook the lifespan refuses in production: the transport of the built-in
+    agent's client of the public A2A endpoint and of each demo visitor's client of the public visitor endpoints (the
+    app itself, in process), set on the runtime before the lifespan starts."""
 
     settings: Settings
     clock: Callable[[], datetime]
@@ -70,7 +72,8 @@ class Runtime:
     listener: Listener | None = None
     runner: TurnRunner | None = None      # the session turns this process runs (Task 7)
     agents: DemoAgents | None = None      # the built-in visiting agent's runs (Plan 02b)
-    a2a_transport: Any = field(default=None, repr=False)      # tests only: the built-in agent's way to the app
+    demo_visitors: DemoVisitors | None = None     # the demo visitors' runs (`demo_visitors.py`)
+    a2a_transport: Any = field(default=None, repr=False)      # tests only: the agent's and demo visitors' loopback
     presence: Presence = field(default_factory=Presence)      # who is typing, in this process's memory (Plan 02b)
     proving: Proving = field(default_factory=proving_work)    # the proving routes' running work (Plan 02b)
     turn_runs: TurnRuns = field(default_factory=TurnRuns)
@@ -82,7 +85,7 @@ class Runtime:
 
     def started(self) -> "Runtime":
         if (self.kernel is None or self.engine is None or self.listener is None or self.runner is None
-                or self.agents is None or self.jobs is None):
+                or self.agents is None or self.demo_visitors is None or self.jobs is None):
             raise RuntimeError("the API's lifespan hasn't started")
         return self
 

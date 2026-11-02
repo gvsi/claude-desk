@@ -315,3 +315,30 @@ export const PreviewWithStatus: Story = {
     await expect(Math.round(link.getBoundingClientRect().height)).toBe(69);
   },
 };
+
+/** A demo visitor's chat: the persona's first name, then its pill right after it, the time still at the right. */
+export const DemoVisitor: Story = {
+  args: {
+    name: 'Riley',
+    time: '11:02 pm',
+    demoVisitor: true,
+    quote: "Yes please. Is anything sooner open? There's water on the floor.",
+    status: { tone: 'handled', text: 'Quoted' },
+  },
+  parameters: {
+    canvas: 'none',
+    canvasNote: 'The REV-DEMO boards in review (N-Live-REV-DEMO-chat-1512, #artboard-4ae3b66fd4f0): a demo visitor\'s row, its "Demo visitor" pill right after the name on the top line.',
+  },
+  play: async ({ canvas }) => {
+    const link = canvas.getByRole('link', { name: /^Riley Demo visitor 11:02 pm/ });
+    const name = canvas.getByText('Riley');
+    const pill = canvas.getByText('Demo visitor');
+    await expect(name.nextElementSibling).toBe(pill);
+    await expect(Math.round(pill.getBoundingClientRect().left - name.getBoundingClientRect().right)).toBe(8);
+    // The time stays at the row's right.
+    const time = canvas.getByText('11:02 pm');
+    const top = name.parentElement!;
+    await expect(Math.round(top.getBoundingClientRect().right - time.getBoundingClientRect().right)).toBe(0);
+    await expect(link).toBeVisible();
+  },
+};
