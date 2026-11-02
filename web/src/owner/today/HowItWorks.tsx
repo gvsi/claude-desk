@@ -31,7 +31,11 @@ export interface HowItWorksProps {
   business: string;
   /** The Today read, or undefined while it is out or has failed. */
   today: Today | undefined;
-  /** The requests held in Needs you, excluding callbacks; undefined until a current read is in. */
+  /**
+   * The server-read count of requests held in Needs you, excluding callbacks, as Safety counts.
+   * The link target includes locally kept requests and excludes those answered here, so it can
+   * differ from this count until the next read succeeds. Undefined until a current read is in.
+   */
   heldCount: number | undefined;
   /** Callbacks and handoffs in Needs you, which rule out a quiet day. */
   callbackCount: number;
