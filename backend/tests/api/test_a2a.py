@@ -594,7 +594,7 @@ async def test_a_booking_reads_what_the_session_waits_on_before_its_reply_spends
                 if record.decision.session_id == agent.session_id]
     assert quote.state == "held"
     desk_id = fake.sessions[agent.session_id].desk_id
-    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id)}), reply("You're booked.")))
+    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id), "name": "Jane Doe", "contact": "jane@example.com"}), reply("You're booked.")))
     fake.calls.clear()
 
     booked = await agent.send("Never mind, book me the earliest weekday visit at list price.")
@@ -634,7 +634,7 @@ async def held_then_booked(app, browser, fake, kernel_http, model, monkeypatch, 
         return await route_call(conn, caller, generation, block)
 
     monkeypatch.setattr(loop, "route_call", routing)
-    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id)}),
+    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id), "name": "Jane Doe", "contact": "jane@example.com"}),
                        tool_use("native__find_slots", {"days": 3}), reply("You're booked.")))
     fake.calls.clear()
     answer = await agent.post(sent)
