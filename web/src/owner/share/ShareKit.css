@@ -1,6 +1,7 @@
 /* ShareKit (N-Run2-Share): the link card, then 24 px under it the printable card (300 px) and,
    32 px to its right, the ready-made words under their heading, 8 px apart, with More channels
-   8 px under them: one card of rows, each with its pill at the right. When the kit has less room than
+   8 px under them: one card of rows, each with its channel's line icon on a connector tile at the
+   left (board REV-CHAN A) and its pill at the right. When the kit has less room than
    the card and a readable column of words, the two stack; on a phone (N-Run2-Share-Phone) every
    gap is 16 px. */
 
@@ -51,8 +52,13 @@
 .cd-share-kit__later {
   display: flex;
   align-items: center;
-  gap: var(--space-16);
+  gap: var(--space-12);
   padding: var(--space-16);
+}
+
+/* The channel's tile 12 px before its words (board REV-CHAN A), the pill 16 px after them. */
+.cd-share-kit__later > .cd-pill {
+  margin-left: var(--space-4);
 }
 
 .cd-share-kit__later + .cd-share-kit__later {
