@@ -39,6 +39,10 @@ from .test_execute import activate, change_records, committed, executed, reserva
 # The owner's line for a held request a booking closed (`render.owner_line("cancelled_by_booking")`), the owner's
 # own words; a request the visitor cancelled has none.
 BOOKED_LINE = "The visitor booked before you answered, so this request closed."
+# The visitor's line for the same request, in the session's language and signed: their own booking replaced it. A
+# request the visitor cancelled keeps the state's own line ("Cancelled").
+CLOSED_BY_BOOKING = {"en": "Closed: your booking replaced this request",
+                     "es": "Cerrada: su reserva sustituyó esta solicitud"}
 
 
 async def post_answer(client: httpx.AsyncClient, headers: dict[str, str], decision_id: str,
@@ -318,7 +322,7 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(app, c
     assert (response.status_code, response.json()) == (409, {"code": "conflict"})
 
     decision = await read_id(client, visitor.headers, held.decision_id)
-    assert (decision.state, decision.visitor_plain, decision.answers) == ("cancelled", "Cancelled", [])
+    assert (decision.state, decision.visitor_plain, decision.answers) == ("cancelled", CLOSED_BY_BOOKING["en"], [])
     verify_signature(await public_key(client), decision)
     # the owner alone reads that a booking closed it, not the visitor; the line isn't signed, so the owner's read
     # verifies with the same signature
@@ -350,6 +354,34 @@ async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(app, c
     refused = await post_cancel(client, visitor, held.decision_id)
     assert (refused.status_code, refused.json()) == (409, {"code": "conflict"})
     assert BOOKED_LINE not in json.dumps([e.event.summary for e in await ledger_rows(app, copy)])
+
+
+@pytest.mark.parametrize("language", ["en", "es"])
+async def test_a_booking_closing_a_held_quote_tells_the_visitor_their_booking_replaced_it(app, client, reviewer,
+                                                                                         frozen_clock, language):
+    # The visitor's receipt for the held discount says their own booking replaced it, in the session's language, as
+    # the decision's signed status line; the owner's line stays his, in English.
+    reviewer.answer = PASS
+    copy, visitor = await visitor_of(app, client)
+    await set_session(app, copy, visitor.session_id, last_language=language)
+    held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=5000))
+    assert held.state == "held"
+    frozen_clock.advance(60)
+    await book_and_run(client, visitor)
+
+    decision = await read_id(client, visitor.headers, held.decision_id)
+    assert (decision.state, decision.visitor_plain, decision.owner_plain) == ("cancelled", CLOSED_BY_BOOKING[language],
+                                                                              None)
+    verify_signature(await public_key(client), decision)
+    assert decision.visitor_plain == render.status("closed_by_booking", language, owner="Mike Turner")
+    owner_read = await read_id(client, copy.owner, held.decision_id)
+    assert owner_read == decision.model_copy(update={"owner_plain": BOOKED_LINE})
+    async with kernel_ctx(app) as ctx:
+        ctx.bind(copy.copy_id)
+        row = (await ctx.db.scalars(ctx.repo.scoped(select(DecisionRow).where(
+            DecisionRow.decision_id == held.decision_id)))).one()
+    assert (row.state, row.visitor_plain, row.signature) == ("cancelled", CLOSED_BY_BOOKING[language],
+                                                             decision.signature)
 
 
 @pytest.mark.parametrize("case", ["booked_first", "another_session", "list_price", "not_confirmed"])

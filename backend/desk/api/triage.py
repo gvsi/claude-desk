@@ -3,8 +3,9 @@ Claude writes for the owner alone, on `claude-haiku-5-5` at low effort.
 
 - `triage_attempt`, the job a turn defers for each attempt the checkpoint stopped, as Safety counts them (a refusal
   when decided, or a reply of Claude's blocked for anything but a paused session): Haiku reads the attempt as the
-  copy's kernel_ro views hold it (a decision's reason, tool and effects, or a reply check's violations) and the
-  session's last visitor or agent message, each wrapped, and answers a `Triage`. It is stored as an owner-only
+  copy's kernel_ro views hold it (a decision's reason, tool and effects, with the words of the label Safety shows for
+  why it was turned down when it has one; or a reply check's violations) and the session's last visitor or agent
+  message, each wrapped, and answers a `Triage`. It is stored as an owner-only
   `triage` row (the `Triage` as JSON, `ref_id` the attempt as Safety names it: the decision's ID, or the reply entry's
   `seq`), with an `annotation` row for the transcript item it shows on, when there is one (a refusal's receipt, or
   for a blocked reply the handoff it ended in or, when Claude could rewrite it, its stopped draft). A replayed attempt
@@ -45,6 +46,7 @@ from desk.api.prompts import (
     STOPPED_ATTEMPT_TAG,
     TRANSLATION_SYSTEM,
     TRIAGE_SYSTEM,
+    TURNED_DOWN_BECAUSE,
     Translation,
     Triage,
     wrap,
@@ -122,7 +124,7 @@ async def _attempt(conn: AsyncConnection, ids: Ids, ref_id: str, ref_kind: RefKi
     decided, or a reply check of Claude's in this session blocked for anything but a pause; None for anything else,
     for an attempt the kernel replayed (its ledger entry marked `summary.replayed`: recorded history), and for one
     whose ledger entry can't be read, so an attempt of unknown origin never reaches the model."""
-    from desk.api.owner_reads import reply_violations  # owner reads also depends on the turn runner
+    from desk.api.owner_reads import refusal_cause, reply_violations  # owner reads also depends on the turn runner
 
     ro = KernelRO(conn, ids.copy_id, ro_schema)
     if ref_kind == "decision":
@@ -134,8 +136,17 @@ async def _attempt(conn: AsyncConnection, ids: Ids, ref_id: str, ref_kind: RefKi
                                                                      seq=row["ledger_seq"])
         if decision_replayed(row, entry):                 # replayed, or of unknown origin
             return None
-        return {"kind": "refused", "tool": row["tool"], "effects": list(row["effects"] or []),
-                "reason": row["reason_plain"]}
+        attempt = {"kind": "refused", "tool": row["tool"], "effects": list(row["effects"] or []),
+                   "reason": row["reason_plain"]}
+        # Why, in the words of the label Safety shows beside it, its first letter lowercased to follow "It was turned
+        # down:", and none when Safety shows none. The cause reads the session's verification as Safety's attempts
+        # do; it never clears (`refusal_cause`).
+        session = await ro.session(ids.session_id)
+        cause = None if session is None else refusal_cause(row, entry, verified=bool(session["verified"]))
+        if cause in TURNED_DOWN_BECAUSE:
+            label = TURNED_DOWN_BECAUSE[cause]
+            attempt["turned_down_because"] = label[:1].lower() + label[1:]
+        return attempt
     if ref_kind != "reply" or not (ref_id.isascii() and ref_id.isdigit()) or len(ref_id) > 18:
         return None
     entry = await ro.one("ledger_entries", desk_id=ids.desk_id, seq=int(ref_id))
@@ -170,6 +181,16 @@ async def _shown_on(conn: AsyncConnection, ids: Ids, ref_id: str, ref_kind: RefK
     return (await conn.execute(found.order_by(MESSAGES.c.n).limit(1))).scalar_one_or_none()
 
 
+def triage_request(attempt: dict[str, Any], said: str | None) -> ModelRequest:
+    """Haiku's request for a stopped attempt (`_attempt`) and the session's last words, already wrapped
+    (`_last_said`)."""
+    parts = [wrap(STOPPED_ATTEMPT_TAG, json.dumps(attempt, ensure_ascii=False, sort_keys=True)),
+             *([said] if said else [])]
+    return ModelRequest(route=TRIAGE_ROUTE, system=[{"type": "text", "text": TRIAGE_SYSTEM}],
+                        messages=[_user("\n".join(parts))], model=ANNOTATION_MODEL, effort="low",
+                        max_tokens=TRIAGE_MAX_TOKENS, output_schema=Triage, timeout_s=ANNOTATION_TIMEOUT_S)
+
+
 async def triage_attempt(engine: AsyncEngine, model: ModelClient, ids: Ids, ref_id: str, ref_kind: RefKind, *,
                          ro_schema: str = KERNEL_RO, production: bool = False,
                          clock: Callable[[], datetime] = _utc_now) -> bool:
@@ -182,12 +203,7 @@ async def triage_attempt(engine: AsyncEngine, model: ModelClient, ids: Ids, ref_
         await conn.commit()
     if attempt is None or done or spent:
         return False
-    parts = [wrap(STOPPED_ATTEMPT_TAG, json.dumps(attempt, ensure_ascii=False, sort_keys=True)),
-             *([said] if said else [])]
-    request = ModelRequest(route=TRIAGE_ROUTE, system=[{"type": "text", "text": TRIAGE_SYSTEM}],
-                           messages=[_user("\n".join(parts))], model=ANNOTATION_MODEL, effort="low",
-                           max_tokens=TRIAGE_MAX_TOKENS, output_schema=Triage, timeout_s=ANNOTATION_TIMEOUT_S)
-    triage = await _ask(engine, model, ids, request, Triage)
+    triage = await _ask(engine, model, ids, triage_request(attempt, said), Triage)
     if triage is None:
         return False
     if ref_kind == "reply":

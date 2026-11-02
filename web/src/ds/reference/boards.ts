@@ -112,6 +112,17 @@ export const REFERENCE_BOARDS = [
   'N-R2-Vision-ClaudeAccount',
   'N-R2-Vision-Phone',
   'N-R2-Vision-CityOffice-Resident',
+  // The demo visitor, in review (REV-DEMO): Today's "Watch a demo visitor" card (artboard
+  // cdae4f209f2e) and its start error (d691001ca787); its conversation while it chats, at a laptop's
+  // width (4ae3b66fd4f0) and a phone's (b6a3eaf4a777), after a whisper (b5079e9ac81c), after a
+  // take-over (894cee1ec120), and once it has ended (2e93bf1904b9).
+  'N-Live-REV-DEMO-today-1512',
+  'N-Live-REV-DEMO-error-1512',
+  'N-Live-REV-DEMO-chat-1512',
+  'N-Live-REV-DEMO-chat-390',
+  'N-Live-REV-DEMO-whisper-1512',
+  'N-Live-REV-DEMO-takeover-1512',
+  'N-Live-REV-DEMO-ended-1512',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
@@ -180,6 +191,13 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Vision-ClaudeAccount': 'laptop-994',
   'N-R2-Vision-Phone': 'laptop',
   'N-R2-Vision-CityOffice-Resident': 'laptop',
+  'N-Live-REV-DEMO-today-1512': 'laptop',
+  'N-Live-REV-DEMO-error-1512': 'laptop',
+  'N-Live-REV-DEMO-chat-1512': 'laptop',
+  'N-Live-REV-DEMO-chat-390': 'phone',
+  'N-Live-REV-DEMO-whisper-1512': 'laptop',
+  'N-Live-REV-DEMO-takeover-1512': 'laptop',
+  'N-Live-REV-DEMO-ended-1512': 'laptop',
 };
 
 /** The window `board`'s story runs at, and its render's size unless `RENDER_SIZES` gives its own. */

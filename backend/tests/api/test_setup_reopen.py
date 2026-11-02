@@ -24,6 +24,7 @@ from tests.api.test_setup_questions import Owner, answer, next_step, stored as s
 from tests.api.test_setup_rules import (  # noqa: F401  (the app and model fixtures)
     GOOD_CARDS,
     HOURS,
+    request_text,
     SITUATIONS,
     app,
     business_jobs,
@@ -90,6 +91,9 @@ async def test_a_change_from_a_later_step_reopens_the_questions_with_the_owners_
     (request,) = model.requests[calls:]
     assert request.output_schema is setup.SETUP_TURNS[setup.REOPEN_TOPIC]
     assert f"<owner_answer>{CHANGE}</owner_answer>" in request.messages[-1]["content"][0]["text"]
+    # Only the change's own turn is told how a change reaches what the owner accepted or answered.
+    assert setup.SETUP_REOPEN_LINE in request_text(request)
+    assert not any(setup.SETUP_REOPEN_LINE in request_text(earlier) for earlier in model.requests[:calls])
 
     # What was drafted from the answers is gone, so the steps after the questions draft it again.
     row = await stored(engine, state["interview_id"])
@@ -97,6 +101,33 @@ async def test_a_change_from_a_later_step_reopens_the_questions_with_the_owners_
     for later in ("rules", "situations", "safety_check", "confirm", "go_live"):
         refused = await owner.browser.post(policy(state, later))
         assert (refused.status_code, refused.json()["error"]) == (409, "conflict"), later
+
+
+async def test_a_change_that_drops_a_time_frame_is_never_asked_to_put_it_back(app, browser, kernel_http, model, engine):
+    # The check that the owner's time frames are kept or named reads the setup questions' answers. A change names the
+    # time frames it removes ("from within 24 hours", "stop saying one business day"), and a retry would push the
+    # removed promise back into the line, so once "Change something" reopened the questions no turn is checked: the
+    # change's own turn, and the owner's next answer, which is often a second change, each take one call.
+    owner, state = await ready(app, browser, kernel_http, model)
+    interview_id = state["interview_id"]
+    calls = len(model.requests)
+    change = "Change after hours from within 24 hours to within 2 hours, and stop saying one business day."
+    line = "Leave a message after hours and the team replies as soon as it can."
+    model.add(turn("Done: after hours now says the team replies as soon as it can, the closest wording to 2 hours; "
+                   "see What customers will read. Anything else to change?", step_done=False, after_hours=line))
+    reply = await reopen(owner, state, change)
+    assert reply.status_code == 200, reply.text
+    (request,) = model.requests[calls:]
+    assert request.output_schema is setup.SETUP_TURNS[setup.REOPEN_TOPIC]
+    assert (await stored(engine, interview_id))["answers"]["after_hours"] == line
+
+    calls = len(model.requests)
+    urgent = "Urgent jobs are seen as soon as the team can."
+    followed = await answer(owner, model, interview_id, "Yes, and stop saying same day for urgent jobs.",
+                            turn("Done.", step_done=False, urgent=urgent))
+    assert followed.status_code == 200, followed.text
+    assert [request.output_schema for request in model.requests[calls:]] == [setup.SETUP_TURNS[setup.REOPEN_TOPIC]]
+    assert (await stored(engine, interview_id))["answers"]["urgent"] == urgent
 
 
 async def test_a_repeated_send_answers_the_first_and_another_body_with_its_key_is_a_conflict(
@@ -178,7 +209,8 @@ async def test_a_slow_reopen_answers_202_and_is_polled_or_rolled_back_at_its_dea
     await at_step(owner, model, state, "preview")
     before = await stored(engine, state["interview_id"])
     monkeypatch.setattr(setup, "TURN_WAIT_S", 0.01)
-    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", 0.5 if timeout else 10)
+    # The turn's model call ends `TURN_FINISH_S` before the run's deadline, for the turn to save.
+    monkeypatch.setattr(setup, "TURN_RUN_TIMEOUT_S", setup.TURN_FINISH_S + (0.5 if timeout else 10))
     release = asyncio.Event()
     model.add(gated(turn("Closed on Saturdays, noted. Anything else?", step_done=False), release))
     pending = await reopen(owner, state, key="slow-change")
@@ -429,6 +461,7 @@ async def test_only_the_change_itself_can_ask_a_finished_topic_again(app, browse
                          turn(next={"kind": "topic", "topic": "quote_limit"}))
     assert reply.status_code == 200, reply.text
     assert reply.json()["step"] == "tools"
+    assert setup.SETUP_REOPEN_LINE not in request_text(model.requests[-1])     # the turn after the change
 
 
 async def test_proving_work_from_before_a_change_never_lands_after_it(app, browser, kernel_http, model, engine, fake,

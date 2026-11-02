@@ -16,7 +16,7 @@ from desk.kernel_service import demo_inbox, labels, render
 from desk.kernel_service.adapters import payment_link, profile_sha256, quote, request_callback
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
                                                ExecCtx, Normalized, NormalizeCtx, quoted)
-from desk.kernel_service.adapters.book import BookAdapter, BookArgs
+from desk.kernel_service.adapters.book import NEEDS_CONTACT, BookAdapter, BookArgs
 from desk.kernel_service.adapters.capture_lead import ADAPTER as CAPTURE_LEAD, CaptureLeadArgs
 from desk.kernel_service.adapters.request_callback import RequestCallbackArgs
 
@@ -55,7 +55,7 @@ class PurposePaymentArgs(BaseModel):
 # Fixed sentences are code-owned. The owner's description and canonical configuration stay quoted data.
 BLOCK_SENTENCES = {
     "intake": "Saves the person's name, contact details and answers to the business's questions, so the owner can follow up.",
-    "typed_booking": "Books one open time on the business's calendar for this kind of appointment.",
+    "typed_booking": "Books one open time on the business's calendar for this kind of appointment. " + NEEDS_CONTACT,
     "purpose_payment": "Creates a secure payment link for this purpose, for the amount the owner set.",
     "urgent": "Saves an urgent callback request and alerts the owner right away.",
 }
