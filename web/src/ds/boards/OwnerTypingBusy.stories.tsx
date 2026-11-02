@@ -110,7 +110,7 @@ const meta = {
     canvas: 'N-Typing-Owner-Busy',
     canvasNote: [
       'The board’s panels from WritingIndicator, PersonMessage, SystemLine and Button. Mike’s message is the Turner fixture’s, where the board writes that he is looking at the photos.',
-      'Busy buttons show the spinner signed later the same day in place of the board’s three dots, at the same width and only on the pressed button; the busy row leaves out the red refusals, which only an approval card’s Deny shows.',
+      'Busy buttons show the spinner signed later the same day in place of the board’s three dots, at the same width and only on the pressed button; the busy row leaves out red buttons, reserved for refusals and deletes that cannot be undone (owner decision, 2026-11-02).',
       'The board’s title, explanations and “How it behaves” list are sign-off notes and stay in the canvas; its dashed outlines marked parts before they were built.',
     ].join(' '),
   },

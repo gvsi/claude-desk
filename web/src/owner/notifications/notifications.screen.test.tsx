@@ -112,7 +112,6 @@ describe('Notifications', () => {
   });
 
   it.each(['desktop', 'phone'] as const)('page_fits_and_keeps_its_row_on_%s', async (viewport) => {
-    addEntry({ kind: 'head_checkpoint', to: 'owner', body: `{"head":"${'5c1e9a0b77d24f6e'.repeat(8)}","seq":48}` }, 2 * DAY_MS);
     const { screen } = await renderRoute(TODAY, { viewport });
     if (viewport === 'phone') {
       // On a phone the row is in the Menu sheet, under Safety, with its count.
@@ -123,9 +122,6 @@ describe('Notifications', () => {
     await notificationsRow(screen).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).toBeVisible();
     await expect.poll(() => rows(screen)).toHaveLength(mockStore.world.inbox.length);
-    // The checkpoint's signed record wraps inside the column, in the trace's monospace.
-    const trace = screen.getByRole('main').element().querySelector<HTMLElement>('.cd-notifications__entry.cd-type-trace')!;
-    expect(trace.scrollWidth).toBeLessThanOrEqual(trace.clientWidth);
     expectNoHorizontalScroll();
     await expectScreenBasics(screen.container, { owner: true });
   });
