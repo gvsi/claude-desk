@@ -430,9 +430,9 @@ describe('fixtures', () => {
     // booking ID (render/en.py and es.py). The fixture's card below draws the same words.
     const render = (language: string) => readFileSync(path.join(BACKEND, 'kernel_service', 'render', `${language}.py`), 'utf8');
     expect(render('en')).toContain('f"{clock(start)} to {clock(end)}"');
-    expect(render('en')).toContain('f"With {desk.owner_display_name}"');
+    expect(render('en')).toContain('f"With {desk.owner}"');
     expect(render('es')).toContain('f"De {clock(start)} a {clock(end)}"');
-    expect(render('es')).toContain('f"Con {desk.owner_display_name}"');
+    expect(render('es')).toContain('f"Con {desk.owner}"');
     const owner = rivera.business.ownerName;
     const card = (language: 'en' | 'es') => rivera.blocks.booking_confirmed[language];
     expect(card('en').title).toBe('Tuesday, November 3');
@@ -455,11 +455,11 @@ describe('fixtures', () => {
     };
     const fragments = {
       en: [
-        `f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "`,
+        `f"This payment link was cancelled because {desk.owner}'s rules changed. "`,
         '"Ask again if you still want to pay."',
       ],
       es: [
-        'f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "',
+        'f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner}. "',
         '"Pídelo de nuevo si todavía quieres pagar."',
       ],
     };
