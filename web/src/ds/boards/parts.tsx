@@ -720,8 +720,9 @@ export function brandOf(publicDesk: PublicDesk): PublicBrand {
     tagline: publicDesk.desk_name,
     monogram: Array.from(publicDesk.business_name)[0] ?? '',
     field: publicDesk.brand.primary ?? '',
-    ink: 'var(--text-primary)',
-    inkSecondary: 'var(--text-secondary)',
+    ink: 'var(--text-on-brand)',
+    inkSecondary: 'var(--text-on-brand-secondary)',
+    statusHandled: 'var(--status-handled-on-brand)',
     accent: publicDesk.brand.accent ?? '',
   };
 }
@@ -1127,7 +1128,7 @@ export function AgentsCard({ title, lead, holdsCards = false, children }: { titl
 /** Settings' sections, in order. Connectors have their own tab, so there is no Integrations entry. */
 export const SETTINGS_SECTIONS: readonly SubNavItem[] = [
   { key: 'general', label: 'General', href: '#settings-general' },
-  { key: 'notifications', label: 'Notifications', href: '#settings-notifications' },
+  { key: 'alerts', label: 'Alerts', href: '#settings-alerts' },
   { key: 'channels', label: 'Channels', href: '#settings-channels' },
   { key: 'billing', label: 'Billing', href: '#settings-billing' },
 ];

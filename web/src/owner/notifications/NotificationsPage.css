@@ -1,0 +1,125 @@
+/* Notifications (REV-NOTIF): Customers' 760 px column, centered in the page, with the footer under
+   it in the same column. The days start 28 px under the header, 24 px apart, each under
+   Conversations' day line, its rows 4 px under it. A row is the dot's 8 px column, the words 12 px
+   after it and the time at the right, 16 px above and below and 8 px in at the sides, over a
+   hairline; the last row of a day has none, as the next day's line separates them (owner,
+   2026-11-02). */
+
+.cd-notifications,
+.cd-owner-layout:has(> .cd-notifications) {
+  --cd-notifications-column: 760px;
+}
+
+.cd-notifications {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--cd-notifications-column);
+  min-width: 0;
+  margin: 0 auto;
+}
+
+/* The concept footer sits in the page's column, as the board draws it. */
+.cd-owner-layout:has(> .cd-notifications) > .cd-owner-layout__footer {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--cd-notifications-column);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.cd-notifications__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  margin-top: var(--space-28);
+}
+
+.cd-notifications__day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.cd-notifications__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-notifications__item:not(:last-child) {
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-notifications__row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  column-gap: var(--space-12);
+  padding: var(--space-16) var(--space-8);
+  color: inherit;
+  text-decoration: none;
+}
+
+a[href].cd-notifications__row:hover {
+  background: var(--fill-hover);
+}
+
+a[href].cd-notifications__row:hover .cd-text-link {
+  text-decoration-color: currentColor;
+}
+
+/* Kept for every row, so the words line up whether or not it was unread. */
+.cd-notifications__dot {
+  width: 8px;
+  height: 8px;
+  margin-top: var(--space-8);
+  border-radius: 50%;
+}
+
+.cd-notifications__dot--unread {
+  background: var(--text-primary);
+}
+
+.cd-notifications__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.cd-notifications__kind,
+.cd-notifications__entry,
+.cd-notifications__request {
+  margin: 0;
+}
+
+.cd-notifications__kind {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+/* In meta type, at its own weight, not the kind's. */
+.cd-notifications__to {
+  color: var(--text-secondary);
+}
+
+/* Word for word, broken anywhere, so a checkpoint's long signature never runs past the column. */
+.cd-notifications__entry {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-notifications__item--unread .cd-notifications__entry {
+  color: var(--text-primary);
+}
+
+/* 8 px under the body. */
+.cd-notifications__request {
+  margin-top: var(--space-4);
+}
+
+.cd-notifications__time {
+  padding-top: 2px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}

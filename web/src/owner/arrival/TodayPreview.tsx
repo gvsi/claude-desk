@@ -3,7 +3,6 @@ import { Component, useLayoutEffect, useRef, useState, type ReactNode } from 're
 
 import { AppShell, ReviewerBar } from '../../ds/index.ts';
 import { givenOwnerName } from '../../public/brand.ts';
-import { OwnerInbox } from '../inbox/OwnerInbox.tsx';
 import { OwnerDeskProvider, OwnerSidebar, type OwnerDeskContext } from '../OwnerLayout.tsx';
 import { TodayClockContext } from '../today/todayClock.ts';
 import { TodayPage } from '../today/TodayPage.tsx';
@@ -59,13 +58,13 @@ class NothingIfItThrows extends Component<{ children: ReactNode }, { threw: bool
 function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [still] = useState(() => {
-    const { business, desk, liveCount, reads } = stillToday(new Date(opened), new Date(readAt));
+    const { business, desk, liveCount, unreadCount, reads } = stillToday(new Date(opened), new Date(readAt));
     // Answering, a Desk's hold and a place to scroll back to do nothing here: the picture is inert,
     // and no copy exists yet.
     const context = { business, desk, setAnswering: ignore, holdDesk: ignore, reachPlace: ignore } satisfies OwnerDeskContext;
     // Today's labels are drawn at the moment the picture reads its copy, as Today will draw them.
     const clock = () => new Date(readAt);
-    return { client: new StillQueryClient(reads), desk: context, liveCount, clock };
+    return { client: new StillQueryClient(reads), desk: context, liveCount, unreadCount, clock };
   });
   const { business, desk } = still.desk;
 
@@ -81,7 +80,7 @@ function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
           <OwnerDeskProvider value={still.desk}>
             <AppShell
               business={business.name}
-              banner={<ReviewerBar ownerName={givenOwnerName(business.owner_display_name)} onStartOver={ignore} actions={<OwnerInbox timezone={business.timezone} />} />}
+              banner={<ReviewerBar ownerName={givenOwnerName(business.owner_display_name)} onStartOver={ignore} />}
               sidebar={
                 <OwnerSidebar
                   businesses={[business]}
@@ -89,6 +88,7 @@ function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
                   desk={desk}
                   current="today"
                   liveCount={still.liveCount}
+                  unreadCount={still.unreadCount}
                   switching={false}
                   onToggleSwitcher={ignore}
                   onCloseSwitcher={ignore}

@@ -24,6 +24,7 @@ import type {
   VisitorSession,
 } from '../api/views.ts';
 import { AgentRuns, agentCardOut, demoAgentIssued, isDemoAgentTask } from './agents.ts';
+import { deskJobTools } from './businessTools.ts';
 import { idempotencyKeyOf } from './keys.ts';
 import { OWNER_LANGUAGE, loweredReason } from './moneyCap.ts';
 import {
@@ -63,7 +64,6 @@ import { PRESETS, presetCards, seedWorld, type MockSeed } from './seed.ts';
 import {
   SETUP_ROUTES,
   setupPublicDesk,
-  setupTaskSet,
   stopSetupRuns,
   withSetupBusinesses,
   withSetupBusinessName,
@@ -279,6 +279,9 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
+
+/** Chats whose visitor confirmed a code while the owner had the chat: the API's wake that waits for the hand-back. */
+const VERIFIED_WHILE_TAKEN_OVER = new WeakSet<SessionRecord>();
 
 /**
  * The visitor's or visiting agent's latest line when nothing answered it after, as the API's hand-back
@@ -630,10 +633,18 @@ const SERVED: ServedRoutes = {
     if (isFailure(session)) return session;
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
     const state = sv.world.handBack(session);
-    // A line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and an
-    // agent's on its next request, the only time an agent's turn runs.
+    // A code the visitor confirmed while the owner had the chat has Claude go on with what they asked for,
+    // as the API's note tells it to, whatever they wrote since. It's used up once that turn starts: a
+    // take-over before then fences the turn off and leaves the code for the next hand-back. Otherwise a
+    // line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and
+    // an agent's on its next request, the only time an agent's turn runs.
     const waiting = waitingLine(session);
-    if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
+    if (VERIFIED_WHILE_TAKEN_OVER.has(session)) {
+      sv.runTurn(session, () => {
+        VERIFIED_WHILE_TAKEN_OVER.delete(session);
+        return afterVerify(hasAllTools(sv.world, session));
+      }, session.language, '');
+    } else if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
     return ok(state);
   },
   resume(sv, req) {
@@ -739,9 +750,12 @@ const SERVED: ServedRoutes = {
     if (isFailure(desk)) return desk;
     const preset = isRecord(req.body) ? req.body.preset : undefined;
     if (req.malformed || !isPreset(preset)) return INVALID;
-    // The preset's cards for the Desk's hours in place of every owner card, personal ones included:
-    // its diff lists each one it removes.
-    return ok(sv.world.draftCards(desk, presetCards(preset, desk.summary.hours)));
+    // Keep eligible non-money job cards unchanged; preset IDs always belong to the preset.
+    const jobs = deskJobTools(rulesView(desk).tools);
+    const cards = presetCards(preset, desk.summary.hours);
+    const presetIds = new Set(cards.map((card) => card.card_id));
+    const kept = desk.policy.cards.filter((card) => !card.is_default && jobs.has(card.applies_to) && !presetIds.has(card.card_id));
+    return ok(sv.world.draftCards(desk, [...cards, ...kept]));
   },
   draftMoneyCap(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -882,8 +896,12 @@ const SERVED: ServedRoutes = {
     const { session } = visitor;
     // One answer for a wrong, expired or used-up code, so a refusal never says which.
     if (!sv.world.checkCode(session, code)) return failWith(422, 'kernel', { code: 'invalid' });
-    // The API wakes Claude, which goes on with what the visitor asked for.
-    sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    // The API notes the code and wakes Claude, which goes on with what the visitor asked for. As for a
+    // message, a paused chat's turn is the kernel's handoff, and while the owner has the chat Claude
+    // stays quiet: the note waits for the hand-back, which wakes it then (`handback`).
+    if (session.state.mode === 'ai') sv.runTurn(session, () => afterVerify(hasAllTools(sv.world, session)), session.language, '');
+    else if (session.state.mode === 'paused') sv.runTurn(session, PAUSED_TURN, session.language, '');
+    else VERIFIED_WHILE_TAKEN_OVER.add(session);
     return ok({ state: session.state } satisfies VerifyChecked);
   },
   visitorInbox(sv, req) {
@@ -904,16 +922,15 @@ const SERVED: ServedRoutes = {
     return isFailure(visitor) ? visitor : ok(demoAgentIssued(sv.world, visitor.desk));
   },
   agentTasks(sv, req) {
-    // The Desk's set, read with this browser's chat as the API reads it: its setup business type,
-    // Turner's on the copy's own Desk (its first), `other` on any other Desk setup didn't make.
+    // The Desk's set, read with this browser's chat: its summary's business type, the one key the API reads for
+    // the agent and the owner's list (`agents.demo_task_sets`). That is its setup business type, Turner's on the
+    // copy's first Desk, and `other` on any other Desk setup didn't make.
     const visitor = sv.visitor(req.params.slug, req.cookies);
     if (isFailure(visitor)) return visitor;
-    const deskId = visitor.desk.summary.desk_id;
-    const own = sv.world.desks[0]?.summary.desk_id === deskId;
     const payments = visitor.desk.tools.some((row) => row.status === 'enabled'
       && (row.tool === 'native.payment_link' || row.tool === 'native.charge_mandate'));
     return ok({
-      task_set: setupTaskSet(sv.world, deskId) ?? (own ? 'rivera' : 'other'),
+      task_set: visitor.desk.summary.business_type,
       tasks: payments ? ['book_visit', 'quote_and_deposit', 'push_the_limit'] : ['book_visit'],
     } satisfies AgentTasks);
   },

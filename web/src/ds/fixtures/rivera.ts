@@ -1040,8 +1040,11 @@ const sharedChargeCard = rule({
  */
 const sharedChargeShared = { lead: 'Applies to every tool that charges money', titles: ['Payment link', 'Charge within a signed limit'] };
 
-/** That line's words as they read under each tool the shared rule governs. */
-const sharedChargeAppliesTo = 'Applies to every tool that charges money: Payment link and Charge within a signed limit.';
+/**
+ * That line's own words as they read under each tool the shared rule governs: they end in a colon, and
+ * the tools' titles start a line of their own under them.
+ */
+const sharedChargeAppliesTo = 'Applies to every tool that charges money:';
 
 /**
  * A personal rule: the card the owner's "Allow only for Dana Whitfield, always" answer to Dana's

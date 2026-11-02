@@ -4,6 +4,7 @@
  * shared contracts.
  */
 import { effectiveBrand } from './brand.ts';
+import { deskJobTools } from './businessTools.ts';
 import type { Decision, DecisionState, HoursWindow, LedgerEntry, LedgerPage, PublicDesk, RuleCard, SseEvent, ToolName } from '../api/contracts.ts';
 import type {
   Attempt,
@@ -110,13 +111,23 @@ function latestVisitorText(session: SessionRecord): string | null {
 const SAID: ReadonlySet<TranscriptKind> = new Set(['visitor_text', 'agent_text']);
 
 /**
- * What Needs you quotes from a chat, read as it stands, as the API's `recent_texts` and
+ * What Needs you quotes from a chat, as the API's `recent_texts`, `texts_before_held` and
  * `visitor_lines` read it: the visitor's (or visiting agent's) previous and last messages, oldest
- * first, each as its glimpse (`visitorLine`), joined with " · ". Just the last when there's one,
- * and null when nothing is left.
+ * first, each as its glimpse (`visitorLine`), joined with " · ". For a held request (`decisionId`),
+ * only the visitor's lines since Claude's last reply before its held status (a request whose status
+ * isn't in the chat quotes the chat's latest). If that window is empty, it quotes the newest visitor
+ * line before the status. A handoff quotes the chat's latest. Just the last when there's one, and
+ * null when nothing is left.
  */
-function fromTheVisitor(session: SessionRecord | undefined): string | null {
-  const said = (session?.items ?? []).filter((item) => SAID.has(item.kind)).slice(-2);
+function fromTheVisitor(session: SessionRecord | undefined, decisionId?: string): string | null {
+  const items = session?.items ?? [];
+  const held = decisionId === undefined ? -1 : items.findIndex((item) =>
+    item.kind === 'status' && item.event !== null && 'decision_id' in item.event && item.event.decision_id === decisionId);
+  const before = held === -1 ? items : items.slice(0, held);
+  const answered = held === -1 ? -1 : before.findLastIndex((item) =>
+    item.kind === 'delivered' && item.event?.type === 'message' && item.event.author === 'claude');
+  let said = before.slice(answered + 1).filter((item) => SAID.has(item.kind)).slice(-2);
+  if (held !== -1 && said.length === 0) said = before.filter((item) => SAID.has(item.kind)).slice(-1);
   const lines = said.map((item) => visitorLine(item.text)).filter((line) => line !== null);
   return lines.length > 0 ? lines.join(' · ') : null;
 }
@@ -334,8 +345,9 @@ function holdingCard(cards: readonly RuleCard[], cardIds: readonly string[]): Ru
 }
 
 /**
- * Every held request and open handoff, oldest first. Each quotes what its visitor wrote most
- * recently, as of this read (`fromTheVisitor`). A handoff also carries its chat's newest triage
+ * Every held request and open handoff, oldest first. Each quotes what its visitor wrote
+ * (`fromTheVisitor`): a held request the words that made it, a handoff the chat's latest, as of
+ * this read. A handoff also carries its chat's newest triage
  * summary (`newestTriageSummary`); a held request never does, as the API sends it, since a visitor
  * could steer a summary to sway an approval.
  */
@@ -355,7 +367,7 @@ export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
           held_by: holdingCard(cards, d.decision.card_ids)?.reason ?? null,
           held_at: isoTime(d.createdAt),
           session: needsYouSession(session, d.decision.session_id),
-          from_the_visitor: fromTheVisitor(session),
+          from_the_visitor: fromTheVisitor(session, d.decision.decision_id),
           claude_summary: null,
         } satisfies NeedsYouItem,
       };
@@ -909,12 +921,11 @@ export const HEALTH: HealthOut = {
 
 /**
  * The preset the owner cards came from: the one whose cards they are, exactly, as a Desk with these
- * opening hours drafts it (`presetCards`), else null. It is provenance only, and Turner's own rules
- * match neither.
+ * opening hours drafts it (`presetCards`), apart from the Desk's own job cards, else null.
  */
-function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[]): RulesPreset | null {
+function presetOf(cards: readonly RuleCard[], hours: readonly HoursWindow[], jobs: ReadonlySet<string>): RulesPreset | null {
   const set = (list: readonly RuleCard[]) => list.filter((card) => card.is_default !== true).map(canonicalCard).sort().join('\n');
-  const owned = set(cards);
+  const owned = set(cards.filter((card) => !jobs.has(card.applies_to)));
   const match = (Object.keys(PRESETS) as RulesPreset[]).find((preset) => set(presetCards(preset, hours)) === owned);
   return match ?? null;
 }
@@ -945,7 +956,7 @@ export function rulesView(desk: DeskRecord): RulesView {
         .map((card) => ({ card_id: card.card_id, mode: card.mode, reason: card.reason, shared: card.applies_to.startsWith('effect:') })),
     };
   });
-  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards, desk.summary.hours) };
+  return { active: { ...desk.policy, cards: cards.map((card) => ({ ...card })) }, tools, preset: presetOf(cards, desk.summary.hours, deskJobTools(tools)) };
 }
 
 /**
