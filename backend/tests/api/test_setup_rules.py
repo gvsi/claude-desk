@@ -2522,7 +2522,7 @@ async def test_safety_check_keeps_long_price_titles_out_of_tries(monkeypatch):
          "unit_cents": 30_000},
     ]
     answers = SetupAnswers(summary="Bookkeeping.", owner_display_name="Mike Turner")
-    interview = SimpleNamespace(desk_id="desk-1", step="rules", draft_version=2, answers=answers)
+    interview = SimpleNamespace(desk_id="desk-1", step="rules", draft_version=2, answers=answers, reopens=0, busy=False)
     owner = OwnerCtx(copy_id="copy-1", desk_ids=("desk-1",), owner_session_id="owner-session", owner_generation=1,
                      kernel=None, ro=SimpleNamespace(rows=AsyncMock(return_value=listed)))
     monkeypatch.setattr(setup, "_load", AsyncMock(return_value=interview))
