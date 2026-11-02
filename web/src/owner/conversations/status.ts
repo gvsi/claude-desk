@@ -4,6 +4,7 @@
  */
 import type { ConversationSummary } from '../../api/views.ts';
 import type { StatusTone } from '../../ds/index.ts';
+import { OWNER_NAME_FALLBACK } from '../../public/brand.ts';
 import {
   LATEST_DEPOSIT_PAID, LATEST_VISIT_BOOKED, TURNED_DOWN,
   VISITOR_QUOTED, VISITOR_LEAD_CAPTURED, VISITOR_OWNER_DECLINED,
@@ -87,7 +88,8 @@ export function conversationListStatus(s: ConversationSummary, held: number, ope
       turned_down: { tone: 'info', text: TURNED_DOWN },
       lead_captured: { tone: 'info', text: VISITOR_LEAD_CAPTURED },
       owner_declined: { tone: 'info', text: VISITOR_OWNER_DECLINED },
-      called_back: ownerFirstName ? { tone: 'handled', text: visitorCalledBack(ownerFirstName) } : undefined,
+      // Setup's stand-in for an owner who gave no name isn't a name to call back with.
+      called_back: ownerFirstName && ownerFirstName !== OWNER_NAME_FALLBACK ? { tone: 'handled', text: visitorCalledBack(ownerFirstName) } : undefined,
       deposit_paid: { tone: 'handled', text: LATEST_DEPOSIT_PAID },
       document_sent: s.verified ? { tone: 'handled', text: VISITOR_DOCUMENT_SENT } : undefined,
       visit_booked: { tone: 'handled', text: VISITOR_VISIT_BOOKED },

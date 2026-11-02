@@ -108,6 +108,12 @@ describe('conversationListStatus', () => {
       .toEqual({ tone: 'info', text: 'Your own preview' });
   });
 
+  it('doesnt_call_back_as_setups_stand_in_owner_name', () => {
+    const chat = summary({ latest_outcome: 'called_back', latest_visitor_text: 'Please call me.' });
+    expect(conversationListStatus(chat, 0, false, 'Owner')).toEqual(conversationStatus(chat, 0));
+    expect(conversationListStatus(chat, 0, false, 'Mike')).toEqual({ tone: 'handled', text: 'Mike called back' });
+  });
+
   it('says_no_messages_yet_for_a_visitor_who_hasnt_written', () => {
     const silent = summary({ latest_visitor_text: null });
     expect(conversationListStatus(silent, 0, false, 'Mike')).toEqual({ tone: 'info', text: 'No messages yet' });
