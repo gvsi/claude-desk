@@ -34,14 +34,21 @@ from starlette.routing import Route
 
 from desk.api.model import ModelRequest, build_kwargs, parse_structured, strict_schema
 from desk.api.prompts import Translation
-from desk.api.triage import ANNOTATION_MODEL, TRANSLATION_MAX_TOKENS, TRANSLATION_ROUTE
+from desk.api.triage import ANNOTATION_MODEL, TRANSLATION_MAX_TOKENS, TRANSLATION_ROUTE, triage_request
 from desk.contracts import A2ARequest, CopyCreated, DemoAgentIssued, Mandate, RenderedBlock
 from desk.events import A2AResponse
-from desk.kernel_service.decisions import REVIEW_SCHEMA, SOFT_PROMISE_SCHEMA
+from desk.kernel_service.decisions import (
+    REVIEW_SCHEMA,
+    SOFT_PROMISE_SCHEMA,
+    WEB_SEARCH_MAX_TOKENS,
+    WEB_SEARCH_MODEL,
+    WEB_SEARCH_SYSTEM,
+)
 from evals.fakes import FakeAnthropic, LoopbackServer
 from evals.tier1 import test_02_a2a as a2a
 from evals.tier1.harness import Auth, Expect, TravelClock
 from evals.tier1.stub import ContractStub
+from evals.tier1.targets import SOFT_PROMISE_MODEL
 
 FAULTS = (
     "unverified",                 # any signature passes
@@ -355,11 +362,29 @@ async def test_turn_calls_count_claude_the_reviewer_and_the_soft_promise_check_o
     try:
         for body in ({"model": a2a.OPUS, "max_tokens": 64, "messages": [{"role": "user", "content": a2a.HELLO}]},
                      structured(a2a.REVIEWER_MODEL, REVIEW_SCHEMA),
-                     structured(a2a.SOFT_PROMISE_MODEL, SOFT_PROMISE_SCHEMA),
+                     structured(SOFT_PROMISE_MODEL, SOFT_PROMISE_SCHEMA),
                      structured(ANNOTATION_MODEL, strict_schema(Translation))):
             await post(fake, body)   # unscripted, so each is answered 500, and each is kept as a call
         assert len(fake.calls()) == 4
         assert a2a.turn_calls(fake) == 3
+    finally:
+        fake.stop()
+
+
+async def test_turn_calls_count_every_call_but_the_owners_annotation_jobs():
+    """A turn's call that is neither Claude's nor one of the kernel's checks, the kernel's web search on Sonnet here,
+    still counts: only the owner's annotation jobs, translation and triage on Haiku, are left out."""
+    fake = FakeAnthropic().start()
+    try:
+        await post(fake, {   # as the kernel's `web_search` sends it: tools, but no structured answer
+            "model": WEB_SEARCH_MODEL, "max_tokens": WEB_SEARCH_MAX_TOKENS, "system": WEB_SEARCH_SYSTEM,
+            "messages": [{"role": "user", "content": "<query>emergency plumber opening hours</query>"}],
+            "tools": [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}],
+            "thinking": {"type": "between_tools"}})
+        assert a2a.turn_calls(fake) == 1
+        await post(fake, build_kwargs(triage_request({"tool": "native.find_slots", "effect": "deny"}, None)))
+        assert len(fake.calls()) == 2
+        assert a2a.turn_calls(fake) == 1
     finally:
         fake.stop()
 
