@@ -25,7 +25,8 @@ const ARROW = new RegExp(`${ARROW_CHARACTERS.source}|->`, 'u');
  * Plurals of these ("PDFs", "APIs") pass too, because only the run of two or more capitals is looked
  * up. "IA" is AI in Spanish, as the public page's disclosure says it ("una IA que responde por …").
  * "KB" is the unit of a file's size, as Settings › Knowledge writes it ("up to 100 KB"). "AA" is Artificial
- * Analysis, the benchmark board the capability prediction's chart names beside the scores it lists.
+ * Analysis, the benchmark board the capability prediction's chart names beside the scores it lists. "UK" is the
+ * country, as the capability prediction names the UK AI Security Institute.
  */
 export const COPY_ACRONYMS: ReadonlySet<string> = new Set([
   'I',
@@ -48,6 +49,7 @@ export const COPY_ACRONYMS: ReadonlySet<string> = new Set([
   'JSON',
   'KB',
   'AA',
+  'UK',
 ]);
 
 /**

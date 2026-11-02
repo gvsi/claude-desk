@@ -263,12 +263,12 @@ describe('ReaderPage with motion', () => {
     // The page can grow above the section while the window glides there, as when the reading type's web font
     // swaps in on a cold load. The glide still ends with the heading at its place.
     const screen = await renderReader('prediction');
-    const heading = headingOf('limitations');
+    const heading = headingOf('why-the-limits-stay-in-code');
     const hero = document.querySelector('[data-hero]') as HTMLElement;
     const grow = document.createElement('div');
     grow.style.height = '29px';
     onTestFinished(() => grow.remove());
-    followLink('limitations');
+    followLink('why-the-limits-stay-in-code');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(heading.getBoundingClientRect().top, 'the glide is under way').toBeGreaterThan(200);
     hero.append(grow);
@@ -281,14 +281,14 @@ describe('ReaderPage with motion', () => {
     const nudged = await renderReader('prediction');
     const restAtTheClick = () => window.dispatchEvent(new Event('scrollend'));
     document.addEventListener('click', restAtTheClick, { once: true });
-    followLink('limitations');
+    followLink('why-the-limits-stay-in-code');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const grown = document.createElement('div');
     grown.style.height = '29px';
     onTestFinished(() => grown.remove());
     (document.querySelector('[data-hero]') as HTMLElement).append(grown);
     await expect
-      .poll(() => Math.abs(headingOf('limitations').getBoundingClientRect().top - 88), { timeout: 2000, message: 'after an earlier rest' })
+      .poll(() => Math.abs(headingOf('why-the-limits-stay-in-code').getBoundingClientRect().top - 88), { timeout: 2000, message: 'after an earlier rest' })
       .toBeLessThanOrEqual(1);
     await untilStill();
     await nudged.unmount();
@@ -349,8 +349,8 @@ describe('ReaderPage with motion', () => {
     withoutScrollAnchoring();
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction');
-    const heading = headingOf('limitations');
-    followLink('limitations');
+    const heading = headingOf('why-the-limits-stay-in-code');
+    followLink('why-the-limits-stay-in-code');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
     await new Promise((resolve) => setTimeout(resolve, 200));
     const grown = document.createElement('div');
@@ -362,7 +362,7 @@ describe('ReaderPage with motion', () => {
     await expect
       .poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000, message: 'once the type has loaded' })
       .toBeLessThanOrEqual(1);
-    expect(marked()).toEqual(['#limitations']);
+    expect(marked()).toEqual(['#why-the-limits-stay-in-code']);
     await untilStill();
     await screen.unmount();
   });
@@ -375,8 +375,8 @@ describe('ReaderPage with motion', () => {
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction');
     await jumpTo(1800);
-    followLink('limitations');
-    const heading = headingOf('limitations');
+    followLink('why-the-limits-stay-in-code');
+    const heading = headingOf('why-the-limits-stay-in-code');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 2000 }).toBeLessThanOrEqual(1);
     await untilStill();
     at.navigate?.(-1);

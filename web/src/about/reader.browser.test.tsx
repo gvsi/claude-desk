@@ -47,7 +47,7 @@ const PAGES = {
     title: 'Capability prediction',
     summary:
       'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
-    sections: ['Capability', 'Why it matters', 'How it’s measured', 'Why it’s coming', 'Limitations', 'Readiness'],
+    sections: ['Capability', 'Why it matters', 'How it’s measured', 'Why it’s coming', 'Why the limits stay in code', 'Readiness'],
   },
 } as const;
 
@@ -456,7 +456,7 @@ describe('ReaderPage', () => {
     // The claim opens "Capability" as a card on the page's paper (owner, 2026-11-02), drawn from the document's own
     // words: the bold lead, the three things the model will do as the reader's bulleted list, tightened (8 px under
     // the lead, 4 px apart, 16 px over the caveat), then the caveat, whose payoff alone is bold. Bold is the reader's
-    // 640. Under them, the prediction at a glance: a label column and a value column between hairlines.
+    // 640. Under them, the prediction at a glance in five rows: a label column and a value column between hairlines.
     const LEAD = 'By Q4 2027, a generally available Claude model will be able to act for a person or small business on its own:';
     const ITEMS = [
       'answer strangers and the AI agents acting for them',
@@ -469,7 +469,11 @@ describe('ReaderPage', () => {
       ['The bar', '80% of a bank’s customer-service tasks done right on the first try, on τ³-Banking'],
       ['Today', 'Claude Opus 5.5 at 56.0% (Fireworks)'],
       ['The trend', 'Straight-line fits reach 80% between Q2 and the start of Q4 2027'],
-      ['Wrong if', 'No Claude model reaches 70% by the end of Q2 2027'],
+      ['Safety', 'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027'],
+      [
+        'Wrong if',
+        'No Claude model reaches 70% by the end of Q2 2027, or a public red team playing the person in the chat can’t get a model with no limits in code to break an owner’s rule',
+      ],
     ];
     for (const size of [DESKTOP, PHONE]) {
       const where = `prediction at ${size.width}`;
@@ -507,7 +511,8 @@ describe('ReaderPage', () => {
       expect(caveat?.querySelector('em, i, b'), where).toBeNull();
       for (const strong of [...bold(lead), ...bold(caveat)]) expect(getComputedStyle(strong).fontWeight, where).toBe('640');
 
-      // At a glance: four rows, each a label and its value under a hairline; the benchmark links to its board.
+      // At a glance: five rows, each a label and its value under a hairline, the longer values wrapping in their own
+      // column inside the card; the benchmark links to its board.
       const rows = [...(glance?.querySelectorAll(':scope > div') ?? [])];
       expect(rows.map((row) => [...row.children].map((cell) => `${cell.localName} ${flat(cell.textContent)}`)), where).toEqual(
         GLANCE.map(([label, value]) => [`dt ${label}`, `dd ${value}`]),
@@ -517,6 +522,8 @@ describe('ReaderPage', () => {
         expect(getComputedStyle(row).borderTopColor, where).toBe(tokenColor('--line-hairline', card));
         const [label, value] = [...row.children] as [Element, Element];
         expect(Math.round(box(value).left - box(label).left), `${where}: the value column`).toBe(size === PHONE ? 88 : 108);
+        expect(box(value).right, `${where}: ${label.textContent} inside the card`).toBeLessThanOrEqual(box(card).right);
+        expect(value.scrollWidth, `${where}: ${label.textContent} unclipped`).toBeLessThanOrEqual(value.clientWidth);
       }
       const link = glance?.querySelector('a');
       expect([link?.textContent, link?.getAttribute('href'), link?.getAttribute('target')], where).toEqual([
@@ -524,6 +531,78 @@ describe('ReaderPage', () => {
         'https://taubench.com/leaderboard/',
         '_blank',
       ]);
+      await screen.unmount();
+    }
+  });
+
+  it('limits_section_reads_on_a_laptop_and_a_phone', async () => {
+    // "Why the limits stay in code" sets its results as the proposal's measures do: a table on a laptop, each row led
+    // by its attack; on a phone a list of blocks, each attack a title over its other three cells, every cell inside
+    // the window. Its "Prediction:" and "Falsifier:" paragraphs open in the reader's bold, as the article's other
+    // paragraphs set bold.
+    const ATTACKS = [
+      'Prompt injection, Gray Swan’s benchmark',
+      'Prompt injection, computer use',
+      'Prompt injection, browser use',
+      'Prompt injection, coding',
+      'Instructions in text the user pastes',
+      'Unverifiable claims of authority',
+    ];
+    for (const size of [DESKTOP, PHONE]) {
+      const where = `prediction at ${size.width}`;
+      const screen = await renderReader('prediction', { size });
+      const heading = document.getElementById('why-the-limits-stay-in-code') as HTMLElement;
+      const next = document.getElementById('readiness') as HTMLElement;
+      const inSection = (el: Element) =>
+        Boolean(heading.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+        Boolean(el.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+      const tables = [...screen.container.querySelectorAll('article table, article .cd-about-measures-list')].filter(inSection);
+      expect(tables, where).toHaveLength(1);
+      const results = tables[0] as HTMLElement;
+      if (size === DESKTOP) {
+        expect(results.localName, where).toBe('table');
+        expect(results.classList.contains('cd-about-measures'), where).toBe(true);
+        expect([...results.querySelectorAll('thead th')].map((th) => flat(th.textContent)), where).toEqual([
+          'Attack',
+          'How it’s run',
+          'Claude Opus 5',
+          'Claude Opus 5.5',
+        ]);
+        expect([...results.querySelectorAll('tbody th[scope="row"]')].map((th) => flat(th.textContent)), where).toEqual(ATTACKS);
+        expect([...results.querySelectorAll('tbody tr')].map((row) => row.children.length), where).toEqual(Array(6).fill(4));
+      } else {
+        expect(results.querySelector('table'), where).toBeNull();
+        const items = [...results.querySelectorAll('.cd-about-measures-list__item')];
+        expect(items.map((item) => flat(item.querySelector('dt')?.textContent)), where).toEqual(ATTACKS);
+        for (const item of items) {
+          const lines = [...item.querySelectorAll('dd')];
+          expect(lines, where).toHaveLength(3);
+          expect(lines.map((line) => line.querySelector('[data-label]')?.textContent ?? null), where).toEqual([
+            null,
+            'Claude Opus 5',
+            'Claude Opus 5.5',
+          ]);
+        }
+        expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(PHONE.width);
+        for (const el of results.querySelectorAll('dt, dd, dd > span')) {
+          const { left, right } = el.getBoundingClientRect();
+          expect(left >= 0 && right <= PHONE.width, `${where}: ${flat(el.textContent)}`).toBe(true);
+          expect(el.scrollWidth, `${where}: ${flat(el.textContent)} unclipped`).toBeLessThanOrEqual(el.clientWidth + 1);
+        }
+      }
+
+      // The two bold-led paragraphs, in the article's own paragraph style.
+      const plain = [...screen.container.querySelectorAll<HTMLElement>('article > p')].filter(inSection);
+      const led = plain.filter((p) => p.firstElementChild?.localName === 'strong' && p.firstChild === p.firstElementChild);
+      expect(led.map((p) => flat(p.firstElementChild?.textContent)), where).toEqual(['Prediction:', 'Falsifier:']);
+      const other = plain.find((p) => !led.includes(p)) as HTMLElement;
+      for (const p of led) {
+        expect(getComputedStyle(p.firstElementChild as Element).fontWeight, where).toBe('640');
+        for (const property of ['fontFamily', 'fontSize', 'lineHeight', 'marginBottom', 'color'] as const) {
+          expect(getComputedStyle(p)[property], `${where}: ${property}`).toBe(getComputedStyle(other)[property]);
+        }
+      }
       await screen.unmount();
     }
   });
@@ -665,9 +744,15 @@ describe('ReaderPage', () => {
       const expected = documentText(blocks).map(apostrophes);
       // Each piece's key is its block's place in the document and its place in the block.
       const keys = blocks.flatMap((block, b) => documentText([block]).map((_, i) => `${b}.${i}`));
-      // Header cells the page shows again as labels: the readiness scale's "Watch for", and the phone lists' third
-      // column, the proposal's "Prototype" and the prediction's fits' "Reaches 80%".
+      // Header cells the page shows again as labels: the readiness scale's "Watch for", and on a phone each list's
+      // headings from its third column on (the proposal's "Prototype", the prediction's fits' "Reaches 80%" and its
+      // results' two models).
       const headerCells = blocks.flatMap((block) => (block.kind === 'table' ? documentText([{ ...block, rows: [] }]) : []));
+      const listLabels = blocks.flatMap((block, b) => {
+        const before = blocks[b - 1];
+        const readiness = before?.kind === 'figure' && before.name === 'readiness';
+        return block.kind === 'table' && !readiness ? documentText([{ ...block, rows: [] }]).slice(2) : [];
+      });
 
       for (const size of [DESKTOP, PHONE]) {
         const where = `${id} at ${size.width}`;
@@ -698,13 +783,15 @@ describe('ReaderPage', () => {
           'Claude Opus 5.5 at 56.0% (Fireworks)',
           'The trend',
           'Straight-line fits reach 80% between Q2 and the start of Q4 2027',
+          'Safety',
+          'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
           'Wrong if',
-          'No Claude model reaches 70% by the end of Q2 2027',
+          'No Claude model reaches 70% by the end of Q2 2027, or a public red team playing the person in the chat can’t get a model with no limits in code to break an owner’s rule',
         ];
         const allowed = (text: string) =>
           (id === 'proposal' && text === pullQuote) ||
           (id === 'prediction' && (steps.includes(text) || glance.includes(text))) ||
-          ((text === 'Watch for' || (size === PHONE && ['Prototype', 'Reaches 80%'].includes(text))) && headerCells.includes(text));
+          ((text === 'Watch for' || (size === PHONE && listLabels.includes(text))) && headerCells.includes(text));
         expect(unmarked.filter((text) => !allowed(text)), where).toEqual([]);
         if (id === 'proposal') expect(unmarked.filter((text) => text === pullQuote), where).toHaveLength(1);
         else expect(unmarked.filter((text) => glance.includes(text)), where).toEqual(glance);
@@ -978,16 +1065,25 @@ describe('ReaderPage', () => {
     expect(Math.round(window.scrollY), 'the place Back returned to').toBe(place);
     await back.unmount();
 
-    // Once the document has gone, its section isn't kept: the other document opens at its top and stays there. The
-    // other document's heading at the same place in its document as "Limitations" is drawn in the very heading that
-    // was "Limitations".
-    const limitationsAt = ABOUT_DOCUMENTS.prediction.blocks.findIndex((block) => block.kind === 'heading' && block.id === 'limitations');
-    const twin = ABOUT_DOCUMENTS.proposal.blocks[limitationsAt];
-    if (twin?.kind !== 'heading') throw new Error('the proposal has no heading where the prediction has Limitations');
+    // Once the document has gone, its section isn't kept: the other document opens at its top and stays there, though
+    // it draws one of its own headings in the very heading element that was the section's. The section is the
+    // furthest down of the prediction's that sits at the same place in its document as one of the proposal's (at the
+    // least, each document's first section).
+    const sectionsOf = (id: AboutId) =>
+      ABOUT_DOCUMENTS[id].blocks.flatMap((block, i) => (block.kind === 'heading' && block.depth === 2 ? [i] : []));
+    const shared = sectionsOf('prediction')
+      .reverse()
+      .find((i) => sectionsOf('proposal').includes(i));
+    const section = shared === undefined ? undefined : ABOUT_DOCUMENTS.prediction.blocks[shared];
+    const twin = shared === undefined ? undefined : ABOUT_DOCUMENTS.proposal.blocks[shared];
+    if (section?.kind !== 'heading' || twin?.kind !== 'heading') {
+      throw new Error('no section of the prediction sits where the proposal has a heading');
+    }
     loaded = typeStillLoading();
-    const third = await renderReader('prediction', { hash: '#limitations' });
-    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
-    const heading = document.getElementById('limitations');
+    const third = await renderReader('prediction', { hash: `#${section.id}` });
+    await expect.poll(() => Math.abs(offsetOf(section.id))).toBeLessThanOrEqual(1);
+    expect(window.scrollY, 'opened down the page').toBeGreaterThan(0);
+    const heading = document.getElementById(section.id);
     at.navigate?.('/about/proposal');
     await expect.poll(title).toBe('Product proposal');
     expect(document.getElementById(twin.id), 'the same heading element').toBe(heading);
@@ -1096,15 +1192,15 @@ describe('ReaderPage', () => {
   });
 
   it('a_contents_link_ends_an_addresss_keep', async () => {
-    // Opened at "How it's measured" while the type loads, then "Limitations" followed by a click alone, as assistive
-    // technology activates a link (no pointer or key events). Once the type loads, the page keeps Limitations, and
-    // never goes back to How it's measured on the way.
+    // Opened at "How it's measured" while the type loads, then "Why the limits stay in code" followed by a click
+    // alone, as assistive technology activates a link (no pointer or key events). Once the type loads, the page keeps
+    // that section, and never goes back to How it's measured on the way.
     withoutScrollAnchoring();
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction', { hash: '#how-its-measured' });
     await expect.poll(() => Math.abs(offsetOf('how-its-measured'))).toBeLessThanOrEqual(1);
-    followContentsLink('limitations');
-    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    followContentsLink('why-the-limits-stay-in-code');
+    await expect.poll(() => Math.abs(offsetOf('why-the-limits-stay-in-code'))).toBeLessThanOrEqual(1);
     const visits: string[] = [];
     const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = function (this: Element, ...args: unknown[]) {
@@ -1116,7 +1212,7 @@ describe('ReaderPage', () => {
     });
     swapType();
     loaded();
-    await expect.poll(() => Math.abs(offsetOf('limitations')), { message: 'kept at Limitations' }).toBeLessThanOrEqual(1);
+    await expect.poll(() => Math.abs(offsetOf('why-the-limits-stay-in-code')), { message: 'kept at Why the limits stay in code' }).toBeLessThanOrEqual(1);
     await twoFrames();
     expect(visits, 'sections the page moved to once the type loaded').not.toContain('how-its-measured');
     await screen.unmount();
@@ -1166,14 +1262,14 @@ describe('ReaderPage', () => {
     withoutScrollAnchoring();
     const loaded = typeStillLoading();
     const screen = await renderReader('prediction');
-    followContentsLink('limitations');
-    await expect.poll(() => Math.abs(offsetOf('limitations'))).toBeLessThanOrEqual(1);
+    followContentsLink('why-the-limits-stay-in-code');
+    await expect.poll(() => Math.abs(offsetOf('why-the-limits-stay-in-code'))).toBeLessThanOrEqual(1);
     await twoFrames();
     swapType();
-    expect(offsetOf('limitations'), 'the swap moved the page').toBeGreaterThan(20);
+    expect(offsetOf('why-the-limits-stay-in-code'), 'the swap moved the page').toBeGreaterThan(20);
     loaded();
-    await expect.poll(() => Math.abs(offsetOf('limitations')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
-    expect(document.activeElement, 'focus stays on the section').toBe(headingOf('limitations'));
+    await expect.poll(() => Math.abs(offsetOf('why-the-limits-stay-in-code')), { message: 'once the type has loaded' }).toBeLessThanOrEqual(1);
+    expect(document.activeElement, 'focus stays on the section').toBe(headingOf('why-the-limits-stay-in-code'));
     await screen.unmount();
   });
 
@@ -1565,7 +1661,7 @@ describe('ReaderPage', () => {
     expect(marked(), 'at the top, before the first section').toEqual([]);
     expect(bars(), 'no bar before the first section').toEqual([]);
     for (const [anchor, name] of [
-      ['limitations', 'Limitations'],
+      ['why-the-limits-stay-in-code', 'Why the limits stay in code'],
       ['readiness', 'Readiness'],
     ] as const) {
       await jumpTo(placeOf(anchor));
@@ -1598,7 +1694,7 @@ describe('ReaderPage', () => {
     // On a phone the folded list marks nothing, and its words stay as they were, in text-primary.
     const phone = await renderReader('prediction', { size: PHONE });
     await userEvent.click(phone.container.querySelector('nav[aria-label="On this page"] summary') as HTMLElement);
-    await jumpTo(placeOf('limitations'));
+    await jumpTo(placeOf('why-the-limits-stay-in-code'));
     await twoFrames();
     expect(marked(), 'at 390').toEqual([]);
     const folded = phone.container.querySelector('nav[aria-label="On this page"]') as HTMLElement;
@@ -1615,20 +1711,20 @@ describe('ReaderPage', () => {
     /** The window's offset that puts `anchor`'s heading `by` above the window's top. */
     const past = (anchor: string, by: number) => placeOf(anchor) + parseFloat(getComputedStyle(headingOf(anchor)).scrollMarginTop) + by;
 
-    // From part way through "How it's measured" to part way through "Limitations", in one jump: the headings in
-    // between go from below the line to above the window, and no heading lands above the line, so nothing comes
-    // into or leaves the band the observer watches. The mark follows once the scroll rests.
+    // From part way through "How it's measured" to part way through "Why the limits stay in code", in one jump: the
+    // headings in between go from below the line to above the window, and no heading lands above the line, so
+    // nothing comes into or leaves the band the observer watches. The mark follows once the scroll rests.
     await jumpTo(past('how-its-measured', 90));
     await expect.poll(marked).toEqual(['How it’s measured (location)']);
     expect(headingOf('why-its-coming').getBoundingClientRect().top, 'the next heading starts below the line').toBeGreaterThan(line);
-    const to = past('limitations', 190);
+    const to = past('why-the-limits-stay-in-code', 190);
     expect(headingOf('readiness').getBoundingClientRect().top - (to - window.scrollY), 'the next heading lands below the line').toBeGreaterThan(line);
     await jumpTo(to);
-    await expect.poll(marked).toEqual(['Limitations (location)']);
+    await expect.poll(marked).toEqual(['Why the limits stay in code (location)']);
 
-    // From Limitations' place to Readiness' place.
-    await jumpTo(placeOf('limitations'));
-    await expect.poll(marked).toEqual(['Limitations (location)']);
+    // From the limits section's place to Readiness' place.
+    await jumpTo(placeOf('why-the-limits-stay-in-code'));
+    await expect.poll(marked).toEqual(['Why the limits stay in code (location)']);
     await jumpTo(placeOf('readiness'));
     await expect.poll(marked).toEqual(['Readiness (location)']);
     await screen.unmount();
@@ -1646,8 +1742,8 @@ describe('ReaderPage', () => {
     const without = await renderReader('prediction');
     await jumpTo(past('how-its-measured', 90));
     await expect.poll(marked).toEqual(['How it’s measured (location)']);
-    await jumpTo(past('limitations', 190));
-    await expect.poll(marked, { message: 'without scrollend' }).toEqual(['Limitations (location)']);
+    await jumpTo(past('why-the-limits-stay-in-code', 190));
+    await expect.poll(marked, { message: 'without scrollend' }).toEqual(['Why the limits stay in code (location)']);
     await without.unmount();
   });
 
@@ -1726,9 +1822,9 @@ describe('ReaderPage', () => {
     const own = window.location.href;
     onTestFinished(() => window.history.replaceState(window.history.state, '', own));
     const screen = await renderReader('prediction');
-    const heading = headingOf('limitations');
-    const link = screen.container.querySelector<HTMLElement>('nav[aria-label="On this page"] a[href="#limitations"]');
-    expect(link?.getAttribute('href')).toBe('#limitations');
+    const heading = headingOf('why-the-limits-stay-in-code');
+    const link = screen.container.querySelector<HTMLElement>('nav[aria-label="On this page"] a[href="#why-the-limits-stay-in-code"]');
+    expect(link?.getAttribute('href')).toBe('#why-the-limits-stay-in-code');
     // Where the heading is once the page has handled the click: a listener on the document hears it after the page's.
     let atClick = Number.NaN;
     const onClick = () => {
@@ -1750,7 +1846,7 @@ describe('ReaderPage', () => {
     expect(heading.matches(':focus-visible'), 'focus came from the keyboard').toBe(true);
     expect([getComputedStyle(heading).outlineStyle, getComputedStyle(heading).boxShadow]).toEqual(['none', 'none']);
     // The router draws the new address in a transition, which a busy machine may not have drawn yet.
-    await expect.poll(() => at.path).toBe('/about/prediction#limitations');
+    await expect.poll(() => at.path).toBe('/about/prediction#why-the-limits-stay-in-code');
     // The next Tab goes on from the section, not from the top of the page.
     await userEvent.tab();
     expect(heading.compareDocumentPosition(document.activeElement as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

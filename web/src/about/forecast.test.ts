@@ -32,7 +32,7 @@ function documentWords(): string {
 }
 
 describe('the forecast at a glance', () => {
-  it('glance_rows_say_the_prediction_in_four_lines', () => {
+  it('glance_rows_say_the_prediction_in_five_lines', () => {
     expect(GLANCE.map((row) => [row.label, row.text, row.link ?? null])).toEqual([
       [
         'The bar',
@@ -41,12 +41,25 @@ describe('the forecast at a glance', () => {
       ],
       ['Today', 'Claude Opus 5.5 at 56.0% (Fireworks)', null],
       ['The trend', 'Straight-line fits reach 80% between Q2 and the start of Q4 2027', null],
-      ['Wrong if', 'No Claude model reaches 70% by the end of Q2 2027', null],
+      [
+        'Safety',
+        'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
+        null,
+      ],
+      [
+        'Wrong if',
+        'No Claude model reaches 70% by the end of Q2 2027, or a public red team playing the person in the chat can’t get a model with no limits in code to break an owner’s rule',
+        null,
+      ],
     ]);
   });
 
   it('glance_rows_say_what_the_document_says', () => {
     const text = documentWords();
+    const row = (label: string) => GLANCE.find((glance) => glance.label === label)?.text ?? '';
+    /** The document's paragraph that starts with `start`, its bold marks dropped. */
+    const line = (start: string) => text.split('\n').find((paragraph) => paragraph.startsWith(start)) ?? '';
+
     // The bar, as the document sets it.
     expect(text).toContain('The bar is 80% pass^1.');
     // Today: the latest Claude score, and its board, as the document cites it.
@@ -54,8 +67,24 @@ describe('the forecast at a glance', () => {
     expect(text).toContain('to 56.0% (Opus 5.5, September 2026, Fireworks)');
     // The trend: the fits' first and last quarters, in the document's words.
     expect(text).toContain('straight-line fits in log-odds reach 80% between Q2 2027 and the start of Q4 2027');
-    // Wrong if: the document's first falsifier, without naming the benchmark again.
-    expect(text).toContain('no Claude model reaches 70% on τ³-Banking by the end of Q2 2027');
+
+    // Safety restates the safety section's prediction, clause by clause.
+    const prediction = line('Prediction: ');
+    expect(prediction).toMatch(/^Prediction: through Q4 2027, prompt injection hidden in what the model reads keeps falling/);
+    expect(prediction).toContain('but manipulation by the person in the chat will not be shown solved');
+    expect(row('Safety')).toBe(
+      'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
+    );
+
+    // Wrong if restates both falsifiers: the trend's, in "Why it’s coming", and the safety section's.
+    const falsifiers = text.split('\n').filter((paragraph) => paragraph.startsWith('Falsifier: '));
+    expect(falsifiers).toHaveLength(2);
+    expect(falsifiers[0]).toBe('Falsifier: no Claude model reaches 70% on τ³-Banking by the end of Q2 2027.');
+    expect(falsifiers[1]).toMatch(/^Falsifier: by the end of 2027, a public adaptive red team that plays the person in the chat, /);
+    expect(falsifiers[1]).toContain('can’t get a generally available model with no limits in code to break an owner’s rule');
+    const [trend, redTeam] = row('Wrong if').split(', or ');
+    expect(trend).toBe('No Claude model reaches 70% by the end of Q2 2027');
+    expect(redTeam).toBe('a public red team playing the person in the chat can’t get a model with no limits in code to break an owner’s rule');
   });
 });
 

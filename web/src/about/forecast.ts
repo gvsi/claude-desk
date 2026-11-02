@@ -138,7 +138,11 @@ export interface GlanceRow {
   link?: { text: string; href: string };
 }
 
-/** The prediction at a glance, under the claim: the bar, where Claude is today, the trend and what would prove it wrong. */
+/**
+ * The prediction at a glance, under the claim: the bar, where Claude is today, the trend, the safety prediction and
+ * what would prove the two predictions wrong. Safety and Wrong if restate the document's "Prediction:" and
+ * "Falsifier:" lines (forecast.test.ts holds them to the text).
+ */
 export const GLANCE: readonly GlanceRow[] = [
   {
     label: 'The bar',
@@ -147,6 +151,14 @@ export const GLANCE: readonly GlanceRow[] = [
   },
   { label: 'Today', text: `${LATEST_CLAUDE.model} at ${percent(LATEST_CLAUDE.score)} (${LATEST_CLAUDE.board})` },
   { label: 'The trend', text: trendWords() },
-  // The document's first falsifier (forecast.test.ts holds it to the text).
-  { label: 'Wrong if', text: 'No Claude model reaches 70% by the end of Q2 2027' },
+  {
+    label: 'Safety',
+    text: 'Prompt injection keeps falling; manipulation by the person in the chat won’t be shown solved through Q4 2027',
+  },
+  {
+    label: 'Wrong if',
+    text:
+      'No Claude model reaches 70% by the end of Q2 2027, or a public red team playing the person in the chat can’t ' +
+      'get a model with no limits in code to break an owner’s rule',
+  },
 ];
