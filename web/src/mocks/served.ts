@@ -280,10 +280,13 @@ type Scheduled = ({ step: Step } | { pick: () => readonly Step[] }) & { language
 /** Whether a queued entry still runs once the session has moved past its generation (`Server.tick`). */
 const isUnfenced = (entry: Scheduled): boolean => 'step' in entry && entry.step.unfenced === true;
 
-/** Mode markers, whispers and annotations don't answer a visitor's line. */
-function waitingVisitorText(session: SessionRecord): string | null {
+/**
+ * The visitor's or visiting agent's latest line when nothing answered it after, as the API's hand-back
+ * looks for one: mode markers, whispers and annotations aren't answers.
+ */
+function waitingLine(session: SessionRecord): string | null {
   const latest = session.items.findLast((item) => ['visitor_text', 'agent_text', 'delivered'].includes(item.kind));
-  return latest?.kind === 'visitor_text' ? latest.text : null;
+  return latest?.kind === 'visitor_text' || latest?.kind === 'agent_text' ? latest.text : null;
 }
 
 /** The owner-chat streams a test can plan: Ask Claude's answer, or a setup turn. */
@@ -627,9 +630,10 @@ const SERVED: ServedRoutes = {
     if (isFailure(session)) return session;
     if (session.state.mode !== 'owner') return failWith(409, 'kernel', { code: 'conflict' });
     const state = sv.world.handBack(session);
-    // A line the visitor sent while the owner had the chat, with no answer after it, gets Claude's.
-    const waiting = waitingVisitorText(session);
-    if (waiting !== null) sv.runVisitorTurn(session, waiting);
+    // A line sent while the owner had the chat, with no answer after it, gets Claude's: a visitor's now, and an
+    // agent's on its next request, the only time an agent's turn runs.
+    const waiting = waitingLine(session);
+    if (waiting !== null && session.state.kind !== 'agent') sv.runVisitorTurn(session, waiting);
     return ok(state);
   },
   resume(sv, req) {

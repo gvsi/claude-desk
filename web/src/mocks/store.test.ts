@@ -1693,6 +1693,18 @@ describe('taking over', () => {
     expect(typesOf(events).filter((kind) => kind === 'message')).toHaveLength(1);
   });
 
+  it('hand_back_leaves_a_waiting_agent_line_for_its_next_request', async () => {
+    // As on the API, an agent's line waits too, but its turn runs only on the agent's own next request.
+    const world = mockStore.world;
+    const agent = world.addSession(world.desk(deskId)!, { agent: "Alex Kim's assistant" });
+    const params = { session_id: agent.state.session_id };
+    expect((await call('takeover', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    world.agentText(agent, 'Can someone come on Thursday?');
+    expect((await call('handback', { params, body: { generation: agent.state.generation } })).status).toBe(200);
+    await drain();
+    expect(agent.events.map(({ ev }) => ev.type)).toEqual(['owner_joined', 'owner_left']);
+  });
+
   it.each(['empty', 'owner_answered', 'claude'] as const)('hand_back_starts_nothing_after_%s', async (latest) => {
     const { session, events } = await openChat();
     const params = { session_id: session.session_id };
