@@ -281,9 +281,56 @@ function webSources(): Source[] {
     .map((file) => ({ file, text: readFileSync(path.join(src, file), 'utf8') }));
 }
 
-/** `text` without its comments, so a guard reads only code and the strings code holds. */
+/**
+ * `text` without its comments, so a guard reads only code and the strings code holds: a block comment
+ * becomes a space, and a line comment goes up to its line break. Only comments outside strings go: the
+ * scan follows quotes, template literals (and the code in their `${…}`) and escapes, so a marker
+ * inside a string ('//', "/*", a URL) is text and can't hide the code after it. A quote left open
+ * ends at its line break, as a string in code does, so an apostrophe in JSX text holds one line at most.
+ */
 function withoutComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1');
+  let out = '';
+  // What the scan is inside, innermost last: a quote or "`" for a string, "{" for a brace in a
+  // template literal's code. Outside them all, it reads code.
+  const inside: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const char = text.charAt(i);
+    const enclosing = inside.at(-1);
+    if (enclosing === "'" || enclosing === '"' || enclosing === '`') {
+      if (char === '\\') {
+        out += text.slice(i, i + 2);
+        i += 2;
+        continue;
+      }
+      if (char === enclosing || (char === '\n' && enclosing !== '`')) inside.pop();
+      else if (enclosing === '`' && text.startsWith('${', i)) {
+        inside.push('{');
+        out += '${';
+        i += 2;
+        continue;
+      }
+      out += char;
+      i += 1;
+      continue;
+    }
+    if (text.startsWith('//', i)) {
+      const end = text.indexOf('\n', i);
+      i = end === -1 ? text.length : end;
+      continue;
+    }
+    if (text.startsWith('/*', i)) {
+      const end = text.indexOf('*/', i + 2);
+      out += ' ';
+      i = end === -1 ? text.length : end + 2;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === '`' || (char === '{' && enclosing === '{')) inside.push(char);
+    else if (char === '}' && enclosing === '{') inside.pop();
+    out += char;
+    i += 1;
+  }
+  return out;
 }
 
 /** Every stylesheet under `web/src/`, paths relative to it: the app's, the About pages' and the design system's. */
@@ -463,6 +510,25 @@ describe('design system source guards', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('strips_comments_outside_strings_only', () => {
+    // A comment marker inside a string, a template literal or a URL is text, so the code after it stays.
+    const kept = [
+      "const a = '//'; const card = <FactCard />;",
+      'const a = "/*"; const card = <FactCard />;',
+      'const a = `a // b ${c} d`; const card = <FactCard />;',
+      "const url = 'https://example.com/a'; const card = <FactCard />;",
+      "const said = 'it\\'s // here'; const card = <FactCard />;",
+    ];
+    for (const code of kept) expect(withoutComments(code), code).toBe(code);
+    // Comments still go, quotes and markers inside them included: a block comment as a space, a line
+    // comment up to its line break, and one in a template literal's expression too.
+    expect(withoutComments('const a = "/*"; /* a FactCard\'s note */ const b = 1;')).toBe('const a = "/*";   const b = 1;');
+    expect(withoutComments("const a = 1; // it's a FactCard\nconst b = '//';")).toBe("const a = 1; \nconst b = '//';");
+    expect(withoutComments('const a = `${b /* FactCard */} // c`;')).toBe('const a = `${b  } // c`;');
+    // A quote left open ends at its line break, as a string in code does, so the next line is code again.
+    expect(withoutComments("<p>Don't</p>\n// FactCard\nconst a = 1;")).toBe("<p>Don't</p>\n\nconst a = 1;");
   });
 
   const sources = scannedSources();
