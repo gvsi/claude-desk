@@ -10,8 +10,8 @@
  * the set's top bar (`AboutBar`), the same as the reading pages', and "Read next" at its end. The page is static:
  * its words come from `text.ts`, nothing on it moves, and it makes no request.
  */
-import { Fragment, useId } from 'react';
-import { Link } from 'react-router';
+import { Fragment, useContext, useId, useLayoutEffect, useRef } from 'react';
+import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
 import { ConceptFooter, Icon } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
@@ -208,11 +208,24 @@ function SectionText({ heading, passages }: Pick<Section, 'heading' | 'passages'
  * "See each one up close": a card for each idea, two by two at every width. Each card is one link to the idea's
  * vision page, named by the idea and its line; the top of the idea's phone above them is decoration.
  */
+const OPENED_CARDS = new WeakMap<object, Map<string, string>>();
+
 function PictureCards() {
   const headingId = useId();
+  const cardsRef = useRef<HTMLElement>(null);
+  const { navigator } = useContext(UNSAFE_NavigationContext);
+  const { key } = useLocation();
+  const navigationType = useNavigationType();
+  useLayoutEffect(() => {
+    if (navigationType !== 'POP') return;
+    const href = OPENED_CARDS.get(navigator)?.get(key);
+    const opener = Array.from(cardsRef.current?.querySelectorAll<HTMLAnchorElement>('a.va-card') ?? []).find((link) => link.getAttribute('href') === href);
+    // The article restores its scroll separately; focus must leave that place alone.
+    opener?.focus({ preventScroll: true });
+  }, [navigator, key, navigationType]);
   const { heading, lead, cards } = PICTURE_CARDS;
   return (
-    <section className="va-body va-cards" aria-labelledby={headingId}>
+    <section ref={cardsRef} id="vision-pages" className="va-body va-cards" aria-labelledby={headingId}>
       <h2 className="va-h2" id={headingId}>
         {heading}
       </h2>
@@ -220,7 +233,12 @@ function PictureCards() {
       <ul className="va-cards__grid">
         {cards.map(({ screen, name, line, href }) => (
           <li key={href} className="va-cards__item">
-            <Link className="va-card" to={href}>
+            <Link className="va-card" to={href} state={{ fromVision: true }} onClick={(event) => {
+              if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              const opened = OPENED_CARDS.get(navigator) ?? new Map<string, string>();
+              opened.set(key, href);
+              OPENED_CARDS.set(navigator, opened);
+            }}>
               <div className="va-card__top" aria-hidden="true">
                 <Phone screen={screen} decorative />
               </div>

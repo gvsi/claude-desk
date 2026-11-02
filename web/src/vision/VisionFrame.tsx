@@ -27,13 +27,20 @@ export interface VisionFrameProps {
  */
 export function VisionFrame({ title, children }: VisionFrameProps) {
   const navigate = useNavigate();
-  const { pathname } = useLocation();
+  const { pathname, state } = useLocation();
   usePagePlace(pathname);
 
   useDocumentTitle(title);
 
   return (
-    <div className="cd-vision-frame" onClick={followInAppLinks(navigate)}>
+    <div className="cd-vision-frame" onClick={followInAppLinks(navigate)} onClickCapture={(event) => {
+      if (state?.fromVision !== true || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
+      if (!(link instanceof HTMLAnchorElement) || link.target !== '' || link.getAttribute('href') !== VISION_BACK_HREF) return;
+      // The article opened this page: use its history entry, with the reader's place kept there.
+      event.preventDefault();
+      void navigate(-1);
+    }}>
       {children(<VisionBar backHref={VISION_BACK_HREF} />)}
     </div>
   );
