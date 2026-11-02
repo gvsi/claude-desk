@@ -95,6 +95,34 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
+  it('takes_typing_while_the_answer_streams_and_sends_it_once_the_answer_ends', async () => {
+    const held = gate();
+    mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
+    const { panel } = await ask(viewport);
+    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+    // The panel's composer has focus as the answer streams, and keeps it: typing works, Send waits.
+    const box = panel.getByRole('textbox', { name: 'Ask Claude' });
+    const send = panel.getByRole('button', { name: 'Send', exact: true });
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toBeEnabled();
+    await userEvent.keyboard('And on holidays?');
+    await expect.element(box).toHaveValue('And on holidays?');
+    await expect.element(send).toBeDisabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('And on holidays?');
+    expect(requests('ruleChat')).toHaveLength(1);
+
+    held.release();
+    await finalAnswer(panel, 'Nothing changes until you confirm it.');
+    // The answer has come in: the words typed meanwhile are still there, with focus, and they send.
+    await expect.element(box).toHaveFocus();
+    await expect.element(box).toHaveValue('And on holidays?');
+    await expect.element(send).toBeEnabled();
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('ruleChat')).toHaveLength(2);
+    await expect.element(box).toHaveValue('');
+  });
+
   it('keeps_the_writing_dots_until_a_word_is_whole', async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 1, until: held.until });
@@ -306,11 +334,15 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     await expect.poll(() => (growing(panel)?.textContent ?? '').split(' ').length, LANDS_WITHIN).toBe(11);
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const inView = (el: Element) => el.getBoundingClientRect().bottom <= log.getBoundingClientRect().bottom + 1;
+    // Followed with room under it, as a chat leaves its end: 24 px above the conversation's foot.
+    const roomUnder = (el: Element) => log.getBoundingClientRect().bottom - el.getBoundingClientRect().bottom;
     expect(inView(growing(panel)!)).toBe(true);
+    expect(Math.abs(roomUnder(growing(panel)!) - 24), `${roomUnder(growing(panel)!)} px under the answer being written`).toBeLessThanOrEqual(2);
     held.release();
     const final = await finalAnswer(panel, 'I can explain what a rule does, or draft a change to one.');
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(inView(final)).toBe(true);
+    expect(Math.abs(roomUnder(final) - 24), `${roomUnder(final)} px under the final answer`).toBeLessThanOrEqual(2);
   });
 
   it('shows_a_drafted_change_with_both_its_buttons_in_view', async () => {
@@ -373,4 +405,53 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(again.getByText(ANSWER, { exact: true }).elements()).toHaveLength(0);
     expect(again.getByText(ASK, { exact: true }).elements()).toHaveLength(0);
   });
+});
+
+// Beside the panel, the Rules page's own composer stays in reach; on a phone the sheet covers it.
+it('holds_the_rules_page_composer_while_an_answer_streams_and_sends_once_it_has_come_in', async () => {
+  const held = gate();
+  mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
+  const { screen, panel } = await ask('desktop');
+  await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+  // The page's box takes typing and keeps focus while the answer streams; only Send and Enter wait.
+  const box = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
+  const send = () => box.element().closest('.cd-composer')!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
+  await box.click();
+  await userEvent.keyboard('And on holidays?');
+  await expect.element(box).toHaveValue('And on holidays?');
+  await expect.element(box).toHaveFocus();
+  expect(send().disabled).toBe(true);
+  await userEvent.keyboard('{Enter}');
+  await expect.element(box).toHaveValue('And on holidays?');
+  expect(requests('ruleChat')).toHaveLength(1);
+
+  held.release();
+  await finalAnswer(panel, 'Nothing changes until you confirm it.');
+  // The answer has come in: the words are still there, with focus, and they send.
+  await expect.element(box).toHaveFocus();
+  await expect.element(box).toHaveValue('And on holidays?');
+  await expect.poll(() => send().disabled).toBe(false);
+  await userEvent.keyboard('{Enter}');
+  await expect.poll(() => requests('ruleChat')).toHaveLength(2);
+  await expect.element(box).toHaveValue('');
+});
+
+it('holds_the_rules_page_suggestions_while_an_answer_streams_and_asks_once_it_has_come_in', async () => {
+  const held = gate();
+  mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
+  const { screen, panel } = await ask('desktop');
+  await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+  // A suggestion waits, in its place, while the answer comes in: a press asks nothing.
+  const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button').first();
+  await expect.element(chip).toBeVisible();
+  await expect.element(chip).toBeDisabled();
+  (chip.element() as HTMLButtonElement).click();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(requests('ruleChat')).toHaveLength(1);
+
+  held.release();
+  await finalAnswer(panel, 'Nothing changes until you confirm it.');
+  await expect.element(chip).toBeEnabled();
+  await chip.click();
+  await expect.poll(() => requests('ruleChat')).toHaveLength(2);
 });

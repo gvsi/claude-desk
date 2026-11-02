@@ -1,9 +1,10 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, SetupState, WentLive } from '../api/views.ts';
 import { Button, Card, Notice, PageHeader, Pill, StatusDot, StatusLabel } from '../ds/index.ts';
+import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { CopyLink } from '../owner/share/CopyLink.tsx';
 import { QrCode } from '../owner/share/QrCode.tsx';
@@ -56,6 +57,9 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   const [wentLive, setWentLive] = useState<WentLive | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The preview's composer takes focus once its chat can be written in, for the owner to try it at once.
+  const preview = useRef<HTMLDivElement>(null);
+  useFocusOnArrival(preview, '.cd-public-shell__composer textarea');
 
   const goLive = async () => {
     setPending(true);
@@ -154,7 +158,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
   return (
     <div className="cd-setup-step">
       <PageHeader title={copy.previewTitle} />
-      <div className="cd-setup-live__preview">
+      <div className="cd-setup-live__preview" ref={preview}>
         <PublicChat slug={state.slug} previewDeskId={state.desk_id} embedded />
       </div>
       {error === null ? null : <Notice tone="error">{error}</Notice>}

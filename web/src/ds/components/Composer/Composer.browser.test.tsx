@@ -77,3 +77,123 @@ it('long_failed_answer_story_is_keyboard_scrollable_and_axe_clean_at_390', async
   const result = await axe.run(screen.container, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] } });
   expect(result.violations).toEqual([]);
 });
+
+it('send_held_keeps_typing_and_focus_but_holds_send_and_enter_until_it_lifts', async () => {
+  const sent: string[] = [];
+  const props = { variant: 'owner', label: 'Ask Claude', placeholder: 'Ask Claude', onSend: (text: string) => sent.push(text) } as const;
+  const screen = await render(<Composer {...props} />);
+  const input = screen.getByRole('textbox', { name: 'Ask Claude' });
+  const send = screen.getByRole('button', { name: 'Send' });
+  const box = input.element() as HTMLTextAreaElement;
+  await input.click();
+  // A reply starts coming in while the box has focus: it keeps it, and typing works.
+  await screen.rerender(<Composer {...props} sendHeld />);
+  await expect.element(input).toBeEnabled();
+  expect(document.activeElement).toBe(box);
+  await userEvent.keyboard('Is $500 fine?');
+  expect(box.value).toBe('Is $500 fine?');
+  // Only Send and Enter wait: nothing is sent, and the words stay.
+  await expect.element(send).toBeDisabled();
+  await userEvent.keyboard('{Enter}');
+  expect(sent).toEqual([]);
+  expect(box.value).toBe('Is $500 fine?');
+  // Shift+Enter still starts a new line.
+  await userEvent.keyboard('{Shift>}{Enter}{/Shift}Or less?');
+  expect(box.value).toBe('Is $500 fine?\nOr less?');
+  expect(document.activeElement).toBe(box);
+  // The reply has come in: focus stays, and the words typed meanwhile send.
+  await screen.rerender(<Composer {...props} />);
+  expect(document.activeElement).toBe(box);
+  expect(box.value).toBe('Is $500 fine?\nOr less?');
+  await expect.element(send).toBeEnabled();
+  await userEvent.keyboard('{Enter}');
+  expect(sent).toEqual(['Is $500 fine?\nOr less?']);
+  expect(box.value).toBe('');
+});
+
+/** Where a press on `variant`'s box lands away from its controls: the owner's tools row, or the single row's padding. */
+async function clickBoxSurface(variant: 'owner' | 'visitor' | 'whisper', input: HTMLElement): Promise<void> {
+  const box = input.closest<HTMLElement>('.cd-composer__box')!;
+  if (variant === 'owner') {
+    // The middle of the row under the text, where no control is: the empty part Send leaves.
+    await userEvent.click(box.querySelector<HTMLElement>('.cd-composer__tools')!);
+    return;
+  }
+  await userEvent.click(box, { position: { x: 6, y: Math.round(box.getBoundingClientRect().height / 2) } });
+}
+
+for (const variant of ['owner', 'visitor', 'whisper'] as const) {
+  it(`a_click_on_the_${variant}_box_away_from_its_controls_puts_the_caret_at_the_end_of_the_text`, async () => {
+    const sent: string[] = [];
+    const screen = await render(
+      <div>
+        <button type="button">Elsewhere</button>
+        <Composer variant={variant} label="Message" placeholder="Message" onSend={(text) => sent.push(text)} />
+      </div>,
+    );
+    const input = screen.getByRole('textbox', { name: 'Message' });
+    const box = input.element() as HTMLTextAreaElement;
+    await input.click();
+    await userEvent.keyboard('Thursday works');
+    await screen.getByRole('button', { name: 'Elsewhere' }).click();
+    expect(document.activeElement).not.toBe(box);
+    await clickBoxSurface(variant, box);
+    expect(document.activeElement).toBe(box);
+    expect(box.selectionStart).toBe('Thursday works'.length);
+    expect(box.selectionEnd).toBe('Thursday works'.length);
+    // Send keeps its own click: the words go, and the box clears.
+    await screen.getByRole('button', { name: variant === 'whisper' ? 'Send whisper' : 'Send' }).click();
+    expect(sent).toEqual(['Thursday works']);
+    expect(box.value).toBe('');
+  });
+}
+
+it('a_click_on_the_box_keeps_a_selection_in_the_text_and_does_nothing_while_disabled', async () => {
+  const props = { variant: 'owner', label: 'Message', placeholder: 'Message', onSend: () => {} } as const;
+  const screen = await render(<Composer {...props} />);
+  const input = screen.getByRole('textbox', { name: 'Message' });
+  const box = input.element() as HTMLTextAreaElement;
+  await input.click();
+  await userEvent.keyboard('Thursday works');
+  box.setSelectionRange(0, 8);
+  await clickBoxSurface('owner', box);
+  expect(document.activeElement).toBe(box);
+  expect([box.selectionStart, box.selectionEnd]).toEqual([0, 8]);
+  box.blur();
+  await screen.rerender(<Composer {...props} disabled />);
+  await clickBoxSurface('owner', box);
+  expect(document.activeElement).not.toBe(box);
+});
+
+it('a_send_tried_again_and_held_leaves_focus_to_the_screen_until_its_reply_has_come_in', async () => {
+  const props = { variant: 'owner', label: 'Your answer', placeholder: 'Your answer', onSend: () => {} } as const;
+  const failed = { text: 'Both, about evenly', line: 'I couldn’t answer just now. Your answer is still here; try again.', onRetry: () => {} };
+  const screen = await render(<Composer {...props} failed={failed} />);
+  const retry = screen.getByRole('button', { name: 'Try again', exact: true });
+  await retry.click();
+  await expect.element(retry).toHaveFocus();
+  // Sent again, the box comes back while the reply is on its way: it takes no focus of its own, so a
+  // phone's keyboard doesn't open, and the screen places focus once the reply has come in.
+  await screen.rerender(<Composer {...props} sendHeld />);
+  const box = screen.getByRole('textbox', { name: 'Your answer' });
+  await expect.element(box).toBeEnabled();
+  expect(document.activeElement).not.toBe(box.element());
+});
+
+it('a_click_on_the_box_focuses_the_text_inside_an_ancestor_that_takes_focus', async () => {
+  // An owner page's main region, or Ask Claude's sheet, takes focus itself (tabIndex -1): a click on
+  // the box's empty row still puts the caret in the text.
+  const screen = await render(
+    <div tabIndex={-1}>
+      <Composer variant="owner" label="Message" placeholder="Message" onSend={() => {}} />
+    </div>,
+  );
+  const input = screen.getByRole('textbox', { name: 'Message' });
+  const box = input.element() as HTMLTextAreaElement;
+  await input.click();
+  await userEvent.keyboard('Thursday works');
+  box.blur();
+  await clickBoxSurface('owner', box);
+  expect(document.activeElement).toBe(box);
+  expect(box.selectionStart).toBe('Thursday works'.length);
+});
