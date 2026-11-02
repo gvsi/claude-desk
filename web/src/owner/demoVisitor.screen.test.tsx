@@ -269,6 +269,17 @@ describe('Demo visitor', () => {
     await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
   });
 
+  it('an_older_conversation_opened_afresh_reads_its_own_ending', async () => {
+    // The first demo visitor is stopped and a second one runs on the Desk now; then the first
+    // conversation opens in a new tab, with nothing this tab learned before.
+    const first = await startOne('first');
+    await mockStore.dispatch('stopDemoVisitor', { params: { desk_id: RIVERA.deskId, run_id: first.run_id } });
+    await startOne('second');
+    const { screen } = await renderRoute(`${LIST}/${first.session_id}`);
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    expect(requests('demoVisitorRun').some((r) => r.path.endsWith(`/demo_visitor/${first.run_id}`))).toBe(true);
+  });
+
   it('an_older_conversation_keeps_its_own_ending', async () => {
     // The first demo visitor is stopped; a second one runs on the Desk now.
     const first = await startOne('first');

@@ -118,6 +118,15 @@ def utc(moment: datetime) -> datetime:
     return moment.astimezone(UTC)
 
 
+@dataclass(frozen=True)
+class DemoMark:
+    """A demo visitor's chat, as its `demo_visitor` row marks it: its persona's first name, and the run that opened
+    it (the row's `ref_id`; None for a row written before the run was recorded there)."""
+
+    first_name: str
+    run_id: str | None
+
+
 class People:
     """The Desk's visitor and agent sessions (the owner's session belongs to the copy, not to a Desk), and who each one
     is, for the owner: the verified person's display name, else the name the session's newest lead gave (untrusted),
@@ -138,16 +147,16 @@ class People:
             return None
         return self._verified.get(session_id) or self._leads.get(session_id)
 
-    def brief(self, session_id: str, demo: dict[str, str] | None = None) -> NeedsYouSession | None:
+    def brief(self, session_id: str, demo: dict[str, DemoMark] | None = None) -> NeedsYouSession | None:
         """Who the session is, for Needs you. `demo` is the Desk's demo visitors' chats (`demo_visitors`): one of
         them is flagged and, with no other name, named by its persona, as Conversations names it."""
         row = self.sessions.get(session_id)
         if row is None:
             return None
-        demo = demo or {}
+        mark = (demo or {}).get(session_id)
         return NeedsYouSession(session_id=session_id, kind=row["kind"],
-                               display_name=self.name(session_id) or demo.get(session_id), verified=row["verified"],
-                               assurance=row["assurance"], demo_visitor=session_id in demo)
+                               display_name=self.name(session_id) or (mark.first_name if mark else None),
+                               verified=row["verified"], assurance=row["assurance"], demo_visitor=mark is not None)
 
 
 async def people(ctx: OwnerCtx, desk_id: str) -> People:
@@ -1197,13 +1206,14 @@ async def transcript_replayed(ctx: OwnerCtx, desk_id: str, session_id: str) -> b
     return session_id in recorded
 
 
-async def demo_visitors(ctx: OwnerCtx, desk_id: str, session_id: str | None = None) -> dict[str, str]:
-    """The Desk's demo visitors' chats (only `session_id`'s, when given), each with its persona's first name: the
-    sessions whose transcript holds a `demo_visitor` row (module docstring)."""
+async def demo_visitors(ctx: OwnerCtx, desk_id: str, session_id: str | None = None) -> dict[str, DemoMark]:
+    """The Desk's demo visitors' chats (only `session_id`'s, when given), each with its persona's first name and the
+    run that opened it: the sessions whose transcript holds a `demo_visitor` row (module docstring). A chat names its
+    own run, so the owner's page reads that run's ending after a newer one has started, and after a restart."""
     only = [] if session_id is None else [MESSAGES.c.session_id == session_id]
-    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text).where(
+    rows = await ctx.ro.conn.execute(select(MESSAGES.c.session_id, MESSAGES.c.text, MESSAGES.c.ref_id).where(
         MESSAGES.c.copy_id == ctx.copy_id, MESSAGES.c.desk_id == desk_id, MESSAGES.c.kind == "demo_visitor", *only))
-    return dict(rows.all())
+    return {session_id: DemoMark(first_name=text, run_id=run_id) for session_id, text, run_id in rows.all()}
 
 
 async def leads(ctx: OwnerCtx, desk_id: str) -> list[Lead]:
@@ -1249,14 +1259,17 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
         if session_id not in latest:
             continue
         outcome = outcomes.get(session_id, Outcome())
+        mark = demo.get(session_id)
         found.append(ConversationSummary(
-            session_id=session_id, kind=row["kind"], display_name=who.name(session_id) or demo.get(session_id),
+            session_id=session_id, kind=row["kind"],
+            display_name=who.name(session_id) or (mark.first_name if mark else None),
             verified=row["verified"], mode=row["mode"],
             last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
             latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcome.outcome,
             latest_outcome_starts_at=outcome.starts_at, latest_outcome_cents=outcome.cents,
-            latest_outcome_cause=outcome.cause, replayed=session_id in recorded, demo_visitor=session_id in demo))
+            latest_outcome_cause=outcome.cause, replayed=session_id in recorded, demo_visitor=mark is not None,
+            demo_visitor_run_id=mark.run_id if mark else None))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

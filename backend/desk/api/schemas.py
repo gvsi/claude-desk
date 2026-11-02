@@ -479,7 +479,8 @@ class ConversationSummary(BaseModel):
 
     `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
     `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
-    persona's first name."""
+    persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
+    runs were recorded there."""
 
     session_id: str
     kind: ActorKind
@@ -497,6 +498,7 @@ class ConversationSummary(BaseModel):
     latest_outcome_cents: int | None = None
     latest_outcome_cause: RefusalCause | None = None
     demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
+    demo_visitor_run_id: str | None = None  # the demo visitor run that opened the chat, when its mark names one
 
 
 class OwnerTranscript(BaseModel):
@@ -510,6 +512,7 @@ class OwnerTranscript(BaseModel):
     typing_until: AwareDatetime | None
     replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
     demo_visitor: bool = False              # a demo visitor's chat: an AI the owner started plays the customer
+    demo_visitor_run_id: str | None = None  # the demo visitor run that opened it (`GET …/demo_visitor/{run_id}`)
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------

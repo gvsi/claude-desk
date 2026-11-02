@@ -293,6 +293,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     owner_preview: session.ownerPreview,
     latest_visitor_text: latestVisitorText(session),
     demo_visitor: session.demoVisitor != null,
+    demo_visitor_run_id: session.demoVisitorRun ?? null,
     ...(session.state.kind === 'agent' ? latestAgentOutcome(world, session) : { ...NO_OUTCOME, latest_outcome: latestVisitorOutcome(world, session) }),
   };
 }
@@ -851,6 +852,7 @@ export function ownerTranscript(session: SessionRecord, after: number, now: numb
     }),
     typing_until: typing !== null && typing > now ? isoTime(typing) : null,
     demo_visitor: session.demoVisitor != null,
+    demo_visitor_run_id: session.demoVisitorRun ?? null,
   };
 }
 

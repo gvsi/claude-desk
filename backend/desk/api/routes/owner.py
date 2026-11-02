@@ -478,10 +478,11 @@ async def conversation(session_id: Annotated[str, Path(max_length=128)], request
         ctx, item.event.decision_id, session_id, item.event.state, item.event.ledger_seq) for item in statuses))
     for item, reason in zip(statuses, reasons, strict=True):
         item.owner_plain = reason
+    mark = (await owner_reads.demo_visitors(ctx, session["desk_id"], session_id)).get(session_id)
     return OwnerTranscript(state=state, items=items,
                            typing_until=process.presence.visitor_typing_until(session_id, process.clock()),
                            replayed=await owner_reads.transcript_replayed(ctx, session["desk_id"], session_id),
-                           demo_visitor=bool(await owner_reads.demo_visitors(ctx, session["desk_id"], session_id)))
+                           demo_visitor=mark is not None, demo_visitor_run_id=mark.run_id if mark else None)
 
 
 @router.get("/desks/{desk_id}/safety", response_model=list[Attempt], responses=error_responses(401, 404, 422, 503))

@@ -109,6 +109,8 @@ export interface SessionRecord {
    * gave no name of its own, and which the owner's reads tag; absent or null for anyone else.
    */
   demoVisitor?: string | null;
+  /** The demo visitor run that opened the chat, which its mark names as the API's does. */
+  demoVisitorRun?: string | null;
   /** The last turn's language; a follow-up after an answer uses it. */
   language: Language;
   lastActivity: number;

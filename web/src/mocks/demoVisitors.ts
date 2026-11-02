@@ -154,6 +154,8 @@ export class DemoVisitorRuns {
       messages_sent: 0,
       ended: null,
     };
+    // The chat's mark names its run, as the API's does.
+    session.demoVisitorRun = run.run_id;
     const held: Held = { run, key, at: now, timer: null };
     this.runs.set(run.run_id, held);
     const lines: string[] = [...DEMO_VISITOR_LINES];

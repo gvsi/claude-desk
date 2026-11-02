@@ -192,11 +192,12 @@ async def health(request: Request) -> HealthOut | JSONResponse:
 
 
 async def _mark_demo_visitor(engine: AsyncEngine, ids: Ids, run: DemoVisitorRun) -> None:
-    """Mark a demo visitor's chat in its transcript (a `demo_visitor` row naming its persona), once its session is open
-    and before it says anything, so the owner's reads label the chat after this process is gone. A failure here ends
-    the run before it writes (`DemoVisitors`' `on_open`), so no demo visitor chats unmarked."""
+    """Mark a demo visitor's chat in its transcript (a `demo_visitor` row naming its persona in `text` and its run in
+    `ref_id`), once its session is open and before it says anything, so the owner's reads label the chat, and name the
+    run whose ending its page reads, after this process is gone. A failure here ends the run before it writes
+    (`DemoVisitors`' `on_open`), so no demo visitor chats unmarked."""
     async with engine.connect() as conn:
-        await append_message(conn, ids, "demo_visitor", text=run.first_name)
+        await append_message(conn, ids, "demo_visitor", text=run.first_name, ref_id=run.run_id)
         await conn.commit()
 
 

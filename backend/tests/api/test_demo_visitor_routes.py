@@ -396,6 +396,53 @@ async def test_its_chat_is_flagged_in_conversations_and_its_transcript_across_a_
         assert transcript["demo_visitor"] is True
 
 
+async def test_its_chat_names_its_own_run_so_an_older_chat_reads_its_ending_across_a_restart(
+        db, fake, api_settings, clock, browser, copy, visitor_model, desk_model):
+    desk_id = copy.desk_ids[0]
+    model = ByRoute(visitor_model, desk_model)
+
+    async def reads(app: FastAPI, session_id: str) -> tuple[dict, dict]:
+        owner = owner_of(app, browser, copy)
+        listed = await owner.get(f"/api/owner/desks/{desk_id}/conversations")
+        transcript = await owner.get(f"/api/owner/conversations/{session_id}")
+        assert (listed.status_code, transcript.status_code) == (200, 200), (listed.text, transcript.text)
+        return {row["session_id"]: row for row in listed.json()}, transcript.json()
+
+    async with running(fake, api_settings, clock, model) as app:
+        owner = owner_of(app, browser, copy)
+        release = asyncio.Event()
+        thinking = gated(step("never sent"), release)
+        visitor_model.add(thinking)
+        first = (await start(owner, desk_id, key="click-1")).json()
+        await asyncio.wait_for(thinking.entered.wait(), 5)
+        stopped = await owner.post(f"/api/owner/desks/{desk_id}/demo_visitor/{first['run_id']}/stop")
+        assert stopped.json()["ended"] == "stopped_by_owner"
+        release.set()
+        visitor_model.add(step("", done=True))
+        second = (await start(owner, desk_id, key="click-2")).json()
+        await app.state.runtime.demo_visitors.drain()
+
+        # Each chat names its own run, beside its flag, though the Desk's newest run is the second's.
+        listed, transcript = await reads(app, first["session_id"])
+        assert (listed[first["session_id"]]["demo_visitor_run_id"], transcript["demo_visitor_run_id"]) == (
+            first["run_id"], first["run_id"])
+        assert listed[second["session_id"]]["demo_visitor_run_id"] == second["run_id"]
+        newest = (await owner.get(f"/api/owner/desks/{desk_id}/demo_visitor")).json()
+        assert newest["run_id"] == second["run_id"]
+        # So the first chat reads its own run, and its ending.
+        own = await owner.get(f"/api/owner/desks/{desk_id}/demo_visitor/{transcript['demo_visitor_run_id']}")
+        assert own.json()["ended"] == "stopped_by_owner"
+        # A real visitor's chat names none.
+        seeded = next(row for row in listed.values() if not row["demo_visitor"])
+        assert seeded["demo_visitor_run_id"] is None
+
+    # Another process, with no memory of the runs: each chat still names its own.
+    async with running(fake, api_settings, clock, model) as app:
+        listed, transcript = await reads(app, first["session_id"])
+        assert (listed[first["session_id"]]["demo_visitor_run_id"], transcript["demo_visitor_run_id"]) == (
+            first["run_id"], first["run_id"])
+
+
 # The process ---------------------------------------------------------------------------------------------------
 
 

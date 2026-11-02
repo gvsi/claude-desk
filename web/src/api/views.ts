@@ -107,6 +107,8 @@ export interface ConversationSummary {
    * With no verified or lead name, `display_name` is its persona's first name. Absent is false.
    */
   demo_visitor?: boolean;
+  /** The demo visitor run that opened the chat (`GET …/demo_visitor/{run_id}`); null or absent when none is named. */
+  demo_visitor_run_id?: string | null;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
@@ -330,6 +332,8 @@ export interface OwnerTranscript {
   replayed?: boolean;
   /** A demo visitor's chat: an AI the owner started plays the customer. Absent is false. */
   demo_visitor?: boolean;
+  /** The demo visitor run that opened the chat (`GET …/demo_visitor/{run_id}`); null or absent when none is named. */
+  demo_visitor_run_id?: string | null;
 }
 
 /** An item of the owner's transcript: a visitor's kinds, and where the reply check stopped a draft of Claude's. */

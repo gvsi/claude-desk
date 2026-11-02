@@ -356,7 +356,8 @@ export interface ConnectorProposal {
  *
  * `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
  * `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
- * persona's first name.
+ * persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
+ * runs were recorded there.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -411,6 +412,7 @@ export interface ConversationSummary {
       )
     | null;
   demo_visitor?: boolean;
+  demo_visitor_run_id?: string | null;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -711,6 +713,7 @@ export interface OwnerTranscript {
   typing_until: string | null;
   replayed?: boolean;
   demo_visitor?: boolean;
+  demo_visitor_run_id?: string | null;
 }
 /**
  * The owner's view adds the AI-written translation and triage (Plan 02b), which never reach a visitor, and each

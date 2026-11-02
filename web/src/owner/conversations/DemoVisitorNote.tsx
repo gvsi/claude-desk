@@ -4,11 +4,12 @@
  * no button.
  *
  * The note reads the conversation's own run by its ID, so an older conversation keeps its own ending
- * after a newer run starts on the Desk. The ID comes from the start that opened the page; else from
- * the Desk's newest run, when that run is this chat's (only one runs at a time in a copy, so a chat
- * whose run isn't the newest has ended); and once learned it is kept while the app runs. Runs live
- * in the API's memory for an hour: a run it no longer keeps, or a chat whose run can't be found,
- * has ended, and is said to have finished.
+ * after a newer run starts on the Desk. The ID comes from the conversation's own reads, which name the
+ * run that opened the chat; else from the start that opened the page; else from the Desk's newest run,
+ * when that run is this chat's (only one runs at a time in a copy, so a chat whose run isn't the
+ * newest has ended), for a chat marked before its run was named; and once learned it is kept while
+ * the app runs. Runs live in the API's memory for an hour: a run it no longer keeps, or a chat whose
+ * run can't be found, has ended, and is said to have finished.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -43,12 +44,14 @@ export function endedLine(ended: DemoVisitorRun['ended']): string {
 
 /**
  * The demo visitor run of chat `sessionId` on `deskId`, read while `demo` (the chat is a demo
- * visitor's), polled at the conversation's pace while it runs. `startedRun` is the run the page that
- * opened the chat started there, if it did.
+ * visitor's), polled at the conversation's pace while it runs. `namedRun` is the run the
+ * conversation's reads name, once they have; `startedRun` the run the page that opened the chat
+ * started there, if it did.
  */
-export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boolean, startedRun: string | null): DemoVisitorPhase {
+export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boolean, namedRun: string | null, startedRun: string | null): DemoVisitorPhase {
   const queryClient = useQueryClient();
-  const [runId, setRunId] = useState<string | null>(() => startedRun ?? queryClient.getQueryData<string>(runIdKey(sessionId)) ?? null);
+  const [kept, setRunId] = useState<string | null>(() => startedRun ?? queryClient.getQueryData<string>(runIdKey(sessionId)) ?? null);
+  const runId = namedRun ?? kept;
 
   const newest = useQuery({
     queryKey: newestDemoVisitorKey(deskId),
@@ -62,9 +65,9 @@ export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boole
   const learned = runId ?? (newestIsThisChat ? newestRead!.data!.run_id : null);
   useEffect(() => {
     if (learned === null) return;
-    if (runId === null) setRunId(learned);
+    if (kept !== learned) setRunId(learned);
     queryClient.setQueryData(runIdKey(sessionId), learned);
-  }, [learned, runId, queryClient, sessionId]);
+  }, [learned, kept, queryClient, sessionId]);
 
   const run = useQuery({
     queryKey: demoVisitorRunKey(deskId, learned ?? ''),
