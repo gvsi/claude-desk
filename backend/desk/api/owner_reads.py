@@ -822,6 +822,20 @@ class Paid:
     replayed: bool
 
 
+def paid_moves(ledger: Iterable[dict], links: Iterable[str]) -> dict[str, dict]:
+    """Each of `links` that moved to `paid`, with the ledger entry that moved it: its first `payment` entry in that
+    state, not a refused retry, which the kernel ledgers with the link's state too (a link moves to `paid` once).
+    `ledger` runs in seq order."""
+    wanted, moved = set(links), {}
+    for entry in ledger:
+        event = entry["event"] or {}
+        summary = event.get("summary") or {}
+        if (event.get("kind") == "payment" and summary.get("state") == "paid" and not summary.get("refused")
+                and summary.get("link_id") in wanted):
+            moved.setdefault(summary["link_id"], entry)
+    return moved
+
+
 async def _paid(ctx: OwnerCtx, desk_id: str, sessions: dict[str, dict], start: datetime, end: datetime) -> list[Paid]:
     """The payments in the Desk's visitor and agent sessions from `start` to `end`: each payment link paid, for the
     link's amount, when its move to `paid` (its first `payment` ledger entry in that state, not a refused retry, which
@@ -834,15 +848,8 @@ async def _paid(ctx: OwnerCtx, desk_id: str, sessions: dict[str, dict], start: d
     links = {row["link_id"]: row["amount_cents"] for row in await ctx.ro.rows("payment_links", desk_id=desk_id,
                                                                                 state="paid")
              if row["session_id"] in sessions}
-    paid = []
-    for entry in ledger:
-        event = entry["event"] or {}
-        summary = event.get("summary") or {}
-        if (event.get("kind") == "payment" and summary.get("state") == "paid" and not summary.get("refused")
-                and summary.get("link_id") in links):
-            amount = links.pop(summary["link_id"])         # a link moves to `paid` once, wherever the window is
-            if start <= entry_time(entry) <= end:
-                paid.append(Paid(cents=amount, replayed=replayed(entry)))
+    paid = [Paid(cents=links[link_id], replayed=replayed(entry)) for link_id, entry in paid_moves(ledger, links).items()
+            if start <= entry_time(entry) <= end]
     charges = [row for row in await ctx.ro.rows("decisions", desk_id=desk_id, tool="native.charge_mandate",
                                                 state="executed")
                if row["session_id"] in sessions and row["ledger_seq"] in entries
@@ -979,6 +986,70 @@ async def agent_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str], decis
     return {session: max(found)[-1] if found else None for session, found in events.items()}
 
 
+VISITOR_DONE = {"native.quote": "quoted", "native.book": "visit_booked", "native.capture_lead": "lead_captured",
+                "native.release_document": "document_sent"}
+
+
+async def visitor_outcomes(ctx: OwnerCtx, desk_id: str, sessions: list[str],
+                           decisions: list[dict]) -> dict[str, str | None]:
+    """The newest outcome of each of these visitor sessions, read from the kernel's decisions, payment links,
+    handoffs and ledger alone, never a transcript, a message or a link token: an executed quote, booking, lead or
+    document release (`VISITOR_DONE`) at its decision's current ledger entry, a refusal at decide or execution
+    (`turned_down`), the owner declining a held request (`owner_declined`), a link's move to `paid` (`paid_moves`,
+    `deposit_paid`), and a call-back the owner marked done (`called_back`) at the entry that closed it (one a newer
+    call-back replaced, or with no closing entry, gives none). A decision still held, expired or cancelled, or a
+    handoff opening, newer than all of them clears it to null. Each is timed by `entry_time`, equal times by seq; a
+    decision whose entry isn't read falls back to its `created_at`. Any other executed tool is no event."""
+    if not sessions:
+        return {}
+    wanted = set(sessions)
+    mine = [row for row in decisions if row["session_id"] in wanted]
+    links = {row["link_id"]: row["session_id"]
+             for row in await ctx.ro.rows("payment_links", desk_id=desk_id, state="paid")
+             if row["session_id"] in wanted}
+    callbacks = {row["handoff_id"]: row["session_id"]
+                 for row in await ctx.ro.rows("handoffs", desk_id=desk_id, kind="callback", status="done")
+                 if row["session_id"] in wanted}
+    ledger = ro_view(ctx.ro.schema, "ledger_entries")
+    event = type_coerce(ledger.c.event, JSONB)
+    try:
+        await set_copy(ctx.ro.conn, ctx.copy_id)
+        entries = [dict(row._mapping) for row in await ctx.ro.conn.execute(select(ledger).where(
+            ledger.c.copy_id == ctx.copy_id, ledger.c.desk_id == desk_id,
+            ledger.c.seq.in_([row["ledger_seq"] for row in mine if row["ledger_seq"] is not None])
+            | ((event["kind"].astext == "payment") & (event["summary"]["state"].astext == "paid"))
+            | ((event["kind"].astext == "desk_data") & (event["summary"]["part"].astext == "handoffs")))
+            .order_by(ledger.c.seq))]
+    finally:
+        await ctx.ro.done()
+    by_seq = {entry["seq"]: entry for entry in entries}
+    events: dict[str, list[tuple[datetime, int, str | None]]] = {session: [] for session in sessions}
+    for row in mine:
+        state, entry = row["state"], by_seq.get(row["ledger_seq"])
+        outcome = (VISITOR_DONE.get(row["tool"]) if state == "executed" else
+                   "turned_down" if state in {"refused", "refused_at_execution"} else
+                   "owner_declined" if state == "denied" else None)
+        if outcome is not None or state in {"held", "expired", "cancelled"}:
+            events[row["session_id"]].append((entry_time(entry) if entry else utc(row["created_at"]),
+                                              row["ledger_seq"] or 0, outcome))
+    for link_id, entry in paid_moves(entries, links).items():
+        events[links[link_id]].append((entry_time(entry), entry["seq"], "deposit_paid"))
+    for entry in entries:
+        summary = (entry["event"] or {}).get("summary") or {}
+        if summary.get("part") != "handoffs" or not isinstance(summary.get("refs"), list):
+            continue
+        if summary.get("kind") in ("card", "callback"):
+            session = entry["event"].get("session_id")
+            if session in wanted:
+                events[session].append((entry_time(entry), entry["seq"], None))
+        elif "replaced_by" not in summary and "closed_by" not in summary:
+            for handoff_id in summary["refs"]:
+                if isinstance(handoff_id, str) and handoff_id in callbacks:     # a call-back goes `done` once
+                    events[callbacks.pop(handoff_id)].append((entry_time(entry), entry["seq"], "called_back"))
+    return {session: max(found, key=lambda event: event[:2])[2] if found else None
+            for session, found in events.items()}
+
+
 async def history_sessions(ctx: OwnerCtx, desk_id: str) -> tuple[set[str], set[str]]:
     """The Desk's sessions that are recorded history, and those known to be live. A session is recorded history when
     the API stored its transcript with a `replay_id` (`store_replayed_night`) or the kernel marked one of its `session`
@@ -1043,6 +1114,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None) 
     said = await last_texts(ctx, desk_id, visitors, kinds=("visitor_text",))
     outcomes = await agent_outcomes(ctx, desk_id, [session_id for session_id, row in who.sessions.items()
                                                    if row["kind"] == "agent" and session_id in latest], decisions)
+    outcomes |= await visitor_outcomes(ctx, desk_id, visitors, decisions)
     recorded, _ = await history_sessions(ctx, desk_id)
     found = []
     for session_id, row in who.sessions.items():
