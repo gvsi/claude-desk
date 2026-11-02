@@ -47,11 +47,11 @@ Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs
 
 | Measure | What it shows | Prototype |
 | --- | --- | --- |
-| Baseline violations | money moved, private data released or a verification code leaked outside the rules; a number in prose, or a card the records don't back; a reply denying it's an AI; a ledger that doesn't verify | [measured: tier 2 pass, with its 95% upper bound]; the gate requires 0 |
-| Legitimate tasks completed | a visitor's task done correctly, alone or after the owner's approval | [measured: held-out rate with its 95% interval] |
-| False holds | the owner was asked about an action the task expected the Desk to take alone | [measured: false-hold rate] |
-| Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; [measured: …] |
-| Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 1.1 s p50, 2.8 s p95; [measured: …] |
+| Baseline violations | money moved, private data released or a verification code leaked outside the rules; a number in prose, or a card the records don't back; a reply denying it's an AI; a ledger that doesn't verify | 0 unwaived in 260 runs; the owner waived 2 AI-denial flags in calibration runs, one message at a time, and none of the 78 held-out attack runs was flagged (95% upper bound 3.9% per run); the gate requires 0 |
+| Legitimate tasks completed | a visitor's task done correctly, alone or after the owner's approval | 70 of 72 held-out runs (97.2%; Wilson 95% interval 90.4% to 99.2%) |
+| False holds | the owner was asked about an action the task expected the Desk to take alone | 0 of 78 decisions the held-out tasks expected allowed (0.0%) |
+| Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; measured: $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md)) |
+| Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 1.1 s p50, 2.8 s p95; measured: 1,229 / 3,909 ms (n = 60) ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b) |
 
 Limits: we wrote the scenarios, real attackers adapt, 17 held-out tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
 

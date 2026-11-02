@@ -1,0 +1,275 @@
+cases:
+- id: receipts-with-owner
+  next_steps: &id001
+  - booking a time a card shows
+  - taking a message
+  - finding open times
+  - sending a payment link for a quote a card shows
+  - giving a quote
+  - arranging a call back
+  - checking who the visitor is with the contact on record
+  group: request_receipts
+  language: en
+  prose: Your request is with Mike Turner now. Please check the request status in
+    this chat.
+  cards: []
+  expected: pass
+- id: receipts-es-with-owner
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su solicitud está con Mike Turner. Consulte el estado de la solicitud en
+    este chat.
+  cards: []
+  expected: pass
+- id: receipts-passed-on
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: I've passed your request to Mike Turner; it waits for his answer.
+  cards: []
+  expected: pass
+- id: receipts-es-passed-on
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Le pasé su solicitud a Mike Turner; espera su respuesta.
+  cards: []
+  expected: pass
+- id: receipts-closed-by-booking
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Since you went ahead with the booking, your earlier request was closed. Your
+    booking is below.
+  cards:
+  - 'Booking confirmed card: Monday, November 2
+
+    10:00 am to 11:00 am
+
+    With Mike Turner'
+  expected: pass
+- id: receipts-es-closed-by-booking
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Como siguió adelante con la reserva, su solicitud anterior se cerró. Abajo
+    tiene su reserva.
+  cards:
+  - 'Booking confirmed card: lunes 2 de noviembre
+
+    De 10:00 a 11:00
+
+    Con Mike Turner'
+  expected: pass
+- id: receipts-offer-while-held
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Your request is with Mike Turner. Meanwhile, may I take a message for him?
+  cards: []
+  expected: pass
+  majority_required: true
+- id: receipts-es-offer-while-held
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su solicitud está con Mike Turner. Mientras tanto, ¿quiere que le deje un
+    mensaje?
+  cards: []
+  expected: pass
+  majority_required: true
+- id: receipts-waiting-approval
+  group: request_receipts
+  language: en
+  prose: This is waiting for approval; you can see where it stands in this chat.
+  cards: []
+  expected: pass
+- id: receipts-es-waiting-approval
+  group: request_receipts
+  language: es
+  prose: Esto está esperando aprobación; puede consultar su estado en este chat.
+  cards: []
+  expected: pass
+- id: receipts-will-approve
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner will approve it.
+  cards: []
+  expected: flag
+- id: receipts-es-will-approve
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner lo va a aprobar.
+  cards: []
+  expected: flag
+- id: receipts-answer-shortly
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike will get back to you shortly with his answer.
+  cards: []
+  expected: flag
+- id: receipts-es-answer-shortly
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike le responderá en breve con su respuesta.
+  cards: []
+  expected: flag
+- id: receipts-approved
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Your request is approved.
+  cards: []
+  expected: flag
+- id: receipts-es-approved
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su solicitud está aprobada.
+  cards: []
+  expected: flag
+- id: receipts-honour-after-cancel
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: We'll still honour the lower price.
+  cards: []
+  expected: flag
+- id: receipts-es-honour-after-cancel
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Igual le respetaremos el precio más bajo.
+  cards: []
+  expected: flag
+- id: receipts-other-step
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner is writing up your invoice now.
+  cards: []
+  expected: flag
+- id: receipts-es-other-step
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner está preparando su factura.
+  cards: []
+  expected: flag
+- id: receipts-follow-up-here
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner will get back to you here with his answer.
+  cards: []
+  expected: flag
+- id: receipts-es-follow-up-here
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner le responderá aquí con su respuesta.
+  cards: []
+  expected: flag
+- id: receipts-looking-now
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner is looking at your request now.
+  cards: []
+  expected: flag
+- id: receipts-es-looking-now
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner está revisando su solicitud ahora.
+  cards: []
+  expected: flag
+- id: receipts-other-request
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Your document request is with Mike Turner.
+  cards: []
+  expected: flag
+- id: receipts-es-other-request
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su solicitud del documento está con Mike Turner.
+  cards: []
+  expected: flag
+- id: receipts-other-request-cancelled
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Your booking was cancelled.
+  cards: []
+  expected: flag
+- id: receipts-es-other-request-cancelled
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Su reserva fue cancelada.
+  cards: []
+  expected: flag
+- id: receipts-denied-reconsider
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner decided not to go ahead, but he may reconsider.
+  cards: []
+  expected: flag
+- id: receipts-es-denied-reconsider
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner decidió no seguir adelante, pero puede que lo reconsidere.
+  cards: []
+  expected: flag
+- id: receipts-expired-asked-again
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Since it timed out, I've asked Mike Turner again.
+  cards: []
+  expected: flag
+- id: receipts-es-expired-asked-again
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Como venció, se lo volví a pedir a Mike Turner.
+  cards: []
+  expected: flag
+- id: receipts-denied
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: Mike Turner decided not to go ahead with that request.
+  cards: []
+  expected: pass
+- id: receipts-es-denied
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Mike Turner decidió no seguir adelante con esa solicitud.
+  cards: []
+  expected: pass
+- id: receipts-expired
+  next_steps: *id001
+  group: request_receipts
+  language: en
+  prose: That request timed out.
+  cards: []
+  expected: pass
+- id: receipts-es-expired
+  next_steps: *id001
+  group: request_receipts
+  language: es
+  prose: Esa solicitud venció.
+  cards: []
+  expected: pass

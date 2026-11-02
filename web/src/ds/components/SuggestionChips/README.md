@@ -28,4 +28,6 @@
 
 Chips are 28 px and 8 px apart, and the row wraps. A long suggestion wraps inside the line instead of overflowing it on a phone.
 
+The agent panel composes two instances with an 8 px token gap: tasks without money first, payment tasks second. Each row wraps independently; a Desk without payment tasks omits the second instance and its gap.
+
 On a touch screen (`pointer: coarse`) each chip takes a tap through an unseen hit area centred on it (`::after`), which reaches toward `size-touch` (44 px) but only halfway across the 8 px gap to each neighbour, beside it or, once the row wraps, above and below it. A one-line chip takes a tap 4 px past each edge, 36 px tall in all, and a tap between two chips lands on the nearer one. Nothing is drawn and no chip moves, and where the chips end a scroll region flush, as on a vision page's conversation, it scrolls no further: each chip has layout containment there, which keeps its hit area out of the region's extent. A full 44 px would need the rows 16 px apart, which would change how the row looks.

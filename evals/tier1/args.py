@@ -24,8 +24,14 @@ def find_slots_args(from_date: date | str | None = None, days: int = 7) -> dict[
     return _present(from_date=from_date.isoformat() if isinstance(from_date, date) else from_date, days=days)
 
 
-def book_args(slot_id: str) -> dict[str, Any]:
-    return {"slot_id": slot_id}
+# Who a booking is for: a booking needs a name and a phone number or email unless the session is verified or
+# saved them as a lead (#740), so the suite's bookings carry the ones an honest visitor gives.
+BOOKING_NAME, BOOKING_CONTACT = "Jane Doe", "jane@example.com"
+
+
+def book_args(slot_id: str, name: str | None = BOOKING_NAME, contact: str | None = BOOKING_CONTACT,
+              address: str | None = None, note: str | None = None) -> dict[str, Any]:
+    return _present(slot_id=slot_id, name=name, contact=contact, address=address, note=note)
 
 
 def capture_lead_args(name: str, contact: str | None = None, note: str | None = None) -> dict[str, Any]:
