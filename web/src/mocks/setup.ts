@@ -1191,8 +1191,10 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       interview.state.messages.push({ role: 'claude', text: '', choices: [], card: updated });
     } else if (!/[?]/.test(words) && /^(?:yes\b|accept\b|set it up\b|connect\b|no\b|not now\b|skip\b|decline\b)/i.test(words)) {
       const unpriced = payment !== null && (payment.amount_cents === null || payment.amount_cents <= 0);
-      card.state = unpriced || /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words) ? 'declined' : 'accepted';
-      markDecided(interview, card.proposal_id);
+      const no = /^(?:no\b|not now\b|skip\b|decline\b)/i.test(words);
+      card.state = unpriced || no ? 'declined' : 'accepted';
+      // As the API's typed decision: a yes can't accept a payment with no amount, so its decline is setup's, not the owner's.
+      if (no || !unpriced) markDecided(interview, card.proposal_id);
       connectAcceptedProposal(world, interview, card);
       nextConsultant(interview);
     } else {

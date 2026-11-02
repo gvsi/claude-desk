@@ -495,6 +495,18 @@ describe('setup consultant run and decisions', () => {
     expect(state.messages.filter(({ role }) => role === 'owner').at(-1)?.text).toBe('Yes, please');
   });
 
+  it.each([
+    ['Yes, please', 'declined', undefined],
+    ['Not now', 'declined', true],
+  ] as const)('marks_a_typed_%s_to_an_unpriced_payment_as_the_owners_decision_only_when_setup_can_take_it', async (text, state, decided) => {
+    // As the API's typed decision: a yes can't accept a payment with no amount, so setup declines it for the owner.
+    let at = await cpaAt('payment');
+    const payment = at.pending_card!;
+    at = await setupState('setupAnswer', at.interview_id, { question: null, card: payment, text });
+    const message = at.messages.find(({ card }) => card?.proposal_id === payment);
+    expect([message?.card?.state, message?.owner_decided]).toEqual([state, decided]);
+  });
+
   it('suggestions_record_the_owner_and_finish_all_leftovers_with_safe_unpriced_payments', async () => {
     let state = await cpaAt('intake');
     const before = structuredClone(state);
