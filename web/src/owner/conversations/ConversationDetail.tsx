@@ -181,6 +181,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   const namedRun = chat.data?.demo_visitor_run_id ?? summary?.demo_visitor_run_id ?? null;
   const demoRun = useDemoVisitorRun(deskId, demo, namedRun, demoVisitorRun);
   const demoEnded = demo && demoRun.phase === 'ended';
+  const nobodyThere = chat.data?.replayed === true || (demoEnded && chat.data?.state.mode === 'ai');
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
   // nothing new while a message is on its way, so they never replace words typed after them.
@@ -275,8 +276,9 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
       if (!sent) setUnsent({ kind: 'whisper', text });
     });
   };
+  // Once a demo visitor has ended nobody is left to write to, or for Claude to answer: no composer.
   let composer = null;
-  if (state.mode === 'owner') {
+  if (!demoEnded && state.mode === 'owner') {
     composer = (
       // While the owner types in a chat she took over, the visitor sees her initials and three dots.
       <div ref={composerRef} data-composer="say" onInput={ownerTyping.onInput}>
@@ -291,7 +293,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
         />
       </div>
     );
-  } else if (state.mode === 'ai') {
+  } else if (!demoEnded && state.mode === 'ai') {
     composer = (
       <div ref={composerRef} data-composer="whisper">
         <Composer
@@ -363,9 +365,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
           ) : null}
         </Transcript>
       </div>
-      {/* No one is on the other side of a recorded chat, or of a demo visitor's once it has ended (its visitor
-          session is gone, or idle for good): nothing to take over, whisper or write. */}
-      {read.replayed === true || demoEnded ? null : (
+      {/* No one is on the other side of a recorded chat, nor of a demo visitor's once it has ended (its visitor
+          session is gone, or idle for good) and Claude has it again: nothing to take over, whisper or write. An ended
+          demo chat the owner still has keeps Hand back (or Resume), with no composer. */}
+      {nobodyThere ? null : (
         <div className="cd-conversation__controls">
           <TakeOverBar
             mode={state.mode}

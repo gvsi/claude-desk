@@ -324,6 +324,32 @@ describe('Demo visitor', () => {
     expect(again.screen.getByRole('button', { name: 'Take over', exact: true }).elements()).toHaveLength(0);
   });
 
+  it.each(['desktop', 'phone'] as const)('an_ended_demo_chat_the_owner_took_over_can_be_handed_back_on_%s', async (viewport: Viewport) => {
+    const { session_id: sessionId } = await startOne('took-over');
+    const { screen, router } = await renderRoute(`${LIST}/${sessionId}`, { viewport });
+    await expect.element(demoNote(screen)).toMatchTextContent(NOTE);
+    // The owner takes the chat over, then stops the demo visitor.
+    await screen.getByRole('button', { name: 'Take over', exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
+    await demoNote(screen).getByRole('button', { name: STOP, exact: true }).click();
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    // The chat is still hers: Hand back stays, and nothing more can be written to a visitor who has gone.
+    const handBack = screen.getByRole('button', { name: 'Hand back to Claude', exact: true });
+    await expect.element(handBack).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).not.toBeInTheDocument();
+    expectNoHorizontalScroll();
+
+    // Handed back, nobody is there and Claude has it: the controls go, and the row no longer says she's in the chat.
+    await handBack.click();
+    await expect.element(screen.getByRole('button', { name: 'Hand back to Claude', exact: true })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Take over', exact: true })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).not.toBeInTheDocument();
+    await router.navigate(LIST);
+    const row = screen.getByRole('link', { name: /^Riley Demo visitor/ });
+    await expect.element(row).toBeVisible();
+    await expect.poll(() => row.element().textContent ?? '').not.toMatch(/in this chat/);
+  });
+
   it('a_demo_chat_whose_reads_name_no_run_reads_as_ended', async () => {
     // A chat marked before its mark named its run: its own run can't be read, so it has ended for the page,
     // which reads no other run in its place.
