@@ -303,6 +303,7 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
         const now = await reread();
         if (now !== null && (now.step !== 'questions' || now.busy === true)) return;
       }
+      returnFocus.current = false;
       setSuggestionsError(ownerErrorCopy(err));
     } finally {
       setSuggesting(false);

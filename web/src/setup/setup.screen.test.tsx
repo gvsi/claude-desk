@@ -4848,6 +4848,7 @@ describe('consultant setup', () => {
     } else {
       await expect.element(screen.getByRole('alert')).toHaveTextContent(UNREACHABLE_COPY.en);
       await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeEnabled();
+      await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toHaveFocus();
     }
     expect(requests('setup').length).toBeGreaterThan(reads);
     expect(requests('setupSuggestions')).toHaveLength(1);
