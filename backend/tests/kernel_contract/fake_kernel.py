@@ -61,7 +61,7 @@ contract test, before the task that first uses them.
   summary. A document link serves its bytes once within a day. A payment link, for the session's own current quote at
   its amount under the seed's `rv-link` card, is read, completed (a `charge` fact and the kernel's `payment_confirmed`
   verdict) or cancelled by its token alone; anything but `issued` is 409 `conflict`. A link whose quote another
-  payment has paid (a mandate charge, or another of its links) is cancelled when it is next read or completed,
+  payment has paid (a mandate charge, or another of its links) is cancelled when it is next read, completed or reached by an activation,
   ledgered `quote_paid` with no `cancel_reason`, since it can never be paid now. Tokens are kept in memory,
   never mirrored. `PaymentLinkView` serves the contract's fields: the Desk's business name, the verified customer
   by first name and last initial while the link is issued, and `cancel_reason` `rules_changed` for a link a rule
@@ -4132,12 +4132,18 @@ class FakeKernelState:
         return self._policy_version(desk, record)
 
     def _cancel_disallowed_links(self, desk: Desk) -> list[str]:
-        """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change."""
+        """Activation rechecks auto-allowed links; single-use owner approvals survive a rule change. A link whose
+        quote another payment has paid is cancelled for that first, whatever the rules say or who approved it
+        (`_settle_paid_quote`, naming the version): no `cancel_reason`, so no chat line. Unlike the kernel, this
+        activation has no expiry or mandate-expiry move of its own, so a paid quote's link past its expiry or
+        mandate reads `cancelled` here where the kernel would expire it or cancel it for its mandate."""
         decisions = {record.decision.action.action_id: record for record in self.decisions.values()
                      if record.decision.action is not None and record.decision.outcome == "allow"}
         cancelled = []
         for link in self.payment_links.values():
-            if link.desk_id != desk.desk_id or link.state != "issued" or link.action_id not in decisions:
+            if link.desk_id != desk.desk_id or link.state != "issued":
+                continue
+            if self._settle_paid_quote(link, version=desk.policy_version) or link.action_id not in decisions:
                 continue
             record = decisions[link.action_id]
             action = record.decision.action
@@ -4620,13 +4626,18 @@ class FakeKernelState:
         self.append(desk, "payment", {"link_id": link.link_id, "state": state, **summary},
                     session_id=link.session_id)
 
-    def _settle_paid_quote(self, link: PaymentLink) -> None:
-        """An `issued` link whose quote another payment has paid can never be paid: a read or a completion cancels
-        it, with no `cancel_reason` and no chat line, ledgered `{link_id, state: "cancelled", reason: "quote_paid"}`,
-        as the kernel's read (`reconcile_link`) and its completion's quote check do."""
+    def _settle_paid_quote(self, link: PaymentLink, *, version: int | None = None) -> bool:
+        """An `issued` link whose quote another payment has paid can never be paid: a read, a completion or an
+        activation (of `version`, which the entry and the link name) cancels it, with no `cancel_reason` and no chat
+        line, ledgered `{link_id, state: "cancelled", reason: "quote_paid"}`, as the kernel's read
+        (`reconcile_link`), its completion's quote check and its activation do. Whether it moved the link."""
         quote = self.quotes.get(link.quote_id)
         if link.state == "issued" and quote is not None and quote["status"] == "paid":
-            self._move_link(link, "cancelled", reason="quote_paid")
+            if version is not None:
+                link.cancelled_by_version = version
+            self._move_link(link, "cancelled", reason="quote_paid", **({} if version is None else {"version": version}))
+            return True
+        return False
 
     def _issued(self, link: PaymentLink, step: str) -> None:
         """Completing or cancelling needs an `issued` link; anything else is 409 `conflict`, ledgered."""
@@ -4682,7 +4693,8 @@ class FakeKernelState:
         session, and the answer carries the kernel's `payment_confirmed` verdict for that session at its current
         generation, ledgered `reply` by the Desk, in any mode (`deliver()` decides whether it is shown)."""
         link = self._payment_link(request)
-        self._settle_paid_quote(link)
+        if self._settle_paid_quote(link):
+            raise Refusal(409, "conflict")              # one `payment` entry, the cancel, as the kernel's C2 writes
         self._issued(link, "complete")
         desk, session = self.desks[link.desk_id], self.sessions[link.session_id]
         charge_id = new_id("charge")
