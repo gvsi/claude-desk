@@ -2668,13 +2668,22 @@ def settle_plan(interview: Interview) -> None:
         card = next(entry.card for entry in reversed(interview.transcript)
                     if entry.card is not None and entry.card.proposal_id == pending)
         card.state = "declined" if _unpriced_payment(card.job) else "accepted"
-    # Stored interviews may contain earlier acceptances that bypassed the amount check.
+    # Stored interviews may contain earlier acceptances that bypassed the amount check. Code voids such a yes, so it is
+    # no longer the owner's decision: the setup plan says the job was left out for want of an amount (`_setup_plan`).
+    # Which yeses code voids is read from each card's latest shown copy, as `_setup_plan` reads it, so an older copy
+    # can't clear a newer decision on the same card.
+    latest = {entry.card.proposal_id: entry.card for entry in interview.transcript if entry.card is not None}
+    voided = {proposal_id for proposal_id, card in latest.items()
+              if card.state == "accepted" and _unpriced_payment(card.job)}
     for entry in interview.transcript:
         for card in [*entry.planned, *([entry.card] if entry.card is not None else [])]:
             if card.state == "accepted" and _unpriced_payment(card.job):
                 card.state = "declined"
             if card.state == "accepted" and card.connector is not None and card.connector.app != "stripe":
                 card.connector.connected = True
+    for entry in interview.transcript:
+        if entry.card is not None and entry.card.proposal_id in voided:
+            entry.owner_decided = False
 
 
 async def close_setup(owner, engine, model, interview: Interview, *, answered: bool = False) -> None:
