@@ -716,13 +716,18 @@ class DemoVisitors:
 
     def _settle(self, held: _Held, task: asyncio.Task) -> None:
         """A run's task is over: a run it never got to end (cancelled before it began) ends now, and `start` is
-        answered whatever happened."""
+        answered whatever happened. A run that failed before its session opened started no chat, so its start no longer
+        counts toward the copy's three an hour."""
         self._tasks.discard(task)
         if held.run.state == "running":
             if held.stopping.is_set():
                 _end(held.run, "stopped_by_owner")
             else:
                 _fail(held.run, "the process is stopping")
+        if held.run.state == "failed" and held.run.session_id is None:
+            starts = self._starts.get(held.copy_id, [])
+            if held.started_at in starts:
+                starts.remove(held.started_at)
         held.opened.set()
 
     def _forget(self, now: datetime) -> None:

@@ -254,6 +254,20 @@ async def test_a_copy_starts_three_an_hour(app, browser, fake, clock, copy, visi
     await app.state.runtime.demo_visitors.drain()
 
 
+async def test_starts_that_never_opened_a_chat_dont_spend_the_hourly_cap(app, browser, fake, copy, visitor_model):
+    owner = owner_of(app, browser, copy)
+    desk_id = copy.desk_ids[0]
+    fake.fail("POST /sessions", "422", times=3)             # the Desk won't open the visitor's session, three times
+    for n in range(3):
+        refused = await start(owner, desk_id, key=f"click-{n}")
+        assert (refused.status_code, refused.json()) == (503, {"error": "demo_visitor_unavailable"}), n
+    # None of them started a chat, so none counts toward the three an hour: the next click starts one.
+    visitor_model.add(step("", done=True))
+    started = await start(owner, desk_id, key="click-3")
+    assert started.status_code == 202, started.text
+    await app.state.runtime.demo_visitors.drain()
+
+
 async def test_none_starts_once_todays_model_budget_is_spent(app, browser, fake, clock, copy, visitor_model,
                                                              api_settings, passcode_hash, engine):
     runtime = app.state.runtime
