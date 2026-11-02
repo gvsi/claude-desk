@@ -273,6 +273,8 @@ export interface BusinessOut {
  * setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
  * (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
  * Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's.
+ * `unread_conversations` is how many of the Desk's conversations are unread (`ConversationSummary.unread`), so the
+ * owner's menu can show it on every page without reading the list.
  */
 export interface DeskSummary {
   desk_id: string;
@@ -283,6 +285,7 @@ export interface DeskSummary {
   answering: boolean;
   setup: DeskSetup | null;
   business_type: "rivera" | "trade" | "office" | "landlord" | "other";
+  unread_conversations: number;
 }
 /**
  * A Desk's setup interview that hasn't gone live: its ID (`GET /api/owner/setup/{id}`) and the step it is at.
@@ -372,7 +375,10 @@ export interface ConnectorProposal {
  * `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
  * `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
  * persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
- * runs were recorded there.
+ * runs were recorded there. `unread` is whether the visitor or the visiting agent wrote after the cursor the owner
+ * last marked read (`POST /api/owner/conversations/{session_id}/read`), or wrote at all with nothing marked; what
+ * Claude, the owner, the API and the kernel add never makes a conversation unread, and the owner's preview never
+ * is.
  */
 export interface ConversationSummary {
   session_id: string;
@@ -429,6 +435,7 @@ export interface ConversationSummary {
     | null;
   demo_visitor?: boolean;
   demo_visitor_run_id?: string | null;
+  unread: boolean;
 }
 /**
  * The owner's copy: what `POST /api/owner/copies`, `start_over` and `me` answer with.
@@ -839,6 +846,13 @@ export interface ProvingPending {
 export interface ProvingRetry {
   path: string;
   body: Record<string, unknown> | null;
+}
+/**
+ * `POST /api/owner/conversations/{session_id}/read`: the transcript cursor the owner has seen (`TranscriptItem.n`,
+ * the last item the screen showed). The marker only moves forward, and never past the session's newest row.
+ */
+export interface ReadThroughIn {
+  through: number;
 }
 /**
  * Which of Today's sections count recorded history: the night the kernel replayed into the copy when it was made
@@ -1369,6 +1383,7 @@ export const API_OPERATIONS = {
   "POST /api/owner/conversations/{session_id}/resume": { 200: "SessionState" },
   "POST /api/owner/conversations/{session_id}/messages": { 200: "OwnerMessageResult" },
   "POST /api/owner/conversations/{session_id}/typing": { 204: null },
+  "POST /api/owner/conversations/{session_id}/read": { 204: null },
   "POST /api/owner/desks/{desk_id}/demo_visitor": { 202: "DemoVisitorStarted" },
   "GET /api/owner/desks/{desk_id}/demo_visitor": { 200: "DemoVisitorRun" },
   "GET /api/owner/desks/{desk_id}/demo_visitor/{run_id}": { 200: "DemoVisitorRun" },

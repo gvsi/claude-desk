@@ -14,14 +14,13 @@ and the grant here says so outright. The kernel's and the mock payments server's
 Like the revisions before it, it runs again over what it added (a test stamps below an earlier revision and upgrades).
 
 Revision ID: api_conversation_reads
-Revises: 09_business_tools_view
+Revises: api_demo_visitor_route
 """
 
 from alembic import op
 
 revision = "api_conversation_reads"
-# Chains after kernel_one_open_handoff once that revision lands on main.
-down_revision = "09_business_tools_view"
+down_revision = "api_demo_visitor_route"
 branch_labels = None
 depends_on = None
 
