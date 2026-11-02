@@ -21,7 +21,7 @@ function pageShapes(
   page: string,
   rest: readonly string[],
   search: string,
-  showSampleQuestions: boolean,
+  showSampleContent: boolean,
   setup: SkeletonSetup | undefined,
 ): ReactNode | null {
   const exact = rest.every((part) => part === '');
@@ -32,11 +32,11 @@ function pageShapes(
   if (page === 'safety' && safetyRoute && new URLSearchParams(search).get('view') !== 'entries') return <SafetySkeleton withHeader />;
   if (page === 'people' && exact) return <PeopleSkeleton withHeader />;
   if (page === 'profile' && exact) return <ProfileSkeleton />;
-  if (page === 'knowledge' && exact) return <KnowledgeSkeleton showSampleQuestions={showSampleQuestions} />;
-  if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} />;
+  if (page === 'knowledge' && exact) return <KnowledgeSkeleton showSampleQuestions={showSampleContent} />;
+  if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} recordedHistory={showSampleContent} />;
   // One conversation open beside the list: `/conversations/:id`.
   const [conversation = '', ...after] = rest;
-  if (page === 'conversations' && conversation !== '' && after.every((part) => part === '')) return <ConversationsSkeleton withHeader open />;
+  if (page === 'conversations' && conversation !== '' && after.every((part) => part === '')) return <ConversationsSkeleton withHeader open recordedHistory={showSampleContent} />;
   return null;
 }
 
@@ -47,12 +47,12 @@ function pageShapes(
 export function pageSkeletonFor(
   pathname: string,
   search: string,
-  showSampleQuestions = true,
+  showSampleContent = true,
   setup?: SkeletonSetup,
 ): { page: ReactNode | null; fill: boolean; centered: boolean } {
   const [page = '', ...rest] = pathname.split('/').slice(3);
   return {
-    page: pageShapes(page, rest, search, showSampleQuestions, setup),
+    page: pageShapes(page, rest, search, showSampleContent, setup),
     fill: FILL_PAGES.has(page as NavKey),
     centered: CENTERED_PAGES.has(page as NavKey),
   };
@@ -67,8 +67,8 @@ export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setu
   const queryClient = useQueryClient();
   const businesses = queryClient.getQueryData<BusinessOut[]>(DESKS_KEY);
   const deskId = decodeURIComponent(pathname.split('/')[2] ?? '');
-  const showSampleQuestions = businesses === undefined || isStartingSampleDesk(queryClient, businesses, deskId);
-  const { page, fill, centered } = pageSkeletonFor(pathname, search, showSampleQuestions, setup);
+  const showSampleContent = businesses === undefined || isStartingSampleDesk(queryClient, businesses, deskId);
+  const { page, fill, centered } = pageSkeletonFor(pathname, search, showSampleContent, setup);
   return (
     <AppShell
       skeleton
