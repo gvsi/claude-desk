@@ -22,6 +22,7 @@ import { greetingPresence } from './presence.ts';
 import { requestInHash } from './requestLink.ts';
 import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
+import { useTodayNow } from './todayClock.ts';
 import { skeletonSetupOf, TodaySkeleton } from './TodaySkeleton.tsx';
 
 import './Today.css';
@@ -95,6 +96,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const cards = useRef(new Map<string, HTMLElement>());
   // Whether the demo bar's Demo inbox sheet is open, as the frame hears it.
   const inboxOpen = useInboxOpen();
+  // The time the greeting is drawn at: the browser's, or the still picture's.
+  const greetedAt = useTodayNow();
 
   const name = today.data?.greeting_name ?? firstName(business.owner_display_name);
   // The Desk's setup while it hasn't gone live, as the copy's Desks name it; null once it is live,
@@ -274,7 +277,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
           <div className="cd-today__band">
             <div className="cd-today__greeting">
               <Greeting
-                text={`${greetingFor(new Date(), business.timezone)}, ${name}`}
+                text={`${greetingFor(greetedAt, business.timezone)}, ${name}`}
                 presence={today.data ? greetingPresence(live) : undefined}
                 link={{ label: link, onCopy: copyLink, copied: copied !== null }}
                 actions={
