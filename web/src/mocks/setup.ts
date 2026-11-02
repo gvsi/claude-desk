@@ -551,7 +551,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A client asks for their last receipt',
       saturday: 'A visitor wants balayage on Saturday morning',
       someoneElses: "Someone asks for another client's phone number",
-      searches: ['hair salon deposits and late cancellations', 'salon new client consultation form'],
+      searches: ['hair salon color appointment deposits', 'salon new client consultation form'],
     },
   ],
   [
@@ -565,7 +565,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
       document: 'A tenant asks for a copy of their lease',
       saturday: 'A visitor wants a Saturday morning viewing',
       someoneElses: 'Someone asks which apartment another tenant lives in',
-      searches: ['rental application fees and deposits', 'tenant maintenance request form'],
+      searches: ['rental viewings and application fees', 'tenant maintenance request form'],
     },
   ],
 ];
@@ -831,7 +831,7 @@ function consultantProposals(): ProposalCard[] {
 /** Signed board words, shared by all fixture paths. */
 export const CPA_COPY = {
   opening: [
-    'Thanks, Linda. Here’s how I understand Chen & Co.: you and one colleague do tax returns and bookkeeping for individuals and small businesses in San Jose. New clients start with a free 20-minute consult, and you price each engagement after it.',
+    'Thanks, Linda. Here’s how I understand Chen & Co.: you and one colleague do tax returns and bookkeeping in San Jose. New clients book a free 20-minute consult, a personal return is $350, and each engagement starts with a $500 retainer by secure link. A client’s AI assistant can also book and pay for them, within a limit the client signs.',
     'Here’s what I’d have your Desk do: book those free consults, ask new clients a few questions first, and send a retainer link once you’ve priced the work. Questions like “where’s my return?” can come to you for now.',
     'One thing first, so I describe Chen & Co. the right way.',
   ],

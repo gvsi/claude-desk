@@ -908,19 +908,19 @@ describe('setup', () => {
         examples: [
           {
             chip: 'A hair salon in Oakland',
-            description: 'I’m Priya Shah. Juniper Hair Studio is a four-chair salon in Oakland doing cuts, color and balayage. Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.',
+            description: 'I’m Priya Shah. Juniper Hair Studio is a four-chair salon in Oakland doing cuts, color and balayage, open Tuesday to Saturday. Clients book their own appointments, color takes a $40 deposit by secure link, and many of our clients write in Spanish.',
           },
           {
             chip: 'A plumber in Oakland',
-            description: 'I’m Mike Turner. Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
+            description: 'I’m Mike Turner. Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley. A service call is $129, you can take up to 10% off without asking me, and I want to hear about burst pipes and flooding right away, day or night.',
           },
           {
             chip: 'Apartments in Sacramento',
-            description: 'I’m Sam Okafor. Maple Street Rentals manages 14 apartments in two buildings in Sacramento. People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.',
+            description: 'I’m Sam Okafor. Maple Street Rentals manages 14 apartments in two buildings in Sacramento. People book viewings of open units and pay the $45 application fee by secure link, and tenants report maintenance problems; a leak or a lockout should reach me at once.',
           },
           {
             chip: 'A CPA firm in San Jose',
-            description: 'I’m Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.',
+            description: 'I’m Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping. New clients book a free 20-minute consult, a personal return is $350, and each engagement starts with a $500 retainer by secure link. A client’s AI assistant can book and pay for them, within a limit the client signs.',
           },
         ],
       },
@@ -930,19 +930,19 @@ describe('setup', () => {
         examples: [
           {
             chip: 'Una peluquería en Oakland',
-            description: 'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage. Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.',
+            description: 'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage, de martes a sábado. Los clientes agendan su propia cita, el color lleva un depósito de $40 con un enlace seguro, y atendemos a clientes en español y en inglés.',
           },
           {
             chip: 'Un plomero en Oakland',
-            description: 'Soy Mike Turner. Turner Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
+            description: 'Soy Mike Turner. Turner Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley. La visita de servicio cuesta $129, puedes descontar hasta un 10% sin preguntarme, y quiero saber de inmediato de tuberías reventadas o inundaciones, de día o de noche.',
           },
           {
             chip: 'Departamentos en Sacramento',
-            description: 'Soy Sam Okafor. Maple Street Rentals administra 14 departamentos en dos edificios de Sacramento. La gente pregunta por unidades disponibles y visitas, los inquilinos reportan problemas de mantenimiento, y yo cobro las cuotas de solicitud y los depósitos.',
+            description: 'Soy Sam Okafor. Maple Street Rentals administra 14 departamentos en dos edificios de Sacramento. La gente agenda visitas a unidades disponibles y paga la cuota de solicitud de $45 con un enlace seguro, y los inquilinos reportan problemas de mantenimiento; una fuga o alguien que se quedó sin llaves me tiene que llegar de inmediato.',
           },
           {
             chip: 'Un despacho contable en San José',
-            description: 'Soy Linda Chen. Chen & Co. es un despacho contable de dos personas en San José que prepara declaraciones de impuestos y lleva la contabilidad de personas y pequeños negocios. Los clientes nuevos empiezan con una consulta gratis de 20 minutos, y cotizamos cada trabajo después de ella.',
+            description: 'Soy Linda Chen. Chen & Co. es un despacho contable de dos personas en San José que prepara declaraciones de impuestos y lleva contabilidad. Los clientes nuevos agendan una consulta gratis de 20 minutos, una declaración personal cuesta $350 y cada trabajo empieza con un anticipo de $500 con un enlace seguro. El asistente de IA de un cliente también puede agendar y pagar por él, dentro del límite que el cliente firme.',
           },
         ],
       },
@@ -4108,7 +4108,7 @@ describe('setup', () => {
   });
 });
 
-const CPA_DESCRIPTION = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+const CPA_DESCRIPTION = START_EXAMPLES.en.examples[3]!.description;
 
 async function consultantAt(kind = 'opening'): Promise<SetupState> {
   const start = await startInterview(null, CPA_DESCRIPTION);
