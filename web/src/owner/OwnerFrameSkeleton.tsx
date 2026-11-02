@@ -1,11 +1,13 @@
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router';
 
-import { ABOUT_LINKS } from '../about/links.ts';
+import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { AppShell, ConceptFooter, ReviewerBarSkeleton, SidebarSkeleton, type NavKey } from '../ds/index.ts';
 import { ConversationsSkeleton } from './conversations/ConversationsSkeleton.tsx';
 import { CENTERED_PAGES, FILL_PAGES } from './OwnerLayout.tsx';
 import { PeopleSkeleton } from './people/PeopleSkeleton.tsx';
+import { ProfileSkeleton } from './profile/ProfileSkeleton.tsx';
+import { KnowledgeSkeleton } from './knowledge/KnowledgeSkeleton.tsx';
 import { RulesSkeleton } from './rules/RulesSkeleton.tsx';
 import { SafetySkeleton } from './safety/SafetySkeleton.tsx';
 import { TodaySkeleton } from './today/TodaySkeleton.tsx';
@@ -19,6 +21,8 @@ function pageShapes(page: string, rest: readonly string[], search: string): Reac
   const safetyRoute = exact || (rest[0] !== '' && rest.slice(1).every((part) => part === ''));
   if (page === 'safety' && safetyRoute && new URLSearchParams(search).get('view') !== 'entries') return <SafetySkeleton withHeader />;
   if (page === 'people' && exact) return <PeopleSkeleton withHeader />;
+  if (page === 'profile' && exact) return <ProfileSkeleton />;
+  if (page === 'knowledge' && exact) return <KnowledgeSkeleton />;
   if (page === 'conversations' && exact) return <ConversationsSkeleton withHeader open={false} />;
   // One conversation open beside the list: `/conversations/:id`.
   const [conversation = '', ...after] = rest;
@@ -41,7 +45,7 @@ export function OwnerFrameSkeleton({ pathname }: { pathname: string }) {
       skeleton
       business=""
       banner={<ReviewerBarSkeleton inbox />}
-      sidebar={<SidebarSkeleton rows={7} about={ABOUT_LINKS.links.length} />}
+      sidebar={<SidebarSkeleton rows={9} about={SIDEBAR_ABOUT.links.length} />}
       fill={fill}
     >
       <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}${centered ? ' cd-owner-layout--centered' : ''}`}>

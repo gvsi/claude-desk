@@ -101,6 +101,7 @@
   --size-connector-title-tile: 44px;
   --size-connection-term: 200px;
   --size-recent-when: 120px;
+  --size-knowledge-add: 320px;
   --size-sub-nav: 200px;
   --size-agents-column: 760px;
   --size-skeleton-band: 900px;
@@ -213,6 +214,13 @@
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 18px;
+  font-weight: 380;
+}
+
+.cd-type-file-tag {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  line-height: 13px;
   font-weight: 380;
 }
 

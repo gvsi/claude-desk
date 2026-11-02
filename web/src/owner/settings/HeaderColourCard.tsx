@@ -17,25 +17,31 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
   const captionId = useId();
   const [optimistic, setOptimistic] = useState<BrandPalette | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  // Fence a second click before React has drawn the pending state. Controls keep their focus.
-  const saving = useRef(false);
+  const pickCounter = useRef(0);
   const unconfirmed = useRef(false);
+  const uncertainSave = useRef(false);
   const selected = optimistic ?? paletteKey(business.brand);
   const shown = optimistic === null ? business.brand ?? {} : paletteBrand(optimistic);
   const { brand } = brandFrom({ business_name: business.name, desk_name: desk.name, owner_display_name: business.owner_display_name, brand: shown });
 
   const save = useMutation({
-    mutationFn: (palette: BrandPalette) => request('setBusiness', {
+    // Aborting fetch cannot undo a server write. Serialize writes, even across remounts,
+    // so the latest pick reaches storage after every earlier write has settled.
+    scope: { id: `header-colour:${business.business_id}` },
+    mutationFn: ({ palette }: { palette: BrandPalette; pick: number }) => request('setBusiness', {
       params: { desk_id: desk.desk_id },
       body: { name: business.name, owner_display_name: business.owner_display_name, timezone: business.timezone, brand_palette: palette, brand: {} },
     }),
     onMutate: () => queryClient.cancelQueries({ queryKey: DESKS_KEY }),
-    onError: async (err) => {
-      const previous = paletteKey(business.brand);
-      if (isUncertain(err)) {
+    onError: async (err, { palette, pick }) => {
+      if (isUncertain(err)) uncertainSave.current = true;
+      if (pick !== pickCounter.current) return;
+      let previous = paletteKey(queryClient.getQueryData<BusinessOut[]>(DESKS_KEY)?.find((item) => item.business_id === business.business_id)?.brand ?? business.brand);
+      if (uncertainSave.current) {
         // A lost response can follow a committed write. Only a fresh read can confirm a rollback.
         await queryClient.cancelQueries({ queryKey: DESKS_KEY });
         const read = await queryClient.fetchQuery(desksQuery()).catch(() => null);
+        if (pick !== pickCounter.current) return;
         if (read === null) {
           unconfirmed.current = true;
           setFailure(OWNER_ERROR_COPY.network);
@@ -44,7 +50,8 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
         // This read is confirmed even if the following settle refetch fails.
         setOptimistic(null);
         const now = read.find((item) => item.business_id === business.business_id);
-        if (now === undefined || paletteKey(now.brand) !== previous) return;
+        if (now === undefined || paletteKey(now.brand) === palette) return;
+        previous = paletteKey(now.brand);
       }
       setOptimistic(null);
       setFailure(`That didn't save, so your header is still ${previous === null ? 'Custom colour' : PALETTE_NAMES[previous]}.`);
@@ -53,7 +60,6 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
       // Responses can arrive out of order across mounts. Read the server after every outcome;
       // never carry a mutation's old palette into the shared cache.
       await queryClient.invalidateQueries({ queryKey: DESKS_KEY });
-      saving.current = false;
     },
   });
 
@@ -70,19 +76,18 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
   }, [dataUpdatedAt, status, save.isPending]);
 
   function pick(palette: BrandPalette) {
-    if (saving.current || (palette === selected && !unconfirmed.current)) return;
-    saving.current = true;
+    if (palette === selected && !unconfirmed.current) return;
+    if (!save.isPending) uncertainSave.current = false;
     unconfirmed.current = false;
     setFailure(null);
     setOptimistic(palette);
-    save.mutate(palette);
+    save.mutate({ palette, pick: ++pickCounter.current });
   }
 
   function move(event: KeyboardEvent<HTMLButtonElement>, palette: BrandPalette) {
     const direction = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
     if (direction === undefined) return;
     event.preventDefault();
-    if (saving.current) return;
     const index = (PALETTE_KEYS.indexOf(palette) + direction + PALETTE_KEYS.length) % PALETTE_KEYS.length;
     const next = PALETTE_KEYS[index]!;
     const group = event.currentTarget.parentElement;
@@ -97,7 +102,7 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
           <h2 id={titleId} className="cd-type-control">Header colour</h2>
           <p id={captionId} className="cd-type-caption cd-settings__quiet">The bar at the top of your public page.</p>
         </div>
-        <div role="radiogroup" aria-labelledby={titleId} aria-describedby={captionId} aria-busy={save.isPending} className="cd-header-colour__swatches">
+        <div role="radiogroup" aria-labelledby={titleId} aria-describedby={captionId} className="cd-header-colour__swatches">
           {PALETTE_KEYS.map((palette) => (
             <button
               key={palette}
@@ -105,7 +110,6 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
               role="radio"
               aria-label={PALETTE_NAMES[palette]}
               aria-checked={palette === selected}
-              aria-disabled={save.isPending || undefined}
               tabIndex={palette === (selected ?? 'none') ? 0 : -1}
               className={`cd-header-colour__swatch${palette === 'none' ? ' cd-header-colour__swatch--none' : ''}`}
               style={{ '--swatch-field': palette === 'none' ? 'var(--bg-panel)' : paletteBrand(palette).primary } as CSSProperties}

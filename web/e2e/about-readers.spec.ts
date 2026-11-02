@@ -125,7 +125,14 @@ test('open_a_document_from_the_sidebar', async ({ page }) => {
   // proposal, whose link into the prototype goes back to this Desk.
   const about = page.getByRole('navigation', { name: 'About this prototype' });
   await expect(about).toBeVisible();
-  await expect(about.getByRole('link')).toHaveText(['Capability prediction', 'Product proposal', 'Vision']);
+  await expect(page.getByRole('navigation', { name: 'Main', exact: true }).locator('.cd-sidebar__label')).toHaveText([
+    'Today', 'Conversations', 'Customers', 'Knowledge', 'Rules', 'Safety', 'Profile', 'Share', 'Settings',
+  ]);
+  const github = about.getByRole('link', { name: 'GitHub (opens in a new tab)', exact: true });
+  await expect(github).toHaveAttribute('target', '_blank');
+  await expect(github).toHaveAttribute('rel', 'noreferrer');
+  await expect(github).toHaveAttribute('href', 'https://github.com/gvsi/claude-desk');
+  await expect(about.getByRole('link')).toHaveText(['Capability prediction', 'Product proposal', 'Vision', 'GitHub']);
   await about.getByRole('link', { name: 'Product proposal', exact: true }).click();
   await page.waitForURL('**/about/proposal');
   await expect(title(page, 'Product proposal')).toBeVisible(FIRST_DRAW);

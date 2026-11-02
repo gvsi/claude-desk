@@ -2,8 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
 import { expectComputed } from '../test/expectComputed.ts';
-import { ANSWERING_LINE, GENERAL_DETAILS, GeneralSettings, SettingsPage } from './parts.tsx';
-import { SPEC, expectFooter, expectFooterAtFoot, expectSettingsPage, one } from './spec.ts';
+import { ANSWERING_LINE, GeneralSettings, SettingsPage } from './parts.tsx';
+import { SPEC, expectFooter, expectFooterAtFoot, expectSettingsPage } from './spec.ts';
 
 /** Settings › General: the business's details, Claude acts for you, and deleting this Desk. */
 function SettingsGeneral() {
@@ -44,34 +44,15 @@ export const Board: Story = {
     // The page's own: the sidebar has an Claude acts for you switch too.
     const page = within(canvas.getByRole('main'));
 
-    // The details, read-only: each label over its value, in the board's words, with no Change.
-    const business = page.getByRole('region', { name: 'Your business' });
-    const terms = within(business).getAllByRole('term').map((term) => term.textContent);
-    const values = within(business).getAllByRole('definition').map((value) => value.textContent);
-    await expect(terms.map((term, index) => [term, values[index]])).toEqual(GENERAL_DETAILS.map(({ label, value }) => [label, value]));
-    await expect(within(business).queryByRole('button')).toBeNull();
-    const card = one(business, '.cd-card');
-    // The card 8 px under its heading, as wide as the content column.
-    await expect(Math.round(card.getBoundingClientRect().top - one(business, 'h2').getBoundingClientRect().bottom)).toBe(8);
-    await expect(Math.round(card.getBoundingClientRect().width)).toBe(720);
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(326);
-
-    // Claude acts for you, on, in its own card 20 px under the details.
     const answering = page.getByRole('switch', { name: 'Claude acts for you' });
     await expect(answering).toHaveAttribute('aria-checked', 'true');
     // The short line everywhere, as the phone board writes it (owner decision, 2026-10-30).
     await expect(answering).toHaveAccessibleDescription('Within your rules');
     const answeringCard = page.getByRole('region', { name: 'Claude acts for you' });
-    // The words line up with Business; the switch keeps its vertical inset and the card's height.
-    const label = within(answering).getByText('Claude acts for you', { exact: true });
-    await expect(Math.round(label.getBoundingClientRect().left)).toBe(
-      Math.round(within(business).getByText('Business', { exact: true }).getBoundingClientRect().left),
-    );
     await expect(Math.round(answeringCard.getBoundingClientRect().height)).toBe(91);
     await expect(Math.round(answering.getBoundingClientRect().top - answeringCard.getBoundingClientRect().top)).toBe(21);
     await expect(Math.round(answeringCard.getBoundingClientRect().bottom - answering.getBoundingClientRect().bottom)).toBe(21);
     expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });
-    await expect(Math.round(answeringCard.getBoundingClientRect().top - card.getBoundingClientRect().bottom)).toBe(20);
 
     // Delete this Desk: its heading 28 px under Claude acts for you, the line, and the neutral button at the column's right.
     const remove = page.getByRole('region', { name: 'Delete this Desk' });

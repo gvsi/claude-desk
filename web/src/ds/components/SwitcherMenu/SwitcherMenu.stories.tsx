@@ -21,8 +21,10 @@ const hrefs = {
   today: '#today',
   conversations: '#conversations',
   people: '#customers',
+  knowledge: '#knowledge',
   rules: '#rules',
   safety: '#safety',
+  profile: '#profile',
   share: '#share',
   settings: '#settings',
 } satisfies SidebarHrefs;
