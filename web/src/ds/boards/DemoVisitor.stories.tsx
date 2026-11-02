@@ -247,11 +247,16 @@ function DemoConversation({ stage }: { stage: Stage }) {
           </TranscriptRow>
         ) : null}
       </Transcript>
-      <TakeOverBar mode={owner ? 'owner' : 'ai'} visitorName={RILEY} ownerName={OWNER} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
-      {owner ? (
-        <Composer variant="owner" label="Write to them" placeholder="They see your words exactly as you write them." onSend={fn()} />
-      ) : (
-        <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude. They won't see it." onSend={fn()} />
+      {/* Once it has ended nobody is left to answer: no Take over and no whisper box. */}
+      {note === 'finished' ? null : (
+        <>
+          <TakeOverBar mode={owner ? 'owner' : 'ai'} visitorName={RILEY} ownerName={OWNER} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
+          {owner ? (
+            <Composer variant="owner" label="Write to them" placeholder="They see your words exactly as you write them." onSend={fn()} />
+          ) : (
+            <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude. They won't see it." onSend={fn()} />
+          )}
+        </>
       )}
       <ConceptFooter />
     </div>
@@ -449,12 +454,14 @@ export const Ended: Story = {
   render: () => <ConversationBoard stage="ended" />,
   parameters: {
     canvas: 'N-Live-REV-DEMO-ended-1512',
-    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}"`,
+    canvasNote: `${IN_REVIEW} REV-DEMO when it ends (#artboard-2e93bf1904b9): the note says it finished, with no button; the row keeps its pill. Stopped by the owner, it says "${DEMO_VISITOR_NOTE.stopped}" The board still draws Take over and the whisper box under it; since UX QA on 2026-11-02 an ended demo visitor's chat offers neither, as nobody is left to answer.`,
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
     await expectTaggedRow(canvasElement);
     await expectHeadAndNote(canvasElement, DEMO_VISITOR_NOTE.finished, false);
+    await expect(within(canvasElement).queryByRole('button', { name: 'Take over' })).toBeNull();
+    await expect(within(canvasElement).queryByRole('textbox', { name: 'Whisper to Claude' })).toBeNull();
     await expectNoSidewaysScroll();
   },
 };

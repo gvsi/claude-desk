@@ -297,6 +297,33 @@ describe('Demo visitor', () => {
     expect(requests('demoVisitorRun').some((r) => r.path.endsWith(`/demo_visitor/${first.run_id}`))).toBe(true);
   });
 
+  it.each(['desktop', 'phone'] as const)('once_it_has_ended_there_is_no_take_over_or_whisper_on_%s', async (viewport: Viewport) => {
+    const { session_id: sessionId } = await startOne('controls');
+    const { screen } = await renderRoute(`${LIST}/${sessionId}`, { viewport });
+    // While it runs: Take over and the whisper box, as in any chat.
+    await expect.element(demoNote(screen)).toMatchTextContent(NOTE);
+    await expect.element(screen.getByRole('button', { name: 'Take over', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).toBeVisible();
+
+    // Stopped: nobody is left to answer, so neither is offered; the note and the transcript stay.
+    await demoNote(screen).getByRole('button', { name: STOP, exact: true }).click();
+    await expect.element(demoNote(screen)).toHaveTextContent(STOPPED);
+    await expect.element(screen.getByRole('button', { name: 'Take over', exact: true })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('textbox', { name: 'Whisper to Claude' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('log')).toBeVisible();
+    expectNoHorizontalScroll();
+
+    // Finished on its own: the same.
+    mockStore.nextEpoch();
+    mockStore.reset('rivera');
+    const finished = await startOne('controls-finished');
+    mockStore.demoVisitors.endRun(finished.run_id, 'finished');
+    const again = await renderRoute(`${LIST}/${finished.session_id}`, { viewport });
+    await expect.element(demoNote(again.screen)).toHaveTextContent(FINISHED);
+    await expect.element(again.screen.getByRole('textbox', { name: 'Whisper to Claude' })).not.toBeInTheDocument();
+    expect(again.screen.getByRole('button', { name: 'Take over', exact: true }).elements()).toHaveLength(0);
+  });
+
   it('a_demo_chat_whose_reads_name_no_run_reads_as_ended', async () => {
     // A chat marked before its mark named its run: its own run can't be read, so it has ended for the page,
     // which reads no other run in its place.

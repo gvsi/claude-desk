@@ -180,6 +180,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
   const demo = chat.data?.demo_visitor === true || summary?.demo_visitor === true;
   const namedRun = chat.data?.demo_visitor_run_id ?? summary?.demo_visitor_run_id ?? null;
   const demoRun = useDemoVisitorRun(deskId, demo, namedRun, demoVisitorRun);
+  const demoEnded = demo && demoRun.phase === 'ended';
 
   // Unsent words go back into their own box once it is shown, and only there. The box takes
   // nothing new while a message is on its way, so they never replace words typed after them.
@@ -362,8 +363,9 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, demoV
           ) : null}
         </Transcript>
       </div>
-      {/* No one is on the other side of a recorded chat: nothing to take over, whisper or write. */}
-      {read.replayed === true ? null : (
+      {/* No one is on the other side of a recorded chat, or of a demo visitor's once it has ended (its visitor
+          session is gone, or idle for good): nothing to take over, whisper or write. */}
+      {read.replayed === true || demoEnded ? null : (
         <div className="cd-conversation__controls">
           <TakeOverBar
             mode={state.mode}
