@@ -31,12 +31,12 @@ it('shows one period after Chen & Co. when reaching Real situations on desktop a
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Check real situations' }).click();
   await expect.element(screen.getByRole('heading', { name: 'Real situations', exact: true })).toBeVisible();
-  const subtitle = screen.getByText('How your draft rules handle things that really happen at Chen & Co. Nothing here is real.', { exact: true });
+  const subtitle = screen.getByText('How your rules will handle things that really happen at Chen & Co. Nothing here is real.', { exact: true });
   await expect.element(subtitle).toBeVisible();
   expect(subtitle.element().querySelector('[data-copy="user"]')?.textContent).toBe('Chen & Co.');
   expectNoHorizontalScroll();
 
   const phone = (await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' })).screen;
-  await expect.element(phone.getByText('How your draft rules handle things that really happen at Chen & Co. Nothing here is real.', { exact: true })).toBeVisible();
+  await expect.element(phone.getByText('How your rules will handle things that really happen at Chen & Co. Nothing here is real.', { exact: true })).toBeVisible();
   expectNoHorizontalScroll();
 });

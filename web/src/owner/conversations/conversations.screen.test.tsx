@@ -220,10 +220,8 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
-  it('open_conversation_fills_its_pane_at_1512', async () => {
-    // The open conversation takes the pane's width, inside its padding: the status, the transcript,
-    // the controls and the whisper box. Messages keep their own widths, the visitor's at the right.
-    const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width: 1512, height: 982 } });
+  it.each([[1440, 900], [1800, 1009], [390, 844]])('open_conversation_centres_its_reading_column_at_%sx%s', async (width, height) => {
+    const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width, height } });
     const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });
     await expect.element(whisperBox).toBeVisible();
     const chat = log(screen);
@@ -232,28 +230,37 @@ describe('Conversations', () => {
     const pane = document.querySelector<HTMLElement>('.cd-conversations__open');
     if (!pane) throw new Error('the conversation opens in its pane');
     const style = getComputedStyle(pane);
+    const paneRect = pane.getBoundingClientRect();
+    const columnWidth = Math.min(768, paneRect.width - 2 * Number.parseFloat(style.paddingLeft));
     const inner = {
-      left: pane.getBoundingClientRect().left + Number.parseFloat(style.paddingLeft),
-      right: pane.getBoundingClientRect().right - Number.parseFloat(style.paddingRight),
+      left: paneRect.left + (paneRect.width - columnWidth) / 2,
+      right: paneRect.right - (paneRect.width - columnWidth) / 2,
     };
     const fills = (el: Element, name: string) => {
       const rect = el.getBoundingClientRect();
+      expect(Math.abs(rect.width - columnWidth), `${name} width`).toBeLessThanOrEqual(1);
       expect(Math.abs(rect.left - inner.left), `${name} left`).toBeLessThanOrEqual(1);
       expect(Math.abs(rect.right - inner.right), `${name} right`).toBeLessThanOrEqual(1);
+      expect(Math.abs((rect.left - paneRect.left) - (paneRect.right - rect.right)), `${name} centred`).toBeLessThanOrEqual(1);
     };
-    expect(inner.right - inner.left).toBeGreaterThan(900);
     const transcript = chat.element();
+    for (const selector of ['.cd-conversation__head', '.cd-transcript-row', '.cd-conversation__controls']) {
+      fills(document.querySelector(selector)!, selector);
+    }
     fills(transcript, 'transcript');
     fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
+    const scroll = document.querySelector('.cd-conversation__scroll')!.getBoundingClientRect();
+    expect(Math.abs(scroll.right - paneRect.right), 'scroll bar stays at the pane edge').toBeLessThanOrEqual(1);
+    expect(inner.left - scroll.left, 'focus rings have side clearance').toBeGreaterThanOrEqual(16);
     // Her bubble ends at the transcript's right edge, at most 85% of its width.
     const bubble = chat.getByText(first ?? '', { exact: true }).element().getBoundingClientRect();
     expect(Math.abs(bubble.right - transcript.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
     expect(bubble.width).toBeLessThanOrEqual(transcript.getBoundingClientRect().width * 0.85 + 1);
     // Claude's words keep to the reading width (640 px), from the transcript's left, so their lines
-    // stay around 80 characters while the row is the pane's width.
+    // stay around 80 characters inside the wider conversation column.
     const prose = [...transcript.querySelectorAll<HTMLElement>('.cd-claude-message__prose')];
     expect(prose.length).toBeGreaterThan(0);
-    expect(prose.some((p) => p.getBoundingClientRect().width > 600), 'a reply long enough to reach the cap').toBe(true);
+    if (width >= 1024) expect(prose.some((p) => p.getBoundingClientRect().width > 600), 'a reply long enough to reach the cap').toBe(true);
     for (const p of prose) {
       expect(p.getBoundingClientRect().width).toBeLessThanOrEqual(640);
       expect(Math.abs(p.getBoundingClientRect().left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
@@ -684,6 +691,25 @@ describe('Conversations', () => {
     expect(caption.element().textContent).toMatch(new RegExp(`, signed requests from ${name}$`));
     expect(caption.element().querySelector('[data-copy="user"]')?.textContent).toBe(name);
     await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('unnamed_agent_head_says_agent_once', async () => {
+    // An agent with no name on record: the title already says it's an agent, so the head doesn't say
+    // it again in a pill, as the list leaves out its status line. The signed pill stays.
+    const booked = await bookTheEarliestVisit();
+    session(booked).displayName = null;
+    const { screen } = await renderRoute(conversation(booked));
+    await expect.element(screen.getByRole('heading', { level: 2, name: 'Agent', exact: true })).toBeVisible();
+    const head = screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    expect([...head.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Signed']);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    // Named, the pill says what the name doesn't.
+    session(booked).displayName = rivera.conversations.alexAgent.name;
+    const withName = await renderRoute(conversation(booked));
+    await expect.element(withName.screen.getByRole('heading', { level: 2, name: rivera.conversations.alexAgent.name })).toBeVisible();
+    const namedHead = withName.screen.container.querySelector('.cd-conversation__head') as HTMLElement;
+    expect([...namedHead.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Agent', 'Signed']);
   });
 
   it('receipt_opens_the_trace', async () => {

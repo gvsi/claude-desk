@@ -39,7 +39,8 @@ contract test, before the task that first uses them.
   call-back's new id), then opens its own of kind `callback` under that id; a row's kind never changes, so a stale
   mark of done on a closed one is 409. A booking, native or typed, closes the session's open handoffs of kind `card`
   as the owner's mark of done does, each ledgered `desk_data` naming it with `closed_by: "booking"`; a call-back
-  stays open.
+  stays open. A booking also makes the session's earlier held quotes with a discount stale: the next read of one
+  cancels it, as lazy expiry does.
   `POST /handoffs/{id}/done` closes either kind. A reply entry records `final`.
 - The recorded night (Plan 01d): `record_night(*sessions)` is the recording `POST /copies` replays into a copy that
   asks (`replay_night: true`): each session closed at generation 0 with no person, its rows at the recorded moments,
@@ -124,6 +125,7 @@ contract test, before the task that first uses them.
 import asyncio
 import hashlib
 import hmac
+import itertools
 import json
 import re
 import secrets
@@ -268,6 +270,7 @@ IDLE_LIMIT = timedelta(hours=24)        # a visitor or agent session closes afte
 GENESIS = "0" * 64
 KEY_ID = "fake-kernel"
 PUBLIC_KEY_HEX = "00" * 32           # no real key: fake signatures verify against nothing
+_DECISION_ORDER = itertools.count()   # the order decisions are made in, for times `now` doesn't tell apart
 
 class Refusal(Exception):
     """A non-2xx answer: its status and `KernelError.code`."""
@@ -1394,6 +1397,7 @@ class DecisionRecord:
     created_at: datetime
     result: ExecResult | None = None
     running: bool = False                       # its execution began and hasn't ended (`in_flight`)
+    order: int = field(default_factory=lambda: next(_DECISION_ORDER))   # when it was made, among equal `created_at`s
 
 
 @dataclass
@@ -1506,6 +1510,7 @@ class FakeKernelState:
         self.document_links: dict[str, DocumentLink] = {}   # link_id -> its link, tokens in memory only
         self.payment_links: dict[str, PaymentLink] = {}     # link_id -> its link, tokens in memory only
         self.quotes: dict[str, dict] = {}               # quote_id -> its kernel_ro row
+        self.bookings: dict[str, dict] = {}             # booking_id -> its Desk, session, action and status
         self._by_call: dict[tuple[str, int, str], str] = {}   # (session_id, generation, call_id) -> decision_id
         self._token_hashes: dict[str, str] = {}        # sha256(token) -> session_id
         self._failures: dict[str, list] = {}           # route -> [kind, times left or None]
@@ -2906,12 +2911,36 @@ class FakeKernelState:
         return record.decision
 
     def _refresh(self, record: DecisionRecord) -> Decision:
-        """Lazy expiry: an allow lasts 60 s, a hold 24 h."""
+        """Lazy expiry: an allow lasts 60 s, a hold 24 h. Then a held quote with a discount is cancelled once its own
+        session has a confirmed booking decided after it, ledgered with the booking and the Desk's version and cap (the
+        kernel's `decide.supersede_if_booked`)."""
         decision = record.decision
         if (decision.state in ("allowed", "held") and record.result is None and not record.running
                 and self.now > decision.expires_at):
             return self._transition(record, "expired")
+        booking_id = self._superseding_booking(record)
+        if booking_id is not None:
+            desk = self.desks[record.desk_id]
+            return self._transition(record, "cancelled", action_id=decision.action.action_id, cancelled_by="booking",
+                                    booking_id=booking_id, policy_version=desk.policy_version,
+                                    auto_money_cap_cents=min(desk.auto_money_cap_cents, AUTO_MONEY_HARD_CAP_CENTS))
         return decision
+
+    def _superseding_booking(self, record: DecisionRecord) -> str | None:
+        """The first confirmed booking of a held discount quote's own session on its Desk whose decision came after the
+        quote's: a later `created_at`, or, since `now` stands still between calls, the same one and made later."""
+        decision = record.decision
+        if (decision.state != "held" or record.tool != "native.quote" or decision.action is None
+                or not decision.action.discount_bp):
+            return None
+        by_action = {made.decision.action.action_id: made for made in self.decisions.values()
+                     if made.decision.action is not None}
+        later = sorted((made.created_at, made.order, booking_id) for booking_id, booking in self.bookings.items()
+                       if booking["desk_id"] == record.desk_id and booking["session_id"] == decision.session_id
+                       and booking["status"] == "confirmed"
+                       and (made := by_action.get(booking["action_id"])) is not None
+                       and (made.created_at, made.order) > (record.created_at, record.order))
+        return later[0][2] if later else None
 
     def _own_decision(self, request: Request, session_id: str | None,
                       decision_id: str) -> tuple[Session, DecisionRecord]:
@@ -3086,6 +3115,8 @@ class FakeKernelState:
             self._put("bookings", (booking_id,), {
                 "booking_id": booking_id, **ids, "slot_id": slot.slot_id, "starts_at": slot.starts_at,
                 "person_id": session.person_id, "lead_id": None, "status": "confirmed"})
+            self.bookings[booking_id] = {"desk_id": desk.desk_id, "session_id": action.session_id,
+                                         "action_id": action.action_id, "status": "confirmed"}
             self._close_card_handoffs(session, desk, closed_by="booking")
             facts.append(Fact(fact_id=f"booking:{booking_id}", kind="booking", status="committed", source="kernel",
                               label=label, claims=[

@@ -48,10 +48,12 @@ export interface AgentRunStarted {
 }
 /**
  * Which words the built-in agent's tasks take on the Desk (plan 09, C2): `rivera` on the copy's own Desk, else
- * the business type setup stored for it (`other` without one). A key, never words: the page holds every word.
+ * the business type setup stored for it (`other` without one). Tasks are listed in page order; the payment tasks
+ * need an enabled agent payment tool. Keys, never words: the page holds every word.
  */
 export interface AgentTasks {
   task_set: "rivera" | "trade" | "office" | "landlord" | "other";
+  tasks: ("book_visit" | "quote_and_deposit" | "push_the_limit")[];
 }
 /**
  * One side of an exchange in a built-in agent's run: the agent's request (`n`-th), or the Desk's answer to it,

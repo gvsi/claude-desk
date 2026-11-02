@@ -608,13 +608,14 @@ README_SECTIONS = [
     "Try it",
     "Things to try",
     "What's real, mocked and unfinished",
+    "What we left out on purpose",
     "Security model",
     "Evidence",
     "Run it locally",
     "How it was built",
     "Documents",
 ]
-FOOTER = "Concept prototype by Giovanni Alcantara, not an Anthropic product"
+FOOTER = "Concept prototype by [Giovanni Alcantara](https://www.linkedin.com/in/giovannialcantara/), not an Anthropic product"
 
 
 def sections(text: str) -> dict[str, str]:

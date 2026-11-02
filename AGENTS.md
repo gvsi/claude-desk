@@ -65,5 +65,6 @@ If a task seems to require breaking one of these, stop and raise it with the pro
 
 - Every status update stands on its own: what the task is, what happened, what you found, what you need. Lead with the result.
 - Name plans, PRs and tasks by what they build, with the number in brackets, e.g. "the web app (plan 04)" or "the kernel core PR (plan 01a)", never by number alone.
+- Only the orchestrating session asks the project owner (owner, 2026-11-01). Every other lane sends it each decision or sign-off that needs him, with a recommendation and the links, and uses no questions tool itself.
 - Ask for decisions and sign-offs with the questions tool, one question per decision, recommended option first with a one-line reason. Each question carries everything needed to decide (links that open the exact board, story, screen or PR section to review, not just the canvas or the PR; what changes; what it costs) and assumes the project owner hasn't followed the session or the other lanes.
 - Standing rules belong in this file, not in agent memory.

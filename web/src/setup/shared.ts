@@ -2,7 +2,8 @@
  * What setup's steps share: the rules draft's read, the line around the business's name, how to
  * tell the client's own proving give-up from the server's answer, and each step opening at its top.
  */
-import { Fragment, createElement, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { Fragment, createElement, useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useNavigate } from 'react-router';
 
 import { ApiError, request } from '../api/http.ts';
 import type { RouteKey } from '../api/routes.ts';
@@ -41,6 +42,34 @@ export function setupRulesQuery(id: string) {
     retry: false,
     refetchOnWindowFocus: false,
   };
+}
+
+/** An interview's setup page, at the step the API has it at. */
+export function setupPath(id: string): string {
+  return `/app/setup/${encodeURIComponent(id)}`;
+}
+
+/** The search parameter that opens setup's chat over a later step: "Change something". */
+const CHAT_PARAM = 'chat';
+
+/**
+ * Where "Change something" leads, from Real situations or a step after the chat: the same
+ * interview with its chat open again. The chat's "Continue" goes back to `setupPath`, the step the
+ * API has it at.
+ */
+export function changeSomethingPath(id: string): string {
+  return `${setupPath(id)}?${CHAT_PARAM}`;
+}
+
+/** The page's address asks for setup's chat ("Change something"). */
+export function opensSetupChat(search: URLSearchParams): boolean {
+  return search.has(CHAT_PARAM);
+}
+
+/** "Change something"'s handler: opens the interview's chat again, over the step the owner is on. */
+export function useChangeSomething(id: string): () => void {
+  const navigate = useNavigate();
+  return useCallback(() => void navigate(changeSomethingPath(id)), [navigate, id]);
 }
 
 /**

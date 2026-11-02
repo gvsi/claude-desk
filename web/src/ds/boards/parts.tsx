@@ -876,7 +876,7 @@ export function BoardPage({ children }: { children: ReactNode }) {
 }
 
 /** The helper under every Rules composer, as the boards word it. */
-export const RULES_HELPER = 'Claude shows you the change and example situations before anything applies.';
+export const RULES_HELPER = 'Claude shows you the change before anything applies.';
 
 /**
  * The owner composer of the Rules page and a tool's page: the box named by its placeholder, the

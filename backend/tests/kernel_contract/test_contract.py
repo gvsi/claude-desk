@@ -1663,29 +1663,30 @@ async def test_a_call_back_request_closes_the_card_handoff_and_opens_its_own(ker
     assert session_handoffs(ro_read, ro_schema, copy, previewing.state.session_id) == []
 
 
-@pytest.mark.kernel_plan("01c")
-@pytest.mark.parametrize("booking", ["native", "typed"])
-async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booking):
-    """A booking in a conversation the handoff card handed to the owner closes the card's handoff, as the owner's mark
-    of done closes one, so the owner's Needs you stops listing the conversation. The closing is ledgered `desk_data`
-    naming the card's handoff with `closed_by: "booking"`. Another session's card handoff stays open. A typed booking
-    books through the native booking's execution, so it closes the card's handoff the same way. Both bookings are
-    allowed outright by an owner card for the slot's window, with no review."""
-    http, ro_schema, _ = kernel
-    copy = await new_copy(http)
-    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
-    tool = "native.book"
-    if booking == "typed":
-        tool = "desk.consult"
-        consult = BusinessTool(tool=tool, title="Book a consult", description="Book an introduction.",
-                               config={"block": "typed_booking", "appointment_type": "Consult", "minutes": 20})
-        await owner.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[consult]), path={"id": desk_id})
-        (row,) = ro_read(ro_schema, copy.copy_id, "SELECT definition_sha256 FROM {ro}.tools WHERE desk_id = %s"
-                                                  " AND tool = %s", (desk_id, tool))
-        confirmed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
-            desk_id=desk_id, tools=[ToolPin(tool=tool, definition_sha256=row["definition_sha256"])], enable=True))
-        proved_or_skip(confirmed.draft)
-        await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=confirmed.draft.version))
+async def booking_tool(owner: CredentialView, ro_read, ro_schema: str, copy: CopyCreated, booking: str) -> str:
+    """The tool a `native` or `typed` booking books with: `native.book`, or a typed booking business tool the owner
+    adds and confirms on the copy's first Desk (it skips when the kernel can't prove drafts)."""
+    if booking == "native":
+        return "native.book"
+    desk_id, tool = copy.desk_ids[0], "desk.consult"
+    consult = BusinessTool(tool=tool, title="Book a consult", description="Book an introduction.",
+                           config={"block": "typed_booking", "appointment_type": "Consult", "minutes": 20})
+    await owner.call("PUT /desks/{id}/business_tools", BusinessToolsRequest(tools=[consult]), path={"id": desk_id})
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT definition_sha256 FROM {ro}.tools WHERE desk_id = %s"
+                                              " AND tool = %s", (desk_id, tool))
+    confirmed = await owner.call("POST /tools/confirm", ToolsConfirmRequest(
+        desk_id=desk_id, tools=[ToolPin(tool=tool, definition_sha256=row["definition_sha256"])], enable=True))
+    proved_or_skip(confirmed.draft)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=confirmed.draft.version))
+    return tool
+
+
+async def bookable_outright(owner: CredentialView, ro_read, ro_schema: str, copy: CopyCreated,
+                            tool: str = "native.book") -> dict:
+    """The copy's first calendar slot, which `tool` now books with no one asked: an owner card allows it in the slot's
+    window with no review, in place of the cards that covered the tool, drafted, proved and confirmed (it skips when
+    the kernel can't prove drafts)."""
+    desk_id = copy.desk_ids[0]
     (slot, *_) = ro_read(ro_schema, copy.copy_id, "SELECT slot_id, starts_at, minutes FROM {ro}.calendar_slots"
                                                   " WHERE desk_id = %s ORDER BY starts_at", (desk_id,))
     local = slot["starts_at"].astimezone(ZoneInfo("America/Los_Angeles"))
@@ -1699,6 +1700,22 @@ async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booki
                                                                       expected_parent=active["version"]))
     proved_or_skip(draft)
     await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+    return slot
+
+
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("booking", ["native", "typed"])
+async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booking):
+    """A booking in a conversation the handoff card handed to the owner closes the card's handoff, as the owner's mark
+    of done closes one, so the owner's Needs you stops listing the conversation. The closing is ledgered `desk_data`
+    naming the card's handoff with `closed_by: "booking"`. Another session's card handoff stays open. A typed booking
+    books through the native booking's execution, so it closes the card's handoff the same way. Both bookings are
+    allowed outright by an owner card for the slot's window, with no review."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    tool = await booking_tool(owner, ro_read, ro_schema, copy, booking)
+    slot = await bookable_outright(owner, ro_read, ro_schema, copy, tool)
 
     visitor, other = await new_visitor(http, slug), await new_visitor(http, slug)
     for created in (visitor, other):              # another language: the handoff card, which opens a card handoff
@@ -1716,6 +1733,49 @@ async def test_a_booking_closes_the_sessions_card_handoff(kernel, ro_read, booki
               if entry.event.kind == "desk_data" and entry.event.summary.get("part") == "handoffs"
               and "kind" not in entry.event.summary]
     assert closed == [{"part": "handoffs", "refs": [card_id], "closed_by": "booking"}]
+
+
+@pytest.mark.kernel_plan("01c")
+@pytest.mark.parametrize("booking", ["native", "typed"])
+async def test_a_booking_cancels_the_sessions_earlier_held_discount_quote(kernel, ro_read, booking):
+    """A visitor whose discount quote is held and who then books, at list price, no longer waits on the discount: the
+    next read of the held quote, through the API's own client, finds it `cancelled` with the state's own line, ledgered
+    `decide` naming the booking and the rules version in force with its money cap, and the owner's answer to it is 409
+    with nothing run. A typed booking writes the same booking, so it counts the same way. Another session's held
+    discount quote, with no booking, stays held."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    desk_id, owner, slug = copy.desk_ids[0], http.owner(copy.owner_token), desk_slug(ro_read, ro_schema, copy)
+    tool = await booking_tool(owner, ro_read, ro_schema, copy, booking)
+    slot = await bookable_outright(owner, ro_read, ro_schema, copy, tool)
+    drain = item_id(ro_read, ro_schema, copy, "Drain clearing")
+    visitor, other = await new_visitor(http, slug), await new_visitor(http, slug)
+    view = http.session(visitor.session_token)
+    held = await decide(view, visitor.state.session_id, 0, "quote-1", "native.quote", quote_args(drain, 5000))
+    kept = await decide(http.session(other.session_token), other.state.session_id, 0, "quote-1", "native.quote",
+                        quote_args(drain, 5000))
+    assert held.state == kept.state == "held"
+    booked = await decide(view, visitor.state.session_id, 0, "book-1", tool, {"slot_id": slot["slot_id"]})
+    assert booked.outcome == "allow", booked.reason_plain
+    assert (await execute(view, booked, 0)).state == "succeeded"
+
+    cancelled = await read_decision(view, held.decision_id)
+    assert (cancelled.state, cancelled.visitor_plain, cancelled.answers) == ("cancelled", "Cancelled", [])
+    assert cancelled.ledger_seq > held.ledger_seq and cancelled.signature != held.signature
+    assert await refused(answer(owner, held.decision_id, "allow_once")) == (409, "conflict")
+    assert (await read_decision(owner, held.decision_id)).state == "cancelled"
+    assert (await read_decision(owner, kept.decision_id)).state == "held"
+    stored = ro_read(ro_schema, copy.copy_id, "SELECT state FROM {ro}.decisions WHERE decision_id = %s",
+                     (held.decision_id,))
+    assert stored == [{"state": "cancelled"}]
+    (row,) = ro_read(ro_schema, copy.copy_id, "SELECT booking_id FROM {ro}.bookings WHERE desk_id = %s", (desk_id,))
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    entries = [entry.event.summary for entry in (await ledger_page(owner, desk_id)).entries
+               if entry.event.kind == "decide" and entry.event.ref_id == held.decision_id]
+    assert entries[1:] == [{"decision_id": held.decision_id, "action_id": held.action.action_id, "state": "cancelled",
+                            "cancelled_by": "booking", "booking_id": row["booking_id"],
+                            "policy_version": active["version"],
+                            "auto_money_cap_cents": active["auto_money_cap_cents"]}]
 
 
 @pytest.mark.kernel_plan("01b")
