@@ -366,3 +366,23 @@ it('holds_the_rules_page_composer_while_an_answer_streams_and_sends_once_it_has_
   await expect.poll(() => requests('ruleChat')).toHaveLength(2);
   await expect.element(box).toHaveValue('');
 });
+
+it('holds_the_rules_page_suggestions_while_an_answer_streams_and_asks_once_it_has_come_in', async () => {
+  const held = gate();
+  mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
+  const { screen, panel } = await ask('desktop');
+  await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+  // A suggestion waits, in its place, while the answer comes in: a press asks nothing.
+  const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button').first();
+  await expect.element(chip).toBeVisible();
+  await expect.element(chip).toBeDisabled();
+  (chip.element() as HTMLButtonElement).click();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(requests('ruleChat')).toHaveLength(1);
+
+  held.release();
+  await finalAnswer(panel, 'Nothing changes until you confirm it.');
+  await expect.element(chip).toBeEnabled();
+  await chip.click();
+  await expect.poll(() => requests('ruleChat')).toHaveLength(2);
+});

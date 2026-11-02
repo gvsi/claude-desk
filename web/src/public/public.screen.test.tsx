@@ -1888,6 +1888,94 @@ describe('public chat page', () => {
     await expect.element(box).toHaveValue('');
   });
 
+  it('holds_send_through_a_receipt_that_comes_before_the_reply_and_lets_go_when_the_owner_joins', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    await say(screen, 'Can I get 15% off if I pay cash?');
+    const held = chatEvents().find(({ ev }) => ev.type === 'held')?.ev;
+    if (held?.type !== 'held') throw new Error('the discount was held');
+    const box = chatBox(screen);
+    const send = () => screen.getByRole('button', { name: 'Send', exact: true }).element() as HTMLButtonElement;
+    // The next message's request waits on its way, so its turn hasn't started.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: 'vmsg-held' }, until: gate, afterCommit: true });
+    await box.click();
+    // Sent once the reply before it has landed, receipts and all.
+    await userEvent.keyboard('How much is drain clearing?');
+    await expect.poll(() => send().disabled).toBe(false);
+    await userEvent.keyboard('{Enter}');
+    await expect.element(box).toHaveValue('');
+    await userEvent.keyboard('And on a Sunday?');
+    await expect.poll(() => send().disabled).toBe(true);
+
+    // What came of the earlier request arrives before the reply: the reply is still on its way.
+    const expired = 'That request ran out of time.';
+    mockStore.emit(RIVERA.slug, { ...held, type: 'resolved', state: 'expired', visitor_plain: expired, ledger_seq: held.ledger_seq + 100 });
+    await vi.waitFor(() => expect(document.body.textContent).toContain(expired));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(send().disabled).toBe(true);
+
+    // Mike Turner joins the chat: he answers in his own time, so Send waits no longer.
+    mockStore.emit(RIVERA.slug, { type: 'owner_joined', name: 'Mike Turner' });
+    await expect.poll(() => send().disabled).toBe(false);
+    await expect.element(box).toHaveValue('And on a Sunday?');
+    await expect.element(box).toHaveFocus();
+  });
+
+  it('try_again_waits_for_a_reply_on_its_way_and_holds_send_until_its_own_reply_starts', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const box = chatBox(screen);
+    const send = () => screen.getByRole('button', { name: 'Send', exact: true }).element() as HTMLButtonElement;
+    const sends = () => requests('sendMessage').length;
+    /** The next message's request waits on its way until the returned function lets it go. */
+    const holdNextSend = () => {
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      onTestFinished(() => release());
+      mockStore.inject({ route: 'sendMessage', status: 202, body: { message_id: `vmsg-held-${sends()}` }, until: gate, afterCommit: true });
+      return release;
+    };
+    mockStore.inject({ route: 'sendMessage', status: 500 });
+    await type(screen, 'How much is drain clearing?');
+    const retry = screen.getByRole('alert').getByRole('button', { name: 'Try again', exact: true });
+    await expect.element(retry).toBeVisible();
+
+    // A later message's reply is on its way: "Try again" waits too, and a press sends nothing.
+    const later = holdNextSend();
+    await box.click();
+    await userEvent.keyboard('Can someone come Tuesday afternoon?{Enter}');
+    await expect.poll(sends).toBe(2);
+    await expect.element(retry).toHaveAttribute('aria-disabled', 'true');
+    (retry.element() as HTMLElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(sends()).toBe(2);
+    const before = chatEvents().length;
+    later();
+    await turnEnded(before);
+    await expect.element(retry).not.toHaveAttribute('aria-disabled');
+
+    // Sent again, the message holds Send until its own reply starts, as a new message does.
+    const again = holdNextSend();
+    await box.click();
+    await userEvent.keyboard('And on a Sunday?');
+    await expect.poll(() => send().disabled).toBe(false);
+    await retry.click();
+    await expect.poll(sends).toBe(3);
+    await expect.poll(() => send().disabled).toBe(true);
+    const resent = chatEvents().length;
+    again();
+    await turnEnded(resent);
+    await expect.poll(() => send().disabled).toBe(false);
+    await expect.element(box).toHaveValue('And on a Sunday?');
+  });
+
   it('a_reply_from_history_shows_whole_with_its_card_and_receipt_at_once', async () => {
     const first = await renderRoute(PAGE);
     await ready(first.screen);

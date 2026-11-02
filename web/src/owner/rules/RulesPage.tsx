@@ -330,7 +330,9 @@ export function RulesPage() {
   // page's body or the panel sliding out, and the page doesn't scroll to it.
   const askRow = useRef<HTMLDivElement>(null);
   const openedBy = useRef<string | null>(null);
+  // While an answer comes in, a suggestion waits in its place, as the composer's Send does.
   const pickChip = (words: string) => {
+    if (answering) return;
     if (!asking) openedBy.current = words;
     ask(words);
   };
@@ -506,7 +508,7 @@ export function RulesPage() {
       {presetSaid === null ? null : <Notice tone={presetSaid.tone}>{presetSaid.line}</Notice>}
       <div ref={askRow} className="cd-rules__ask">
         <Composer variant="owner" label={COMPOSER_LABEL} placeholder={COMPOSER_LABEL} helper={COMPOSER_HELPER} maxLength={WORDS_MAX} sendHeld={answering} onSend={ask} />
-        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} onPick={pickChip} />}
+        {chips.length === 0 ? null : <SuggestionChips label="Suggestions" suggestions={chips} disabled={answering} onPick={pickChip} />}
       </div>
       {readError}
       <SkeletonScreen loading={loading} status="Reading your rules" skeleton={<RulesSkeleton withHeader={false} />} className="cd-rules__region">
