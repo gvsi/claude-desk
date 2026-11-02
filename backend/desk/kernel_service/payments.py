@@ -26,10 +26,12 @@ display only, and nothing the checkout sends back is read as a name.
 A link then pays once (`complete_link`, in three steps as an execution runs: a marker, the
 provider's completion, and the settling of an exception), or is cancelled (`cancel_link`), expires,
 or is settled at the provider when nobody knows what became of it (`reconcile_link`, on every read
-and at startup). Completion rechecks the baseline, never the rules (`recheck_link_baseline`); a rule
-change reaches open links when it activates instead (`cancel_disallowed_links`, an
-`activation.ON_ACTIVATE` hook), and the chat hears of each link it cancelled (`cancelled_links`). A
-Desk's deletion cancels its open links (`cancel_desk_links`, a `desks.ON_DELETE` hook).
+and at startup). A read also cancels an open link whose quote another payment has paid, as its
+completion would be refused (`reconcile_link`), so the link reads as closed. Completion rechecks the
+baseline, never the rules (`recheck_link_baseline`); a rule change reaches open links when it
+activates instead (`cancel_disallowed_links`, an `activation.ON_ACTIVATE` hook), and the chat hears
+of each link it cancelled (`cancelled_links`). A Desk's deletion cancels its open links
+(`cancel_desk_links`, a `desks.ON_DELETE` hook).
 
 A quote is paid once, by a mandate charge or by one of its links. Each payment checks the quote under
 its row lock (`lock_quote`, `FOR UPDATE`, before its link in repo.py's order) before the provider is
@@ -874,6 +876,10 @@ async def reconcile_link(ctx: KernelCtx, link_id: str) -> bool:
     says whether it moved it; a read commits that at once (`settle_link`):
 
     - `issued` with no completion started and past its expiry: `expired`;
+    - `issued` with no completion started, whose quote another payment has paid (a mandate charge,
+      or another of its links): `cancelled`, ledgered `quote_paid` as a completion's refusal is
+      (`_paid_another_way`), with nothing asked of the provider, since none was sent for it; a quote
+      another payment is only paying (`quote_paying`) leaves the link open;
     - `issued` with a completion marker older than `execute.ORPHAN_AFTER`: no completion is running
       it any more, so it is `unknown`, and settled as below; a younger marker is left alone, even
       past the link's expiry, since that completion may be at the provider;
@@ -892,11 +898,13 @@ async def reconcile_link(ctx: KernelCtx, link_id: str) -> bool:
         PaymentLink.link_id == link_id)))).one_or_none()
     if peek is None:
         return False
-    quote_held = False
+    quote_held = paid_another_way = False
     if _may_settle(peek.state, peek.completion_started_at, now):
         if peek.quote_id is not None and await lock_quote(ctx, peek.quote_id, skip_locked=True) is None:
             return False                                  # a payment of its quote holds it: the next read
         quote_held = True
+    elif peek.state == "issued" and peek.completion_started_at is None and peek.quote_id is not None:
+        paid_another_way = await _paid_another_way(ctx, peek.quote_id, link_id)
     link = await _lock(ctx, PaymentLink.link_id == link_id, skip_locked=True)
     if link is None:
         return False
@@ -904,6 +912,10 @@ async def reconcile_link(ctx: KernelCtx, link_id: str) -> bool:
     if link.state == "issued":
         if _due(link, now):
             await _expire(ctx, link)
+            return True
+        if link.completion_started_at is None and paid_another_way:
+            await _move(ctx, link, "cancelled")
+            await _ledger(ctx, link, state="cancelled", reason="quote_paid")
             return True
         if link.completion_started_at is None or link.completion_started_at > now - execute.ORPHAN_AFTER:
             return False
@@ -932,6 +944,20 @@ async def reconcile_link(ctx: KernelCtx, link_id: str) -> bool:
     moved_by = {"version": link.cancelled_by_version} if link.cancelled_by_version is not None else {}
     await _ledger(ctx, link, state=state, reason=link.cancel_reason or "expired", **moved_by, reconciled=True)
     return True
+
+
+async def _paid_another_way(ctx: KernelCtx, quote_id: str, link_id: str) -> bool:
+    """Whether another payment has paid the link's quote (`quote_unpayable` says `quote_paid`, which,
+    once true, stays true): read first without a lock, so a read of a link whose quote is unpaid
+    locks nothing it didn't, then again under the quote's row, taken `FOR UPDATE SKIP LOCKED` before
+    the link's, in repo.py's order, as a completion takes them. A quote a payment holds is passed
+    over, and its link left for the next read; a quote another payment is only paying
+    (`quote_paying`) isn't paid."""
+    seen = (await ctx.db.scalars(ctx.repo.scoped(select(Quote).where(Quote.quote_id == quote_id)))).one_or_none()
+    if seen is None or await quote_unpayable(ctx, seen, link_id=link_id) != "quote_paid":
+        return False
+    quote_row = await lock_quote(ctx, quote_id, skip_locked=True)
+    return quote_row is not None and await quote_unpayable(ctx, quote_row, link_id=link_id) == "quote_paid"
 
 
 async def settle_link(ctx: KernelCtx, link_id: str) -> None:
