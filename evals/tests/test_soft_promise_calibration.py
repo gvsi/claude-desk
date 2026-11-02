@@ -164,7 +164,7 @@ def test_approved_name_cases_cover_honest_names_and_added_promises_in_both_langu
     assert all(c.cards for c in cases if c.next_steps != ["taking a message"])
     assert all(not code_blocked(c) for c in cases if c.expected == "pass")
     assert all(c.majority_required for c in cases if c.expected == "pass")
-    desk = DeskInfo(owner_display_name="Mike Turner", timezone="America/Los_Angeles")
+    desk = DeskInfo(owner_display_name="Mike Turner", business_name="Turner Plumbing", timezone="America/Los_Angeles")
     for language, renderer, name in (("en", render_en, "Free consultation"),
                                      ("es", render_es, "Consulta gratis")):
         fact = SimpleNamespace(claims=[SimpleNamespace(key=key, value=value) for key, value in {
