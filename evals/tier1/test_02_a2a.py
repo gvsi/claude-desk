@@ -70,6 +70,13 @@ def script_the_checks(fake: FakeAnthropic) -> None:
     fake.default(API_HAIKU_MODEL, Json(ENGLISH), schema=TRANSLATION_SCHEMA)
 
 
+def any_further_turn_decides(fake: FakeAnthropic) -> None:
+    """Once Claude's script has run out, each further call of Claude's looks for open slots: a turn a fault starts
+    then decides something, so a case's "nothing decided" can fail, where an unscripted call would only fail the
+    turn."""
+    fake.default(OPUS, ToolUse("native__find_slots", find_slots_args()))
+
+
 async def mint(k: KernelHarness, desk: GoldenDesk) -> DemoAgentIssued:
     """A demo agent for the copy's Desk, minted by its owner: a key the kernel knows and its signed mandate."""
     return await k.call("POST /agents/demo", body={"desk_id": desk.desk_id}, auth=desk.owner)
@@ -196,6 +203,7 @@ async def test_replayed_a2a_nonce_other_body(k: KernelHarness, api: ApiTarget, f
     called and no session is opened."""
     script_the_checks(fake)
     fake.script(OPUS, send_reply(HAPPY))
+    any_further_turn_decides(fake)
     desk = await golden_desk(k)
     issued = await mint(k, desk)
     agent = Auth.agent(issued, desk.slug, k.clock)
@@ -270,6 +278,7 @@ async def test_a2a_resent_after_its_turn(k: KernelHarness, api: ApiTarget, fake:
     and no new session."""
     script_the_checks(fake)
     fake.script(OPUS, send_reply(HAPPY), ToolUse("native__find_slots", find_slots_args()), send_reply(SLOTS))
+    any_further_turn_decides(fake)
     desk = await golden_desk(k)
     agent = Auth.agent(await mint(k, desk), desk.slug, k.clock)
     async with DeskClient(api.base_url, api.passcode) as client:

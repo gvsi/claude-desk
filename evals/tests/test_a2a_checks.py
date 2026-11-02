@@ -249,7 +249,7 @@ CAUGHT = [
     ("forged_a2a_signature", "session_before_signature", "a forged opening request created an agent session"),
     ("replayed_a2a_nonce_other_body", "nonce_ignores_body", "its nonce reused under another body, naming its session, "
                                                             "answered 200"),
-    ("replayed_a2a_nonce_other_body", "refuses_late", "a request under a reused nonce made a model call"),
+    ("replayed_a2a_nonce_other_body", "refuses_late", "a request under a reused nonce was decided"),
     ("a2a_other_agents_session", "foreign_session", "the second agent's request naming the first agent's session "
                                                     "answered 500"),
     ("a2a_other_agents_session", "refuses_late", "the refused request wrote app.* rows naming the first agent's session"),
