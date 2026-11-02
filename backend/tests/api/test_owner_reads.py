@@ -654,7 +654,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
     first, second, third = listed.json()
     assert first == {
         "decision": fake.decisions[seeded].decision.model_dump(mode="json"),
-        "held_by": "Quotes from your price list, at list price.",
+        "held_by": None,        # past an automatic rule's limit: the headline already quotes that rule
         "held_at": fake.decisions[seeded].created_at.isoformat().replace("+00:00", "Z"),
         "handoff": None,
         "session": {"session_id": fake.decisions[seeded].decision.session_id, "kind": "visitor",
