@@ -26,7 +26,7 @@ it('strict_mode_remount_is_not_a_browser_close', async () => {
   act(() =>
     root.render(
       <StrictMode>
-        <Dialog title="Delete Emergencies?" body="Its public link stops working." confirmLabel="Delete Desk" cancelLabel="Keep it" onConfirm={() => {}} onCancel={onCancel} />
+        <Dialog title="Delete Turner Plumbing's Emergencies?" body="Its public link stops working." confirmLabel="Delete Desk" cancelLabel="Keep it" onConfirm={() => {}} onCancel={onCancel} />
       </StrictMode>,
     ),
   );

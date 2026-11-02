@@ -156,7 +156,7 @@ export function GeneralPage() {
         <Dialog
           title={
             <>
-              Delete <span data-copy="user">{desk.name}</span>?
+              Delete <span data-copy="user">{business.name}</span>'s <span data-copy="user">{desk.name}</span>?
             </>
           }
           body={DELETE_LINE}
