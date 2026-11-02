@@ -771,6 +771,20 @@ async def has_pending(conn: AsyncConnection, session_id: str) -> bool:
     return await latest_pending(conn, session_id) is not None
 
 
+async def has_unanswered_visitor(conn: AsyncConnection, session_id: str) -> bool:
+    """Whether the latest conversational message is the visitor's, with no delivered reply after it.
+
+    Mode markers, private whispers and bookkeeping aren't answers. Read under the events lock so a message
+    being stored has committed before deciding whether the hand-back should wake Claude.
+    """
+    await lock_events(conn, session_id)
+    kind = (await conn.execute(select(MESSAGES.c.kind).where(
+        MESSAGES.c.session_id == session_id, NOT_REPLAYED,
+        MESSAGES.c.kind.in_(("visitor_text", "agent_text", "owner_say", "delivered")))
+        .order_by(MESSAGES.c.n.desc()).limit(1))).scalar_one_or_none()
+    return kind == "visitor_text"
+
+
 async def latest_pending(conn: AsyncConnection, session_id: str) -> int | None:
     """The `n` of the session's latest pending row (`has_pending`), or None when no work is waiting."""
     return (await conn.execute(select(func.max(MESSAGES.c.n)).where(

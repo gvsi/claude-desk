@@ -26,7 +26,7 @@ from desk.api.main import create_app
 from desk.api.prompts import NOTES
 from desk.api.routes import public
 from desk.kernel_api import CreateCopyRequest, DeskBusinessRequest
-from tests.api.fakes import ScriptedModel, response
+from tests.api.fakes import ScriptedModel, response, tool_use
 from tests.api.notes import conversation_notes
 from tests.api.test_approvals import answer, held_request, resolved
 from tests.api.test_loop_fencing import Kernel
@@ -358,6 +358,89 @@ async def test_visitor_messages_during_take_over_do_not_wake_claude(app, browser
     assert [(item["kind"], item["text"]) for item in owner_items] == [("owner_joined", None),
                                                                         ("visitor_text", "Is that Mike?"),
                                                                         ("delivered", None)]
+
+
+async def test_hand_back_answers_the_waiting_visitor_once(app, browser, fake, kernel_http, model, engine):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    sent = await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages", json={"text": "Do you fix leaks?"})
+    assert sent.status_code == 202
+    await app.state.runtime.runner.drain()
+    assert model.requests == []
+    model.add(response(reply("Yes, we can help with leaks. What is leaking?")))
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+        events = await stream.until(lambda events: "turn_end" in types(events))
+        # Repeating the same mode at its current generation must not start another turn.
+        assert (await mode_change(chat, "handback", 2)).status_code == 200
+        await app.state.runtime.runner.drain()
+
+    assert len(model.requests) == 1
+    assert "<visitor_message>Do you fix leaks?</visitor_message>" in json.dumps(model.requests[0].messages)
+    assert types(events) == ["owner_joined", "owner_left", "writing", "message", "turn_end"]
+    assert (events[-2][1].author, events[-2][1].generation) == ("claude", 2)
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]
+    assert len(fake.called("POST /check_reply")) == 1
+
+
+@pytest.mark.parametrize("latest", ["empty", "owner_answered", "owner", "claude"])
+async def test_hand_back_without_a_waiting_visitor_starts_nothing(app, browser, fake, kernel_http, model, engine,
+                                                               latest):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    if latest == "claude":
+        model.add(response(reply("Yes, we can help with leaks.")))
+        async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+            assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                            json={"text": "Do you fix leaks?"})).status_code == 202
+            await stream.until(lambda events: "turn_end" in types(events))
+        await app.state.runtime.runner.drain()
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    if latest == "owner_answered":
+        assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                        json={"text": "Do you fix leaks?"})).status_code == 202
+        await app.state.runtime.runner.drain()
+    if latest in ("owner", "owner_answered"):
+        assert (await message(chat, "Yes, it's Mike. I can help with that.")).status_code == 200
+    calls_before = len(model.requests)
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        assert (await mode_change(chat, "handback", 1)).status_code == 200
+        await stream.until(lambda events: "owner_left" in types(events))
+        await app.state.runtime.runner.drain()
+
+    assert len(model.requests) == calls_before
+    assert await control_types(engine, chat.session_id) == []
+    assert await conversation_notes(engine, chat.session_id, "text", "wake") == [
+        (NOTES["taken_over"], False), (NOTES["handed_back"], False)]
+
+
+async def test_hand_back_turn_still_decides_executes_and_checks_with_the_visitor_credential(
+        app, browser, fake, kernel_http, model, engine):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert (await mode_change(chat, "takeover", 0)).status_code == 200
+    assert (await chat.visitor.post(f"/api/public/desks/{chat.slug}/messages",
+                                    json={"text": "How much is drain clearing?"})).status_code == 202
+    await app.state.runtime.runner.drain()
+    model.add(response(tool_use("native__quote", {"items": [{"item_id": "drain", "qty": 1}],
+                                                "requested_discount_bp": 0})),
+              response(reply("I have checked the price list.")))
+    fake.calls.clear()
+
+    # With no open stream, the hand-back leaves work for the next visitor request; it never borrows the owner cookie.
+    assert (await mode_change(chat, "handback", 1)).status_code == 200
+    await app.state.runtime.runner.drain()
+    assert model.requests == []
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        events = await stream.until(lambda events: "turn_end" in types(events))
+    await app.state.runtime.runner.drain()
+
+    assert len(model.requests) == 2 and types(events).count("turn_end") == 1
+    turn = fake.calls[fake.calls.index(fake.called("POST /sessions/{id}/mode")[0]) + 1:]
+    assert [call.route for call in turn if call.route in ("POST /decide", "POST /execute", "POST /check_reply")] == [
+        "POST /decide", "POST /execute", "POST /check_reply"]
+    assert all(call.headers.get(VISITOR) == chat.token and OWNER not in call.headers for call in turn)
+    assert await control_types(engine, chat.session_id) == ["run_resumable"]
 
 
 async def test_hand_back_resumes_claude_with_the_visitor_credential(app, browser, fake, kernel_http, model, engine):

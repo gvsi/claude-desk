@@ -55,7 +55,8 @@ from desk.api.schemas import (
     operation_ids,
 )
 from desk.api.sse import RUN_EVENTS, append_control, emit
-from desk.api.store import MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending, transcript
+from desk.api.store import (MESSAGES, Ids, Replayed, append_message, blocks_text, has_pending,
+                            has_unanswered_visitor, transcript)
 from desk.contracts import (CopyCreated, Decision, DemoInboxEntry, LedgerPage, OwnerMessageResult, SessionState,
                             effective_brand)
 from desk.events import EvOwnerJoined, EvOwnerLeft, EvOwnerTyping
@@ -707,8 +708,9 @@ async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionSt
         return
     if before == "owner":
         await _transcribed(conn, ids, EvOwnerLeft(type="owner_left"))
+    waiting_visitor = before == "owner" and await has_unanswered_visitor(conn, ids.session_id)
     await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
-                         wake=False)
+                         wake=waiting_visitor)
     if await has_pending(conn, ids.session_id):
         await append_control(conn, ids, "run_resumable", {"generation": now.generation})
 
@@ -737,7 +739,8 @@ async def handback(session_id: SessionId, body: GenerationIn,
                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> SessionState:
     """Hand a conversation the owner took over back to Claude, at the generation the owner last read: the kernel
     moves it to mode `ai` (a new generation), the visitor sees the owner leave, and Claude reads that the owner handed
-    it back. Work that waited for the owner (an answered request's outcome, a whisper) wakes Claude, whose turn runs
+    it back. Work that waited for the owner (an unanswered visitor line, an answered request's outcome, a whisper)
+    wakes Claude, whose turn runs
     with the visitor's credential once it is present: the open stream or the next request."""
     return await _change_mode(ctx, session_id, "ai", body.generation)
 
