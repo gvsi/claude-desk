@@ -340,6 +340,11 @@ export interface OwnerTranscript {
   typing_until?: string | null;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+  /**
+   * The visitor's public chat stream is open now, so a whisper reaches Claude at once (owner view
+   * only). An agent holds no stream, so its chat reads false. Absent is false.
+   */
+  visitor_here?: boolean;
   /** A demo visitor's chat: an AI the owner started plays the customer. Absent is false. */
   demo_visitor?: boolean;
   /** The demo visitor run that opened the chat (`GET …/demo_visitor/{run_id}`); null or absent when none is named. */

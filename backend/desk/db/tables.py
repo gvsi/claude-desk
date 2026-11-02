@@ -15,7 +15,8 @@ KERNEL_TABLES: tuple[str, ...] = (
     "payment_links", "handoffs", "notification_prefs", "demo_inbox", "ledger_heads", "ledger_entries",
 )
 
-APP_TABLES: tuple[str, ...] = ("messages", "run_events", "setup_interviews", "a2a_turns", "model_calls")
+APP_TABLES: tuple[str, ...] = ("messages", "run_events", "setup_interviews", "a2a_turns", "model_calls",
+                              "conversation_reads")
 
 MOCKPAY_TABLES: tuple[str, ...] = ("checkouts", "charges", "refunds", "tool_definitions")
 

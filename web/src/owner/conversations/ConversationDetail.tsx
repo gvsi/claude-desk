@@ -38,13 +38,13 @@ import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
-import { DEMO_VISITOR_PILL, TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder } from './copy.ts';
+import { DEMO_VISITOR_PILL, TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder, whisperHelper } from './copy.ts';
 import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { DemoVisitorNote, useDemoVisitorRun } from './DemoVisitorNote.tsx';
 import { latestOf } from './latest.ts';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
 import { OwnerTranscript } from './OwnerTranscript.tsx';
-import { whoLabel } from './status.ts';
+import { nameOf, whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
@@ -373,6 +373,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
           variant="whisper"
           label="Whisper to Claude"
           placeholder={sampleDesk ? WHISPER_PLACEHOLDER_SAMPLE : WHISPER_PLACEHOLDER}
+          helper={whisperHelper(summary ? nameOf(summary) : null, read.visitor_here === true)}
           maxLength={MESSAGE_MAX_LENGTH}
           disabled={controls.sending}
           onSend={whisper}

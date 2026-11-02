@@ -5,7 +5,7 @@ Each mode change goes to the kernel with the owner's credential under the sessio
 the note it brings, so nothing of an older generation is shown after it. A say is checked by the kernel and shown
 through `deliver()` as the owner's; a whisper reaches only Claude, wrapped as untrusted text. Claude's follow-up after
 a hand-back or a resume runs with the visitor's own credential, once it is present (the open stream or the next
-request).
+request), so the owner's read says whether the visitor's stream is open now (`visitor_here`).
 
 The app runs on FakeKernel (behind hooks a test may set), a scripted model and Procrastinate's in-memory job queue,
 its worker inside the app's lifespan.
@@ -41,6 +41,7 @@ from tests.api.test_public_chat import (
     rows,
     stored_events,
     types,
+    until,
     visitor_cookie,
 )
 from tests.kernel_contract.ro_tables import FAKE_RO_SCHEMA
@@ -747,6 +748,44 @@ async def test_whisper_waits_while_the_owner_has_the_chat_or_it_is_paused(app, b
     assert [event.handoff for event in await stored_events(engine, chat.session_id) if event.type == "message"] == [
         False, False]
     assert await control_types(engine, chat.session_id) == ["run_resumable"]
+
+
+async def visitor_here(owner: httpx.AsyncClient, session_id: str) -> bool:
+    """The owner's read of whether the conversation's visitor is in the chat now."""
+    read = await owner.get(f"/api/owner/conversations/{session_id}")
+    assert read.status_code == 200, read.text
+    return read.json()["visitor_here"]
+
+
+async def test_the_owner_sees_whether_the_visitor_is_in_the_chat(app, browser, fake, kernel_http):
+    """A whisper reaches Claude at once only while the visitor's stream is open, and at their next request otherwise,
+    so the owner's read says which: here while their public stream is open, away before it opens and once it closes."""
+    chat = await new_chat(app, browser, kernel_http, fake)
+    assert await visitor_here(chat.owner, chat.session_id) is False
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(chat.token)]) as stream:
+        await until(lambda: stream.frames)                  # its opening comment has been read
+        assert await visitor_here(chat.owner, chat.session_id) is True
+    assert await visitor_here(chat.owner, chat.session_id) is False
+
+
+async def test_another_visitors_stream_leaves_a_chat_with_none_away(app, browser, fake, kernel_http):
+    chat = await new_chat(app, browser, kernel_http, fake)
+    _, token, beside = await open_session(app, browser, chat.slug)      # another visitor on the same Desk
+
+    async with Stream(app, events_path(chat.slug), headers=[cookie(token)]) as stream:
+        await until(lambda: stream.frames)
+        assert await visitor_here(chat.owner, beside["state"]["session_id"]) is True
+        assert await visitor_here(chat.owner, chat.session_id) is False
+
+
+async def test_a_visiting_agent_reads_as_away(app, browser, fake, kernel_http, model):
+    """An agent holds no stream: Claude reads a whisper at its next request, so its session never reads as here."""
+    agent = await new_agent(app, browser, fake, kernel_http)
+    model.add(response(reply("Happy to help.")))
+    assert (await agent.send("Hello")).status_code == 200
+
+    assert await visitor_here(owner_browser(app, browser, agent.owner_token), agent.session_id) is False
 
 
 async def test_owner_steps_into_their_preview_of_a_desk_in_setup(app, browser, fake, kernel_http, model, engine):

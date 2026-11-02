@@ -95,7 +95,17 @@ export const Board: Story = {
     await expect(card).not.toHaveTextContent('Test payment');
     await expect(within(card).queryByRole('link')).toBeNull();
     await expect(within(card).queryByRole('button')).toBeNull();
-    await expect(Math.round(one(desk, '.cd-reply-card').getBoundingClientRect().left)).toBe(266);
+    // The left About column leaves the reading column centred in the chat pane to its right.
+    const about = canvas.getByRole('complementary', { name: 'About Turner Plumbing' });
+    const column = about.getBoundingClientRect();
+    const pane = chat.getBoundingClientRect();
+    const reading = one(chat, '.cd-public-shell__chat-head').getBoundingClientRect();
+    await expect(column.left).toBe(0);
+    await expect(column.width).toBeCloseTo(1512 * 0.22, 1);
+    await expect(pane.left).toBe(column.right);
+    await expect(reading.width).toBe(680);
+    await expect(reading.left + reading.width / 2).toBeCloseTo(pane.left + pane.width / 2, 1);
+    await expect(one(desk, '.cd-reply-card').getBoundingClientRect().left).toBe(reading.left);
     await expectFooter(canvasElement);
   },
 };

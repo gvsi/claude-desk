@@ -110,7 +110,9 @@ class DeskSummary(BaseModel):
     `answering` is separate: the Answering switch can turn a Desk on before its setup finishes, and it still lists its
     setup. `business_type` is the key the owner's pages word their fixed examples by, the built-in agent's task set
     (`agents.demo_task_set`): the business type setup stored for the Desk, `rivera` for the copy's own Desk (the
-    Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's."""
+    Turner seed) and `other` for any other Desk setup didn't type. Read-only; never text of the Desk's.
+    `unread_conversations` is how many of the Desk's conversations are unread (`ConversationSummary.unread`), so the
+    owner's menu can show it on every page without reading the list."""
 
     desk_id: str
     slug: str
@@ -120,6 +122,7 @@ class DeskSummary(BaseModel):
     answering: bool
     setup: DeskSetup | None
     business_type: DemoTaskSet
+    unread_conversations: int
 
 
 class CopyOut(BaseModel):
@@ -491,7 +494,10 @@ class ConversationSummary(BaseModel):
     `demo_visitor` is true for a demo visitor's chat (an AI the owner started to play a customer,
     `owner_reads.demo_visitors`), listed as soon as it opens; with no verified or lead name, its `display_name` is its
     persona's first name; and `demo_visitor_run_id` names the run that opened it, None for a mark written before
-    runs were recorded there."""
+    runs were recorded there. `unread` is whether the visitor or the visiting agent wrote after the cursor the owner
+    last marked read (`POST /api/owner/conversations/{session_id}/read`), or wrote at all with nothing marked; what
+    Claude, the owner, the API and the kernel add never makes a conversation unread, and the owner's preview never
+    is."""
 
     session_id: str
     kind: ActorKind
@@ -511,18 +517,22 @@ class ConversationSummary(BaseModel):
     latest_outcome_cause: RefusalCause | None = None
     demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
     demo_visitor_run_id: str | None = None  # the demo visitor run that opened the chat, when its mark names one
+    unread: bool
 
 
 class OwnerTranscript(BaseModel):
     """`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as
     the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).
     `typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,
-    kept in the API's memory and shown to the owner alone."""
+    kept in the API's memory and shown to the owner alone. `visitor_here`, presence too, is true while the visitor's
+    public chat stream is open, when a whisper reaches Claude at once; an agent holds no stream, so its session reads
+    false (Claude reads a whisper at its next request)."""
 
     state: SessionState
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
     replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
+    visitor_here: bool = False
     demo_visitor: bool = False              # a demo visitor's chat: an AI the owner started plays the customer
     demo_visitor_run_id: str | None = None  # the demo visitor run that opened it (`GET …/demo_visitor/{run_id}`)
 
@@ -537,6 +547,15 @@ class GenerationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     generation: Annotated[int, Field(ge=0)]
+
+
+class ReadThroughIn(BaseModel):
+    """`POST /api/owner/conversations/{session_id}/read`: the transcript cursor the owner has seen (`TranscriptItem.n`,
+    the last item the screen showed). The marker only moves forward, and never past the session's newest row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    through: Annotated[int, Field(ge=0)]
 
 
 class OwnerMessageIn(BaseModel):

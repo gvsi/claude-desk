@@ -553,7 +553,7 @@ it('composer_stays_in_view_while_the_log_scrolls', async () => {
 });
 
 it('about_column_beside_the_chat_or_atop_the_conversation', async () => {
-  // On a laptop the about column stands at the right of the chat, from the header to the window's
+  // On a laptop the about column stands at the left of the chat, from the header to the window's
   // foot, and stays put while the conversation scrolls. Narrower than 900 px there is no room
   // beside the chat, and the page doesn't scroll, so the column opens the conversation's scroll
   // region instead: above the first message, the region's full width, scrolled away as the chat
@@ -570,7 +570,7 @@ it('about_column_beside_the_chat_or_atop_the_conversation', async () => {
       const after = about.getBoundingClientRect();
       seen.push({
         window: named(size),
-        beside: before.left >= main.getBoundingClientRect().right && before.right === innerWidth,
+        beside: before.right <= main.getBoundingClientRect().left && before.left === 0,
         underTheHeader: before.top === one('.cd-public-brand').getBoundingClientRect().bottom && before.bottom === innerHeight,
         still: after.top === before.top && after.left === before.left,
       });
@@ -1797,4 +1797,31 @@ it('focus_moving_on_from_ask_scrolls_nothing', async () => {
     { composerDisabled: false, short: true, focused: true, readingMoved: 0, scrolledPastWhatTheHeadLost: 0 },
     { composerDisabled: true, short: true, focused: true, readingMoved: 0, scrolledPastWhatTheHeadLost: 0 },
   ]);
+});
+
+it('open_status_shows_once_with_or_without_about_in_standalone_and_embedded_shells', async () => {
+  container.style.height = '820px';
+  for (const width of [1512, 900, 899]) {
+    for (const footer of [true, false]) {
+      for (const withAbout of [true, false]) {
+        act(() => root.render(null));
+        await page.viewport(width, 820);
+        act(() => root.render(
+          <PublicShell brand={brandOf(desk)} ownerName="Mike Turner" language="en" openStatus={OPEN_EN}
+            about={withAbout ? desk.charter : undefined} footer={footer} onAskForOwner={() => {}} composer={null}>
+            {null}
+          </PublicShell>,
+        ));
+        await vi.waitFor(() => {
+          const statuses = container.querySelectorAll('.cd-public-shell__open-status');
+          expect(statuses).toHaveLength(1);
+          const status = statuses[0]!;
+          expect(status.textContent).toBe(OPEN_EN.text);
+          const destination = width >= 900 && withAbout ? '.cd-public-shell__about' : '.cd-public-shell__brand';
+          expect(status.closest(destination)).not.toBeNull();
+        });
+        await expect.element(one('.cd-public-shell__open-status')).toBeVisible();
+      }
+    }
+  }
 });

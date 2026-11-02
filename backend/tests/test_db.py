@@ -1639,6 +1639,32 @@ def test_business_tools_view_migration_goes_down_and_up(scratch):
     assert not admin.execute("SELECT has_column_privilege('desk_api', 'kernel.tools', 'profile', 'SELECT')").fetchone()[0]
 
 
+def test_the_conversation_reads_revision_goes_down_and_up(scratch):
+    """api_conversation_reads adds the owner's read markers, a table of the API's own that desk_api reads and writes and
+    no other role reaches, and an index of the visitors' and agents' words for the unread reads. Its downgrade takes
+    both away, and head brings them back."""
+    admin = scratch.conn
+    below = ScriptDirectory.from_config(alembic_config()).get_revision("api_conversation_reads").down_revision
+
+    def present() -> tuple[bool, bool]:
+        return admin.execute("SELECT to_regclass('app.conversation_reads') IS NOT NULL,"
+                             " to_regclass('app.messages_said') IS NOT NULL").fetchone()
+
+    assert present() == (True, True)
+    scratch.migrate(command.downgrade, below)
+    try:
+        assert present() == (False, False)
+    finally:
+        scratch.migrate(command.upgrade, "head")
+    assert present() == (True, True)
+    assert columns(admin, "app", "conversation_reads") == ["copy_id", "desk_id", "session_id", "read_through_n",
+                                                           "read_at", "created_at"]
+    for role, expected in (("desk_api", set(DML)), ("desk_kernel", set()), ("desk_mockpay", set())):
+        held = {privilege for privilege in (*DML, "TRUNCATE", "REFERENCES", "TRIGGER")
+                if has(admin, "has_table_privilege", role, "app.conversation_reads", privilege)}
+        assert held == expected, role
+
+
 def test_kernel_ro_reads_need_no_role_that_bypasses_row_security(admin):
     # as on a managed Postgres whose migration role is neither SUPERUSER nor BYPASSRLS: the table's
     # owner and the view's owner are both bound by row security, and the API still reads its copy

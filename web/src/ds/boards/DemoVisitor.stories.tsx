@@ -297,11 +297,11 @@ const IN_REVIEW = 'Built against the board in review; sign-off pending.';
  * The stories draw the boards as they are.
  */
 const SINCE_THE_BAR =
-  'The board predates the bar pinned to the top of the open conversation (REV-720 C). The web app draws "Demo visitor" in that bar, right after the level pill, and the note at the top of the transcript, 16 px under the bar and over its opening lines, so it scrolls away with them.';
+  'The board predates the bar pinned to the top of the open conversation (REV-720 C). The web app draws "Demo visitor" in that bar, right after the level pill, and the note at the top of the transcript, 16 px under the bar and over its opening lines, so it scrolls away with them. The web app\'s take-over and whisper composers now show example placeholders, with a helper line under the take-over one (#905), where the board draws the older placeholder words.';
 
 /** What the web app's Things to try draws differently from the REV-DEMO Today boards, by the owner's later choices. */
 const SINCE_THE_CHOICES =
-  "The other cards keep the board's words, where the web app's have since moved on: a hold past an automatic rule's limit has no “Held by your rule” line, since its headline already quotes that rule (owner decision, 2026-11-02, #671); “Try to break it” points at each reply's receipt, a hold by a named rule reads “A request is waiting for your answer: {rule}.”, and every card fits in three lines (owner, 2026-11-02, #867).";
+  "The other cards keep the board's words, where the web app's have since moved on: a hold past an automatic rule's limit has no “Held by your rule” line, since the held card's headline in Needs you already quotes that rule (owner decision, 2026-11-02, #671); “Try to break it” points at each reply's receipt, and a hold by a named rule reads “A request is waiting for your answer: {rule}.” (owner, 2026-11-02, #867).";
 
 const meta = {
   title: 'Boards/Demo visitor',
