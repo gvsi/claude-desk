@@ -9,6 +9,20 @@ import { DemoInboxPanel, type DemoInboxPanelProps } from './DemoInboxPanel.tsx';
 const [codeEntry] = chen.demoInbox.entries;
 const notice = chen.demoInbox.notices.find((n) => n.entry_id === codeEntry?.entry_id);
 
+/** An urgent callback's alert to the owner, as the kernel stores it, without the title it reads under. */
+const alert: DemoInboxEntry = {
+  entry_id: 'inbox-urgent',
+  to: 'owner',
+  kind: 'alert',
+  body: 'Reported as urgent through “Emergency callback”. Sam Lee · (510) 555-0100 · My pipes have burst',
+  created_at: '2026-11-01T09:00:00Z',
+  decision_id: null,
+};
+const alertNotice = { entry_id: alert.entry_id, to: 'owner', preview: 'Urgent callback requested' };
+
+/** The line above an opened entry's body: its title or its kind. */
+const kindOf = (html: string) => html.match(/cd-demo-inbox__kind[^>]*>([^<]*)</)?.[1];
+
 function render(props: Partial<DemoInboxPanelProps>): string {
   return renderToStaticMarkup(
     createElement(DemoInboxPanel, { viewer: 'visitor', language: 'en', items: [], onRetry: () => {}, ...props }),
@@ -54,16 +68,6 @@ describe('DemoInboxPanel', () => {
   it('an_owner_alert_reads_under_its_title_or_else_its_kind', () => {
     // The kernel titles the owner's alerts with their preview line; one without a title, or with a
     // blank one, reads as its kind, as every entry did before.
-    const alert: DemoInboxEntry = {
-      entry_id: 'inbox-urgent',
-      to: 'owner',
-      kind: 'alert',
-      body: 'Reported as urgent through “Emergency callback”. Sam Lee · (510) 555-0100 · My pipes have burst',
-      created_at: '2026-11-01T09:00:00Z',
-      decision_id: null,
-    };
-    const alertNotice = { entry_id: alert.entry_id, to: 'owner', preview: 'Urgent callback requested' };
-    const kindOf = (html: string) => html.match(/cd-demo-inbox__kind[^>]*>([^<]*)</)?.[1];
     const owner = (entry: DemoInboxEntry) => render({ viewer: 'owner', items: [{ notice: alertNotice, entry }] });
     expect(kindOf(owner({ ...alert, title: 'Urgent callback requested' }))).toBe('Urgent callback requested');
     for (const untitled of [alert, { ...alert, title: null }, { ...alert, title: '' }, { ...alert, title: '   ' }]) {
@@ -74,6 +78,18 @@ describe('DemoInboxPanel', () => {
     if (!codeEntry || !notice) throw new Error('the Chen fixture has no code entry');
     const visitor = render({ items: [{ notice, entry: { ...codeEntry, title: 'New verification code' } }] });
     expect(kindOf(visitor)).toBe('Verification code');
+  });
+
+  it('an_owner_alert_in_spanish_reads_as_its_kind', () => {
+    // The kernel's titles are English only, so the owner's panel in Spanish reads a titled alert as
+    // its kind, "Aviso", never under the English line.
+    const html = render({
+      viewer: 'owner',
+      language: 'es',
+      items: [{ notice: alertNotice, entry: { ...alert, title: 'Urgent callback requested' } }],
+    });
+    expect(kindOf(html)).toBe('Aviso');
+    expect(html).not.toContain('Urgent callback requested');
   });
 
   it('a_visitor_sees_a_row_before_its_entry_only_for_a_contact', () => {

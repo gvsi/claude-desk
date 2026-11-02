@@ -391,9 +391,13 @@ export const OwnerAlertLinkLeavesTheAppByBackslash: Story = {
 export const OwnerAlertInSpanish: Story = {
   args: { viewer: 'owner', language: 'es', items: [{ ...holdAlert, requestHref: REQUEST_HREF }] },
   parameters: {
-    canvasNote: `${BOARD}'s owner panel in Spanish, which no board shows: the request link in Spanish.`,
+    canvasNote: `${BOARD}'s owner panel in Spanish, which no board shows: the alert reads as its kind, "Aviso", since the kernel's titles are English only, and the request link is in Spanish.`,
   },
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
+    // owner_titles_are_english_only: the Spanish panel reads the titled alert as its kind.
+    const [alert] = itemsOf(canvasElement) as [HTMLElement];
+    await expect(alert.querySelector('.cd-demo-inbox__kind')).toHaveTextContent(/^Aviso$/);
+    await expect(alert.textContent).not.toContain(HOLD_TITLE);
     await expect(canvas.getByRole('link', { name: 'Abrir la solicitud' })).toHaveAttribute('href', REQUEST_HREF);
     await expect(canvas.queryByRole('link', { name: 'Open the request' })).toBeNull();
   },
