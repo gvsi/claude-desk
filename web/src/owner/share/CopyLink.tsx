@@ -31,7 +31,8 @@ async function writeToClipboard(value: string): Promise<void> {
 export function CopyLink({ url, actions, look = 'field' }: CopyLinkProps) {
   const field = useRef<HTMLDivElement>(null);
   const text = useRef<HTMLParagraphElement>(null);
-  const { state, copy } = useCopyText(writeToClipboard);
+  const { state, announcement, copy } = useCopyText(writeToClipboard);
+  const result = copyResultLine(state, { what: 'link' });
   const target = () => (look === 'text' ? text.current : (field.current?.querySelector<HTMLElement>('[data-copy="code"]') ?? null));
   return (
     <div className={`cd-copy-link cd-copy-link--${look}`}>
@@ -52,7 +53,7 @@ export function CopyLink({ url, actions, look = 'field' }: CopyLinkProps) {
       </div>
       {/* Always there, so the line after a press is read out when it appears. */}
       <p role="status" className="cd-copy-link__result cd-type-meta">
-        {copyResultLine(state, { what: 'link' })}
+        {result === '' ? null : <span key={announcement}>{result}</span>}
       </p>
     </div>
   );

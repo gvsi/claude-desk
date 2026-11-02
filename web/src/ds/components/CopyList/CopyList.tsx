@@ -80,7 +80,8 @@ function plainWords(text: ReactNode, shown: HTMLElement | null): string {
 
 function CopyRow({ item, onCopy }: { item: CopyListItem; onCopy: CopyListProps['onCopy'] }) {
   const words = useRef<HTMLParagraphElement>(null);
-  const { state, copy } = useCopyText(onCopy);
+  const { state, announcement, copy } = useCopyText(onCopy);
+  const result = copyResultLine(state);
   return (
     <li className="cd-copy-list__row">
       <div className="cd-copy-list__text">
@@ -89,7 +90,7 @@ function CopyRow({ item, onCopy }: { item: CopyListItem; onCopy: CopyListProps['
           {item.text}
         </p>
         <p role="status" className="cd-copy-list__result cd-type-meta">
-          {copyResultLine(state)}
+          {result === '' ? null : <span key={announcement}>{result}</span>}
         </p>
       </div>
       <span className="cd-copy-list__copy">

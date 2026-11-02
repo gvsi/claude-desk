@@ -31,7 +31,7 @@ export interface CopyFieldProps {
 export function CopyField({ label, value, copyLabel, onCopy, note, layout = 'inline', language }: CopyFieldProps) {
   const valueRef = useRef<HTMLElement>(null);
   const labelId = `${useId()}-label`;
-  const { state, copy } = useCopyText(onCopy ?? (() => {}));
+  const { state, announcement, copy } = useCopyText(onCopy ?? (() => {}));
   const copies = copyLabel !== undefined && onCopy !== undefined;
   const result = copyResultLine(state, { language });
 
@@ -68,7 +68,7 @@ export function CopyField({ label, value, copyLabel, onCopy, note, layout = 'inl
       {/* Always there, so the line after a press is read out when it appears. */}
       {copies ? (
         <p role="status" className="cd-copy-field__result cd-type-meta">
-          {result}
+          {result === '' ? null : <span key={announcement}>{result}</span>}
         </p>
       ) : null}
     </div>

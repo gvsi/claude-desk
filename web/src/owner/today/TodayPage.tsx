@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import { Button, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
+import { Button, COPIED_FOR_MS, Greeting, NAV_LABELS, SkeletonScreen } from '../../ds/index.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { useAnsweredFocus } from '../approvals/HeldRequest.tsx';
@@ -50,8 +50,7 @@ const LINK_COPY_LINE: Record<Exclude<LinkCopy, 'idle'>, string> = {
   failed: "Copy didn't work. Select the link and copy it yourself.",
 };
 
-/** How long the link's pill says "Copied" after a copy that worked. */
-export const COPIED_FOR_MS = 1_600;
+export { COPIED_FOR_MS } from '../../ds/index.ts';
 
 /**
  * `/app/:deskId/today`: a band across the page with the greeting, who is here now, the Desk's public

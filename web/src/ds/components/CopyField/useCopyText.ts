@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 
@@ -7,6 +7,12 @@ export type CopyState = 'idle' | 'copied' | 'failed';
 
 /** What a copy control copies, which its failure line names: a link (the Desk's public link) or any other text. */
 export type CopyWhat = 'link' | 'text';
+
+/** How long a successful copy confirmation stays, shared with Today's link pill. */
+export const COPIED_FOR_MS = 1_600;
+
+// Copy controls share a clipboard, so a new success clears the previous control's confirmation.
+let clearLastCopy: (() => void) | undefined;
 
 /**
  * The lines a copy control shows after a press, in the two languages a visitor reads. A failed copy
@@ -62,20 +68,45 @@ export function selectText(el: HTMLElement): void {
  * the callback fails (it throws or rejects), the text in `target` is selected instead (a field's
  * value, or an element's text), so it can still be copied by hand. Pass the target: the failure
  * line says the link or the text "is selected", which is only true when there is one.
+ * Success clears the previous control's confirmation and expires after COPIED_FOR_MS. Key the
+ * live region's contents by `announcement` so repeating a copy announces its result again.
  */
 export function useCopyText(onCopy: (value: string) => Promise<void> | void): {
   state: CopyState;
+  announcement: number;
   copy: (value: string, target: HTMLElement | null) => Promise<void>;
 } {
-  const [state, setState] = useState<CopyState>('idle');
+  const [result, setResult] = useState({ state: 'idle' as CopyState, announcement: 0 });
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const mounted = useRef(true);
+  const clear = useCallback(function clear() {
+    clearTimeout(timer.current);
+    timer.current = undefined;
+    if (clearLastCopy === clear) clearLastCopy = undefined;
+    setResult((now) => now.state === 'copied' ? { ...now, state: 'idle' } : now);
+  }, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      clearTimeout(timer.current);
+      if (clearLastCopy === clear) clearLastCopy = undefined;
+    };
+  }, [clear]);
   const copy = async (value: string, target: HTMLElement | null) => {
     try {
       await onCopy(value);
-      setState('copied');
+      if (!mounted.current) return;
+      clearLastCopy?.();
+      clearLastCopy = clear;
+      setResult((now) => ({ state: 'copied', announcement: now.announcement + 1 }));
+      timer.current = setTimeout(clear, COPIED_FOR_MS);
     } catch {
+      if (!mounted.current) return;
+      clear();
       if (target) selectText(target);
-      setState('failed');
+      setResult((now) => ({ state: 'failed', announcement: now.announcement + 1 }));
     }
   };
-  return { state, copy };
+  return { ...result, copy };
 }
