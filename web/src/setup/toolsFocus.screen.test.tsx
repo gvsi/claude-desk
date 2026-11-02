@@ -30,13 +30,27 @@ it.each([
   for (const question of SETUP_QUESTIONS) await mockStore.dispatch('setupAnswer', { params, body: {
     question: question.key, text: question.key === 'money_limit' ? '$500 is fine.' : 'Yes, that works.',
   } });
+  const desk = mockStore.world.desk(state.desk_id);
+  if (!desk) throw new Error('setup has a Desk');
+  // A long covering rule keeps the review scrollable even after the list has been replaced.
+  desk.policy.cards.push({
+    card_id: 'long-tool-review', applies_to: name === 'Payments' ? 'native.payment_link' : 'payments.create_refund',
+    mode: 'ask', who: 'anyone', reason: 'Ask me before taking a payment for a new customer. '.repeat(20),
+  });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
   const opening = screen.getByRole('button', { name: `${verb} ${name}`, exact: true });
   await expect.element(opening).toBeVisible();
+  if (viewport === 'phone') {
+    (opening.element() as HTMLElement).focus({ preventScroll: true });
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+    expect(window.scrollY).toBeGreaterThan(0);
+  }
   await press(opening.element());
 
   const heading = screen.getByRole('heading', { level: 1, name: new RegExp(`^Review what Claude could do with ${name}`) });
   await expect.element(heading).toHaveFocus();
+  expect(window.scrollY).toBe(0);
+  expect(heading.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
   expect(heading.element().tabIndex).toBe(-1);
   expect(getComputedStyle(heading.element()).boxShadow).toBe('none');
   await press(screen.getByRole('button', { name: 'Cancel', exact: true }).element());
@@ -48,9 +62,17 @@ it.each([
     await press(screen.getByRole('button', { name: 'Connect Stripe', exact: true }).element());
     await expect.element(screen.getByRole('button', { name: 'Turn it on', exact: true })).toBeEnabled();
   }
-  await press(screen.getByRole('button', { name: 'Turn it on', exact: true }).element());
+  const turnOn = screen.getByRole('button', { name: 'Turn it on', exact: true });
+  if (viewport === 'phone') {
+    (turnOn.element() as HTMLElement).focus({ preventScroll: true });
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+    expect(window.scrollY).toBeGreaterThan(0);
+  }
+  await press(turnOn.element());
   const confirmHeading = screen.getByRole('heading', { level: 1, name: `Turn on ${name}`, exact: true });
   await expect.element(confirmHeading).toHaveFocus();
+  expect(window.scrollY).toBe(0);
+  expect(confirmHeading.element().getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
   expect(confirmHeading.element().tabIndex).toBe(-1);
   expect(getComputedStyle(confirmHeading.element()).boxShadow).toBe('none');
 

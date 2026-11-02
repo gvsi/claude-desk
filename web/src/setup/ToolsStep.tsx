@@ -26,7 +26,7 @@ import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { MOCK_PAYMENTS, useConnectorFlow } from './connectorFlow.ts';
 import { SETUP_COPY } from './copy.ts';
-import { aroundBusiness } from './shared.ts';
+import { aroundBusiness, useOpensAtTop } from './shared.ts';
 import { ToolsListSkeleton } from './StepSkeletons.tsx';
 
 const copy = SETUP_COPY.tools;
@@ -138,6 +138,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
   const focusRow = useRef(false);
   const reviewReady = rules.data !== undefined && tools.data !== undefined;
   const viewKey = view.kind === 'confirm' ? `confirm:${view.draft.version}` : view.kind;
+  useOpensAtTop(viewKey);
   // View swaps announce their heading. Back and Cancel return to the opener; a confirm returns
   // to its row immediately, so focus survives the refresh replacing its button with "On".
   useLayoutEffect(() => {
