@@ -261,7 +261,8 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
         "doesn't have to ask again",
         'The reply check reads some everyday words as commitments even in a negation: "promise", '
         '"no charge" and counting words such as "two"',
-        'It allows "free" only inside a repeat of one of this Desk\'s own service names',
+        'It allows "free" only inside the exact title or appointment type of one of your tools, word for word, '
+        'used as that service\'s name; never add a free claim beyond it.',
         'Say "I can\'t say for sure" rather than "I can\'t promise", and describe things without counting them',
         "plain words, no jargon, no exclamation marks",
         "These shape how you sound; the rules above still decide what you say.",
