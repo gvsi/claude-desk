@@ -148,6 +148,14 @@ class People:
             return None
         return self._verified.get(session_id) or self._leads.get(session_id)
 
+    def person(self, session_id: str) -> str | None:
+        """The person on record a visitor's session was verified as, else None: never an agent's or the owner's own
+        preview, even one verified as someone on record."""
+        row = self.sessions.get(session_id)
+        if row is None or row["kind"] != "visitor" or row["preview"] or not row["verified"]:
+            return None
+        return row["person_id"]
+
     def brief(self, session_id: str, demo: dict[str, DemoMark] | None = None) -> NeedsYouSession | None:
         """Who the session is, for Needs you. `demo` is the Desk's demo visitors' chats (`demo_visitors`): one of
         them is flagged and, with no other name, named by its persona, as Conversations names it."""
@@ -1354,7 +1362,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None,
         found.append(ConversationSummary(
             session_id=session_id, kind=row["kind"],
             display_name=who.name(session_id) or (mark.first_name if mark else None),
-            verified=row["verified"], mode=row["mode"],
+            verified=row["verified"], person_id=who.person(session_id), mode=row["mode"],
             last_activity=max(utc(latest[session_id]), utc(row["created_at"])),
             outcome_counts=dict(counts.get(session_id, {})), owner_preview=row["preview"],
             latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcome.outcome,

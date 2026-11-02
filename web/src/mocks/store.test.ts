@@ -1744,6 +1744,34 @@ describe('the scripted Desk', () => {
     );
   });
 
+  it('summary_names_a_verified_visitors_person', async () => {
+    mockStore.reset('rivera_regulars');
+    const { dana, bob } = rivera.people;
+    const world = mockStore.world;
+    const desk = world.desk(deskId)!;
+    const persons = async () =>
+      new Map(((await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[]).map((c) => [c.session_id, c.person_id]));
+
+    // The earlier chats Dana verified in are hers, newest first; Bob has none, and her live chat,
+    // where she hasn't confirmed it's her, is no one's.
+    const seeded = (await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[];
+    expect(seeded.filter((c) => c.person_id === dana.personId).map((c) => c.session_id)).toEqual(['ses-dana-invoice', 'ses-dana-quote']);
+    expect(seeded.filter((c) => c.person_id === bob.personId)).toEqual([]);
+    expect((await persons()).get('ses-dana-web')).toBeNull();
+    expect((await persons()).get('ses-alex-agent')).toBeNull();
+
+    // A visitor who verifies as Bob is his; the owner's preview, verified as him too, isn't.
+    const visitor = world.addSession(desk);
+    world.visitorText(visitor, 'Hi, it is Bob.');
+    world.verify(visitor, bob);
+    const preview = world.addSession(desk, { ownerPreview: true });
+    world.visitorText(preview, 'Testing my own Desk.');
+    world.verify(preview, bob);
+    const listed = await persons();
+    expect(listed.get(visitor.state.session_id)).toBe(bob.personId);
+    expect(listed.get(preview.state.session_id)).toBeNull();
+  });
+
   it('summary_carries_the_visitors_newest_words', async () => {
     const latest = async (sessionId: string) =>
       ((await call('conversations', { params: { desk_id: deskId } })).body as ConversationSummary[]).find((c) => c.session_id === sessionId)

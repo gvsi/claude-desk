@@ -298,6 +298,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     kind: session.state.kind,
     display_name: session.displayName ?? session.demoVisitor ?? null,
     verified: session.state.verified,
+    person_id: session.state.kind === 'visitor' && !session.ownerPreview && session.state.verified ? (session.person?.personId ?? null) : null,
     mode: session.state.mode,
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,

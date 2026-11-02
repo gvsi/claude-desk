@@ -340,7 +340,9 @@ export interface ConnectorProposal {
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
  * anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
- * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+ * preview. `person_id` is the person on record a visitor's session was verified as, which that person's page lists
+ * the conversation by; null for an unverified visitor, an agent and the owner's preview, even a verified one.
+ * `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
  * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
  * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
  * written yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose
@@ -370,6 +372,7 @@ export interface ConversationSummary {
   kind: "visitor" | "agent" | "owner";
   display_name: string | null;
   verified: boolean;
+  person_id: string | null;
   mode: "ai" | "owner" | "paused";
   last_activity: string;
   outcome_counts: {
