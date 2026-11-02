@@ -45,6 +45,7 @@ from sqlalchemy import DateTime, and_, cast, func, literal, null, or_, select, t
 from sqlalchemy.dialects.postgresql import JSONB, JSONPATH
 
 from desk.always_on import specificity
+from desk.api import conversation_reads
 from desk.api.deps import OwnerCtx
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.ro import decision_replayed, replayed, ro_view, set_copy
@@ -1332,7 +1333,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None,
     activity first. A visitor's conversation, other than the owner's own preview, carries the newest message the
     visitor typed (`visitor_line`); an agent's carries none, and instead its newest outcome's facts
     (`agent_outcomes`). A demo visitor's is flagged (`demo_visitors`, or `demo` when the caller read them already)
-    and, with no other name, named by its persona."""
+    and, with no other name, named by its persona. Each says whether it is unread (`conversation_reads.unread`)."""
     who = who or await people(ctx, desk_id)
     decisions = await ctx.ro.rows("decisions", desk_id=desk_id)
     latest = dict((await ctx.ro.conn.execute(
@@ -1354,6 +1355,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None,
                  for session_id, outcome in (await visitor_outcomes(ctx, desk_id, visitors, decisions)).items()}
     recorded, _ = await history_sessions(ctx, desk_id)
     demo = await demo_visitors(ctx, desk_id) if demo is None else demo
+    unread = (await conversation_reads.unread(ctx, [desk_id])).get(desk_id, set())
     found = []
     for session_id, row in who.sessions.items():
         if session_id not in latest:
@@ -1369,7 +1371,7 @@ async def conversations(ctx: OwnerCtx, desk_id: str, who: People | None = None,
             latest_visitor_text=visitor_line(said.get(session_id)), latest_outcome=outcome.outcome,
             latest_outcome_starts_at=outcome.starts_at, latest_outcome_cents=outcome.cents,
             latest_outcome_cause=outcome.cause, replayed=session_id in recorded, demo_visitor=mark is not None,
-            demo_visitor_run_id=mark.run_id if mark else None))
+            demo_visitor_run_id=mark.run_id if mark else None, unread=session_id in unread))
     found.sort(key=lambda summary: summary.session_id, reverse=True)
     found.sort(key=lambda summary: summary.last_activity, reverse=True)
     return found

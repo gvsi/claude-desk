@@ -50,6 +50,11 @@ function hasName(s: ConversationSummary): s is ConversationSummary & { display_n
   return s.display_name != null && s.display_name.trim() !== '';
 }
 
+/** The name `whoLabel` shows for the conversation, or null when it says what they are instead. */
+export function nameOf(s: ConversationSummary): string | null {
+  return !s.owner_preview && hasName(s) ? s.display_name : null;
+}
+
 /**
  * Who the conversation is with: "Your preview" for the owner's own, else the name on record or
  * given (a visitor may have typed it, so it renders as their text), else what they are.

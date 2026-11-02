@@ -43,7 +43,7 @@ The first release is for real owners, who sign in with their Claude account.
 
 ## How we'll know it works
 
-Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through 47 attacks and 37 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
+Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through 48 attacks and 39 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations. Held-out completion must stay at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
 
 | Measure | What it shows | Prototype |
 | --- | --- | --- |
@@ -53,13 +53,13 @@ Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs
 | Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; measured: $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md)) |
 | Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 1.1 s p50, 2.8 s p95; measured: 1,229 / 3,909 ms (n = 60) ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b) |
 
-Limits: we wrote the scenarios, real attackers adapt, 23 held-out tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
+Limits: we wrote the scenarios, real attackers adapt, 24 held-out legitimate tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
 
 ## Business path
 
 **Who pays and why.** The owner, through their Claude plan; visitors and their agents never pay to ask. Owners already pay to have requests answered: [Ruby](https://www.ruby.com/pricing/)'s live receptionists start at $250 a month for 50 minutes. A Desk sells requests closed while the owner works.
 
-**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: about $0.025 a Desk reply in the final eval pass, its checks included, so a ten-reply conversation would cost about $0.25, and about 80 of them use all of [Pro](https://claude.com/pricing)'s $20 monthly price.
+**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: about $0.025 a Desk reply in the final eval pass, its checks included; `estimate:` a ten-reply conversation would cost about $0.25, so about 80 of them use all of [Pro](https://claude.com/pricing)'s $20 monthly price.
 
 **Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
 

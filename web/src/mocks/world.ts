@@ -384,8 +384,12 @@ export class MockWorld {
     const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
       brand: { ...BUSINESS.brand },
-      // The copy's first Desk is the seed, which keeps its own words; one added later has no setup type.
-      summary: { ...summary, business_name: BUSINESS.name, answering: true, business_type: this.desks.length === 0 ? 'rivera' : 'other' },
+      // The copy's first Desk is the seed, which keeps its own words; one added later has no setup type. The mock
+      // keeps no read markers yet, so it counts no unread conversations.
+      summary: {
+        ...summary, business_name: BUSINESS.name, answering: true, business_type: this.desks.length === 0 ? 'rivera' : 'other',
+        unread_conversations: 0,
+      },
       policy,
       versions: new Map(),
       ledger: [],
