@@ -477,6 +477,9 @@ describe('the open conversation bar', () => {
   // After Take over, the seeded held request's card fits whole in the transcript's own region, or
   // the open conversation scrolls as one under its bar: never a region too short for the card.
   it.each([
+    [320, 920, true],
+    [320, 940, true],
+    [320, 1000, false],
     [390, 780, true],
     [390, 860, true],
     [390, 890, true],

@@ -99,6 +99,19 @@ it('public_chat_opens_in_place_phone', async () => {
   await expectScreenBasics(document.body, { owner: false });
 });
 
+it('public_chat_disclosure_keeps_its_height_at_320px', async () => {
+  const read = holdReads(CHAT_READ);
+  await expectSkeletonLoad({
+    status: 'Opening the chat',
+    anchors: CHAT_ANCHORS.map((anchor) => anchor.name === 'disclosure' ? { ...anchor, dimensions: ['height'] } : anchor),
+    open: async () => {
+      await renderRoute(CHAT, { viewport: { width: 320, height: 920 }, pollScale: 100 });
+      await vi.waitFor(() => expect(read.held()).toBe(1));
+    },
+    release: read.release,
+  });
+});
+
 it('public_chat_opens_in_spanish', async () => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
@@ -390,7 +403,11 @@ it.each(['en', 'es'] as const)('public_chat_headers_%s_record_closed_and_no_hour
   }
 });
 
-it.each(['desktop', 'phone'] as const)('agents_reference_cards_land_in_place_%s', async (viewport) => {
+it.each([
+  ['desktop', { width: 1440, height: 900 }],
+  ['390px', { width: 390, height: 844 }],
+  ['375px', { width: 375, height: 844 }],
+] as const)('agents_reference_cards_land_in_place_%s', async (_name, viewport) => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the page for AI agents',

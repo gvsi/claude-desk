@@ -1,28 +1,39 @@
-import { useMemo, useState, type RefObject } from 'react';
+import { useMemo, useRef, useState, type RefObject } from 'react';
 
 import { ConceptFooter, PublicBrandHeaderSkeleton, Skeleton, SkeletonCard, type CopyLanguage } from '../../ds/index.ts';
-import { useTextBox } from '../../lib/useTextLines.ts';
+import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
 import { AGENTS_COPY, DEMO_TASK_COPY, DEMO_TASKS } from './copy.ts';
 
 import './AgentCardPage.css';
 
-/**
- * Shapes for one reference card, using the real cards' title and body spacing. Each row is its lines
- * from 768 px, then on a phone.
- */
-function ReferenceCard({ rows, text, anchor }: { rows: readonly (readonly [number, number])[]; text: 'body' | 'meta'; anchor: string }) {
+/** The fresh Desk's capabilities, measured only, until the kernel's Agent Card is read. */
+const CAN_DO: Record<CopyLanguage, readonly string[]> = {
+  en: ['Get a quote from the price list', 'Find open times and book a visit', 'Pay the service call deposit within a signed limit', 'Ask Mike for a callback'],
+  es: ['Pedir un presupuesto con la lista de precios', 'Ver horarios libres y reservar una visita', 'Pagar el depósito de la visita dentro de un límite firmado', 'Pedir que Mike devuelva la llamada'],
+};
+
+/** A reference row's known words in the real type, at this row's width and in this browser's fonts. */
+function ReferenceRow({ words, text }: { words: string; text: 'body' | 'meta' }) {
+  const row = useRef<HTMLDivElement>(null);
+  const lines = useTextLines(row, { parts: [words], className: `cd-type-${text}` }, 1);
+  return (
+    <div ref={row}>
+      {Array.from({ length: lines }, (_, i) => (
+        <Skeleton key={i} shape="line" text={text} width={i === lines - 1 ? '70%' : '100%'} />
+      ))}
+    </div>
+  );
+}
+
+/** Shapes for one reference card, using the real cards' title, body spacing and measured row heights. */
+function ReferenceCard({ rows, text, anchor }: { rows: readonly string[]; text: 'body' | 'meta'; anchor: string }) {
   return (
     <SkeletonCard padding={16} anchor={anchor}>
       <Skeleton shape="line" text="section" width="65%" />
       <div className="cd-agents-card__body">
         <div className="cd-agents-page__list">
-          {rows.map(([lines, phoneLines], i) => (
-            <div key={i}>
-              <Skeleton shape="line" text={text} width={i === rows.length - 1 ? '70%' : '100%'} />
-              {Array.from({ length: phoneLines - 1 }, (_, line) => (
-                <Skeleton key={line} shape="line" text={text} width="70%" className={line < lines - 1 ? undefined : 'cd-agents-skeleton__phone-line'} />
-              ))}
-            </div>
+          {rows.map((words, i) => (
+            <ReferenceRow key={i} words={words} text={text} />
           ))}
         </div>
       </div>
@@ -93,9 +104,9 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
               <TaskChipShapes language={language} />
             </div>
           </SkeletonCard>
-          <ReferenceCard rows={[[1, 1], [1, 1], [1, 2], [1, 1]]} text="body" anchor="can-do-card" />
+          <ReferenceCard rows={CAN_DO[language]} text="body" anchor="can-do-card" />
           <ReferenceCard
-            rows={language === 'es' ? [[1, 2], [2, 3], [1, 2], [1, 1], [1, 2]] : [[1, 2], [1, 2], [1, 3], [1, 1], [1, 1]]}
+            rows={AGENTS_COPY[language].proveLines}
             text="meta"
             anchor="prove-card"
           />

@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 
+import { useTextLines, type TextPart } from '../../../lib/useTextLines.ts';
 import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import type { CopyLanguage } from '../Notice/errorCopy.ts';
 import { Skeleton, SkeletonCard } from '../Skeleton/Skeleton.tsx';
@@ -16,6 +17,12 @@ const CHIP_WIDTHS = [189, 201, 174] as const;
 /** The invitation's meta line, as wide as its words in each language. */
 const INVITATION_WIDTH: Record<CopyLanguage, number> = { en: 276, es: 322 };
 
+/** The fresh disclosure's words, measured only, with the owner's name kept together as on the page. */
+const DISCLOSURE: Record<CopyLanguage, readonly TextPart[]> = {
+  en: ["You're chatting with Claude, an AI answering for Turner Plumbing. Ask for ", { text: 'Mike Turner', className: 'cd-public-shell__owner' }, ' anytime.'],
+  es: ['Estás hablando con Claude, una IA que responde por Turner Plumbing. Puedes pedir hablar con ', { text: 'Mike Turner', className: 'cd-public-shell__owner' }, ' cuando quieras.'],
+};
+
 /**
  * The shell's own layout and measurements, with no visitor content or interactive elements. History
  * is unknown until the page lands, so every load draws the first view: the greeting, its meta line,
@@ -25,6 +32,8 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
   const shell = useRef<HTMLDivElement>(null);
   useVisualViewportFit(shell, !footer);
   const aboutBeside = useShellLayout(shell);
+  const disclosure = useRef<HTMLDivElement>(null);
+  const disclosureLines = useTextLines(disclosure, { parts: DISCLOSURE[language], className: 'cd-public-shell__disclosure cd-type-meta' }, 2, aboutBeside);
   useFirstView(shell, true, aboutBeside, CHIP_WIDTHS.length);
   const about = footer ? (
     <div className="cd-public-shell__about" data-skeleton-anchor="about-column">
@@ -64,10 +73,10 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
           <div className="cd-public-shell__chat-head" data-skeleton-anchor="chat-head">
             <div className="cd-public-shell__chat-title">
               <Skeleton shape="line" text="section" width={230} anchor="chat-title" />
-              <div data-skeleton-anchor="disclosure">
-                <Skeleton shape="line" text="meta" />
-                <Skeleton shape="line" text="meta" width="80%" />
-                {language === 'es' ? <Skeleton shape="line" text="meta" width="65%" className="cd-public-shell-skeleton__phone-line" /> : null}
+              <div ref={disclosure} data-skeleton-anchor="disclosure">
+                {Array.from({ length: disclosureLines }, (_, i) => (
+                  <Skeleton key={i} shape="line" text="meta" width={i === disclosureLines - 1 ? '80%' : '100%'} />
+                ))}
               </div>
             </div>
             <Skeleton shape="block" measure={{ label: `${ASK_OWNER_PREFIX[language]}Mike Turner`, className: 'cd-button cd-button--secondary cd-button--inline cd-type-control' }} height="var(--size-control)" className="cd-public-shell-skeleton__ask" anchor="ask-owner" />
