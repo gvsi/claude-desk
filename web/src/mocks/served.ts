@@ -610,6 +610,7 @@ const SERVED: ServedRoutes = {
     if (!record) return NOT_FOUND;
     const answer = isRecord(req.body) ? req.body.answer : undefined;
     if (typeof answer !== 'string' || !ANSWERS.has(answer)) return failWith(422, 'kernel', { code: 'invalid' });
+    sv.world.supersedeIfBooked(record);
     if (record.decision.state !== 'held') return failWith(409, 'already_resolved', { decision: record.decision });
     const given = answer as ApprovalAnswer;
     if (!(record.decision.answers ?? []).includes(given)) return failWith(422, 'kernel', { code: 'invalid' });
@@ -711,7 +712,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
     if (!record) return NOT_FOUND;
-    return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(record.decision);
+    return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(sv.world.supersedeIfBooked(record));
   },
   startDemoVisitor(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -937,6 +938,7 @@ const SERVED: ServedRoutes = {
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
     // Only a decision of this browser's own session: anyone else's is not found.
     if (!record || record.decision.session_id !== visitor.session.state.session_id) return NOT_FOUND;
+    sv.world.supersedeIfBooked(record);
     if (record.decision.state !== 'held') return failWith(409, 'kernel', { code: 'conflict' });
     // The kernel cancels it; the outcome reaches the chat as the resolved receipt.
     sv.world.cancel(record);

@@ -1,9 +1,10 @@
 /**
  * An About this prototype reading page: the product proposal or the capability prediction, laid out as the
- * reader boards draw them. A centered title, its summary and the lead figure; then the numbered contents
- * list, the document in a serif column and the author, date and reading time beside it; then "Read next", the
- * next page in the About set. On a phone the contents list folds into one row and the details into a line
- * under the summary.
+ * reader boards draw them. The proposal opens with a centered title, its summary and the lead figure; the
+ * prediction with its title and summary at the top of the article's column, and its claim as a card. Then the
+ * numbered contents list, the document in a serif column and the author, date and reading time beside it; then
+ * "Read next", the next page in the About set. On a phone the contents list folds into one row and the details
+ * into a line under the summary.
  *
  * It is drawn on the About set's paper (`paper.css`), the Vision article's light reading style, so the set's
  * three pages read as one. The page is static: it reads its document from `documents.ts`, which only it loads,
@@ -25,6 +26,7 @@ import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { AboutBar, useAboutNarrow } from './AboutBar.tsx';
 import { ABOUT_DOCUMENTS, readingMinutes, type AboutDocument, type Block, type FigureName } from './documents.ts';
 import { ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
+import { ClaimCard } from './figures/ClaimCard.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
@@ -81,16 +83,27 @@ interface ArticleBlockProps {
   blocks: Block[];
   /** The block's place in the document. */
   index: number;
-  /** The figure the hero draws. */
-  hero: FigureName;
+  /** The figure the hero draws, if any. */
+  hero?: FigureName;
+  /** Set column widths for a table, by its section's anchor (`AboutDocument.columns`). */
+  columns?: Record<string, readonly number[]>;
   compact: boolean;
+}
+
+/** The anchor of the section block `index` sits in. */
+function sectionOf(blocks: Block[], index: number): string | undefined {
+  for (let i = index; i >= 0; i -= 1) {
+    const block = blocks[i];
+    if (block?.kind === 'heading') return block.id;
+  }
+  return undefined;
 }
 
 /**
  * One block of the document. The `#` title and the byline feed the hero and the details instead; the hero's
  * own figure marker renders nothing; the readiness marker's table renders as the readiness scale.
  */
-function ArticleBlock({ blocks, index, hero, compact }: ArticleBlockProps) {
+function ArticleBlock({ blocks, index, hero, columns, compact }: ArticleBlockProps) {
   const block = blocks[index];
   const previous = blocks[index - 1];
   switch (block?.kind) {
@@ -127,7 +140,7 @@ function ArticleBlock({ blocks, index, hero, compact }: ArticleBlockProps) {
       return previous?.kind === 'figure' && previous.name === 'readiness' ? (
         <ReadinessScale table={block} compact={compact} block={index} />
       ) : (
-        <MeasuresTable table={block} compact={compact} block={index} />
+        <MeasuresTable table={block} compact={compact} block={index} widths={columns?.[sectionOf(blocks, index) ?? '']} />
       );
     case 'figure':
       if (block.name === 'readiness') {
@@ -142,26 +155,69 @@ function ArticleBlock({ blocks, index, hero, compact }: ArticleBlockProps) {
   }
 }
 
-/** The document's blocks, with the pull quote after the first section. */
+/**
+ * The document's blocks, with the pull quote, if it has one, after the first section, and its claim, if it has one,
+ * as a card: the claim's blocks render inside it, as the article would draw them, and nowhere else.
+ */
 function Article({ document, compact }: { document: AboutDocument; compact: boolean }) {
-  const { blocks, hero, pullQuote } = document;
+  const { blocks, hero, pullQuote, claim, columns } = document;
   const headings = blocks.flatMap((block, i) => (block.kind === 'heading' && block.depth === 2 ? [i] : []));
-  const quoteAt = headings[1] ?? blocks.length;
+  const quoteAt = pullQuote === undefined ? null : (headings[1] ?? blocks.length);
   const quote = (
     <blockquote key="pull-quote" className="cd-about-pull">
       <p className="cd-type-article-quote">{pullQuote}</p>
     </blockquote>
   );
+  const block = (i: number) => (
+    <ArticleBlock key={i} blocks={blocks} index={i} hero={hero} columns={columns} compact={compact} />
+  );
   return (
     <article className={`cd-about-article ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}>
-      {blocks.map((_, i) => (
-        <Fragment key={i}>
-          {i === quoteAt ? quote : null}
-          <ArticleBlock blocks={blocks} index={i} hero={hero} compact={compact} />
-        </Fragment>
-      ))}
+      {blocks.map((_, i) => {
+        if (claim && i > claim.first && i <= claim.last) return null;
+        return (
+          <Fragment key={i}>
+            {i === quoteAt ? quote : null}
+            {claim?.first === i ? (
+              <ClaimCard compact={compact}>
+                {Array.from({ length: claim.last - claim.first + 1 }, (_, n) => block(claim.first + n))}
+              </ClaimCard>
+            ) : (
+              block(i)
+            )}
+          </Fragment>
+        );
+      })}
       {quoteAt === blocks.length ? quote : null}
     </article>
+  );
+}
+
+/**
+ * How the page opens: "About this prototype", the title, the summary and, on a phone, the byline. In the `hero`
+ * layout, centred, with the app icon above and the lead figure below; in the `column` layout, left-aligned on the
+ * article's edge, with neither.
+ */
+function Opening({ document, compact }: { document: AboutDocument; compact: boolean }) {
+  const hero = document.layout === 'hero';
+  return (
+    <div className={`cd-about-hero${hero ? '' : ' cd-about-hero--column'}`} data-hero="">
+      {hero ? <MarkAppIcon size={compact ? 'compact' : 'large'} /> : null}
+      <p className="cd-about-hero__kicker cd-type-meta">About this prototype</p>
+      <h1 className={`cd-about-hero__title ${compact ? 'cd-type-greeting' : 'cd-type-article-title'}`}>{document.title}</h1>
+      <p
+        className={`cd-about-hero__summary ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}
+        data-summary=""
+      >
+        {document.summary}
+      </p>
+      {compact ? <BylineLine document={document} /> : null}
+      {hero && document.hero ? (
+        <div className="cd-about-hero__figure">
+          <Figure name={document.hero} compact={compact} />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -403,30 +459,22 @@ export function ReaderPage({ id }: ReaderPageProps) {
   // The tab names the document while it is open, and goes back to what it said when it closes.
   useDocumentTitle(inApp(about.title));
 
+  // In the column layout on a laptop the opening moves into the article's column, level with the contents list
+  // and the details; on a phone it keeps its place above the folded contents, left-aligned.
+  const inColumn = about.layout === 'column' && !compact;
+  const layout = about.layout === 'column' ? ' cd-about-page--column' : '';
+
   return (
-    <div className={`cd-about-paper cd-about-paper--app cd-about-set cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>
+    <div
+      className={`cd-about-paper cd-about-paper--app cd-about-set cd-about-page${layout}${compact ? ' cd-about-page--compact' : ''}`}
+    >
       <AboutBar current={id} />
       <main className="cd-about-main">
-        <div className="cd-about-hero" data-hero="">
-          <MarkAppIcon size={compact ? 'compact' : 'large'} />
-          <p className="cd-about-hero__kicker cd-type-meta">About this prototype</p>
-          <h1 className={`cd-about-hero__title ${compact ? 'cd-type-greeting' : 'cd-type-article-title'}`}>
-            {about.title}
-          </h1>
-          <p
-            className={`cd-about-hero__summary ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}
-            data-summary=""
-          >
-            {about.summary}
-          </p>
-          {compact ? <BylineLine document={about} /> : null}
-          <div className="cd-about-hero__figure">
-            <Figure name={about.hero} compact={compact} />
-          </div>
-        </div>
+        {inColumn ? null : <Opening document={about} compact={compact} />}
         <div className="cd-about-body">
           <Contents sections={sections} compact={compact} />
           <div className="cd-about-column">
+            {inColumn ? <Opening document={about} compact={compact} /> : null}
             <Article document={about} compact={compact} />
             <ReadNext next={readNext(id)} compact={compact} />
           </div>

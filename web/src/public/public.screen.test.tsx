@@ -824,29 +824,43 @@ describe('public chat page', () => {
     expect(receiptsOf(rowOf(screen.getByText(line, { exact: true }).element()))).toEqual([line]);
     expect(rowOf(screen.getByText(line, { exact: true }).element()).textContent).not.toContain(held.visitor_plain);
 
-    // In a second chat the visitor goes on after the hold: the cancel stays under the held
-    // message, and so does what cancelling it says, never under the booking that followed.
+    // In a second chat the visitor goes on after the hold with another question: the cancel stays
+    // under the held message, and so does what cancelling it says, never under what followed.
     const second = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(second.screen);
     await say(second.screen, 'Can I get 15% off if I pay cash?');
-    await say(second.screen, 'Book the first one');
     const heldLine = second.screen.getByText(held.visitor_plain, { exact: true }).element();
     const heldRow = rowOf(heldLine);
-    const bookedRow = rowOf(second.screen.getByRole('article', { name: 'Booked' }).element());
-    const booked = receiptsOf(bookedRow);
-    expect(booked).toEqual(["Booked on Mike Turner's calendar"]);
+    await say(second.screen, 'Do you work weekends?');
+    const nextRow = heldRow.nextElementSibling;
+    if (!(nextRow instanceof HTMLElement)) throw new Error('the chat goes on under the held message');
+    const nextReceipts = receiptsOf(nextRow);
     const cancel = second.screen.getByRole('button', { name: 'Cancel this request' });
     await expect.element(cancel).toBeVisible();
     const box = cancel.element().getBoundingClientRect();
     expect(box.top).toBeGreaterThanOrEqual(heldLine.getBoundingClientRect().bottom);
-    expect(box.bottom).toBeLessThanOrEqual(heldRow.nextElementSibling?.getBoundingClientRect().top ?? 0);
-    expect(box.bottom).toBeLessThanOrEqual(bookedRow.getBoundingClientRect().top);
+    expect(box.bottom).toBeLessThanOrEqual(nextRow.getBoundingClientRect().top);
 
     await cancel.click();
     await expect.element(second.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
     await vi.waitFor(() => expect(receiptsOf(heldRow)).toEqual(['Cancelled']));
     expect(heldRow.textContent).not.toContain(held.visitor_plain);
-    expect(receiptsOf(bookedRow)).toEqual(booked);
+    expect(receiptsOf(nextRow)).toEqual(nextReceipts);
+
+    // A booking that follows the hold closes it, as the kernel does, lazily, on the request's next
+    // read: the visitor's own cancel reads it first, so the held message says their booking
+    // replaced it rather than "Cancelled", and the booking keeps its own receipt.
+    const booking = await renderRoute(PAGE, { seed: 'rivera' });
+    await ready(booking.screen);
+    await say(booking.screen, 'Can I get 15% off if I pay cash?');
+    const closingRow = rowOf(booking.screen.getByText(held.visitor_plain, { exact: true }).element());
+    await say(booking.screen, 'Book the first one');
+    const bookedRow = rowOf(booking.screen.getByRole('article', { name: 'Booked' }).element());
+    expect(receiptsOf(bookedRow)).toEqual(["Booked on Mike Turner's calendar"]);
+    await booking.screen.getByRole('button', { name: 'Cancel this request' }).click();
+    await expect.element(booking.screen.getByRole('button', { name: 'Cancel this request' })).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(receiptsOf(closingRow)).toEqual(['Closed: your booking replaced this request']));
+    expect(receiptsOf(bookedRow)).toEqual(["Booked on Mike Turner's calendar"]);
 
     // In a third chat two requests are held. While the first one's cancel is out, the other
     // request's button waits: its words shown with no spinner, still in the tab order, and a click
