@@ -1,6 +1,6 @@
 /* ReviewerBar: a slim full-width line above the owner app, on the muted fill with a hairline
    under it. 36 px tall on one line; on a phone the words wrap and the bar grows with them. The
-   screen's controls and Start over sit together at the right, 16 px apart, never wrapping; with
+   screen's controls and Reset demo sit together at the right, 16 px apart, never wrapping; with
    controls of the screen's own, on a phone the words take the first line and the controls the
    next, 4 px under them. */
 

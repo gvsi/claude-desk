@@ -77,7 +77,7 @@ export const Board: Story = {
     await waitFor(() => expect(canvas.queryByRole('menu')).toBeNull());
     const opener = within(sidebar).getByRole('button', { name: OPENER });
     await expectTabOrder(userEvent, [
-      canvas.getByRole('button', { name: 'Start over' }),
+      canvas.getByRole('button', { name: 'Reset demo' }),
       opener,
       within(sidebar).getByRole('button', { name: `Switch Desk, current: ${MAIN_LINE.name}` }),
       ...within(within(sidebar).getByRole('navigation', { name: 'Main' })).getAllByRole('link'),

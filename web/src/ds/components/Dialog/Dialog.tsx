@@ -6,11 +6,11 @@ import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import './Dialog.css';
 
 export interface DialogProps {
-  /** The question, which names the dialog: "Delete “Emergencies” for Turner Plumbing?", "Start over with a fresh copy?". */
+  /** The question, which names the dialog: "Delete “Emergencies” for Turner Plumbing?", "Reset demo?". */
   title: ReactNode;
   /** What happens, in plain words, which describes the dialog. */
   body: ReactNode;
-  /** The button that does it: "Delete Desk", "Start over". */
+  /** The button that does it: "Delete Desk", "Reset demo". */
   confirmLabel: string;
   /** The confirm button look: primary by default, or danger for a delete that cannot be undone. */
   confirmVariant?: 'primary' | 'danger';

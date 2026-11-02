@@ -4,7 +4,7 @@
 
 ## When to use
 
-- Before something the owner can't easily undo: "Start over with a fresh copy?", "Delete “Main line” for Turner Plumbing?".
+- Before something the owner can't easily undo: "Reset demo?", "Delete “Main line” for Turner Plumbing?".
 - Deleting a Desk from Settings › General uses the default tone with `confirmVariant="danger"`: red on "Delete this Desk" and "Delete Desk", with no refused dot (owner decision, 2026-11-02, replacing the earlier neutral-delete rule).
 - `tone="danger"` adds a refused dot beside the title; no signed screen uses it now.
 - Not for errors or news, which are a `Notice`, and not for anything a visitor sees.
