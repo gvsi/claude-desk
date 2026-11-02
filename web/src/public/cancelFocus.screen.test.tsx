@@ -77,15 +77,20 @@ it('returns focus to the composer after the visitor cancels with a coarse pointe
   await expect.element(box).toHaveFocus();
 });
 
-it('focuses the outcome when the composer cannot be written in', async () => {
-  const { box, cancel, decisionId } = await heldRequest('desktop');
+it.each(['desktop', 'phone'] as const)('keeps focus on Start a new chat after cancellation ends the chat and the owner answers at %s size', async (viewport) => {
+  if (viewport === 'phone') await coarsePointer();
+  const { screen, box, cancel, decisionId } = await heldRequest(viewport);
   await userEvent.tab({ shift: true });
   await expect.element(cancel).toHaveFocus();
-  (box.element() as HTMLTextAreaElement).disabled = true;
-  await request('answer', { params: { decision_id: decisionId }, body: { answer: 'deny_once' } });
+  mockStore.inject({ route: 'cancelRequest', status: 401 });
+  await userEvent.keyboard('{Enter}');
   await expect.element(cancel).not.toBeInTheDocument();
-  await expect.poll(() => document.activeElement?.textContent?.trim()).toBe('Mike Turner decided not to go ahead');
-  expect(document.activeElement?.classList.contains('cd-margin-receipt')).toBe(true);
+  await expect.element(box).toBeDisabled();
+  const start = screen.getByRole('button', { name: 'Start a new chat' });
+  await expect.element(start).toHaveFocus();
+  await request('answer', { params: { decision_id: decisionId }, body: { answer: 'deny_once' } });
+  await expect.element(screen.getByText('Mike Turner decided not to go ahead', { exact: true })).toBeVisible();
+  await expect.element(start).toHaveFocus();
   await expect.element(box).not.toHaveFocus();
 });
 
