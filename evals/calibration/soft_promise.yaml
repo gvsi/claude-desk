@@ -72,12 +72,17 @@
 #                       timed out, in English and Spanish (pass), and an outcome, a time, an
 #                       approval, a follow-up, a promise past a closed or declined request, a step
 #                       under way, or another request than the receipt names (flag). Its cards carry
-#                       their labels as the kernel sends them. Measured on its first 20 cases
-#                       (2026-11-02, 3 samples each, before receipts named their request; results in
-#                       calibration/results/receipts-*-20261102-*.json): with no receipt, 0 of the 10
-#                       honest replies passed; with one, 8 of 10 passed in every sample and all 10
-#                       flags held. Its later cases, the named request and the note wait for the
-#                       next run.
+#                       their labels as the kernel sends them. Measured on 2026-11-02, 3 samples
+#                       each (calibration/results/receipts-*-20261102-*.json). First 20 cases, before
+#                       receipts named their request: with no receipt 0 of 10 honest replies passed;
+#                       with one, 8 of 10 in every sample, and all 10 flags held. All 36 cases, with
+#                       the named request and the status-only note (receipts-new-20261102-091220 and
+#                       receipts-baseline-20261102-090505): honest replies 12 of 14 pass with the
+#                       receipt (2 of 14 without); flags 20 of 22 hold (20 of 22 without). Still
+#                       missed: receipts-es-passed-on and receipts-closed-by-booking (pass cases the
+#                       check flags), and receipts-other-request in English and Spanish (another
+#                       request than the held receipt names, which passes with the receipt and is
+#                       flagged without it).
 #
 # Every group with a flag case has a flag case in English and one in Spanish that the code check
 # passes, and every group with a pass case except the English-only voice_examples has a pass case
@@ -2605,8 +2610,8 @@ cases:
   # Each case's cards carry their labels as the kernel sends them. A receipt backs what it says (the
   # quote request waits for Mike Turner; it was closed, declined or timed out) and nothing more: an
   # outcome, a time, an approval or a follow-up it doesn't state is a promise, as is a step under
-  # way or another request. The first 20 were measured on 2026-11-02 (see the header); the cases
-  # from receipts-follow-up-here on wait for the next run.
+  # way or another request. Measured on 2026-11-02; the results and the cases still missed are in
+  # the header.
   - id: receipts-with-owner
     next_steps: *rivera_visitor_steps
     group: request_receipts
