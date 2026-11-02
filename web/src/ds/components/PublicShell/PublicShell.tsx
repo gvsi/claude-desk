@@ -198,7 +198,7 @@ const COPY = {
 } satisfies Record<CopyLanguage, unknown>;
 
 /** From this width up, the about column stands at the left of the chat. */
-const ABOUT_BESIDE_FROM = 1280;
+const ABOUT_BESIDE_FROM = 900;
 
 /** Below this height the shell is short, whatever it holds. */
 const SHORT_BELOW = 520;
@@ -394,7 +394,7 @@ function watchAbout(shell: HTMLElement, observer: ResizeObserver | null, watched
  * page of its own, so it watches itself and its pinned parts, not the window. Returns whether the
  * about column stands beside the chat.
  *
- * - **The about column** stands beside the chat from 1280 px wide. Until the shell has measured
+ * - **The about column** stands beside the chat from 900 px wide. Until the shell has measured
  *   itself it opens the scroll region, where it takes nothing from the chat's width, so nothing in
  *   the chat (the composer sizing its text box) measures itself at a width the visitor never sees.
  * - **Short** below 520 px tall, or when the banner (if any), the brand header, the chat's head,

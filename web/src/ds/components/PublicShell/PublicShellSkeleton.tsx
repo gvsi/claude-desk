@@ -28,7 +28,10 @@ export function PublicShellSkeleton({ language, footer }: { language: CopyLangua
   useFirstView(shell, true, aboutBeside, CHIP_WIDTHS.length);
   const about = footer ? (
     <div className="cd-public-shell__about" data-skeleton-anchor="about-column">
-      <Skeleton shape="line" text="section" width={200} anchor="about-title" />
+      {/* Keep the title's line box when a tall charter makes the column scroll. */}
+      <div className="cd-public-shell__heading">
+        <Skeleton shape="line" text="section" width={200} anchor="about-title" />
+      </div>
       {aboutBeside ? (
         <div className="cd-public-shell__open-status" data-skeleton-anchor="about-status">
           <Skeleton shape="line" text="meta" width={170} />

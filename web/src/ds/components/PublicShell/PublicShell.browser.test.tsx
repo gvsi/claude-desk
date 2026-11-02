@@ -554,7 +554,7 @@ it('composer_stays_in_view_while_the_log_scrolls', async () => {
 
 it('about_column_beside_the_chat_or_atop_the_conversation', async () => {
   // On a laptop the about column stands at the left of the chat, from the header to the window's
-  // foot, and stays put while the conversation scrolls. Narrower than 1280 px there is no room
+  // foot, and stays put while the conversation scrolls. Narrower than 900 px there is no room
   // beside the chat, and the page doesn't scroll, so the column opens the conversation's scroll
   // region instead: above the first message, the region's full width, scrolled away as the chat
   // goes on and back into view at its start.
@@ -564,7 +564,7 @@ it('about_column_beside_the_chat_or_atop_the_conversation', async () => {
     const about = one('[aria-labelledby]:is(aside, section)');
     const region = scrollRegion();
     const main = one('main');
-    if (size[0] >= 1280) {
+    if (size[0] >= 900) {
       const before = about.getBoundingClientRect();
       if (region) region.scrollTop = region.scrollHeight;
       const after = about.getBoundingClientRect();
@@ -587,7 +587,7 @@ it('about_column_beside_the_chat_or_atop_the_conversation', async () => {
   }
   expect(seen).toEqual(
     WINDOWS.map((size) =>
-      size[0] >= 1280
+      size[0] >= 900
         ? { window: named(size), beside: true, underTheHeader: true, still: true }
         : { window: named(size), inTheRegion: true, regionWide: true, atItsStart: true },
     ),
@@ -700,7 +700,7 @@ it('the_mark_follows_the_about_column_changing_height', async () => {
   // The column's own height can change with nothing scrolled and nothing rendered, as when the web
   // font arrives after the fallback has laid the column out: its hairline moves away from the
   // chat's head or up under it, and whether it is drawn follows. So it does for a column that has
-  // just moved into the scroll region, as the window narrows past 1280 px.
+  // just moved into the scroll region, as the window narrows past 900 px.
   await renderLongChat([390, 844], { links: true });
   await nextFrames();
   const seen = [];
@@ -740,8 +740,8 @@ it('the_mark_follows_the_about_column_changing_height', async () => {
   );
 });
 
-it('about_column_moves_as_the_window_crosses_1280_and_the_draft_stays', async () => {
-  // A window narrowed past 1280 px (or a tablet turned) with the page open: the about column moves
+it('about_column_moves_as_the_window_crosses_900_and_the_draft_stays', async () => {
+  // A window narrowed past 900 px (or a tablet turned) with the page open: the about column moves
   // into the scroll region, and back when it widens, while the rest of the page stays mounted, so
   // an unsent draft is the same text box with the same words.
   await renderLongChat([1440, 900]);
@@ -948,18 +948,18 @@ it('a_long_draft_never_pushes_the_disclosure_out', async () => {
 
 it('focus_in_the_about_column_survives_the_move', async () => {
   // A keyboard visitor on a link in the about column keeps their place when the window crosses
-  // 1280 px and the column moves, both ways.
-  await renderLongChat([1281, 900], { links: true });
+  // 900 px and the column moves, both ways.
+  await renderLongChat([901, 900], { links: true });
   const link = () => page.getByRole('link', { name: 'What agents can do here' }).element() as HTMLElement;
   const inTheRegion = () => one('.cd-public-shell__scroll').contains(one('[aria-labelledby]:is(aside, section)'));
   link().focus();
   expect(document.activeElement).toBe(link());
 
-  await page.viewport(1279, 900);
+  await page.viewport(899, 900);
   await vi.waitFor(() => expect(inTheRegion()).toBe(true));
   expect(document.activeElement).toBe(link());
 
-  await page.viewport(1281, 900);
+  await page.viewport(901, 900);
   await vi.waitFor(() => expect(inTheRegion()).toBe(false));
   expect(document.activeElement).toBe(link());
 });
@@ -980,7 +980,7 @@ it('the_about_column_takes_the_keyboard_only_when_it_scrolls', async () => {
     });
   }
   expect(seen).toEqual([
-    { window: '1024x640', scrolls: false, tabStop: false, named: 'About Turner Plumbing' },
+    { window: '1024x640', scrolls: true, tabStop: true, named: 'About Turner Plumbing' },
     { window: '1440x900', scrolls: false, tabStop: false, named: 'About Turner Plumbing' },
     { window: '390x844', scrolls: false, tabStop: false, named: 'About Turner Plumbing' },
   ]);
@@ -1533,11 +1533,11 @@ it('follows_the_visual_viewport_when_the_keyboard_opens', async () => {
 it('the_about_column_keeps_focus_when_it_stops_scrolling', async () => {
   // Focus on the about column while it scrolls on its own, then a taller window where it fits:
   // focus stays on the column, and once it moves on, the column is no longer a stop.
-  await renderLongChat([1280, 640]);
+  await renderLongChat([1024, 640]);
   const about = one('[aria-labelledby]:is(aside, section)');
   expect(about.tabIndex).toBe(0);
   about.focus();
-  await page.viewport(1280, 1100);
+  await page.viewport(1024, 1100);
   await vi.waitFor(() => expect(about.scrollHeight).toBeLessThanOrEqual(about.clientHeight));
   await nextFrames();
   expect(document.activeElement).toBe(about);
@@ -1565,7 +1565,7 @@ it('the_composer_comes_out_from_under_the_chat_head', async () => {
   ]);
 });
 
-it('a_window_crossing_1280_in_one_step_settles_without_a_switch', async () => {
+it('a_window_crossing_900_in_one_step_settles_without_a_switch', async () => {
   // A laptop window snapped to a phone's size in one step, and back: the about column moves first,
   // then the shell judges whether it is short with the column where it now is. A column still beside
   // a chat too narrow for it would squeeze the chat's head and the composer and turn a roomy phone

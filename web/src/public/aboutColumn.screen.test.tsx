@@ -9,7 +9,7 @@ import { renderRoute } from '../test/renderRoute.tsx';
 import { tokenColor } from '../test/screen.ts';
 
 it('public_about_column_grows_on_the_left_with_status_under_its_title', async () => {
-  for (const [width, height] of [[1280, 982], [1512, 982], [1800, 1000], [2000, 1000]] as const) {
+  for (const [width, height] of [[900, 768], [1024, 768], [1280, 982], [1512, 982], [1800, 1000], [2000, 1000]] as const) {
     const { screen } = await renderRoute(`/d/${RIVERA.slug}`, { viewport: { width, height }, pollScale: 100 });
     await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const about = screen.getByRole('complementary', { name: 'About Turner Plumbing' }).element();
@@ -26,7 +26,7 @@ it('public_about_column_grows_on_the_left_with_status_under_its_title', async ()
     expect(status.getBoundingClientRect().top - about.querySelector('h2')!.getBoundingClientRect().bottom).toBe(8);
     expect(about.querySelector('.cd-public-shell__blocks')!.getBoundingClientRect().top - status.getBoundingClientRect().bottom).toBe(16);
     const reading = document.querySelector('.cd-public-shell__chat-head')!.getBoundingClientRect();
-    expect(reading.width).toBe(680);
+    expect(reading.width).toBe(Math.min(680, chat.width - 80));
     expect(reading.left + reading.width / 2).toBeCloseTo(chat.left + chat.width / 2, 1);
   }
 });
@@ -64,7 +64,7 @@ it('about_status_uses_the_themes_ink_and_status_colours_with_readable_contrast',
 });
 
 it('narrow_public_pages_keep_status_on_its_header_line_and_about_below_chat', async () => {
-  for (const width of [390, 1279]) {
+  for (const width of [390, 899]) {
     const { screen } = await renderRoute(`/d/${RIVERA.slug}`, { viewport: { width, height: 844 }, pollScale: 100 });
     await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const header = screen.getByRole('banner').element();

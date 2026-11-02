@@ -47,7 +47,7 @@ const DESKTOP_CHAT_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'concept-footer', page: '.cd-concept-footer', size: true },
 ];
 
-it.each([[1512, 982], [1800, 1000]])('public_chat_opens_in_place_desktop_%s_%s', async (width, height) => {
+it.each([[900, 768], [1024, 768], [1512, 982], [1800, 1000]])('public_chat_opens_in_place_desktop_%s_%s', async (width, height) => {
   const read = holdReads(CHAT_READ);
   await expectSkeletonLoad({
     status: 'Opening the chat',

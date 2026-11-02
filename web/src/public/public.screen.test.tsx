@@ -4703,11 +4703,11 @@ function conversationAndComposer(screen: RenderResult): { composer: Element; con
 /** The open status, as the design system's PublicShell draws it. */
 const OPEN_STATUS = '.cd-public-shell__open-status';
 
-/** The status is in About on wide pages, and in the brand header below 1280 px. */
+/** The status is in About on wide pages, and in the brand header below 900 px. */
 function statusLine(): HTMLElement {
   const line = document.querySelector<HTMLElement>(OPEN_STATUS);
   if (!line) throw new Error('no open status line');
-  expect(line.closest(window.innerWidth >= 1280 ? '.cd-public-shell__about' : 'header')).not.toBeNull();
+  expect(line.closest(window.innerWidth >= 900 ? '.cd-public-shell__about' : 'header')).not.toBeNull();
   return line;
 }
 

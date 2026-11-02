@@ -5,7 +5,7 @@
 
    The document never scrolls. The brand header and the chat's head with the AI disclosure stay at
    the top and the composer and the footer at the bottom, and only the conversation's scroll region
-   scrolls between them, so the disclosure is always in view. Below 1280 px wide there is no room for
+   scrolls between them, so the disclosure is always in view. Below 900 px wide there is no room for
    the about column beside the chat, so it opens the scroll region instead, above the first message
    (the component moves it there). Below 520 px tall the brand header and the footer scroll with the
    conversation, and only the chat's head and the composer stay put (see "A short shell" below).
@@ -43,7 +43,7 @@
   display: none;
 }
 
-@container cd-public-shell (min-width: 1280px) {
+@container cd-public-shell (min-width: 900px) {
   .cd-public-shell .cd-public-shell-skeleton__beside-line {
     display: flex;
   }
@@ -342,7 +342,7 @@
   justify-content: center;
 }
 
-@container cd-public-shell (max-width: 1279.98px) {
+@container cd-public-shell (max-width: 899.98px) {
   .cd-public-shell--first-view .cd-public-shell__body {
     overflow-y: auto;
   }
