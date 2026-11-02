@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { PublicDesk, RenderedBlock, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
-import type { BusinessOut, CopyOut, DemoAgentRun, RulesDraft, SetupState, SetupTools, SituationResult, Today } from '../api/views.ts';
+import type { BusinessOut, CopyOut, DemoAgentRun, RulesDraft, SetupState, SetupTools, SituationResult, Today, VisitorSession } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { PUBLIC_COPY } from '../public/copy.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
@@ -20,7 +20,7 @@ import {
   holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet,
   thanksTo, TEST_CLIENT_ADDED, TEST_CLIENT_NO, TEST_CLIENT_OFFER, TEST_CLIENT_YES,
 } from './setup.ts';
-import { mockStore } from './store.ts';
+import { MockStore, mockStore, type MockAnswer } from './store.ts';
 
 interface Started {
   business: string | undefined;
@@ -919,6 +919,51 @@ describe("setup's examples", () => {
         expect(desk.about, chip).toBe(about);
       }
     }
+  });
+});
+
+describe('a Desk setup made, in each copy on the dev server', () => {
+  /** The value of the `name` cookie an answer sets. */
+  function cookieSet(answer: MockAnswer, name: string): string {
+    const line = 'network' in answer ? undefined : answer.setCookie?.find((l) => l.startsWith(`${name}=`));
+    const value = line === undefined ? undefined : /^[^=]+=([^;]+)/.exec(line)?.[1];
+    if (value === undefined) throw new Error(`the answer sets no ${name} cookie`);
+    return value;
+  }
+
+  it('two_copies_setting_up_one_business_each_open_their_own_preview_chat', async () => {
+    // Two browsers on one dev server each open a copy and start setup from the same example. Each
+    // new Desk gets a slug no other copy has, so the preview chat on setup's Live step opens in its
+    // own copy: the read that follows the preview finds the chat its visitor cookie names.
+    const store = new MockStore({ cookies: 'real' });
+    const description = START_EXAMPLES.en.examples[0]?.description ?? '';
+    const slugs: string[] = [];
+    for (const browser of ['first', 'second']) {
+      const copy = await store.dispatch('copies', { body: { passcode: 'demo' } });
+      const owner = { desk_owner: cookieSet(copy, 'desk_owner') };
+      const started = await store.dispatch('startSetup', {
+        cookies: owner,
+        body: { description, timezone: 'America/Los_Angeles', idempotency_key: `two-copies-${browser}` },
+      });
+      if ('network' in started || started.status !== 201) throw new Error(`the ${browser} copy starts setup`);
+      const { desk_id, slug } = started.body as SetupState;
+      expect(slug, browser).toMatch(/^juniper-hair-studio-setup1/);
+      const preview = await store.dispatch('openPreview', { cookies: owner, params: { desk_id } });
+      if ('network' in preview || preview.status !== 200) throw new Error(`the ${browser} copy opens its preview`);
+      const read = await store.dispatch('visitorSession', { cookies: { desk_visitor: cookieSet(preview, 'desk_visitor') }, params: { slug } });
+      expect(read, browser).toMatchObject({ status: 200, body: { state: { session_id: (preview.body as VisitorSession).state.session_id } } });
+      slugs.push(slug);
+      // A second setup of the same business in this copy takes the next number, still with the copy's tag.
+      const again = await store.dispatch('startSetup', {
+        cookies: owner,
+        body: { description, timezone: 'America/Los_Angeles', idempotency_key: `two-copies-${browser}-again` },
+      });
+      if ('network' in again || again.status !== 201) throw new Error(`the ${browser} copy starts setup again`);
+      const second = (again.body as SetupState).slug;
+      expect(second, `${browser} again`).toMatch(/^juniper-hair-studio-setup2-/);
+      slugs.push(second);
+    }
+    expect(new Set(slugs).size).toBe(4);
   });
 });
 
