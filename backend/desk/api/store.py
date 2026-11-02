@@ -85,6 +85,7 @@ from desk.api.prompts import (
     wrap,
     wrap_action_update,
 )
+from desk.api.ro import KernelRO
 from desk.api.schemas import OwnerTranscriptItem, StoppedDraft, TranscriptItem
 from desk.contracts import RenderedBlock
 from desk.db.models import ActionUpdateMetadata, Message, RunEvent
@@ -769,6 +770,20 @@ async def has_pending(conn: AsyncConnection, session_id: str) -> bool:
     """Pending work: a row the model hasn't been sent whose `wake` starts a turn (visitor and agent text in mode
     `ai`, whispers, action updates, the verification note)."""
     return await latest_pending(conn, session_id) is not None
+
+
+async def mode_for_message(ro: KernelRO, session_id: str, named: str) -> str:
+    """The session's mode as a visitor's or an agent's message is about to be stored, which decides whether it wakes
+    Claude: read from the session's kernel_ro row under its events lock, taken here and held until the transaction
+    ends, so call it in the transaction that appends the message. The kernel commits a hand-back's mode before the
+    hand-back takes that lock to look for a waiting message (`has_unanswered_visitor`), so either this read sees
+    Claude has the chat again, or the hand-back looks after the message has committed and finds it. `named` is the
+    mode the kernel named the request's session in, used when the row isn't there."""
+    if ro.own_transactions:
+        raise ValueError("the mode is read in the transaction that stores the message")
+    await lock_events(ro.conn, session_id)
+    session = await ro.session(session_id)
+    return named if session is None else session["mode"]
 
 
 async def has_unanswered_visitor(conn: AsyncConnection, session_id: str) -> bool:
