@@ -97,7 +97,7 @@ function withOwner(template: string, language: Language, owner: DeskOwner): stri
 // Visitor-facing text: the kernel's templates and the fixture cards, by language
 
 /** A visitor status line: each decision state's but `executed`, the mandate refusal's, a reply's and the owner's words'. */
-export type VisitorLine = Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'reply_checked' | 'reply_handed_off' | 'owner_said';
+export type VisitorLine = Exclude<DecisionState, 'executed'> | 'refused_over_mandate' | 'closed_by_booking' | 'reply_checked' | 'reply_handed_off' | 'owner_said';
 
 /**
  * The kernel's visitor status lines (its render/en.py and es.py), `{owner}` naming the Desk's
@@ -114,6 +114,7 @@ const VISITOR_TEMPLATES = {
     denied: '{Owner} decided not to go ahead',
     expired: 'This request timed out',
     cancelled: 'Cancelled',
+    closed_by_booking: 'Closed: your booking replaced this request',
     failed: "That didn't go through",
     unknown: 'Still confirming this',
     refused_at_execution: "The rules changed, so this didn't go ahead",
@@ -130,6 +131,7 @@ const VISITOR_TEMPLATES = {
     denied: '{Owner} decidió no seguir adelante',
     expired: 'Esta solicitud venció',
     cancelled: 'Cancelado',
+    closed_by_booking: 'Cerrada: su reserva sustituyó esta solicitud',
     failed: 'No se pudo completar',
     unknown: 'Todavía lo estamos confirmando',
     refused_at_execution: 'Las reglas cambiaron, así que no se hizo',
