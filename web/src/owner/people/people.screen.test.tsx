@@ -855,6 +855,8 @@ describe('share', () => {
       const box = card.getBoundingClientRect();
       expect(Math.round(box.width)).toBe(300);
       expect(Math.round(box.left)).toBe(Math.round((document.documentElement.clientWidth - 300) / 2));
+      // On paper the kit stops being a size container, so it can't hold the fixed card's place.
+      expect(getComputedStyle(card.closest('.cd-share-kit') as HTMLElement).containerType).toBe('normal');
       // At the top of the page, and nothing over it: the card is what its centre hits.
       expect(Math.round(box.top)).toBe(0);
       const centre = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
