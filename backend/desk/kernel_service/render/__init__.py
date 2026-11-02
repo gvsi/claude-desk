@@ -28,8 +28,9 @@ once (`register_template`) with the fact kinds it renders, the fact ID (or ID pr
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line; the soft checks read it after
-its kind's fixed label (`CHECK_LABELS`, `check_text`), and a session's request receipts, each a
-decision's status line, after a label of their own (`RECEIPT_LABEL`, `receipt_check_text`). A
+its kind's fixed label (`CHECK_LABELS`, `check_text`), and a session's request receipts after a label
+of their own (`RECEIPT_LABEL`, `receipt_check_text`), each carrying what was asked for, a decision's
+status line and, while the request is held, a note that the card states only its status. A
 template that names no fact kinds (handoff, verify_prompt) renders without one. `Template.current`
 says whether a fact may still be shown (a status the template renders, not expired), and a fact
 with nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an
@@ -282,7 +283,7 @@ RECEIPT_LABEL = "Request receipt"
 # back a claim about any request; for the checks alone, never shown, in the reply's language, so a Spanish
 # reply about another request reads as one. Keyed by the request's tool, every native and payments tool,
 # since the compiler's default ask can hold any enabled tool, and by `block:<name>` for a business tool's
-# block. A tool named in neither (an MCP tool) has no receipt, the stricter way.
+# block. A tool named in neither (none today) has no receipt, the stricter way.
 RECEIPT_SUBJECTS: dict[str, dict[str, str]] = {
     "en": {
         "native.quote": "Quote request",
@@ -297,7 +298,7 @@ RECEIPT_SUBJECTS: dict[str, dict[str, str]] = {
         "native.fetch_website": "Website request",
         "native.read_memory": "Records request",
         "native.web_search": "Web search request",
-        "payments.list_charges": "Charges request",
+        "payments.list_charges": "Payment history request",
         "payments.create_refund": "Refund request",
         "block:intake": "Details request",
         "block:typed_booking": "Booking request",
@@ -317,7 +318,7 @@ RECEIPT_SUBJECTS: dict[str, dict[str, str]] = {
         "native.fetch_website": "Solicitud de sitio web",
         "native.read_memory": "Solicitud de registros",
         "native.web_search": "Solicitud de búsqueda web",
-        "payments.list_charges": "Solicitud de cobros",
+        "payments.list_charges": "Solicitud de historial de pagos",
         "payments.create_refund": "Solicitud de reembolso",
         "block:intake": "Solicitud de datos",
         "block:typed_booking": "Solicitud de reserva",
@@ -325,17 +326,22 @@ RECEIPT_SUBJECTS: dict[str, dict[str, str]] = {
         "block:urgent": "Solicitud urgente",
     },
 }
-# After the status line, in the reply's language: a receipt states the request's status and nothing more, so
-# "Waiting for Mike Turner to approve" can't read as backing a follow-up or a time.
-RECEIPT_STATUS_ONLY: dict[str, str] = {
-    "en": " (this card states the request's status only; it doesn't say whether or when the owner will answer)",
-    "es": " (esta tarjeta solo indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)",
+# After a held request's status line, in the reply's language, naming that request: the receipt states only its
+# status, so "Waiting for Mike Turner to approve" backs neither another request nor a follow-up or a time. A
+# request the owner answered, or that closed or ran, has no note: he has answered, or it no longer waits for him.
+RECEIPT_HELD_NOTE: dict[str, str] = {
+    "en": " (this card states only this {request}'s status; it says nothing about any other request, or whether or"
+          " when the owner will answer)",
+    "es": " (esta tarjeta solo indica el estado de esta {request}; no dice nada de otras solicitudes, ni si el dueño"
+          " responderá ni cuándo)",
 }
 
 
-def receipt_check_text(asked: str, visitor_plain: str, lang: Language) -> str:
+def receipt_check_text(asked: str, visitor_plain: str, lang: Language, *, held: bool) -> str:
     """A request receipt as the soft checks read it: its English label, what was asked for (`asked`, a tool
-    or `block:<name>`, `RECEIPT_SUBJECTS`) and the status-only note in `lang`, around the decision's status
-    line ("Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states ...)").
-    An `asked` with no subject raises KeyError."""
-    return f"{RECEIPT_LABEL} card: {RECEIPT_SUBJECTS[lang][asked]}: {visitor_plain}{RECEIPT_STATUS_ONLY[lang]}"
+    or `block:<name>`, `RECEIPT_SUBJECTS`) in `lang`, the decision's status line and, while the request is
+    `held`, the note naming it ("Request receipt card: Quote request: Waiting for Mike Turner to approve (this
+    card states only this quote request's status; ...)"). An `asked` with no subject raises KeyError."""
+    subject = RECEIPT_SUBJECTS[lang][asked]
+    note = RECEIPT_HELD_NOTE[lang].format(request=subject.lower()) if held else ""
+    return f"{RECEIPT_LABEL} card: {subject}: {visitor_plain}{note}"

@@ -32,20 +32,24 @@ def test_every_card_template_has_a_label_for_the_soft_checks():
 
 def test_a_request_receipt_reaches_the_soft_checks_with_a_label_no_card_has():
     """The session's request receipts aren't templates: held or resolved, they share one English label of
-    their own, which no card's label shares, then what was asked for and a fixed note that the card states a
-    status only, both in the reply's language, so a Spanish reply about another request reads as one, and a
-    status line never reads as the owner promising to answer."""
+    their own, which no card's label shares, then what was asked for, in the reply's language, so a Spanish
+    reply about another request reads as one. While the request is held, a fixed note in that language
+    follows its status line: the card states only this request's status, nothing about another, nor whether
+    or when the owner will answer. A request the owner answered, or that closed or ran, has no such note,
+    since he has answered or it no longer waits for him."""
     assert render.RECEIPT_LABEL == "Request receipt"
     assert render.RECEIPT_LABEL not in render.CHECK_LABELS.values()
-    assert render.receipt_check_text("native.quote", "Waiting for Mike Turner to approve", "en") == (
-        "Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states the request's"
-        " status only; it doesn't say whether or when the owner will answer)")
-    assert render.receipt_check_text("native.quote", "Esperando la aprobación de Mike Turner", "es") == (
+    assert render.receipt_check_text("native.quote", "Waiting for Mike Turner to approve", "en", held=True) == (
+        "Request receipt card: Quote request: Waiting for Mike Turner to approve (this card states only this quote"
+        " request's status; it says nothing about any other request, or whether or when the owner will answer)")
+    assert render.receipt_check_text("native.quote", "Esperando la aprobación de Mike Turner", "es", held=True) == (
         "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner (esta tarjeta solo"
-        " indica el estado de la solicitud; no dice si el dueño responderá ni cuándo)")
-    assert render.receipt_check_text("block:intake", "Cancelado", "es") == (
-        "Request receipt card: Solicitud de datos: Cancelado (esta tarjeta solo indica el estado de la solicitud;"
-        " no dice si el dueño responderá ni cuándo)")
+        " indica el estado de esta solicitud de presupuesto; no dice nada de otras solicitudes, ni si el dueño"
+        " responderá ni cuándo)")
+    assert render.receipt_check_text("native.quote", "Mike Turner decided not to go ahead", "en", held=False) == (
+        "Request receipt card: Quote request: Mike Turner decided not to go ahead")
+    assert render.receipt_check_text("block:intake", "Cancelado", "es", held=False) == (
+        "Request receipt card: Solicitud de datos: Cancelado")
 
 
 def test_every_tool_and_business_block_a_decision_can_hold_has_a_receipt_subject():
@@ -62,12 +66,15 @@ def test_every_tool_and_business_block_a_decision_can_hold_has_a_receipt_subject
     assert all(subject.strip() == subject and subject for subjects in render.RECEIPT_SUBJECTS.values()
                for subject in subjects.values())
     assert [render.RECEIPT_SUBJECTS["en"][tool] for tool in (
-        "native.quote", "native.book", "native.payment_link", "native.release_document", "payments.create_refund")] == [
-        "Quote request", "Booking request", "Payment link request", "Document request", "Refund request"]
+        "native.quote", "native.book", "native.payment_link", "native.release_document", "payments.create_refund",
+        "payments.list_charges")] == [
+        "Quote request", "Booking request", "Payment link request", "Document request", "Refund request",
+        "Payment history request"]
     assert [render.RECEIPT_SUBJECTS["es"][tool] for tool in (
-        "native.quote", "native.book", "native.payment_link", "native.release_document", "payments.create_refund")] == [
+        "native.quote", "native.book", "native.payment_link", "native.release_document", "payments.create_refund",
+        "payments.list_charges")] == [
         "Solicitud de presupuesto", "Solicitud de reserva", "Solicitud de enlace de pago", "Solicitud de documento",
-        "Solicitud de reembolso"]
+        "Solicitud de reembolso", "Solicitud de historial de pagos"]
 
 
 async def test_both_soft_checkers_read_the_receipts_after_the_cards(monkeypatch):
