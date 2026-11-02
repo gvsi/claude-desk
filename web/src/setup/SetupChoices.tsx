@@ -41,6 +41,11 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
       const inside = root.current?.contains(target);
+      // What was typed on a row ends once the owner leaves it, or presses a key that isn't a character.
+      // Shift and Caps Lock are part of typing ("2FA"), and on the memory question so is Enter, which picks
+      // nothing after typed words, however often it's pressed.
+      const keeps = event.key === 'Shift' || event.key === 'CapsLock' || (event.key === 'Enter' && !offersOther);
+      if ((!inside && target !== document.body) || (event.key.length !== 1 && !keeps)) typed.current = { digits: '', word: false };
       if (event.key === 'Escape' && (inside || target === document.body || target.closest('.cd-setup-dock textarea'))) {
         event.preventDefault(); onDismiss(); return;
       }
@@ -49,7 +54,6 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       // So do Dismiss and a link in Claude's question: Enter opens the link.
       if (target.closest('.cd-icon-button, a[href]')) return;
       const otherInput = target === otherRef.current;
-      if (event.key.length !== 1) typed.current = { digits: '', word: false };
       const move = (index: number) => {
         setActive(index);
         const control = index === choices.length
@@ -68,12 +72,21 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
         move((active + (event.key === 'ArrowDown' ? 1 : rows - 1)) % rows);
-      } else if (!otherInput && !typed.current.word && /^[1-9]$/.test(event.key) && Number(event.key) <= rows) {
+      } else if (!otherInput && /^[1-9]$/.test(event.key) && Number(event.key) <= rows) {
         event.preventDefault();
         const index = Number(event.key) - 1;
-        move(index);
-        // A row digit may begin the owner's words; the next key says which.
-        typed.current.digits = offersOther && index < choices.length ? typed.current.digits + event.key : '';
+        const carried = typed.current.digits;
+        if (offersOther && carried !== '' && index === choices.length) {
+          // After digits typed on a row, "Something else…"'s own number can only be more of the number.
+          typed.current = { digits: '', word: false };
+          setOther((text) => `${text}${carried}${event.key}`.slice(0, maxLength));
+          move(index);
+        } else {
+          move(index);
+          // A row digit may begin the owner's words, and the next key says which. On the memory question a
+          // digit picks its answer, which ends any words typed before it.
+          typed.current = { digits: offersOther && index < choices.length ? carried + event.key : '', word: false };
+        }
       } else if (offersOther && inside && !otherInput && event.key.length === 1 && (event.key !== ' ' || typed.current.digits !== '')) {
         // A highlighted row is a button, which takes no text: what the owner types goes to "Something
         // else…", with any row digits typed just before it, so Enter sends their words and never the row
@@ -92,6 +105,9 @@ export function SetupChoices({ question, choices, maxLength, disabled, onChoose,
         // Reading the owner's memory and website takes a choice made in the panel, never an Enter from the page.
         if (!offersOther && !inside) return;
         event.preventDefault();
+        // Words typed on the memory question pick nothing, Enter after them included: a digit, an arrow or a
+        // click picks its answer.
+        if (!offersOther && typed.current.word) return;
         const text = offersOther && active === choices.length ? other.trim() : choices[active]?.text;
         if (text) onChoose(text);
       }

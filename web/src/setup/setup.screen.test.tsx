@@ -4709,7 +4709,7 @@ describe('consultant setup', () => {
     expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: 'We use Xero' });
   });
 
-  it.each(['12 clients', '150 an hour'])('an_answer_starting_with_digits_typed_on_a_choice_arrives_whole: %s', async (words) => {
+  it.each([['12 clients', '12 clients'], ['150 an hour', '150 an hour'], ['14 clients', '14 clients'], ['2{Shift>}FA{/Shift} clients', '2FA clients']])('an_answer_starting_with_digits_typed_on_a_choice_arrives_whole: %s', async (keys, words) => {
     // The digits first move between rows, as row keys do, then go into "Something else…" with the words
     // that follow them.
     const state = await consultantAt();
@@ -4719,7 +4719,7 @@ describe('consultant setup', () => {
     const options = panel.getByRole('list').getByRole('button');
     await options.first().click({ trial: true });
     (options.first().element() as HTMLElement).focus();
-    await userEvent.keyboard(words);
+    await userEvent.keyboard(keys);
     const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
     await expect.element(other).toHaveFocus();
     await expect.element(other).toHaveValue(words);

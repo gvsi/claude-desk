@@ -164,10 +164,13 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: false }]);
   });
 
-  it.each([[YES, 'sure'], [YES, 'no thanks'], [NO, 'no thanks']])('typing_on_%s_types_nothing_and_sends_nothing_until_an_answer_is_picked: %s', async (answer, words) => {
-    // Its answers are the only way to answer it: words typed with one highlighted go nowhere, so a typed
-    // "sure" can't be taken as either answer. Only the message box, reached by Esc or by "No, I'll type
-    // it", takes words.
+  it.each([
+    [YES, 'sure', '1'],
+    [YES, 'no thanks', '2'],
+    [NO, 'no thanks', '2'],
+  ])('typing_on_%s_picks_nothing_until_an_answer_is_picked: %s', async (answer, words, pick) => {
+    // Its answers are the only way to answer it: words typed with one highlighted go nowhere, and neither a
+    // space among them nor Enter after them, pressed once or twice, picks an answer. A number key does.
     const { state, ask } = await waitingInterview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
     const panel = screen.getByRole('region', { name: ask, exact: true });
@@ -175,15 +178,15 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     await userEvent.keyboard(answer === YES ? '1' : '2');
     const row = screen.getByRole('button', { name: answer, exact: true });
     await expect.element(row).toHaveFocus();
-    // A space among the words presses neither answer.
-    await userEvent.keyboard(words);
+    await userEvent.keyboard(`${words}{Enter}`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await userEvent.keyboard('{Enter}');
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect.element(row).toHaveFocus();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer', exact: true })).toHaveValue('');
     expect(requests('setupConsent')).toHaveLength(0);
-    // Picking is still Enter on the highlighted answer.
-    await userEvent.keyboard('{Enter}');
-    await expect.poll(() => requests('setupConsent').map((r) => r.body)).toEqual([{ allow: answer === YES }]);
+    await userEvent.keyboard(`${pick}{Enter}`);
+    await expect.poll(() => requests('setupConsent').map((r) => r.body)).toEqual([{ allow: pick === '1' }]);
   });
 
   it('takes_focus_on_its_panel_as_it_docks_so_its_keys_work_at_once', async () => {
