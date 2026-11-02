@@ -366,7 +366,13 @@ function businessTypeOf(description: string): BusinessType {
   return 'other';
 }
 
-/** A slug for the business, unique in the copy. */
+/**
+ * A slug for the business, unique across every copy the store holds: the business's name, `-setup`
+ * and the lowest number that keeps it apart from the copy's other Desks, then the copy's own tag
+ * (`MockWorld.scoped`), as the kernel's `new_slug` gives every Desk a suffix of its own. A public
+ * request finds its copy by the slug in its path, so two copies that set up the same business must
+ * not share one. The tests' first copy has no tag, so its slugs stay `<name>-setup1`.
+ */
 function slugFor(world: MockWorld, business: string): string {
   const base =
     business
@@ -376,9 +382,10 @@ function slugFor(world: MockWorld, business: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 30) || 'desk';
+  const slug = (n: number) => world.scoped(`${base}-setup${n}`);
   let n = 1;
-  while (world.deskBySlug(`${base}-setup${n}`)) n += 1;
-  return `${base}-setup${n}`;
+  while (world.deskBySlug(slug(n))) n += 1;
+  return slug(n);
 }
 
 /** The money limit in an answer, in cents: its first amount, at most the platform ceiling; 0 when it names none. */
