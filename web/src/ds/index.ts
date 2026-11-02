@@ -251,6 +251,8 @@ export { OutcomeMenu, type OutcomeMenuProps } from './components/OutcomeMenu/Out
 export { OutcomeGroups, type OutcomeGroupRow, type OutcomeGroupsProps } from './components/OutcomeGroups/OutcomeGroups.tsx';
 export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
 export { ToolTitleList, type ToolTitles } from './components/RuleRow/ToolTitles.tsx';
+export { RuleSentence, type RuleMeta, type RuleSentenceProps, type SentencePart } from './components/RuleSentence/RuleSentence.tsx';
+export { EffectTags, effectTags, type EffectTagsProps } from './components/EffectTags/EffectTags.tsx';
 export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';
 export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
