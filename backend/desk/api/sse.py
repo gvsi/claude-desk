@@ -15,11 +15,12 @@ notices meant for the visitor (a code sent to the contact on record), code-free 
 reach a session.
 
 The stream: one `Listener` per process holds the only `LISTEN desk_run_events` connection and wakes the
-streams of the session each notification names. `event_stream` sends an `open` comment at once (a browser's
-EventSource opens only at the body's first byte), replays the session's events after the client's `Last-Event-ID`,
-calls `on_open`, then sends each new event as it is committed (a wake-up, or a poll every 2 s when a notification is
-missed) and hands each control row that appears unhandled while it is open to `on_control`, once per stream; an idle
-stream gets a `keep-alive` comment every `ping_s`. A hang-up ends the stream wherever it is, as a cancellation, even
+streams of the session each notification names. `event_stream` reads what it replays, sends an `open` comment
+(behind CloudFront and the load balancer, a response's headers reach the browser only with its first body byte, and
+EventSource opens on them), replays the session's events after the client's `Last-Event-ID`, calls `on_open`, then
+sends each new event as it is committed (a wake-up, or a poll every 2 s when a notification is missed) and hands each
+control row that appears unhandled while it is open to `on_control`, once per stream; an idle stream gets a
+`keep-alive` comment every `ping_s`. A hang-up ends the stream wherever it is, as a cancellation, even
 when a database read reports it as an error of its own. A stream whose `Wakeup` is closed (a newer stream of its
 session took its place) ends at once when a send of its waits for the client (one that stopped reading never lets it
 finish), else at its next look, and is cancelled wherever it waits should it still run `CLOSE_GRACE_S` later.
@@ -305,14 +306,17 @@ async def _frames(engine: AsyncEngine, listener: Listener, ids: Ids, after: int,
                   wakeup: Wakeup) -> AsyncIterator[ServerSentEvent]:
     try:
         async with listener.subscribe(ids.session_id, wakeup) as wakeup:
-            # First, before any read: the browser's EventSource opens at the body's first byte, which would otherwise
-            # wait for the first event or keep-alive.
-            yield OPENING
             # Control rows are tracked by the IDs this stream has seen, not by a high-water mark: a row's ID is
             # taken at insert and rows commit in any order, so a lower ID can become visible after a higher one.
             # Rows already waiting are on_open's.
             handed = set() if on_control is None else {row.id for row in await _unhandled_controls(engine, ids)}
-            for seq, payload in await _events_after(engine, ids, after):
+            replay = await _events_after(engine, ids, after)
+            # Behind CloudFront and the load balancer, a response's headers reach the browser only with its first body
+            # byte, and EventSource opens on them: the comment opens it now, not at the first event or keep-alive. It
+            # comes once the replay is read, so the replay follows it with nothing awaited between them (the web takes
+            # a quiet moment after the open as having caught up).
+            yield OPENING
+            for seq, payload in replay:
                 yield _frame(seq, payload)
                 after = seq
             if on_open is not None:
@@ -384,11 +388,11 @@ def event_stream(engine: AsyncEngine, listener: Listener, ids: Ids, last_event_i
                  on_open: Callable[[], Awaitable[None]] | None, ping_s: float = PING_S,
                  poll_s: float = POLL_S, wakeup: Wakeup | None = None,
                  on_end: Callable[[], None] | None = None) -> EventStream:
-    """An `open` comment at once, then the session's events after `last_event_id` (all of them when None), then live
-    ones: SSE `event` is the event's `type` and `id` its `seq`. `on_open` runs after the replay (the control rows and
-    pending work already waiting); `on_control` gets each control row that appears unhandled while the stream is open,
-    whatever order the rows' writers commit in. `wakeup`, when given, is the stream's own, and its `close()` ends the
-    stream (`EventStream`); `on_end` runs once the stream has ended, however it ended.
+    """An `open` comment as soon as the replay is read, then the session's events after `last_event_id` (all of them
+    when None), then live ones: SSE `event` is the event's `type` and `id` its `seq`. `on_open` runs after the replay
+    (the control rows and pending work already waiting); `on_control` gets each control row that appears unhandled
+    while the stream is open, whatever order the rows' writers commit in. `wakeup`, when given, is the stream's own,
+    and its `close()` ends the stream (`EventStream`); `on_end` runs once the stream has ended, however it ended.
 
     Both callbacks run inside the stream and hold back its frames until they return, so they return promptly
     and start longer work (a resumed turn) as a task. A row can reach `on_open` and `on_control`, or several

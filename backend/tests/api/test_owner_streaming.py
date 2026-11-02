@@ -653,8 +653,9 @@ async def test_setup_keepalives_are_ping_comments_every_15_seconds(app, browser,
 @pytest.mark.parametrize("stream", ["setup", "rules"])
 async def test_owner_streams_open_at_once_with_nothing_to_send(app, browser, fake, kernel_http, model, monkeypatch,
                                                                stream):
-    """A browser's EventSource opens at the body's first byte. A setup turn's events and an Ask Claude answer, while
-    Claude hasn't answered yet, send a comment as they start, long before their first 15 s keep-alive."""
+    """Behind CloudFront and the load balancer, a response's headers reach the browser only with its first body byte,
+    and EventSource opens on them. A setup turn's events and an Ask Claude answer, while Claude hasn't answered yet,
+    send a comment as they start, long before their first 15 s keep-alive."""
     from desk.api.prompts import RuleChat
     from tests.api.test_owner_desks import new_owner as rules_owner
 
@@ -723,6 +724,40 @@ async def test_rules_stream_joins_json_work_and_disconnect_leaves_it_running(
     finally:
         gate.set()
         await live.close()
+
+
+async def test_a_send_that_fails_closes_the_routes_events_before_the_response_returns():
+    """When a send fails (the connection dropped), the SSE library closes the response's body. The route's own events
+    are closed with it, before the response returns, even while something still holds them (a traceback's frames can):
+    never left to the garbage collector and the event loop's finalizer."""
+    from desk.api.owner_streaming import event, response
+
+    closed = []
+
+    async def events():
+        try:
+            yield event("delta", {"text": "first"})
+            yield event("delta", {"text": "second"})
+        finally:
+            closed.append(True)                          # a display subscriber lets go of its waiter here
+
+    sent = 0
+
+    async def send(message):
+        nonlocal sent
+        if message["type"] == "http.response.body" and message["body"]:
+            sent += 1
+            if sent == 2:                                # the opening comment went out; the first event's send fails
+                raise OSError("the connection dropped")
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    held = events()
+    with pytest.raises(OSError):
+        await response(held)({"type": "http", "method": "GET"}, receive, send)
+
+    assert closed == [True]
 
 
 async def test_slow_subscriber_gets_reset_before_done_after_failed_attempt():

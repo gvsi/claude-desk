@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import text
 
+from desk.api import sse
 from desk.api.sse import Listener, Wakeup, append_control, claim_control, emit, event_stream, unhandled_controls
 from desk.db.session import database_url
 from desk.api.store import Ids
@@ -24,8 +25,9 @@ async def listener(db) -> AsyncIterator[Listener]:
         yield listener
 
 
-async def raw_frames(response, count: int, *, timeout: float = 5.0) -> list[str]:
-    """Runs an SSE response as a browser would until `count` frames (events or comments) arrived, then hangs up."""
+async def raw_frames(response, count: int, *, timeout: float = 5.0, seen: list[str] | None = None) -> list[str]:
+    """Runs an SSE response as a browser would until `count` frames (events or comments) arrived, then hangs up.
+    `seen`, when given, gets each frame too, as it arrives."""
     frames: list[str] = []
     hung_up = asyncio.Event()
 
@@ -38,6 +40,8 @@ async def raw_frames(response, count: int, *, timeout: float = 5.0) -> list[str]
             assert message["status"] == 200
         elif message["type"] == "http.response.body" and message["body"]:
             frames.append(message["body"].decode())
+            if seen is not None:
+                seen.append(frames[-1])
             if len(frames) >= count:
                 hung_up.set()
 
@@ -168,14 +172,34 @@ async def test_replay_after_last_event_id(engine, listener):
 
 
 async def test_a_stream_with_nothing_to_send_opens_at_once(engine, listener):
-    """A browser's EventSource opens at the body's first byte. A stream with no event to replay sends a comment as it
-    starts, before on_open returns and long before its first keep-alive: no event, data or id, so it never moves the
-    client's Last-Event-ID."""
+    """Behind CloudFront and the load balancer, a response's headers reach the browser only with its first body byte,
+    and EventSource opens on them. A stream with no event to replay sends a comment as it starts, before on_open
+    returns and long before its first keep-alive: no event, data or id, so it never moves the client's Last-Event-ID."""
     async def on_open() -> None:
         await asyncio.Event().wait()                # holds the stream until the client hangs up
 
     stream = event_stream(engine, listener, SESSION_A, None, on_open=on_open, on_control=None, ping_s=60)
     assert await raw_frames(stream, 1, timeout=1.0) == [": open\r\n\r\n"]
+
+
+async def test_a_replay_follows_the_opening_comment_back_to_back(engine, listener, monkeypatch):
+    """A stream reads what it replays before it opens, so its replay follows the opening comment with no read between
+    them: the web takes a quiet moment after the open as having caught up."""
+    await publish(engine, SESSION_A, EvWriting(type="writing"), EvTurnEnd(type="turn_end"))
+    seen: list[str] = []
+    events_after = sse._events_after
+
+    async def reading(*args):
+        seen.append("read")
+        return await events_after(*args)
+
+    monkeypatch.setattr(sse, "_events_after", reading)
+    stream = event_stream(engine, listener, SESSION_A, None, on_open=None, on_control=None, ping_s=60)
+    await raw_frames(stream, 3, seen=seen)
+
+    assert seen[:4] == ["read", ": open\r\n\r\n",
+                        'id: 1\r\nevent: writing\r\ndata: {"type":"writing"}\r\n\r\n',
+                        'id: 2\r\nevent: turn_end\r\ndata: {"type":"turn_end"}\r\n\r\n']
 
 
 async def test_heartbeat_is_a_comment(engine, listener):
