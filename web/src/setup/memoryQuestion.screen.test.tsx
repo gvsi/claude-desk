@@ -15,12 +15,11 @@ import { worker } from '../mocks/browser.ts';
 import { growingWords } from '../mocks/ownerStreams.ts';
 import { CPA_COPY, MEMORY_LABEL } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
-import { SETUP_COPY } from './copy.ts';
+import { SETUP_COPY, START_EXAMPLES } from './copy.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
 
-const CPA_DESCRIPTION =
-  "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+const CPA_DESCRIPTION = START_EXAMPLES.en.examples[3]!.description;
 const TITLE = "Let's set up your Desk";
 const YES = 'Yes, use it';
 const NO = "No, I'll type it";
