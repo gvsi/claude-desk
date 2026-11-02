@@ -631,13 +631,13 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
         "held_at": fake.decisions[seeded].created_at.isoformat().replace("+00:00", "Z"),
         "handoff": None,
         "session": {"session_id": fake.decisions[seeded].decision.session_id, "kind": "visitor",
-                    "display_name": None, "verified": False, "assurance": "none"},
+                    "display_name": None, "verified": False, "assurance": "none", "demo_visitor": False},
         "from_the_visitor": None, "claude_summary": None}
     assert first["decision"]["answers"] == ["allow_once", "deny_once"]        # a limit hold: no "Deny always"
     assert second["decision"]["decision_id"] == dana_hold.decision_id and second["handoff"] is None
     assert second["decision"]["answers"] == ["allow_once", "allow_person", "deny_once"]
     assert second["session"] == {"session_id": dana.session_id, "kind": "visitor", "display_name": "Dana Whitfield",
-                                 "verified": True, "assurance": "demo_code"}
+                                 "verified": True, "assurance": "demo_code", "demo_visitor": False}
     assert second["from_the_visitor"] == "Could you do 10% off the drain clearing?"
     assert third == {
         "decision": None, "held_by": None, "held_at": None,
@@ -645,7 +645,7 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                     "reason": "Sam Ortiz · (510) 555-0199 · Leaking water heater", "callback_window": None,
                     "status": "open", "kind": "callback"},
         "session": {"session_id": caller.session_id, "kind": "visitor", "display_name": "Sam Ortiz",
-                    "verified": False, "assurance": "none"},
+                    "verified": False, "assurance": "none", "demo_visitor": False},
         "from_the_visitor": "Water everywhere, please call me · It's the heater in the garage",   # the last two
         "claude_summary": None}
     # each held request was read from the kernel, with the owner's credential, which applies expiry
@@ -654,6 +654,30 @@ async def test_needs_you_lists_held_requests_and_open_handoffs(app, browser, fak
                                                          for decision_id in (seeded, dana_hold.decision_id))
     assert all(call.headers[OWNER] == owner.token for call in reads)
 
+
+
+async def test_needs_you_tags_a_demo_visitors_requests_by_its_persona(app, browser, fake, kernel_http, engine, db):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    seeded = seeded_hold(fake, owner)
+    fake.now += timedelta(minutes=5)
+    demo = await guest(kernel_http, fake, owner)
+    await write(engine, db, demo.ids, "demo_visitor", text="Riley")        # the mark its run writes as it opens
+    await write(engine, db, demo.ids, "visitor_text", text="Could I get 10% off as a returning customer?")
+    held = await demo.decide("native.quote", discounted_quote(fake, owner))
+    await demo.run("native.request_callback", {"name": "Riley Morgan", "contact": "riley.morgan@example.com",
+                                               "reason": "Kitchen sink leaking"})
+
+    listed = await owner.get(f"desks/{owner.desk_id}/needs_you")
+
+    assert listed.status_code == 200, listed.text
+    # Its held request and its call-back request say it's the demo visitor, named by its persona as Conversations
+    # names it; the seed's real visitor's request never does.
+    seeded_item, held_item, callback = listed.json()
+    assert seeded_item["decision"]["decision_id"] == seeded and seeded_item["session"]["demo_visitor"] is False
+    assert held_item["decision"]["decision_id"] == held.decision_id
+    assert held_item["session"] == {"session_id": demo.session_id, "kind": "visitor", "display_name": "Riley",
+                                    "verified": False, "assurance": "none", "demo_visitor": True}
+    assert callback["handoff"]["session_id"] == demo.session_id and callback["session"] == held_item["session"]
 
 
 async def test_needs_you_gives_the_visitors_last_two_lines_and_claudes_summary(app, browser, fake, kernel_http,
@@ -731,7 +755,7 @@ async def test_needs_you_tells_the_handoff_cards_handoff_from_a_call_back_reques
                     "reason": "The Desk handed this to you.", "callback_window": None, "status": "open",
                     "kind": "card"},
         "session": {"session_id": handed.session_id, "kind": "visitor", "display_name": None, "verified": False,
-                    "assurance": "none"},
+                    "assurance": "none", "demo_visitor": False},
         "from_the_visitor": "How much is a new water heater?", "claude_summary": None}
     assert handoffs[caller.session_id]["handoff"] == {
         "handoff_id": opened[caller.session_id], "session_id": caller.session_id,

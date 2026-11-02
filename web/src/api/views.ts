@@ -102,6 +102,11 @@ export interface ConversationSummary {
   latest_outcome_starts_at?: string | null;
   latest_outcome_cents?: number | null;
   latest_outcome_cause?: RefusalCause | null;
+  /**
+   * A demo visitor's chat: an AI the owner started plays the customer (`owner_reads.demo_visitors`).
+   * With no verified or lead name, `display_name` is its persona's first name. Absent is false.
+   */
+  demo_visitor?: boolean;
 }
 
 export type BriefingKind = 'turned_down' | 'booking' | 'lead' | 'answer';
@@ -234,9 +239,12 @@ export interface Handoff {
 export interface NeedsYouSession {
   session_id: string;
   kind: ActorKind;
+  /** The verified person's name, else the session's lead's, else a demo visitor's persona's, else null. Untrusted. */
   display_name: string | null;
   verified: boolean;
   assurance: Assurance;
+  /** A demo visitor's chat, so Needs you never passes it off as a real customer's. Absent is false. */
+  demo_visitor?: boolean;
 }
 
 interface NeedsYouBase {
@@ -320,6 +328,8 @@ export interface OwnerTranscript {
   typing_until?: string | null;
   /** Replayed from the recorded history into this copy (plan 02b); absent is false. */
   replayed?: boolean;
+  /** A demo visitor's chat: an AI the owner started plays the customer. Absent is false. */
+  demo_visitor?: boolean;
 }
 
 /** An item of the owner's transcript: a visitor's kinds, and where the reply check stopped a draft of Claude's. */

@@ -382,13 +382,16 @@ class AnsweringIn(BaseModel):
 
 class NeedsYouSession(BaseModel):
     """Who a held request or a callback request came from. `display_name` is the verified person's, else the name
-    the session's lead gave (untrusted text), else None."""
+    the session's lead gave (untrusted text), else a demo visitor's persona's first name, else None. `demo_visitor`
+    is true for a demo visitor's chat (`owner_reads.demo_visitors`), so Needs you never passes it off as a real
+    customer's."""
 
     session_id: str
     kind: ActorKind
     display_name: str | None
     verified: bool
     assurance: Assurance
+    demo_visitor: bool = False              # an AI the owner started plays the customer (`owner_reads.demo_visitors`)
 
 
 class Handoff(BaseModel):

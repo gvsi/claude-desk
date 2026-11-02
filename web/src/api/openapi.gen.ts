@@ -679,7 +679,9 @@ export interface NeedsYouItem {
 }
 /**
  * Who a held request or a callback request came from. `display_name` is the verified person's, else the name
- * the session's lead gave (untrusted text), else None.
+ * the session's lead gave (untrusted text), else a demo visitor's persona's first name, else None. `demo_visitor`
+ * is true for a demo visitor's chat (`owner_reads.demo_visitors`), so Needs you never passes it off as a real
+ * customer's.
  */
 export interface NeedsYouSession {
   session_id: string;
@@ -687,6 +689,7 @@ export interface NeedsYouSession {
   display_name: string | null;
   verified: boolean;
   assurance: "none" | "demo_code" | "owner_session";
+  demo_visitor?: boolean;
 }
 /**
  * `POST /api/owner/conversations/{session_id}/messages`: the owner's words, said to the visitor once the owner has

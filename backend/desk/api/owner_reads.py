@@ -138,12 +138,16 @@ class People:
             return None
         return self._verified.get(session_id) or self._leads.get(session_id)
 
-    def brief(self, session_id: str) -> NeedsYouSession | None:
+    def brief(self, session_id: str, demo: dict[str, str] | None = None) -> NeedsYouSession | None:
+        """Who the session is, for Needs you. `demo` is the Desk's demo visitors' chats (`demo_visitors`): one of
+        them is flagged and, with no other name, named by its persona, as Conversations names it."""
         row = self.sessions.get(session_id)
         if row is None:
             return None
-        return NeedsYouSession(session_id=session_id, kind=row["kind"], display_name=self.name(session_id),
-                               verified=row["verified"], assurance=row["assurance"])
+        demo = demo or {}
+        return NeedsYouSession(session_id=session_id, kind=row["kind"],
+                               display_name=self.name(session_id) or demo.get(session_id), verified=row["verified"],
+                               assurance=row["assurance"], demo_visitor=session_id in demo)
 
 
 async def people(ctx: OwnerCtx, desk_id: str) -> People:
@@ -277,14 +281,15 @@ async def needs_you(ctx: OwnerCtx, desk_id: str) -> list[NeedsYouItem]:
     summaries = {session_id: triage.summary
                  for session_id, triage in (await newest_triage(ctx.ro.conn, ctx.copy_id, desk_id, handed)).items()}
     held_by = await _held_by(ctx, desk_id, [decision for _, decision in held])
+    demo = await demo_visitors(ctx, desk_id)
     items = []
     for row, decision in held:
-        if (session := who.brief(decision.session_id)) is not None:
+        if (session := who.brief(decision.session_id, demo)) is not None:
             items.append(NeedsYouItem(decision=decision, held_by=held_by[decision.decision_id],
                                       held_at=utc(row["created_at"]), handoff=None, session=session,
                                       from_the_visitor=texts.get(decision.session_id), claude_summary=None))
     for row in handoffs:
-        if (session := who.brief(row["session_id"])) is not None:
+        if (session := who.brief(row["session_id"], demo)) is not None:
             handoff = Handoff(handoff_id=row["handoff_id"], session_id=row["session_id"], reason=row["reason"],
                               callback_window=row["callback_window"], status=row["status"], kind=row["kind"])
             items.append(NeedsYouItem(decision=None, held_by=None, held_at=None, handoff=handoff, session=session,
