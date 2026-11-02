@@ -403,3 +403,30 @@ def test_a_new_connection_is_authorized_over_ssm_and_recorded_only_when_asked(tm
     assert 'i-0bbbbbbbbbbbbbbbb ssh-ed25519 HOSTKEY' in (tmp_path / 'known_hosts').read_text()
     recorded = json.loads((tmp_path / 'connection-us-east-1.json').read_text())['instance']
     assert recorded == ('i-0bbbbbbbbbbbbbbbb' if remember else 'i-0aaaaaaaaaaaaaaaa')
+
+
+def test_the_shared_connection_outlasts_a_long_upload_queue(tmp_path, monkeypatch):
+    """Every lane's uploads share one connection, and Session Manager carries uploads slowly (15–45 KB/s measured).
+    One 2 MB upload delayed a round trip on that connection by 74 s, past the old 45 s keepalive limit, so the master
+    closed itself and dropped every lane's call. The master now allows ten minutes without a keepalive reply. A
+    closed Session Manager stream still ends it at once, because the proxy process exits."""
+    import json
+    from types import SimpleNamespace
+    from desk_tools import testbox_client as client
+
+    (tmp_path / 'connection-us-east-1.json').write_text(json.dumps({'instance': 'i-0aaaaaaaaaaaaaaaa'}))
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: SimpleNamespace(returncode=0))   # the master is alive
+    options = client.open_connection(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa', None, remember=False)
+    settings = dict(value.split('=', 1) for flag, value in zip(options, options[1:]) if flag == '-o')
+    assert int(settings['ServerAliveInterval']) * int(settings['ServerAliveCountMax']) >= 600
+
+
+def test_a_change_to_the_masters_settings_opens_its_own_master(tmp_path, monkeypatch):
+    """A caller reuses any live master on its control socket, and a master keeps the settings it was opened with. A
+    lane on an older branch could otherwise keep a master with the old 45 s limit open while it stays busy, since
+    ControlPersist counts only idle time. The socket's name therefore follows the master's settings."""
+    from desk_tools import testbox_client as client
+
+    current = client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa')
+    monkeypatch.setattr(client, 'MASTER_OPTIONS', ('ServerAliveInterval=15', 'ServerAliveCountMax=3'))
+    assert client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa') != current
