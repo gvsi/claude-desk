@@ -120,22 +120,27 @@ it.each([
   // reads the busy interview and follows the turn.
   mockStore.streamSetupTurns(true, { answersAtOnce });
   await screen.getByRole('button', { name: 'Both, about evenly', exact: true }).click();
-  // The walk the owner takes: each card's own button, pressed once it is waiting.
-  for (const [card, action] of [
-    ['Google Calendar', 'Connect'],
-    ['Book a free intro call', 'Set it up'],
-    ['Ask new clients three questions', 'Set it up'],
-    ['Stripe', 'Not now'],
-    ['Send a retainer link', 'Not now'],
-    ['Answer “Where’s my return?”', 'Set it up'],
+  // The walk the owner takes: each card's own button, pressed once it is waiting, and its decision
+  // line once its turn lands.
+  const decisions = mockStore.requests.filter((r) => r.key === 'setupProposal').length;
+  for (const [card, action, decided] of [
+    ['Google Calendar', 'Connect', 'Connected'],
+    ['Book a free intro call', 'Set it up', 'Set up'],
+    ['Ask new clients three questions', 'Set it up', 'Set up'],
+    ['Stripe', 'Not now', 'Not now'],
+    ['Send a retainer link', 'Not now', 'Not now'],
+    ['Answer “Where’s my return?”', 'Set it up', 'Set up'],
   ] as const) {
     const article = screen.getByRole('article', { name: card, exact: true });
     await article.getByRole('button', { name: action, exact: true }).click();
-    await expect.poll(() => article.getByRole('button').elements().length).toBe(0);
+    await expect.poll(() => article.query()?.querySelector('.cd-setup-c3__decision')?.textContent, { timeout: 5_000 }).toBe(decided);
   }
   await screen.getByRole('button', { name: 'Ask me before every payment', exact: true }).click();
   await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-  expect(mockStore.requests.filter((r) => r.key === 'setupProposal').map((r) => r.body)).toContainEqual({ accept: true });
+  // "Set it up" and "Connect" send only `accept`; "Not now" only `accept: false`.
+  expect(mockStore.requests.filter((r) => r.key === 'setupProposal').slice(decisions).map((r) => r.body)).toEqual([
+    { accept: true }, { accept: true }, { accept: true }, { accept: false }, { accept: false }, { accept: true },
+  ]);
   await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
   const tools = screen.getByRole('region', { name: 'Tools', exact: true });
