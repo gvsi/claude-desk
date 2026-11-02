@@ -15,7 +15,7 @@
   - The name and the tagline.
   - The open status, when the Desk has hours (see "Open status" below). The header holds no other line and no free text: everything a visitor reads is the kernel's or the shell's own copy.
   - The `accent` only as the 2 px rule under the header: never text, never a ground for text, never the only sign of a control.
-  - Colors are set as `--brand-field`, `--brand-ink`, `--brand-ink-secondary` and `--brand-accent`. Only a plain `#rrggbb` or a token (`var(--token)`) is used; anything else falls back to `bg-panel`, `text-primary`, `text-secondary` and `line-hairline` (`guards.ts`).
+  - Colors are set as `--brand-field`, `--brand-ink`, `--brand-ink-secondary`, `--brand-status-handled` and `--brand-accent`. Only a plain `#rrggbb` or a token (`var(--token)`) is used; anything else falls back to `bg-panel`, `text-primary`, `text-secondary`, `status-handled` and `line-hairline` (`guards.ts`). The open-status dot takes `--brand-status-handled`, and its closed ring `--brand-ink-secondary`.
 - **The chat** in a column at most 680 px wide:
   - "Chat with {name}" and, under it, the AI disclosure. It can't be turned off:
     - "You're chatting with Claude, an AI answering for {name}. Ask for {ownerName} anytime."
@@ -161,7 +161,7 @@ Beside the chat, a charter taller than the column scrolls in the column, on its 
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; accent }`. |
+| `brand` | `PublicBrand` | Required. `{ name; tagline; monogram; field; ink; inkSecondary; statusHandled; accent }`. |
 | `ownerName` | `string \| null` | Required. `owner_display_name`, or null when the owner gave no name: the head then asks for a person. |
 | `language` | `'en' \| 'es'` | Required. |
 | `openStatus` | `PublicOpenStatus` | `PublicDesk['open_status']`, the kernel's object or `null`. Only `text` and `open` are read. |
