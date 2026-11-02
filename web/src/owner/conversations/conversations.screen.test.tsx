@@ -322,7 +322,9 @@ describe('Conversations', () => {
     const lineOf = (id: string) => row(id).querySelector<HTMLElement>('.cd-conversation-item__quote');
 
     // What each agent did, from its outcome and the facts behind it, on the business's clock.
-    expect(lineOf('agent-booked')?.textContent).toBe('Booked Monday, November 2 at 10:00 am.');
+    expect(lineOf('agent-booked')?.textContent).toBe('Booked Mon, Nov 2, 10:00 am.');
+    const bookedLine = lineOf('agent-booked')!;
+    expect(bookedLine.scrollWidth).toBeLessThanOrEqual(bookedLine.clientWidth);
     expect(lineOf('agent-paid')?.textContent).toBe('Paid $20 up front.');
     expect(lineOf('agent-limit')?.textContent).toBe('Asked to pay more than its limit, and was turned down.');
     expect(lineOf('agent-refused')?.textContent).toBe('A request was turned down.');
@@ -362,7 +364,7 @@ describe('Conversations', () => {
     const refused = await bookTheEarliestVisit('push_the_limit');
     const { screen } = await renderRoute(LIST);
     const lineOf = (id: string) => document.querySelector(`a[href="${conversation(id)}"] .cd-conversation-item__quote`)?.textContent;
-    await expect.poll(() => lineOf(booked)).toBe('Booked Tuesday, November 3 at 2:00 pm.');
+    await expect.poll(() => lineOf(booked)).toBe('Booked Tue, Nov 3, 2:00 pm.');
     expect(lineOf(paid)).toBe('Paid $20 up front.');
     expect(lineOf(refused)).toBe('Asked to pay more than its limit, and was turned down.');
     await expectScreenBasics(screen.container, { owner: true });

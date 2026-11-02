@@ -31,7 +31,7 @@ export const AGENT_TURNED_DOWN = 'A request was turned down.';
 /**
  * What an agent did, for its row in the Conversations list, where a visitor's own words would
  * sit: built from its confirmed outcome and the facts the API read behind it, never the agent's
- * words. "Booked Monday, November 2 at 10:00 am." on the business's clock, "Paid $20 up front.",
+ * words. "Booked Mon, Nov 2, 10:00 am." on the business's clock, "Paid $20 up front.",
  * or why its last request was turned down. Null with no outcome, an outcome only a visitor's chat
  * has, or a fact it needs missing, so the row has no line rather than a guess.
  */

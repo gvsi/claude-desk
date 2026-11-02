@@ -17,9 +17,9 @@ describe('agentLine', () => {
   it('says_when_a_booked_visit_starts_on_the_business_clock', () => {
     // 10:00 am in Los Angeles on Monday, November 2, after the clocks went back.
     expect(agentLine({ ...none, latest_outcome: 'visit_booked', latest_outcome_starts_at: '2026-11-02T18:00:00Z' }, LA))
-      .toBe('Booked Monday, November 2 at 10:00 am.');
+      .toBe('Booked Mon, Nov 2, 10:00 am.');
     expect(agentLine({ ...none, latest_outcome: 'visit_booked', latest_outcome_starts_at: '2026-11-02T18:00:00Z' }, 'America/New_York'))
-      .toBe('Booked Monday, November 2 at 1:00 pm.');
+      .toBe('Booked Mon, Nov 2, 1:00 pm.');
   });
 
   it('says_what_was_paid_up_front', () => {

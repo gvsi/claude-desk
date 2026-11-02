@@ -70,10 +70,10 @@ describe('format', () => {
   });
 
   it('day_and_time_on_the_business_clock', () => {
-    // A booking's start, written whole: "Monday, November 2 at 10:00 am".
-    expect(formatDayAndTime('2026-11-02T18:00:00Z', LA)).toBe('Monday, November 2 at 10:00 am');
-    expect(formatDayAndTime('2026-10-31T06:30:00Z', LA)).toBe('Friday, October 30 at 11:30 pm'); // still the 30th there
-    expect(formatDayAndTime('2026-11-03T22:00:00Z', 'America/New_York')).toBe('Tuesday, November 3 at 5:00 pm');
+    // A booking's start, short enough for the list: "Mon, Nov 2, 10:00 am".
+    expect(formatDayAndTime('2026-11-02T18:00:00Z', LA)).toBe('Mon, Nov 2, 10:00 am');
+    expect(formatDayAndTime('2026-10-31T06:30:00Z', LA)).toBe('Fri, Oct 30, 11:30 pm'); // still the 30th there
+    expect(formatDayAndTime('2026-11-03T22:00:00Z', 'America/New_York')).toBe('Tue, Nov 3, 5:00 pm');
     expect(formatDayAndTime('nope', LA)).toBe('');
   });
 

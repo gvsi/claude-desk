@@ -234,7 +234,7 @@ export const AgentLine: Story = {
     name: rivera.conversations.alexAgent.name,
     time: '11:42 am',
     status: { tone: 'info', text: 'Agent · Visit booked' },
-    line: 'Booked Monday, November 2 at 10:00 am.',
+    line: 'Booked Mon, Nov 2, 10:00 am.',
   },
   parameters: {
     canvas: 'none',
@@ -242,10 +242,10 @@ export const AgentLine: Story = {
   },
   play: async ({ canvas }) => {
     // The line joins the link's name between who and when and the status.
-    const link = canvas.getByRole('link', { name: "Alex Kim's assistant 11:42 am Booked Monday, November 2 at 10:00 am. Agent · Visit booked" });
+    const link = canvas.getByRole('link', { name: "Alex Kim's assistant 11:42 am Booked Mon, Nov 2, 10:00 am. Agent · Visit booked" });
 
     // The app's words, unquoted and not marked as someone's own, drawn as the quote is.
-    const line = canvas.getByText('Booked Monday, November 2 at 10:00 am.', { exact: true });
+    const line = canvas.getByText('Booked Mon, Nov 2, 10:00 am.', { exact: true });
     await expect(line).toHaveClass('cd-conversation-item__quote');
     await expect(line).toHaveClass('cd-type-meta');
     await expect(line).not.toHaveAttribute('data-copy');
