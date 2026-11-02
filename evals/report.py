@@ -829,8 +829,8 @@ def latest_json(pass_result: PassSummary, gate_result: Any, metrics: Metrics | N
     false_fail = None
     if recorded is not None and gated:
         false_fail = chance_below(recorded.completion_lower_95, recorded.completion_point, len(gated))
-    elif point is not None and gated:
-        false_fail = chance_below(wilson_lower_95(successes, len(legit)), point, len(gated))
+    elif point is not None and gated and not refused_legit:   # no rate is recorded from a pass with one
+        false_fail = chance_below(wilson_lower_95(successes, trials), point, len(gated))
 
     month = _month_rows(spend_month, p.date)
     if p.spend not in month:
@@ -1185,11 +1185,18 @@ def _split(split: str) -> str:
 def _legit(p: PassSummary, n: dict[str, Any], recorded: RecordedRate | None,
            null_baseline: NullBaseline | None) -> list[str]:
     out = ["## Legitimate-task suite"]
-    errored = sum(1 for r in p.runs if r.suite == "legit" and r.split == "heldout" and not r.judged)
+    unjudged = sum(1 for r in p.runs if r.suite == "legit" and r.split == "heldout" and not r.judged)
+    # The excused refusals are in the trials as misses (`latest_json`); the other unjudged runs are left out.
+    refused = (n["legit_trials"] or 0) - sum(1 for r in p.runs
+                                             if r.suite == "legit" and r.split == "heldout" and r.judged)
+    errored = unjudged - refused
     if n["legit_trials"]:
         lo, hi = n["legit_completion_interval_95"]
         line = (f"Held-out completion: {n['legit_successes']} of {n['legit_trials']} runs "
                 f"({percent(n['legit_completion_point'])}), Wilson 95% interval {percent(lo)} to {percent(hi)}.")
+        if refused:
+            line += (f" {_plural(refused, 'run')} refused by the visitor simulator, counted as "
+                     f"{'a miss' if refused == 1 else 'misses'}; no rate is recorded from this pass.")
         if errored:
             line += f" {_plural(errored, 'errored run')} not judged."
         out.append(line)
@@ -1562,8 +1569,8 @@ def latest_results_block(latest: dict[str, Any]) -> list[str]:
                               "counted as passing them: " + "; ".join(
                                   f"{name} in {k}" for name, k in latest["skipped_checks"].items()))]
           if latest["runs_with_skipped_checks"] else []),
-        *([("Refused by the visitor simulator", f"{latest['refused_runs']} runs, not failed; the Desk's replies "
-                                                 "before the refusal weren't judged by the oracles")]
+        *([("Refused by the visitor simulator", f"{_plural(latest['refused_runs'], 'run')}, not failed; the Desk's "
+                                                 "replies before the refusal weren't judged by the oracles")]
           if latest.get("refused_runs") else []),
         ("Held-out legitimate completion", completion),
         ("Recorded bar", bar),
