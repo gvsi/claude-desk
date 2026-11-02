@@ -201,20 +201,36 @@ describe('rule draft review', () => {
       const rows = [...changes.element().querySelectorAll('.cd-change-review__row')];
       expect(rows).toHaveLength(3);
       expect(rows.map((row) => row.querySelector('.cd-change-review__tag')?.textContent).sort()).toEqual(['Changed', 'New', 'Removed']);
+      // As the Rules page's rule cell: the sentence in primary text, and under it, after the tools
+      // (the review has no tool heading), who it is for and its qualifiers.
+      const lines: Record<string, string> = {
+        'Changed Before': 'Payment link · Anyone · Checked by the reviewer · Over $300, it asks you first',
+        'Changed After': 'Payment link · Anyone · Checked by the reviewer · Over $100, it asks you first',
+        'New After': 'Refund · The customer, once verified',
+        'Removed Before': 'Book a visit · Anyone · Checked by the reviewer',
+      };
+      const seen: string[] = [];
       for (const row of rows) {
         expect(row.querySelectorAll('.cd-change-review__tag')).toHaveLength(1);
         expect(row.querySelectorAll('.cd-change-review__changed, .cd-change-review__title')).toHaveLength(0);
+        const tag = row.querySelector('.cd-change-review__tag')!;
         for (const side of row.querySelectorAll('[role="group"]')) {
+          const name = `${tag.textContent} ${side.getAttribute('aria-label')}`;
+          seen.push(name);
           expect(side.querySelectorAll('.cd-rule-sentence')).toHaveLength(1);
-          expect(side.querySelector('.cd-rule-sentence__sentence')?.textContent).toMatch(/^Claude /);
-          expect(side.querySelector('.cd-rule-sentence__meta')?.textContent).toMatch(/ · (Anyone|The customer, once verified)$/);
+          const sentence = side.querySelector('.cd-rule-sentence__sentence')!;
+          const meta = side.querySelector('.cd-rule-sentence__meta')!;
+          expect(sentence.textContent).toMatch(/^Claude /);
+          expect(getComputedStyle(sentence).color, name).toBe(getComputedStyle(tag).color);
+          expect(getComputedStyle(meta).color, name).not.toBe(getComputedStyle(sentence).color);
+          expect(meta.textContent, name).toBe(lines[name]);
           expect(side.querySelector('.cd-rule-sentence__outcome')?.textContent).toMatch(/^(Allow|Ask me first|Never)$/);
         }
       }
+      expect(seen.sort()).toEqual(Object.keys(lines).sort());
       const removedRow = rows.find((row) => row.querySelector('.cd-change-review__tag')?.textContent === 'Removed');
       expect(removedRow?.querySelector('[aria-label="After"]')).toBeNull();
       expect(removedRow?.querySelector('[aria-label="Before"]')).not.toBeNull();
-      expect(changes.element().textContent).not.toContain('Checked by the reviewer');
       expect(screen.container.querySelector('.cd-change-review')?.scrollWidth).toBeLessThanOrEqual(width);
       await expectScreenBasics(screen.container, { owner: true });
     }
@@ -805,7 +821,8 @@ describe('rule draft review', () => {
       const heading = row.querySelector('.cd-change-review__title');
       expect(heading?.textContent).toBe(title);
       expectUserText(heading!, title);
-      expect(row.querySelector('.cd-rule-sentence__meta')?.textContent).toBe(`${title} · Anyone`);
+      // The governing rule's $20 limit is a qualifier on the line, as on the Rules page.
+      expect(row.querySelector('.cd-rule-sentence__meta')?.textContent).toBe(`${title} · Anyone · Over $20, it asks you first`);
       expect(row.querySelectorAll('.cd-rule-sentence__meta [data-copy="user"]')).toHaveLength(1);
     }
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);

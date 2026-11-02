@@ -22,7 +22,7 @@ import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOf, isC
 import type { RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
 import { ruleWords, targetWords } from './ruleWords.ts';
-import { ruleMeta, ruleSentence, type SentenceWords } from './ruleSentence.ts';
+import { ruleMeta, ruleQualifiers, ruleSentence, type SentenceWords } from './ruleSentence.ts';
 
 /** What applies where no rule the owner set covers a request: the compiler's default ask. */
 export const DEFAULT_SIDE = {
@@ -40,7 +40,17 @@ function connectorFor(card: RuleCard): ConnectorView | undefined {
 }
 
 /**
- * A card on one side of a row: its shared sentence and tools · who meta, plus the legacy outcome,
+ * A side's sentence as the Rules page's rule cell words it: the shared sentence, and under it the
+ * tools it covers, since the review has no tool heading above it, then who it is for and its
+ * qualifiers (`ruleQualifiers`): "Payment link · Anyone · Checked by the reviewer · Over $300, it
+ * asks you first".
+ */
+function sentenceOf(card: RuleCard, words: SentenceWords): NonNullable<ChangeSide['sentence']> {
+  return { parts: ruleSentence(card, words), meta: { tools: ruleMeta(card, words).tools, who: ruleQualifiers(card, words) } };
+}
+
+/**
+ * A card on one side of a row: its shared sentence and its line (`sentenceOf`), plus the legacy outcome,
  * limit, reason, words and `appliesTo` for consumers that still use the field review.
  * `appliesTo` names what it applies to, only when the row's target moves (a card retargeted, one that goes to a rule
  * for a whole effect group, or a shared rule that covers other tools than it did), so the widened
@@ -55,14 +65,14 @@ function cardSide(card: RuleCard, words: SentenceWords, appliesTo: RuleTarget | 
     ...(amount === undefined ? {} : { limit: amount }),
     reason: card.reason,
     words: ruleWords(card, words.people),
-    sentence: { parts: ruleSentence(card, words), meta: ruleMeta(card, words) },
+    sentence: sentenceOf(card, words),
   };
 }
 
 /** The default ask, which is for the row's own tool, so it names no target. */
 function defaultSide(tool: string, words: SentenceWords): ChangeSide {
   const card: RuleCard = { card_id: 'default-ask', applies_to: tool, mode: 'ask', who: 'anyone', reason: DEFAULT_SIDE.reason };
-  return { ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words], sentence: { parts: ruleSentence(card, words), meta: ruleMeta(card, words) } };
+  return { ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words], sentence: sentenceOf(card, words) };
 }
 
 /** A card shared by every tool with that effect (`effect:charge`), which a tool's own card outranks. */

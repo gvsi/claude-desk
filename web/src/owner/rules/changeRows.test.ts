@@ -27,10 +27,19 @@ it('reads changed, new and removed rules as Claude-led sentences', () => {
   const rows = changeRowViews(draft([link, quote], [{ ...link, max_amount_cents: 10_000 }, refund]), null);
   const changed = rows.find((row) => row.key === 'link');
   expect(changed?.before?.sentence?.parts.map((part) => part.text).join('')).toBe('Claude can send payment links up to $300');
-  expect(changed?.after?.sentence).toMatchObject({ meta: { tools: { titles: ['Payment link'] }, who: 'Anyone' } });
+  expect(changed?.after?.sentence).toMatchObject({ meta: { tools: { titles: ['Payment link'] }, who: 'Anyone · Over $100, it asks you first' } });
   expect(changed?.after?.sentence?.parts.map((part) => part.text).join('')).toBe('Claude can send payment links up to $100');
   expect(rows.find((row) => row.key === 'refund')).toMatchObject({ change: 'added', before: null, after: { sentence: { parts: [{ text: 'Claude asks you before ' }, { text: 'any refund', key: true }] } } });
   expect(rows.find((row) => row.key === 'quote')).toMatchObject({ change: 'removed', after: null });
+});
+
+it("says each side's audience and qualifiers after its tools, as the Rules page's rule cell does", () => {
+  const link = { ...card('link', 'native.payment_link'), max_amount_cents: 30_000, review: true };
+  const refund: RuleCard = { ...card('refund', 'payments.create_refund', 'never'), who: 'record_owner' };
+  const [changed, added] = changeRowViews(draft([link], [{ ...link, max_amount_cents: 10_000 }, refund]), null);
+  expect(changed?.before?.sentence?.meta).toEqual({ tools: { titles: ['Payment link'] }, who: 'Anyone · Checked by the reviewer · Over $300, it asks you first' });
+  expect(changed?.after?.sentence?.meta).toEqual({ tools: { titles: ['Payment link'] }, who: 'Anyone · Checked by the reviewer · Over $100, it asks you first' });
+  expect(added?.after?.sentence?.meta).toEqual({ tools: { titles: ['Refund'] }, who: 'The customer, once verified' });
 });
 
 it('names business tools in added rules and shared coverage', () => {

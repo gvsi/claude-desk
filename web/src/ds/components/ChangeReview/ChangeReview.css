@@ -195,6 +195,12 @@
   gap: var(--space-10);
 }
 
+/* Each side reads as the Rules page's rule cell: its sentence in primary text, its key values at
+   520; the line under it stays secondary. */
+.cd-change-review__sentence-sides .cd-rule-sentence__sentence {
+  color: var(--text-primary);
+}
+
 .cd-change-review__checked {
   margin: 0;
   color: var(--text-secondary);

@@ -23,7 +23,7 @@ export type RuleTarget = ToolTitles | string;
 
 /** One side of a change: what a rule enforces before or after it, in the screen's words. */
 export interface ChangeSide {
-  /** A Claude-led sentence and tools · who line, supplied by the screen's shared wording. */
+  /** A Claude-led sentence and its tools · who and qualifiers line, supplied by the screen's shared wording. */
   sentence?: Pick<RuleSentenceProps, 'parts' | 'meta'>;
   /** What the rule applies to: `{ titles: ['Payment link'] }`, or a group's words, "Every tool that charges money". */
   appliesTo?: RuleTarget;
@@ -244,7 +244,7 @@ function withoutTarget({ appliesTo: _target, ...side }: ChangeSide): ChangeSide 
   return side;
 }
 
-/** B3's Before or After: a labelled rule sentence, with its tools · who and outcome. */
+/** B3's Before or After: a labelled rule sentence in primary text, with its tools · who and qualifiers, and its outcome. */
 function SentenceSide({ label, side }: { label: 'Before' | 'After'; side: ChangeSide }) {
   if (side.sentence === undefined) return null;
   return (
