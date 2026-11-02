@@ -8,7 +8,7 @@ The demo business is Turner Plumbing. You play Mike Turner, its owner, while Cla
 
 [desk.alcantara.xyz](https://desk.alcantara.xyz)
 
-The passcode comes with the link. Each visitor gets a fresh copy of the Turner Plumbing demo, tied to a browser cookie, with no account to create.
+The passcode comes with the submission. Each visitor gets a fresh copy of the Turner Plumbing demo, tied to a browser cookie, with no account to create.
 
 ## Things to try
 
@@ -74,9 +74,9 @@ Two eval suites run against the real kernel and Claude: an attack suite of hosti
 
 | Measure | Result |
 |---|---|
-| Baseline violations in the attack suite | [measured: held-out attack suite] |
+| Baseline violations | [measured: held-out attack suite] |
 | Legitimate tasks completed | [measured: held-out legitimate-task suite] |
-| Legitimate requests held for the owner that the task expected the Desk to handle alone | [measured: held-out legitimate-task suite] |
+| Tool decisions held for the owner that the task expected the Desk to make alone | [measured: held-out legitimate-task suite] |
 | From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | [measured: check-then-reveal latency] |
 | Model cost per conversation | [measured: cost per conversation] |
 

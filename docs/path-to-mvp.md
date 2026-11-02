@@ -12,12 +12,12 @@ Read the safety and usefulness numbers together: a Desk that refused everything 
 
 | Metric | Value | Source |
 |---|---|---|
-| Held-out attack violations, unwaived | [measured: held-out attack violations unwaived, final held-out pass] | [measured: source, final held-out pass] |
-| Held-out attack violations, waived, with reasons kept separate | [measured: held-out attack violations waived, final held-out pass] | [measured: source, final held-out pass] |
+| Baseline violations across all judged runs (both suites and splits), unwaived | [measured: unwaived violations, final held-out pass] | [measured: source, final held-out pass] |
+| Baseline violations across all judged runs, waived, with who signed | [measured: waived violations, final held-out pass] | [measured: source, final held-out pass] |
 | Held-out legitimate completion, completed / trials and Wilson 95% interval | [measured: held-out legitimate completion and interval, final held-out pass] | [measured: source, final held-out pass] |
 | False holds on tools legitimate tasks expect allowed, count / eligible decisions and rate | [measured: held-out false holds, final held-out pass] | [measured: source, final held-out pass] |
 
-A waived violation stays in the report, counted apart and with who signed the waiver, and never quietly changes whether the gate passes.
+Only the AI-denial check can be waived: the owner signs, one message at a time, for a correct refusal that quotes the line it won't say. A waived violation stays in the report, counted apart with who signed it.
 
 ## Infrastructure
 
@@ -33,20 +33,20 @@ During setup, Claude acts as a [setup consultant](../backend/desk/api/setup.py).
 
 | Metric | Value | Source |
 |---|---|---|
-| Reviewer skipped, share of tool decisions in legitimate-task conversations | [measured: reviewer skip rate, final held-out pass] | [measured: source, final held-out pass] |
-| Reviewer reached, share of tool decisions in legitimate-task conversations | [measured: share of tool decisions reaching the reviewer, final held-out pass] | [measured: source, final held-out pass] |
+| Reviewer skipped, share of tool decisions in held-out legitimate-task conversations | [measured: share of tool decisions skipping the reviewer, final held-out pass] | [measured: source, final held-out pass] |
+| Reviewer reached, share of tool decisions in held-out legitimate-task conversations | [measured: share of tool decisions reaching the reviewer, final held-out pass] | [measured: source, final held-out pass] |
 
 The two shares add up to the whole. Today's daily model budget counts the API's model calls but not the kernel's. An MVP needs each Desk's model spend reserved before every call on every route, settled correctly when calls run at once, and limits the owner can see.
 
 ## Scaling and what breaks first
 
-Model cost and latency may limit useful traffic before the infrastructure does; only measurement can say. Proofs run when an owner changes rules, not during conversations. The proof times below were measured locally while other test suites ran on the same machine.
+Model cost and latency may limit useful traffic before the infrastructure does; only measurement can say. Proofs run when an owner changes rules, not during conversations. The demo rules' proof time below comes from the final pass's latency run; the 30-card time is the kernel core's, measured locally while other test suites ran on the same machine.
 
 | Constraint | Value | Source |
 |---|---|---|
-| Opus cost per Desk reply (one reply the visitor waits for) in legitimate-task conversations, mean / p50 / p95, including calls after tools | [measured: Opus cost per reply, final held-out pass] | [measured: source, final held-out pass] |
-| Opus model time per Desk reply (one reply the visitor waits for) in legitimate-task conversations, p50 / p95, including calls after tools | [measured: Opus model time per reply, final held-out pass] | [measured: source, final held-out pass] |
-| Proof, Turner Plumbing's starter rules, local p50 / p95 | 381 / 702 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
+| Opus cost per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, mean / p50 / p95, including calls after tools | [measured: Opus cost per reply, final held-out pass] | [measured: source, final held-out pass] |
+| Opus model time per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, p50 / p95, including calls after tools | [measured: Opus model time per reply, final held-out pass] | [measured: source, final held-out pass] |
+| Proof, Turner Plumbing's demo rules, local p50 / p95 | [measured: proving latency, final held-out pass] | [measured: source, final held-out pass] |
 | Proof, 30 rule cards, local p50 / p95 | 1,172 / 2,390 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
 | SSE streams per task, steady state | estimate: at most min(3S, 30I) for S visitor sessions across I internet addresses subject to the per-address limit; no total task cap | estimate: min(3 × S, 30 × I) = stream ceiling; [stream slots](../backend/desk/api/ratelimit.py). Excludes streams with no per-address limit and brief overlap while an older stream closes after a new one replaces it. |
 | API Postgres connection budget per task | estimate: up to 47 | estimate: (20 pool + 10 overflow) + 10 turn locks + 5 job connections + 1 event listener + 1 job listener = 47; [API pools](../backend/desk/api/main.py), [job pool](../backend/desk/db/session.py), [event listener](../backend/desk/api/sse.py), [job listener](../backend/desk/api/jobs.py). |
@@ -63,7 +63,7 @@ Each source names its report, pass, date and latency run. Cost per legitimate-ta
 |---|---|---|---|---|
 | Cost per legitimate-task conversation, mean / p50 / p95 | Local evals | [measured: cost per conversation, final held-out pass] | [measured: source, final held-out pass] | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
 | Full turn, warm and cold first turns apart, p50 / p95 | Local | [measured: local full-turn latency, final held-out pass] | [measured: source, final held-out pass] | — |
-| Finished model reply to reveal, p50 / p95 | Local | [measured: local reveal latency p50 and p95, final held-out pass] | [measured: source, final held-out pass] | 0.3–0.8 s, capped at 2 s |
+| Finished model reply to reveal, p50 / p95 | Local | [measured: local reveal latency p50 and p95, final held-out pass] | [measured: source, final held-out pass] | p50 1.1 s, p95 2.8 s, capped at 8 s |
 | Reply check, p50 / p95 | Local, server-side | [measured: local reply-check latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Decide, p50 / p95 | Local, server-side | [measured: local decide latency, final held-out pass] | [measured: source, final held-out pass] | — |
 | Reviewer when called, p50 / p95 | Local, server-side | [measured: local reviewer latency, final held-out pass] | [measured: source, final held-out pass] | 0.8–1.5 s, 4 s timeout |
