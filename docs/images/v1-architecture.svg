@@ -35,9 +35,11 @@
   <text class="line" x="994" y="54" text-anchor="end">Its own process; holds every business credential</text>
 
   <rect class="box" x="436" y="74" width="184" height="80" rx="12"/>
-  <text class="name" x="452" y="100">Decide</text>
-  <text class="line" x="452" y="120">Cedar rules compiled from</text>
-  <text class="line" x="452" y="136">the owner’s cards</text>
+  <text class="name" x="452" y="92">Decide</text>
+  <text class="line" x="452" y="110">Cedar rules from</text>
+  <text class="line" x="452" y="122">the owner’s cards</text>
+  <text class="line" x="452" y="138">A Sonnet review can</text>
+  <text class="line" x="452" y="150">only narrow</text>
   <path class="arrow" d="M630 114h28M653 109l5 5-5 5"/>
   <rect class="pillbox" x="668" y="98" width="80" height="32" rx="16"/>
   <circle cx="684" cy="114" r="4" fill="#6fa859"/>
@@ -50,9 +52,11 @@
   <text class="pill" x="926" y="119">Refused</text>
 
   <rect class="box" x="436" y="170" width="184" height="96" rx="12"/>
-  <text class="name" x="452" y="196">Check reply</text>
-  <text class="line" x="452" y="216">Prices, dates and discounts</text>
-  <text class="line" x="452" y="232">only in typed cards</text>
+  <text class="name" x="452" y="190">Check reply</text>
+  <text class="line" x="452" y="210">Prices, dates and discounts</text>
+  <text class="line" x="452" y="222">only in typed cards</text>
+  <text class="line" x="452" y="242">Sonnet and Jev can</text>
+  <text class="line" x="452" y="254">only add blocks</text>
   <path class="arrow" d="M630 218h28M653 213l5 5-5 5"/>
   <rect class="pillbox" x="668" y="202" width="88" height="32" rx="16"/>
   <circle cx="684" cy="218" r="4" fill="#6fa859"/>

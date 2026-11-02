@@ -114,12 +114,14 @@ const ARCHITECTURE_CHECKED = [
   'Kernel',
   'Its own process; holds every business credential',
   'Decide',
-  'Cedar rules compiled from the owner’s cards',
+  'Cedar rules from the owner’s cards',
+  'A Sonnet review can only narrow',
   'Runs',
   'Owner decides',
   'Refused',
   'Check reply',
   'Prices, dates and discounts only in typed cards',
+  'Sonnet and Jev can only add blocks',
   'Shown',
   'Handed off',
   'Signed ledger of every decision and check',
@@ -381,6 +383,45 @@ describe('ArchitectureFigure', () => {
       ]);
       for (const dot of screen.container.querySelectorAll('[data-diagram] .cd-status-dot')) {
         expect(dot.getAttribute('aria-hidden')).toBe('true');
+      }
+      await screen.unmount();
+    }
+  });
+
+  it('architecture_checks_say_both_tiers_in_their_box', async () => {
+    // Each of the kernel's checks names itself, then says its tier in code and what the models may do, each line
+    // whole inside its box at the desktop and phone sizes: nothing runs past an edge or is cut off.
+    for (const [size, compact] of [
+      [DESKTOP, false],
+      [PHONE, true],
+    ] as const) {
+      const where = `${size.width} wide`;
+      await page.viewport(size.width, size.height);
+      const screen = await render(<ArchitectureFigure compact={compact} />);
+      const boxes = [...screen.container.querySelectorAll('.cd-about-arch__check > .cd-about-arch__box')];
+      const lines = (box: Element) => [...box.querySelectorAll(':scope > span')];
+      expect(
+        boxes.map((box) => lines(box).map((line) => line.textContent)),
+        where,
+      ).toEqual([
+        ['Decide', 'Cedar rules from the owner’s cards', 'A Sonnet review can only narrow'],
+        ['Check reply', 'Prices, dates and discounts only in typed cards', 'Sonnet and Jev can only add blocks'],
+      ]);
+      for (const text of [
+        'Cedar rules from the owner’s cards',
+        'A Sonnet review can only narrow',
+        'Sonnet and Jev can only add blocks',
+      ]) {
+        await expect.element(screen.getByText(text, { exact: true })).toBeVisible();
+      }
+      for (const box of boxes) {
+        const edge = box.getBoundingClientRect();
+        expect(box.scrollWidth, `${where}: ${box.textContent}`).toBeLessThanOrEqual(box.clientWidth);
+        for (const line of lines(box)) {
+          const { left, right, top, bottom } = line.getBoundingClientRect();
+          const inside = left >= edge.left && right <= edge.right && top >= edge.top && bottom <= edge.bottom;
+          expect(inside, `${where}: ${line.textContent}`).toBe(true);
+        }
       }
       await screen.unmount();
     }

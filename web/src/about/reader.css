@@ -400,6 +400,12 @@
   flex: 43 1 0;
 }
 
+/* A check's two lines, what code decides and then what the models may do, wrap evenly where the box is narrow, so
+   neither leaves a word alone on its last line. */
+.cd-about-arch__check .cd-about-arch__line {
+  text-wrap: balance;
+}
+
 .cd-about-arch__outcomes {
   display: flex;
   flex: 81 1 0;
