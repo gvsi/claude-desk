@@ -426,7 +426,7 @@ function VisitorPhone() {
   const brand = brandOf(rivera.publicDesk.en);
   return (
     <PhoneFrame caption="The public chat, for a visitor">
-      <div className="board-vision-phone__brand" style={{ background: brand.field }}>
+      <div className="board-vision-phone__brand" style={{ background: brand.field, color: brand.ink }}>
         <span className="board-vision-phone__monogram cd-type-control" aria-hidden="true">
           {brand.monogram}
         </span>
@@ -434,7 +434,9 @@ function VisitorPhone() {
           <span className="cd-type-control board-vision-phone__brand-name" data-copy="user">
             {brand.name}
           </span>
-          <span className="board-quiet cd-type-caption board-vision-phone__brand-line">Claude, an AI, answers for Mike Turner</span>
+          <span className="cd-type-caption board-vision-phone__brand-line" style={{ color: brand.inkSecondary }}>
+            Claude, an AI, answers for Mike Turner
+          </span>
         </span>
       </div>
       <div className="board-vision-phone__chat">

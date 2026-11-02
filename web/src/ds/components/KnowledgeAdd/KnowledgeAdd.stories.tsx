@@ -7,6 +7,9 @@ import { KnowledgeAdd } from './KnowledgeAdd.tsx';
 /** The note as N-Run2-Settings-Knowledge writes it. */
 const NOTE = 'We don’t service tankless water heaters older than 15 years. Suggest a replacement quote instead.';
 
+/** The note's example, which the screen supplies on the plumbing demo only. */
+const NOTE_EXAMPLE = "We don't work on gas lines or septic tanks.";
+
 const HINT = 'Up to a few paragraphs. Only you can see it until you make it public.';
 const FILES_LINE = 'Text or Markdown files, up to 100 KB.';
 const ADDED_LINE = 'Added. Only you can see it until you make it public.';
@@ -19,7 +22,7 @@ const SECONDARY = 'rgba(250, 249, 245, 0.64)';
 const meta = {
   title: 'Settings/KnowledgeAdd',
   component: KnowledgeAdd,
-  args: { websitePlaceholder: 'turner-plumbing.example/blog', note: NOTE, onNoteChange: fn(), onAddNote: fn(), onAddFile: fn() },
+  args: { websitePlaceholder: 'turner-plumbing.example/blog', notePlaceholder: NOTE_EXAMPLE, note: NOTE, onNoteChange: fn(), onAddNote: fn(), onAddFile: fn() },
   render: (args) => (
     <div style={{ maxWidth: 720 }}>
       <KnowledgeAdd {...args} />
@@ -53,6 +56,8 @@ export const AddSomething: Story = {
     await expect(note.tagName).toBe('TEXTAREA');
     await expect(note).toHaveValue(NOTE);
     await expect(note).toHaveAccessibleDescription(HINT);
+    // Its example, the screen's, shows once it is empty.
+    await expect(note).toHaveAttribute('placeholder', NOTE_EXAMPLE);
     await expect(Math.round(note.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(12 + 20 + 6);
 
     // The two adds, 12 px under the hint, at a screen's main size and 8 px apart: "Add a note" the
@@ -68,6 +73,9 @@ export const AddSomething: Story = {
     const filesLine = canvas.getByText(FILES_LINE);
     expectComputed(filesLine, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
     await expect(Math.round(filesLine.getBoundingClientRect().top - addNote.getBoundingClientRect().bottom)).toBe(12);
+
+    // No pill of its own: the screen says the page is a mock, beside its title.
+    await expect(canvasElement.querySelector('.cd-pill')).toBeNull();
 
     // knowledge_note_is_the_screens: typing passes the raw text up; "Add a note" asks the screen to add it.
     await userEvent.type(note, 'x');

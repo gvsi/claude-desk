@@ -164,22 +164,23 @@ export async function nextFrames(): Promise<void> {
 }
 
 /**
- * Counts the Demo inbox reads the app sends from now on while `sheet` isn't on the page, each as it
- * is sent: a read sent while the sheet was open isn't one, however late the mock gets it.
+ * Counts the reads of the owner's notifications the app sends from now on while `shown` (the
+ * Notifications page's heading) isn't on the page, each as it is sent: a read sent while the page
+ * was open isn't one, however late the mock gets it.
  */
-export function closedInboxReads(sheet: Locator): () => number {
+export function closedInboxReads(shown: Locator): () => number {
   const send = window.fetch;
   let count = 0;
   const sending = vi.spyOn(window, 'fetch').mockImplementation((input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
-    if (url.pathname === ROUTES.ownerInbox.path && sheet.elements().length === 0) count += 1;
+    if (url.pathname === ROUTES.ownerInbox.path && shown.elements().length === 0) count += 1;
     return send(input, init);
   });
   onTestFinished(() => sending.mockRestore());
   return () => count;
 }
 
-/** A whole poll of the Demo inbox's, then two frames: a sheet still polling would have read by then. */
+/** A whole poll of the notifications', then two frames: a page still polling would have read by then. */
 export async function aPollPasses(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, pollMs('inbox')));
   await nextFrames();

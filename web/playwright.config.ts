@@ -42,7 +42,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   reporter: 'list',
-  use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+  // Dark, the base theme the signed boards draw: the browser would otherwise prefer light and turn
+  // on the light theme.
+  use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, colorScheme: 'dark' },
   projects: [
     {
       name: 'mock',

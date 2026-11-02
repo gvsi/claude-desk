@@ -55,10 +55,11 @@ export function continueSetupLine(step: UnfinishedSetupStep, answering: boolean)
 /** Literal Today copy shared by the page and its word-free loading measurements. */
 export const TODAY_COPY = {
   chatDetail: 'Your public page opens in a new tab. Ask about a price or a time.',
-  breakBeforeOwner: "Ask for a discount, another customer's address or ",
-  breakAfterOwner: "'s home number. Safety shows what was stopped and why.",
+  breakDetail: "Ask for a discount or someone else's details. Each reply's receipt shows the checks.",
+  /** "Answer a held request" while a request waits and no rule held it. */
   waiting: 'A request is waiting for your answer.',
-  heldBy: 'Held by your rule: ',
+  /** The same, before the rule that held it: "A request is waiting for your answer: {rule}." */
+  waitingFor: 'A request is waiting for your answer: ',
   /** "Answer a held request" before anything is held. */
   heldNone: 'When a request waits for your answer, it shows up here.',
   createDetail: 'Describe a business in a few sentences. Claude drafts the rules, and you confirm them.',

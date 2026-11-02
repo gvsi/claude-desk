@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 
 import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, SetupState, WentLive } from '../api/views.ts';
-import { Button, Card, Notice, PageHeader, Pill, StatusDot, StatusLabel } from '../ds/index.ts';
+import { Button, Card, ConnectorIcon, Notice, PageHeader, Pill, StatusDot, StatusLabel } from '../ds/index.ts';
 import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
 import { PublicChat } from '../public/PublicChat.tsx';
 import { COMING_LATER_CHANNELS, WEBSITE_EMBED } from '../lib/channels.ts';
@@ -130,6 +130,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
               <QrCode url={url} />
             </div>
             <div className="cd-setup-live__embed">
+              <ConnectorIcon icon="quotes" glyph={WEBSITE_EMBED.icon} size="section" />
               <div className="cd-setup-live__embed-text">
                 <p className="cd-setup-live__embed-title cd-type-body">{WEBSITE_EMBED.name}</p>
                 <p className="cd-setup-live__embed-line cd-type-meta">{WEBSITE_EMBED.line}</p>
@@ -143,6 +144,7 @@ export function LiveStep({ state, business, answering, onLive, reread }: LiveSte
           <ul role="list" className="cd-setup-live__channels">
             {COMING_LATER_CHANNELS.map((channel) => (
               <li key={channel.key} className="cd-setup-live__embed cd-setup-live__channel">
+                <ConnectorIcon icon="quotes" glyph={channel.icon} size="section" />
                 <div className="cd-setup-live__embed-text">
                   <p className="cd-setup-live__embed-title cd-type-body">{channel.name}</p>
                   <p className="cd-setup-live__embed-line cd-type-meta">{channel.line}</p>

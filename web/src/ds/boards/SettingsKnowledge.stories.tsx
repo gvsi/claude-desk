@@ -6,6 +6,7 @@ import { MOCK_SOURCES } from '../../owner/knowledge/previewSources.ts';
 import { KnowledgeAdd } from '../components/KnowledgeAdd/KnowledgeAdd.tsx';
 import { KnowledgeList, type KnowledgeRowView } from '../components/KnowledgeList/KnowledgeList.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
+import { Pill } from '../components/Pill/Pill.tsx';
 import { RiveraFrame } from './parts.tsx';
 import '../../owner/knowledge/Knowledge.css';
 
@@ -17,10 +18,10 @@ const ITEMS: KnowledgeRowView[] = [
 
 function KnowledgeBoard() {
   return <RiveraFrame current="knowledge" counts={{}}>
-    <PageHeader title="Knowledge" subtitle={KNOWLEDGE_SUMMARY} />
+    <PageHeader title="Knowledge" subtitle={KNOWLEDGE_SUMMARY} badge={<Pill>Mock</Pill>} />
     <div className="cd-knowledge">
       <div className="cd-knowledge__known"><KnowledgeList items={ITEMS} caption="6 sources. Customers can see 5." /></div>
-      <div className="cd-knowledge__add"><KnowledgeAdd websitePlaceholder="turner-plumbing.example/blog" note="" onNoteChange={fn()} onAddNote={fn()} onAddFile={fn()} /></div>
+      <div className="cd-knowledge__add"><KnowledgeAdd websitePlaceholder="turner-plumbing.example/blog" notePlaceholder="We don't work on gas lines or septic tanks." note="" onNoteChange={fn()} onAddNote={fn()} onAddFile={fn()} /></div>
       <KnowledgePreviews />
     </div>
   </RiveraFrame>;
@@ -42,5 +43,9 @@ export const Board: Story = {
     await expect(within(list).getAllByRole('listitem')).toHaveLength(6);
     await expect(canvas.getByText('6 sources. Customers can see 5.')).toBeVisible();
     await expect(canvas.getByRole('button', { name: 'Add a website' })).toBeVisible();
+    // The plumbing demo's page says it is a mock once, beside its title.
+    const mocks = canvas.getAllByText('Mock');
+    await expect(mocks).toHaveLength(1);
+    await expect(mocks[0]?.previousElementSibling).toBe(canvas.getByRole('heading', { level: 1, name: 'Knowledge' }));
   },
 };

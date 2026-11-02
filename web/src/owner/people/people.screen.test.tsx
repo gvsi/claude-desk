@@ -11,10 +11,10 @@ import { cleanup } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { newIdempotencyKey } from '../../api/http.ts';
-import type { RulesView, SetupState } from '../../api/views.ts';
+import type { ConversationSummary, RulesView, SetupState } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { copyResultLine } from '../../ds/index.ts';
-import { formatWhen } from '../../lib/format.ts';
+import { formatListTime, formatWhen } from '../../lib/format.ts';
 import { worker } from '../../mocks/browser.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
@@ -26,7 +26,7 @@ import { expectOwnerBoard } from '../../test/boards.ts';
 import { holdReads } from '../../test/holdReads.ts';
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
+import { assertNoJargon, expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../../test/screen.ts';
 import { SHARE_COPY, displayLink } from '../share/shareCopy.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -518,7 +518,146 @@ describe('customers', () => {
   });
 });
 
+/** The Desk's conversations as the mock lists them now. */
+async function summaries(): Promise<ConversationSummary[]> {
+  const answer = await mockStore.dispatch('conversations', { params: { desk_id: RIVERA.deskId } });
+  if ('network' in answer || answer.status !== 200) throw new Error('the mock lists the conversations');
+  return answer.body as ConversationSummary[];
+}
+
+/** A conversation's page, as a row links to it. */
+const chatPath = (sessionId: string) => `${DESK}/conversations/${sessionId}`;
+
+/** The chats Dana verified in, as `rivera_regulars` gives them, newest first, with each row's words. */
+const DANAS_CHATS = [
+  { sessionId: 'ses-dana-invoice', quote: 'Can you send me my drain clearing invoice?', status: 'Verified · Invoice sent' },
+  { sessionId: 'ses-dana-quote', quote: 'How much is drain clearing?', status: 'Quoted' },
+] as const;
+
+describe("a person's conversations", () => {
+  beforeEach(freezeClock);
+
+  it.each(['desktop', 'phone'] as const)('person_page_lists_their_verified_chats_newest_first_%s', async (viewport) => {
+    // A visitor who verifies as Bob, newer than all of Dana's chats, and her live chat, where she
+    // hasn't confirmed it's her: neither is on her page.
+    await cleanup();
+    mockStore.nextEpoch();
+    mockStore.reset('rivera_regulars');
+    const desk = mockStore.world.desk(RIVERA.deskId)!;
+    const bobs = mockStore.world.addSession(desk);
+    mockStore.world.visitorText(bobs, 'Is my warranty still good?');
+    mockStore.world.verify(bobs, bob);
+    const listed = new Map((await summaries()).map((s) => [s.session_id, s]));
+    const { screen, router } = await renderRoute(`${PEOPLE}/${dana.personId}`, { viewport });
+
+    // Her chats, under the rules, newest first, each drawn as Conversations draws it: her name and
+    // the time, what she wrote, and how it stands, under the day Conversations groups it by.
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(section).toBeVisible();
+    const rules = screen.getByRole('region', { name: `Rules for ${dana.name}` }).element();
+    expect(section.element().getBoundingClientRect().top).toBeGreaterThan(rules.getBoundingClientRect().bottom);
+    await expect.element(section.getByRole('heading', { level: 3, name: 'Earlier', exact: true })).toBeVisible();
+    const rows = section.getByRole('link').elements() as HTMLAnchorElement[];
+    expect(rows.map((row) => row.getAttribute('href'))).toEqual(DANAS_CHATS.map((chat) => chatPath(chat.sessionId)));
+    rows.forEach((row, i) => {
+      const chat = DANAS_CHATS[i]!;
+      const time = formatListTime(listed.get(chat.sessionId)!.last_activity, LA, new Date());
+      expect(row.querySelector('.cd-conversation-item__name')?.textContent).toBe(dana.name);
+      expect(row.querySelector('.cd-conversation-item__time')?.textContent).toBe(time);
+      expect(row.querySelector('.cd-conversation-item__quote')?.textContent).toBe(`“${chat.quote}”`);
+      expect(row.querySelector('.cd-conversation-item__status')?.textContent).toBe(chat.status);
+    });
+    expect(screen.getByRole('link', { name: /warranty/ }).query()).toBeNull();
+    expect(section.element().querySelector(`a[href="${chatPath('ses-dana-web')}"]`)).toBeNull();
+    await expectScreenBasics(screen.container, { owner: true });
+    assertNoJargon(screen.container);
+    expectNoHorizontalScroll();
+    const content = screen.container.querySelector('.cd-app-shell__content')!.getBoundingClientRect();
+    for (const el of section.element().querySelectorAll('*')) {
+      expect(Math.round(el.getBoundingClientRect().right), el.className).toBeLessThanOrEqual(Math.round(content.right));
+    }
+
+    // A row opens its chat, and Back returns to her page.
+    await section.getByRole('link').first().click();
+    await expect.poll(() => router.state.location.pathname).toBe(chatPath(DANAS_CHATS[0].sessionId));
+    await expect.element(screen.getByRole('log').getByText(DANAS_CHATS[0].quote, { exact: true })).toBeVisible();
+    await router.navigate(-1);
+    await expect.poll(() => router.state.location.pathname).toBe(`${PEOPLE}/${dana.personId}`);
+    await expect.element(screen.getByRole('region', { name: 'Conversations', exact: true }).getByRole('link').first()).toBeVisible();
+
+    // Bob's page lists his.
+    await router.navigate(`${PEOPLE}/${bob.personId}`);
+    const his = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(his.getByRole('link', { name: /warranty/ })).toHaveAttribute('href', chatPath(bobs.state.session_id));
+    expect(his.getByRole('link').elements()).toHaveLength(1);
+  });
+
+  it.each(['desktop', 'phone'] as const)('person_page_with_no_verified_chats_says_so_%s', async (viewport) => {
+    const { screen } = await renderRoute(`${PEOPLE}/${bob.personId}`, { viewport, seed: 'rivera_regulars' });
+    const section = screen.getByRole('region', { name: 'Conversations', exact: true });
+    await expect.element(section.getByText('No verified conversations yet.', { exact: true })).toBeVisible();
+    expect(section.getByRole('link').elements()).toEqual([]);
+    expect(section.getByRole('list').elements()).toEqual([]);
+    await expectScreenBasics(screen.container, { owner: true });
+    expectNoHorizontalScroll();
+  });
+
+  it('person_page_conversations_load_then_fail_with_a_retry', async () => {
+    // While the conversations are on their way, their loading line, and her contact already shows.
+    await cleanup();
+    mockStore.nextEpoch();
+    mockStore.reset('rivera_regulars');
+    const list = held();
+    mockStore.inject({ route: 'conversations', status: 200, until: list.until, body: await summaries() });
+    const slow = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100 })).screen;
+    await expect.element(slow.getByRole('status').filter({ hasText: /^Loading their conversations$/ })).toBeVisible();
+    await expect.element(slow.getByRole('region', { name: 'Contact on record' })).toBeVisible();
+    expect(slow.getByRole('region', { name: 'Conversations', exact: true }).query()).toBeNull();
+    list.release();
+    await expect.element(slow.getByRole('region', { name: 'Conversations', exact: true }).getByRole('link').first()).toBeVisible();
+    expect(slow.getByRole('status').filter({ hasText: /^Loading their conversations$/ }).query()).toBeNull();
+
+    // A read that fails (and its one retry, at once): what went wrong and Try again, then her chats.
+    await cleanup();
+    mockStore.nextEpoch();
+    mockStore.reset('rivera_regulars');
+    mockStore.inject({ route: 'conversations', status: 503, times: 2 });
+    const failed = (await renderRoute(`${PEOPLE}/${dana.personId}`, { pollScale: 100, retryScale: 0 })).screen;
+    await expect.element(failed.getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(failed.getByRole('region', { name: `Rules for ${dana.name}` })).toBeVisible();
+    expect(failed.getByRole('region', { name: 'Conversations', exact: true }).query()).toBeNull();
+    await expectScreenBasics(failed.container, { owner: true });
+    await failed.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(failed.getByRole('region', { name: 'Conversations', exact: true }).getByRole('link').first()).toBeVisible();
+    expect(failed.getByText(UNAVAILABLE, { exact: true }).query()).toBeNull();
+  });
+});
+
 describe('a person outside the list', () => {
+  it('person_page_does_not_reuse_a_read_started_before_leaving', async () => {
+    const stale = { people: [{ person_id: bob.personId, display_name: bob.name, masked_contact: bob.maskedContact }], leads: [] };
+    mockStore.inject({ route: 'people', status: 200, body: stale });
+    const { screen, router } = await renderRoute(PEOPLE);
+    await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+
+    const old = held();
+    const before = mockStore.requests.filter((r) => r.key === 'people').length;
+    mockStore.inject({ route: 'people', status: 200, body: stale, until: old.until });
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'people').length).toBeGreaterThan(before);
+    await router.navigate(`${DESK}/share`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Share', exact: true })).toBeVisible();
+
+    const now = held();
+    const answer = await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } });
+    mockStore.inject({ route: 'people', status: 200, until: now.until, body: (answer as { body: unknown }).body });
+    await router.navigate(`${PEOPLE}/${dana.personId}`);
+    await expect.element(screen.getByRole('status').filter({ hasText: /^Loading this customer$/ })).toBeVisible();
+    old.release();
+    now.release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+    expect(screen.getByText("This page doesn't exist").query()).toBeNull();
+  });
+
   it('person_page_reads_the_list_again_before_not_found', async () => {
     // Customers read the list before Dana was on it.
     mockStore.inject({ route: 'people', status: 200, body: { people: [{ person_id: bob.personId, display_name: bob.name, masked_contact: bob.maskedContact }], leads: [] } });
@@ -539,6 +678,17 @@ describe('a person outside the list', () => {
     expect(screen.getByText("This page doesn't exist").query()).toBeNull();
   });
 });
+
+/**
+ * Each channel's line icon in More channels, by its first path: Lucide's app-window (a browser
+ * window), message-circle, message-square and phone.
+ */
+const CHANNEL_GLYPHS = [
+  'M2 8h20M6 4v4M10 4v4',
+  'M7.9 20A9 9 0 1 0 4 16.1L2 22Z',
+  'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+];
 
 describe('share', () => {
   it('more_channels_matches_the_signed_section_on_desktop_and_phone', async () => {
@@ -577,6 +727,27 @@ describe('share', () => {
         const pill = row.querySelector('.cd-pill')!.getBoundingClientRect();
         const text = row.querySelector('.cd-share-kit__later-text')!.getBoundingClientRect();
         expect(pill.left).toBeGreaterThanOrEqual(text.right);
+        // Board REV-CHAN A: the channel's line icon on the built-in connector tile, at the row's
+        // left, 12 px before its words, centred on them. A neutral glyph, never a brand's mark.
+        const tile = row.firstElementChild as HTMLElement;
+        expect(tile.classList).toContain('cd-connector-icon');
+        expect(tile.classList).toContain('cd-connector-icon--section');
+        expect(tile.classList).toContain('cd-connector-icon--built-in');
+        expect(tile.getAttribute('aria-hidden')).toBe('true');
+        const tileBox = tile.getBoundingClientRect();
+        expect([tileBox.width, tileBox.height]).toEqual([36, 36]);
+        expect(getComputedStyle(tile).backgroundColor).toBe(tokenColor('--fill-secondary'));
+        expect(Math.round(tileBox.left - row.getBoundingClientRect().left)).toBe(16);
+        expect(Math.round(text.left - tileBox.right)).toBe(12);
+        expect(Math.round(pill.left - text.right)).toBeGreaterThanOrEqual(16);
+        expect(getComputedStyle(tile).borderTopLeftRadius).toBe('8px');
+        expect(Math.abs((tileBox.top + tileBox.bottom) / 2 - (text.top + text.bottom) / 2)).toBeLessThanOrEqual(1);
+        const glyph = tile.querySelector('svg')!;
+        expect(glyph.getAttribute('stroke')).toBe('currentColor');
+        expect(glyph.querySelector('[fill]:not([fill="none"])')).toBeNull();
+        const glyphBox = glyph.getBoundingClientRect();
+        expect([glyphBox.width, glyphBox.height]).toEqual([20, 20]);
+        expect([...glyph.querySelectorAll('path')].map((path) => path.getAttribute('d'))[0]).toBe(CHANNEL_GLYPHS[index]);
       }
       expectNoHorizontalScroll();
     }

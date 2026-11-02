@@ -446,7 +446,7 @@ it('seeds the signed CPA starter lines and keeps limit answers out of every line
     contact_and_after_hours: 'Email Linda. After hours, take a message.',
   });
   const board = [
-    ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping for individuals and small businesses.'],
+    ['about', 'Chen & Co. CPA is a two-person CPA firm in San Jose. We do tax returns and bookkeeping.'],
     ['intake', 'Before a consult, the Desk asks whether it’s for you, your business or both, which tax years or months need work, and whether you use bookkeeping software.'],
     ['after_hours', 'Outside business hours, the Desk takes a message and Linda replies the next business day.'],
     ['urgent', 'A notice from the IRS or the state with a deadline this week is urgent: the Desk tells Linda right away.'],
@@ -694,6 +694,68 @@ it('seeds How we help as customer-readable lines that pass the scan', async () =
     expect(job).not.toMatch(/\b(?:you|your|free)\b|\d/i);
     expect(publicLineRefused(job)).toBe(false);
   }
+});
+
+let cardRuns = 0;
+
+/**
+ * The CPA starter with its cards, then on to the rules step. Each job card is decided by `decide`, given
+ * the job and how many of its cards came before (a changed card is a new one): true or false is the
+ * card's buttons, with an amount for a retainer, and a string is typed as the answer to the card.
+ */
+async function cpaAtRulesDeciding(decide: (job: string, before: number) => boolean | string) {
+  const query = { cards: '1' };
+  const started = await mockStore.dispatch('startSetup', { query, body: {
+    description: START_EXAMPLES.en.examples[3]!.description,
+    timezone: 'America/Los_Angeles', idempotency_key: `how-we-help-${++cardRuns}`,
+  } });
+  if ('network' in started) throw new Error('start failed');
+  const params = { id: (started.body as SetupState).interview_id };
+  const next = async (key: 'setupConsent' | 'setupAnswer' | 'setupSuggestions' | 'setupProposal', body: unknown, proposal_id?: string) => {
+    const answer = await mockStore.dispatch(key, { params: { ...params, ...(proposal_id ? { proposal_id } : {}) }, query, body });
+    if ('network' in answer || answer.status !== 200) throw new Error(`${key} must answer 200`);
+    return answer.body as SetupState;
+  };
+  let state = await next('setupConsent', { allow: true });
+  state = await next('setupAnswer', { question: state.question, text: 'Both, about evenly' });
+  const seen = new Map<string, number>();
+  while (state.pending_card) {
+    const card = state.messages.findLast((message) => message.card?.proposal_id === state.pending_card)!.card!;
+    const before = seen.get(card.job?.job ?? '') ?? 0;
+    if (card.job) seen.set(card.job.job, before + 1);
+    const answer = card.job === null || decide(card.job.job, before);
+    if (typeof answer === 'string') state = await next('setupAnswer', { question: null, card: card.proposal_id, text: answer });
+    else state = await next('setupProposal', answer && card.job?.job === 'payment' ? { accept: true, amount_cents: 50000 } : { accept: answer }, card.proposal_id);
+  }
+  if (state.step !== 'tools') state = await next('setupSuggestions', {});
+  await mockStore.dispatch('setupRules', { params });
+  const read = await mockStore.dispatch('setupPublicLines', { params });
+  if ('network' in read || read.status !== 200) throw new Error('public lines unavailable');
+  return (read.body as SetupPublicLines).lines.find(({ key }) => key === 'policy:how_we_help');
+}
+
+it('leaves out of How we help the job the owner turned down, and the line when they turned down every job', async () => {
+  const booking = 'New clients book a short introductory call.';
+  const intake = 'Before their call, new clients answer three short questions.';
+  const retainer = 'Clients get a secure link to pay a retainer before work starts.';
+  expect((await cpaAtRulesDeciding(() => true))?.text).toBe([booking, intake, retainer].join('\n'));
+  expect((await cpaAtRulesDeciding((job) => job !== 'payment'))?.text).toBe([booking, intake].join('\n'));
+  expect((await cpaAtRulesDeciding((job) => job !== 'intake'))?.text).toBe([booking, retainer].join('\n'));
+  expect(await cpaAtRulesDeciding(() => false)).toBeUndefined();
+});
+
+it('reads How we help from the current card and the owner’s typed answer, and keeps the sentence of a retainer setup declined for having no amount', async () => {
+  const booking = 'New clients book a short introductory call.';
+  const intake = 'Before their call, new clients answer three short questions.';
+  const retainer = 'Clients get a secure link to pay a retainer before work starts.';
+  // A changed intro call, then "Not now" on the changed card: the booking's sentence goes; accepted, it stays.
+  const changeThen = (yes: boolean) => (job: string, before: number) => job !== 'schedule' || (before === 0 ? 'Make it 30 minutes' : yes);
+  expect((await cpaAtRulesDeciding(changeThen(false)))?.text).toBe([intake, retainer].join('\n'));
+  expect((await cpaAtRulesDeciding(changeThen(true)))?.text).toBe([booking, intake, retainer].join('\n'));
+  // "Not now" typed on the retainer's card is the owner's no.
+  expect((await cpaAtRulesDeciding((job) => job !== 'payment' || 'Not now'))?.text).toBe([booking, intake].join('\n'));
+  // A typed yes on a retainer with no amount is setup's decline, not the owner's: its sentence stays (#855).
+  expect((await cpaAtRulesDeciding((job) => job !== 'payment' || 'Yes, please'))?.text).toBe([booking, intake, retainer].join('\n'));
 });
 
 it('scans read-only How we help before confirmation and public publication', async () => {

@@ -70,6 +70,15 @@ export const SPEC = {
     lineHeight: '20px',
     fontWeight: '420',
   },
+  dangerMain: {
+    height: '40px',
+    borderTopLeftRadius: '8px',
+    backgroundColor: 'rgba(220, 130, 144, 0.16)',
+    color: 'rgb(235, 163, 174)',
+    fontSize: '14px',
+    lineHeight: '20px',
+    fontWeight: '420',
+  },
   primary: { backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' },
   composer: { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '16px', boxShadow: /0px 4px 20px/ },
   footer: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
@@ -366,7 +375,7 @@ export async function expectRulesPage(root: HTMLElement, chips: readonly string[
 }
 
 /** Settings' sections, in SubNav's order. */
-export const SETTINGS_SECTION_NAMES = ['General', 'Notifications', 'Channels', 'Billing'] as const;
+export const SETTINGS_SECTION_NAMES = ['General', 'Alerts', 'Channels', 'Billing'] as const;
 
 /**
  * A Settings board on a laptop: the owner frame with the sidebar's Connectors row after Rules and
