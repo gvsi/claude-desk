@@ -42,7 +42,13 @@ const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 export const needsYouQuery = (deskId: string) =>
   queryOptions({ queryKey: needsYouKey(deskId), queryFn: ({ signal }) => request('needsYou', { params: { desk_id: deskId }, signal }) });
-export const ownerInboxQuery = () => queryOptions({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') });
+// The owner's Demo inbox leaves out the record's signed head checkpoints, which the kernel still sends:
+// they are the record's own engineering text, and Safety says how the record stands in plain words.
+export const ownerInboxQuery = () =>
+  queryOptions({
+    queryKey: OWNER_INBOX_KEY,
+    queryFn: async () => (await request('ownerInbox')).filter((entry) => entry.kind !== 'head_checkpoint'),
+  });
 
 /** How long a page waits for a Desk's Today to be read ahead before it opens Today anyway, still loading. */
 export const READ_AHEAD_MS = 3_000;
