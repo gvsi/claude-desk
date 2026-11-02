@@ -7,8 +7,8 @@ export interface StepsProps {
   label: string;
   /** Each step's name, in order: "Choose", "Sign in", "Review tools", "Confirm". */
   steps: readonly string[];
-  /** The step the person is on, counted from 0. Steps before it are done; one past the last reads as the last. */
-  current: number;
+  /** The step the person is on, counted from 0; null until known. Steps before it are done; one past the last reads as the last. */
+  current: number | null;
   /**
    * The flow is finished, as setup is once the Desk is live: the current step is done too. Its number
    * gives way to a check on the current step's fill, it reads "{name}, done", and it keeps
@@ -31,12 +31,12 @@ export interface StepsProps {
  */
 export function Steps({ label, steps, current, finished = false, drawCheck = false }: StepsProps) {
   // The step the list marks and the line names: `current`, kept within the steps, so both say the same.
-  const at = Math.min(Math.max(current, 0), steps.length - 1);
+  const at = current === null ? null : Math.min(Math.max(current, 0), steps.length - 1);
   return (
     <div className="cd-steps-frame">
       <ol role="list" className="cd-steps cd-type-meta" aria-label={label}>
         {steps.map((step, index) => {
-          const state = index < at ? 'done' : index === at ? 'current' : 'later';
+          const state = at === null ? 'later' : index < at ? 'done' : index === at ? 'current' : 'later';
           const done = state === 'done' || (state === 'current' && finished);
           return (
             <li
@@ -61,7 +61,7 @@ export function Steps({ label, steps, current, finished = false, drawCheck = fal
         })}
       </ol>
       {/* The list says the same to screen readers, so the line is drawn only. */}
-      {steps.length > 0 ? (
+      {at !== null && steps.length > 0 ? (
         <p className="cd-steps__compact cd-type-meta" aria-hidden="true">
           {`Step ${at + 1} of ${steps.length}: `}
           <span className="cd-steps__compact-name">{steps[at]}</span>

@@ -477,6 +477,37 @@ for (const viewport of ['desktop', 'phone'] as const) {
   });
 }
 
+it.each(['desktop', 'phone'] as const)('setup_reload_marks_no_step_until_read at %s', async (viewport) => {
+  const state = await interviewAt('safety_check');
+  for (const key of ['setupConfirm', 'goLive'] as const) {
+    const answer = await mockStore.dispatch(key, { params: { id: state.interview_id } });
+    if ('network' in answer || answer.status !== 200) throw new Error(`the mock answers ${key}`);
+  }
+  const interview = holdReads(path('setup', state));
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+  await vi.waitFor(() => expect(interview.held()).toBe(1));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__column .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  const steps = screen.getByRole('list', { name: 'Set up your Desk' });
+  expect(steps.element().querySelector('[aria-current]')).toBeNull();
+  expect(steps.element().querySelector('.cd-steps__step--current, .cd-steps__step--done')).toBeNull();
+  expect(document.querySelector('.cd-steps__compact')).toBeNull();
+  expect(screen.container.textContent).not.toContain('Step 1 of 5');
+
+  interview.release();
+  await vi.waitFor(() => expect(steps.element().querySelector('[aria-current="step"]')?.textContent).toBe('Live, done'));
+  expect(document.querySelector('.cd-steps__compact')?.textContent).toBe('Step 5 of 5: Live');
+  if (viewport === 'phone') await expect.element(screen.getByText('Step 5 of 5: Live', { exact: true })).toBeVisible();
+});
+
+it.each(['desktop', 'phone'] as const)('fresh_setup_starts_at_questions at %s', async (viewport) => {
+  const { screen } = await renderRoute('/app/setup', { viewport });
+  const steps = screen.getByRole('list', { name: 'Set up your Desk' });
+  expect(steps.element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+  expect(steps.element().querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+  expect(document.querySelector('.cd-steps__compact')?.textContent).toBe('Step 1 of 5: Questions');
+  if (viewport === 'phone') await expect.element(screen.getByText('Step 1 of 5: Questions', { exact: true })).toBeVisible();
+});
+
 it('setup_reload_hands_off', async () => {
   // A reload at the tools: while the interview is read, the column draws a step's header as shapes;
   // then the real header lands and the tools list's own shapes carry on at once, with no frame
