@@ -30,7 +30,10 @@ const SIGNING = [
   'Time window: 5 minutes',
 ];
 
-/** The card’s ten abilities, in the order redrawn on 2026-11-02 (canvas v321). */
+/**
+ * The card’s ten abilities, in the order redrawn on 2026-11-02, the two customer lines with the
+ * kernel’s straight apostrophe (canvas v326).
+ */
 const ABILITIES = [
   'Get a quote from the price list',
   'Find open times',
@@ -40,8 +43,8 @@ const ABILITIES = [
   'Leave contact details',
   'Ask for a callback',
   'Verify a customer with a code sent to their contact on record',
-  'Receive a verified customer’s own documents',
-  'List a verified customer’s own charges',
+  "Receive a verified customer's own documents",
+  "List a verified customer's own charges",
 ];
 
 function AgentsPage() {
@@ -57,8 +60,8 @@ function AgentsPage() {
           <li>Leave contact details</li>
           <li>Ask for a callback</li>
           <li>Verify a customer with a code sent to their contact on record</li>
-          <li>Receive a verified customer’s own documents</li>
-          <li>List a verified customer’s own charges</li>
+          <li>Receive a verified customer's own documents</li>
+          <li>List a verified customer's own charges</li>
         </ul>
       </AgentsCard>
       <AgentsCard title="How agents prove who they are">
@@ -94,7 +97,7 @@ const meta = {
     canvas: 'N-R2-Agents-01-Page',
     canvasNote: [
       'Built against the board in review; sign-off pending.',
-      'N-R2-Agents-01-Page and N-R2-Agents-06-Phone were redrawn on 2026-11-02 (canvas v321) to match the card’s ten abilities, in the same order and words.',
+      'N-R2-Agents-01-Page and N-R2-Agents-06-Phone were redrawn on 2026-11-02 (canvas v326) to match the card’s ten abilities, in the same order and words, the two customer lines with the kernel’s straight apostrophe.',
       'The page for people’s AI agents, /d/:slug/agents: the public page’s brand header on its own (PublicBrandHeader), the endpoint as a CopyField with “Copy address”, and the example request as a CodeBlock, both in the code type.',
       'The column, its title and the cards’ lists are page layout the web app (plan 04) owns.',
       'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
