@@ -1,8 +1,9 @@
 """Approvals: the owner's answer to a held request, and the visitor's cancel.
 
 `POST /approvals/{decision_id}/answer` ("Decision lifecycle"). The answer locks the decision and
-settles it as any read does (`execute.refresh_decision`: lazy expiry first, then the answers the
-active version's money cap offers), so it answers only a request still `held`; anything else is
+settles it as any read does (`execute.refresh_decision`: lazy expiry first, then a held discount
+quote its session's later booking made stale cancelled, then the answers the active version's
+money cap offers), so it answers only a request still `held`; anything else is
 409, and an answer the request wasn't offered (`allow_person` for a request a stranger made, even
 once the session has confirmed who it is, or above the active version's money cap; `deny_always`
 on a hold no `ask` card decided, see `decide.held_by_ask`) is 422. Either refusal is ledgered
@@ -32,6 +33,9 @@ changes a rule.
 `POST /decisions/{decision_id}/cancel`: a session withdraws its own `held` request (`cancelled`);
 any other state is 409, ledgered. A decision of another session, or another copy's for either
 route, is 404, ledgered `auth` on the caller's Desk, or logged when the caller (an owner) has none.
+A held quote with a discount is also `cancelled` by the first read after its session books
+(`decide.supersede_if_booked`): the visitor booked without it, so an answer to it is 409 and
+nothing runs.
 """
 
 import secrets

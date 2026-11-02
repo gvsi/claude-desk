@@ -27,6 +27,7 @@ from evals.results import (
     is_gated,
     pass_target,
     results_check,
+    results_file,
     write_results,
 )
 from evals.tests.eval_repo import commit, git, make_repo, scenario_yaml, set_landed, write
@@ -73,6 +74,19 @@ async def results_at_head(repo: Path, run_one: Any = None, *, runs: int = 1, rat
     result = await run_pass(config(runs=runs, results=True), deps(repo, run_one))
     path = write_results(result, rates, root=repo)
     commit(repo, "test(evals): record the tier 2 results")
+    return path
+
+
+async def run_free_at_head(repo: Path, *, rates: RecordedRates = EMPTY) -> Path:
+    """A run-free results file for the head (every scenario pending), committed by hand: `tier2 --results` writes
+    none, since a pass that judged no run has nothing to record, but `results-check` still reads one committed at
+    an unarmed head."""
+    result = await run_pass(config(runs=1, results=True), deps(repo))
+    assert result.runs == [] and result.pending
+    path = repo / "evals" / "results" / f"{result.inputs}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(results_file(result, rates, root=repo).dumps())
+    commit(repo, "test(evals): commit a run-free results file by hand")
     return path
 
 
@@ -244,6 +258,13 @@ async def test_results_export_needs_a_results_pass(repo, monkeypatch, capsys):
     assert capsys.readouterr().out == f"results: {UNCHECKED.format(unchecked.pass_id)}\n"
     checked = await run_pass(config(results=True), deps(repo))
     assert write_results(checked, EMPTY, root=repo) == repo / "evals" / "results" / f"{checked.inputs}.json"
+
+
+def test_no_committed_results_file_is_run_free():
+    """A results file with no run judged nothing, so it is never evidence and none is kept: an unarmed head
+    needs no file, and a pass that judged no run writes none."""
+    files = sorted((Path(__file__).resolve().parents[1] / "results").glob("*.json"))
+    assert [path.name for path in files if not json.loads(path.read_text())["runs"]] == []
 
 
 async def test_check_passes_when_no_gated_path_changed(repo):
@@ -477,10 +498,10 @@ async def test_check_rejects_missing_duplicate_unknown_or_missplit_rows(repo):
 async def test_check_rejects_pending_for_a_landed_plan(tmp_path):
     repo = make_repo(tmp_path / "repo", landed=("master", "01a"))   # 02 isn't landed here
     branch(repo)
-    path = await results_at_head(repo)
+    path = await run_free_at_head(repo)
     assert json.loads(path.read_text())["pending"] == {sid: "02" for sid in ("atk-cal", "atk-held", "leg-cal",
                                                                                "leg-held")}
-    assert check(repo)[0]          # a run-free file passes
+    assert check(repo)[0]          # a run-free file still reconciles: an unarmed head's check recomputes no gate
     original = path.read_text()
     for match, change in {
         "which landed.toml lists": lambda data: data["pending"].update({"atk-held": "01a"}),
@@ -510,7 +531,7 @@ async def test_check_rejects_rewritten_rate_history_or_dropped_landed_plans(repo
     git(repo, "checkout", "-q", "main", "--", "evals/recorded_rates.json")
     set_landed(repo, ("master", "01a", "01b", "01c", "01c-setup", "02a"))
     commit(repo, "drop 02 from landed.toml")
-    await results_at_head(repo, rates=load_recorded_rates(rates_file))
+    await run_free_at_head(repo, rates=load_recorded_rates(rates_file))
     passed, reason = check(repo)
     assert not passed and "drops plans main lists: 02" in reason
 
@@ -1489,6 +1510,37 @@ def test_a_budget_stopped_results_pass_prints_what_it_did(repo, monkeypatch, cap
     assert printed[2:] == ["gate: the pass stopped at its --max-usd budget, so runs are missing",
                            f"tier2: pass {pass_id} doesn't cover the suite: 2 runs have no row, in 2 scenarios: "
                            "leg-cal run 1; leg-held run 1"]
+    assert not (repo / "evals" / "results").exists()
+
+
+def test_a_results_pass_that_judged_no_run_writes_no_file(tmp_path, monkeypatch, capsys):
+    """With every scenario pending, a --results pass makes no run: its gate reads not evaluated, and no results
+    file is written, since nothing was evaluated and there is nothing to record. `results --pass` refuses it
+    the same way."""
+    from functools import partial
+
+    from evals import results
+    from evals import run as cli
+    from evals.tier2 import passes, suite
+
+    repo = make_repo(tmp_path / "repo", landed=("master", "01a"))   # 02 isn't landed, so every scenario waits
+    in_repo = passes.run_pass
+    monkeypatch.setenv("MODEL_PROVIDER", "anthropic")
+    monkeypatch.setattr(passes, "run_pass", lambda config: in_repo(config, deps(repo, prices={}, keys={}, stack=None)))
+    monkeypatch.setattr(passes, "load_pass", partial(passes.load_pass, root=repo))
+    monkeypatch.setattr(suite, "load_recorded_rates",
+                        partial(suite.load_recorded_rates, repo / "evals" / "recorded_rates.json"))
+    monkeypatch.setattr(results, "write_results", partial(results.write_results, root=repo))
+    assert cli.main(["tier2", "--runs", "1", "--max-usd", "0", "--results"]) == 1
+    printed = capsys.readouterr().out.splitlines()
+    pass_id = printed[0].split()[2].rstrip(":")
+    assert printed[0].startswith(f"tier2: pass {pass_id}: 0 runs, 4 scenarios pending, 0 errors, $0.00 spent"), printed
+    refusal = (f"pass {pass_id} judged no run (4 scenarios pending): nothing was evaluated, so there is nothing to "
+               "record and no results file is written")
+    assert printed[1:] == ["gate: not evaluated; no run was judged (4 scenarios pending)", f"tier2: {refusal}"]
+    assert not (repo / "evals" / "results").exists()
+    assert cli.main(["results", "--pass", pass_id]) == 1
+    assert capsys.readouterr().out == f"results: {refusal}\n"
     assert not (repo / "evals" / "results").exists()
 
 

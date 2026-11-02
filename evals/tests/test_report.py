@@ -548,6 +548,26 @@ def test_report_renders_every_section():
         assert limit.lower() in limits.lower()
 
 
+def test_a_pass_that_judged_no_run_reads_as_not_evaluated():
+    """The report command refuses a pass with no run, but a report rendered from one says it wasn't
+    evaluated, never that the gate passed or failed, and lists the gate's other reasons below."""
+    nothing = "nothing was evaluated: no run was judged (4 scenarios pending)"
+    empty = a_pass([], pending={sid: "02" for sid in ("atk-cal", "atk-held", "leg-cal", "leg-held")})
+    inputs = all_inputs(pass_result=empty, metrics=None, latency=None, calibration=None, recorded=None,
+                        null_baseline=None, spend_month=[empty.spend])
+
+    def summary(*reasons: str) -> str:
+        text = render_report(**{**inputs, "gate_result": gate(False, *reasons)})
+        return text.split("\n## Summary\n", 1)[1].split("\n## ", 1)[0]
+
+    alone = summary(nothing)
+    assert "Not evaluated: no run was judged (4 scenarios pending), so the gate didn't pass.\n" in alone
+    assert "The gate passed" not in alone and "The gate failed" not in alone and "\n- " not in alone
+    stopped = summary(nothing, "the pass stopped at its --max-usd budget, so runs are missing")
+    assert ("Not evaluated: no run was judged (4 scenarios pending), so the gate didn't pass. Its other reasons:\n\n"
+            "- the pass stopped at its --max-usd budget, so runs are missing\n") in stopped
+
+
 def test_latest_json_matches_the_report_numbers(tmp_path: Path):
     """latest.json holds every field the README and the path to MVP read, and each of its numbers
     is the one the report shows; `write_report` writes the report, latest.json and this month's

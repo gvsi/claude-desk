@@ -2677,6 +2677,21 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
   });
 
+  it('the_setup_lockup_leads_to_today_as_save_and_exit_does', async () => {
+    // The lockup in setup's bar is a link that leaves as "Save and exit" does: once the owner has a
+    // Desk, to its Today, which names the step the owner left.
+    const state = await deskAtRules();
+    const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    const lockup = screen.getByRole('banner').getByRole('link', { name: 'Claude Desk, save and exit', exact: true });
+    await expect.element(lockup).toHaveAttribute('href', `/app/${state.desk_id}/today`);
+    const exit = screen.getByRole('banner').getByRole('link', { name: 'Save and exit' });
+    expect(lockup.element().getAttribute('href')).toBe(exit.element().getAttribute('href'));
+    await lockup.click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    await expect.element(region(screen, 'Finish setting up Juniper Hair Studio').getByText(AT_RULES, { exact: true })).toBeVisible();
+  });
+
   it('save_and_exit_lands_on_the_card', async () => {
     // Leaving setup with "Save and exit" opens the new Desk's Today, which leads back in: no loop
     // between the two, and the card names the step the owner left.
@@ -2706,7 +2721,7 @@ describe("Today's unfinished setup", () => {
    * the API has moved setup on, leaves with "Save and exit" at once, within the few seconds Today
    * counts the Desks read as fresh. Resolves on Today.
    */
-  async function leaveRightAfterAStep(meanwhile: () => void = () => undefined): Promise<RenderResult> {
+  async function leaveRightAfterAStep(meanwhile: () => void = () => undefined, by: 'Save and exit' | 'Claude Desk, save and exit' = 'Save and exit'): Promise<RenderResult> {
     const state = await deskAtTools();
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
@@ -2721,7 +2736,7 @@ describe("Today's unfinished setup", () => {
     // Today never draws the step before, not even for a moment as it opens.
     const sawTools = watchFor('Pick up at your tools');
     onTestFinished(() => expect(sawTools(), 'Today drew the tools step').toBe(false));
-    await screen.getByRole('link', { name: 'Save and exit' }).first().click();
+    await screen.getByRole('banner').getByRole('link', { name: by, exact: true }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     expect(performance.now() - startedAt, "left within the Desks' fresh window").toBeLessThan(5_000);
     return screen;
@@ -2737,6 +2752,11 @@ describe("Today's unfinished setup", () => {
   it('leaving_setup_right_after_a_step_names_the_new_step', async () => {
     // The owner reads setup at its tools, goes on to the rules and leaves at once: the card names the rules, not the tools.
     await expectCardAtRules(await leaveRightAfterAStep());
+  });
+
+  it('leaving_setup_by_its_lockup_right_after_a_step_keeps_the_progress', async () => {
+    // The lockup leaves as "Save and exit" does: the step the owner just reached is kept, and Today names it.
+    await expectCardAtRules(await leaveRightAfterAStep(undefined, 'Claude Desk, save and exit'));
   });
 
   it('leaving_setup_names_the_new_step_while_the_desks_are_still_read', async () => {

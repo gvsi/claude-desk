@@ -211,19 +211,23 @@ function scrollerOf(el: Element): Element {
 
 /**
  * Where the conversation is scrolled: the element whose scrolling moves it, how far down, and the
- * size of the shell around it ("390x844"), which tells whether the page has changed size since.
+ * size of the shell around it with its composer area's height ("390x844/96"), which tells whether
+ * the page has changed size since.
  */
 interface ScrollerAt {
   scroller: Element;
   top: number;
-  shellSize: string;
+  layoutSize: string;
 }
 
 /** Where the element whose scrolling moves `el` stands now. */
 function scrollerAt(el: Element): ScrollerAt {
   const scroller = scrollerOf(el);
-  const shell = el.closest(SHELL)?.getBoundingClientRect();
-  return { scroller, top: scroller.scrollTop, shellSize: shell ? `${Math.round(shell.width)}x${Math.round(shell.height)}` : '' };
+  const shell = el.closest(SHELL);
+  const box = shell?.getBoundingClientRect();
+  const area = shell?.querySelector(COMPOSER_AREA)?.getBoundingClientRect();
+  const layoutSize = box ? `${Math.round(box.width)}x${Math.round(box.height)}/${Math.round(area?.height ?? 0)}` : '';
+  return { scroller, top: scroller.scrollTop, layoutSize };
 }
 
 /** The design system's classes for the shell around the page and its composer area, which stays at the bottom of the window. */
@@ -233,12 +237,15 @@ const COMPOSER_AREA = '.cd-public-shell__composer';
 /**
  * Whether a visitor who was at the end, where the page last knew they were (`seen`), has moved
  * away from it to stand where the conversation is now: only by moving it up, in the same scroller,
- * with the shell the same size. The page changing size moves the conversation too, before the page
- * hears of the new size: the browser's scroll anchoring moves it down or up as the rows rewrap, and
- * the shell switching scrollers leaves it where the new scroller was. Nothing lies below the end.
+ * with the shell and its composer area the same size. The page changing size moves the conversation
+ * too, before the page hears of the new size: the browser's scroll anchoring moves it down or up as
+ * the rows rewrap, and the shell switching scrollers leaves it where the new scroller was. And the
+ * browser moves it up on its own, its event coming only with the next frame, as a row that landed
+ * rising settles at the bottom: a composer that grew in between hides the end, and that scroll
+ * still isn't the visitor leaving it. Nothing lies below the end.
  */
 function leftTheEnd(seen: ScrollerAt, now: ScrollerAt): boolean {
-  return now.scroller === seen.scroller && now.shellSize === seen.shellSize && now.top < seen.top;
+  return now.scroller === seen.scroller && now.layoutSize === seen.layoutSize && now.top < seen.top;
 }
 
 /**
@@ -326,11 +333,12 @@ interface NewestInView {
  * anchoring moves the conversation down or up to keep the rows on screen where they were. And the
  * shell can switch which of its parts scrolls the conversation (going short or tall), which leaves
  * it where the new scroller was; the shell says so with its own event, and the end comes back. So
- * while the visitor is at the end, only a move up of the same scroller, with the shell the same
- * size, counts as them leaving it (`leftTheEnd`); once they have moved back, any move counts. Only
- * the conversation's own scroller counts at all, looked up afresh each time: not the about column
- * beside the chat, the composer's text box, or a part of the shell that has just stopped scrolling
- * the conversation. The trade-off: a visitor's scroll up in the very frame the shell changes size,
+ * while the visitor is at the end, only a move up of the same scroller, with the shell and its
+ * composer area the same size, counts as them leaving it (`leftTheEnd`); once they have moved back,
+ * any move counts. Only the conversation's own scroller counts at all, looked up afresh each time:
+ * not the about column beside the chat, the composer's text box, or a part of the shell that has
+ * just stopped scrolling the conversation. The trade-off: a visitor's scroll up in the very frame
+ * the shell or its composer area changes size,
  * before the page has seen the new size, is taken for the browser's and the end comes back once; a
  * scroll gesture goes on past that frame and is followed from there.
  *

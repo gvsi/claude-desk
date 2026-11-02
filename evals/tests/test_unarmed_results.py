@@ -310,11 +310,11 @@ def test_unarmed_reads_the_requested_commits_not_the_working_tree(tmp_path: Path
 
 
 async def test_valid_pending_results_need_no_regeneration_after_a_gated_change(tmp_path: Path):
-    from evals.tests.test_results import results_at_head
+    from evals.tests.test_results import run_free_at_head
 
     repo = make_repo(tmp_path / "repo", landed=("master", "01a"))
     base = commit(repo, "the unarmed base")
-    stale = await results_at_head(repo)
+    stale = await run_free_at_head(repo)
     write(repo, "kernel/src/lib.rs", "// changed after pending-only results\n")
     commit(repo, "a gated change after placeholder results")
     assert stale.name != f"{results.inputs_key('HEAD', repo)}.json"
