@@ -10,8 +10,11 @@ import pytest
 from sqlalchemy import text as sql
 
 from desk.api import setup
-from desk.api.prompts import ConnectorProposal, HoursAnswer, JobProposal, SETUP_PLAN_NOT_CONNECTED, SetupAnswers
+from desk.api.prompts import (
+    PLAN_OFFERS_RULE, ConnectorProposal, HoursAnswer, JobProposal, SETUP_PLAN_NOT_CONNECTED, SetupAnswers,
+)
 from desk.kernel_service.adapters import blocks
+from tests.api.fakes import unavailable
 from tests.api.test_setup_questions import (
     app, model, begin, consent, interview_with, new_owner, stored, next_step, next_ask, card_answer,
 )
@@ -3268,6 +3271,47 @@ async def test_use_your_suggestions_keeps_the_closing_reply_before_the_plan(prop
     tail = (await stored(engine, interview_id))["transcript"][len(before):]
     assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
         setup.PAYMENT_LINE, closing, "The closing plan."]
+
+
+@pytest.mark.parametrize("planned", [True, False])
+async def test_closing_says_the_offers_the_owner_stated_arent_set_up(proposals, model, engine, planned):
+    # After the closing plan, or the fixed line when there's none, setup lists the offers the owner stated in their
+    # words, and says plainly the Desk won't offer them: a discount reaches customers only through the rules.
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    offers = ["Students get 10% off with a student ID", "First consult free for veterans"]
+    answers = {**(await stored(engine, interview_id))["answers"], "offers": offers}
+    async with engine.begin() as conn:
+        await conn.execute(sql("UPDATE app.setup_interviews SET answers = CAST(:answers AS jsonb)"
+                               " WHERE interview_id = :id"), {"answers": json.dumps(answers), "id": interview_id})
+    before = (await stored(engine, interview_id))["transcript"]
+    model.add(next_step("what_you_do", next={"kind": "done"}, reply="", plan="The closing plan.") if planned
+              else unavailable())
+    reply = await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions?cards=1", json={})
+    assert reply.status_code == 200, reply.text
+    tail = (await stored(engine, interview_id))["transcript"][len(before):]
+    told = setup.offers_not_set_up(offers)
+    assert told == ("Offers you mentioned aren't set up yet:\n"
+                    "- Students get 10% off with a student ID\n- First consult free for veterans\n\n"
+                    "Your Desk won't offer them to customers, since a discount reaches customers only through "
+                    "your rules. You can add one in Rules.")
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        setup.PAYMENT_LINE, "The closing plan." if planned else setup.QUESTIONS_DONE, told]
+    assert PLAN_OFFERS_RULE in setup.SETUP_NEXT_SYSTEM
+    # The closing call doesn't read the offers either: only code's note names them.
+    assert not any("Students get" in request.messages[0]["content"][0]["text"] for request in model.requests
+                   if request.output_schema is setup.SetupNextStep)
+
+
+async def test_closing_lists_no_offers_when_the_owner_stated_none(proposals, model, engine):
+    owner, state, ids = proposals
+    interview_id = state["interview_id"]
+    before = (await stored(engine, interview_id))["transcript"]
+    model.add(next_step("what_you_do", next={"kind": "done"}, reply="", plan="The closing plan."))
+    assert (await owner.browser.post(f"/api/owner/setup/{interview_id}/suggestions?cards=1", json={})).status_code == 200
+    tail = (await stored(engine, interview_id))["transcript"][len(before):]
+    assert [entry["text"] for entry in tail if entry["role"] == "claude" and entry["text"]] == [
+        setup.PAYMENT_LINE, "The closing plan."]
 
 
 async def test_a_decision_changes_the_card_and_claude_asks_the_next_thing(proposals, model, engine):

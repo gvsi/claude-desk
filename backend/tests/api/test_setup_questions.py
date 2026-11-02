@@ -1568,6 +1568,23 @@ async def test_setups_messages_leave_out_the_owners_description(app, browser, fa
     assert (await stored(engine, interview_id))["transcript"][0] == transcript[0]
 
 
+async def test_setup_keeps_an_offer_the_owner_stated_for_the_owner_alone(app, browser, kernel_http, model, engine):
+    # "Students get 10% off with a student ID" can't go in a customer line, and no rule gives it: setup keeps it, in
+    # the owner's words, to tell them at the end that it isn't set up. Rules and situations are drafted without it,
+    # and no customer line carries it.
+    owner = await new_owner(app, browser, kernel_http)
+    offer = "Students get 10% off with a student ID"
+    state = await begin(owner, model, offers=[offer])
+    answers = SetupAnswers.model_validate((await stored(engine, state["interview_id"]))["answers"])
+    assert answers.offers == [offer]
+    assert desk_setup.owner_rule_answers(answers).offers == []
+    assert "offers" not in desk_setup.SETUP_POLICY_CLAIMS
+    assert "- offers:" in SETUP_START_SYSTEM and "offers" in SetupStart.model_json_schema()["properties"]
+    # No later call reads them, so no turn can reword one into a customer line: a fact turn's message leaves them out.
+    interview = interview_with(answers, [desk_setup.Entry(role="owner", text=DESCRIPTION)])
+    assert "Students get" not in desk_setup._turn_message(interview, "what_you_do", "We fix bikes.")["content"][0]["text"]
+
+
 async def test_a_desk_that_cant_stop_answering_is_deleted(app, browser, fake, kernel_http, model, engine, caplog):
     owner = await new_owner(app, browser, kernel_http)
     # Answering off fails once: it is tried again, and setup goes on.
