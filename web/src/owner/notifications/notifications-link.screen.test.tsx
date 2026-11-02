@@ -140,6 +140,27 @@ describe('Notifications request link', () => {
     expect(mockStore.requests.filter((r) => r.key === 'decision')).toHaveLength(2);
   });
 
+  it('ledger_checkpoints_stay_out_of_the_owners_notifications', async () => {
+    // The kernel sends the owner a signed head checkpoint of the record now and then. It is the
+    // record's own engineering text, and Safety says how the record stands in plain words, so the
+    // owner's Notifications, its rows and its unread count, leave it out.
+    const held = seededHold();
+    const alert = alertFor(held.decision_id);
+    const checkpoint: DemoInboxEntry = {
+      entry_id: 'inbox-head', to: 'owner', kind: 'head_checkpoint',
+      body: '{"desk_id": "desk-turner", "head": "9f2c", "key_id": "k1", "seq": 50, "signature": "c2ln"}',
+      created_at: new Date().toISOString(), decision_id: null,
+    };
+    mockStore.inject({ route: 'ownerInbox', status: 200, times: 10_000, body: [alert, checkpoint] });
+    const { screen } = await renderRoute(TODAY);
+    const row = screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Notifications/ });
+    await expect.element(row).toHaveAccessibleName('Notifications 1 unread');
+    const page = await openNotifications(screen, held.decision_id);
+    expect(page.getByText(checkpoint.body).elements()).toHaveLength(0);
+    expect(page.getByText(/Ledger checkpoint/).elements()).toHaveLength(0);
+    expect(page.element().querySelectorAll('.cd-notifications__item')).toHaveLength(1);
+  });
+
   it('answered_and_dismissed_request_has_no_link', async () => {
     // Denied and dismissed on Today, the request is no longer held: its alert stays in
     // Notifications, and isn't a link to a card Today no longer has.

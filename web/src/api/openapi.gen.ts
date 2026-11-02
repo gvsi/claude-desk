@@ -123,6 +123,12 @@ export interface ApprovalAnswerOut {
  * closed code for a refused request, from the decision's `policy_ids`, its ledger summary's `reason`/`check`
  * and the session's verified state;
  * the web holds its words. It is null for held requests, stopped drafts and unmapped refusals.
+ * `from_the_visitor` is what the visitor (or visiting agent) wrote in the turn that made a refused request, read as
+ * Needs you reads a held request's: at most two of their lines since Claude's last reply before the refusal's
+ * receipt in the chat, each a one-line glimpse of at most 200 characters, joined with " · "; if that window is
+ * empty, the newest line before the receipt. It is their own untrusted words, for the owner alone. It is null for
+ * held requests and stopped drafts, and for a refusal whose receipt isn't in the chat: an entry can be days old, so
+ * the chat's latest lines would quote something else.
  */
 export interface Attempt {
   ref_id: string;
@@ -158,6 +164,7 @@ export interface Attempt {
         | "no_rule"
       )
     | null;
+  from_the_visitor: string | null;
 }
 /**
  * A checkpoint event, summarized for the owner (route `triage`): what the person asked for and what the Desk
@@ -337,7 +344,9 @@ export interface ConnectorProposal {
 /**
  * A conversation on the Desk: who it is with (`display_name` as `NeedsYouSession`'s), who has it (`mode`), when
  * anything last happened in it, how its requests stand (decisions by state), and whether it is the owner's own
- * preview. `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
+ * preview. `person_id` is the person on record a visitor's session was verified as, which that person's page lists
+ * the conversation by; null for an unverified visitor, an agent and the owner's preview, even a verified one.
+ * `latest_visitor_text` is the newest message the visitor typed, untrusted text shown as typed, with its
  * whitespace runs collapsed to single spaces and trimmed, and cut to 199 characters and "…" when longer than 200;
  * never Claude's words. It is null for an agent's conversation, the owner's preview and a visitor who hasn't
  * written yet. `latest_outcome` is the newest decisive event, derived from stored events, never task names, prose
@@ -362,6 +371,7 @@ export interface ConversationSummary {
   kind: "visitor" | "agent" | "owner";
   display_name: string | null;
   verified: boolean;
+  person_id: string | null;
   mode: "ai" | "owner" | "paused";
   last_activity: string;
   outcome_counts: {

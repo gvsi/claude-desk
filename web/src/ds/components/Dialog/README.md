@@ -4,17 +4,17 @@
 
 ## When to use
 
-- Before something the owner can't easily undo: "Start over with a fresh copy?", "Delete Main line for Turner Plumbing?".
-- Deleting a Desk from Settings › General uses the default tone, a neutral question with neutral buttons, as Boards/Settings, delete this Desk shows (owner decision, 2026-10-30).
+- Before something the owner can't easily undo: "Reset demo?", "Delete “Main line” for Turner Plumbing?".
+- Deleting a Desk from Settings › General uses the default tone with `confirmVariant="danger"`: red on "Delete this Desk" and "Delete Desk", with no refused dot (owner decision, 2026-11-02, replacing the earlier neutral-delete rule).
 - `tone="danger"` adds a refused dot beside the title; no signed screen uses it now.
 - Not for errors or news, which are a `Notice`, and not for anything a visitor sees.
 
 ## What it shows
 
 - A native modal dialog centered over the page, which is inert behind it and dimmed by `scrim`. N-Run2-Settings-DeleteDesk dims the page a little more, with rgba(20, 20, 19, 0.64); the dialog keeps the token. It is `bg-surface` with a `line-card` border at `radius-card`, 440 px wide at most, padded 24 px, and has no shadow.
-- The title in `section` type. `danger` adds a refused dot beside it; the words still say what will happen, and the buttons stay neutral.
+- The title in `section` type. `danger` adds a refused dot beside it; the words still say what will happen, and the button variants are independent of `tone`.
 - The body in `body` type, `text-secondary`, 12 px under the title.
-- At the right, 20 px under the body, a secondary button that leaves things as they are (`cancelLabel`), then the primary button that does it (`confirmLabel`), both at a screen's main size (`size-control-main`). Both say what happens: "Keep it", "Delete Desk".
+- At the right, 20 px under the body, a secondary button that leaves things as they are (`cancelLabel`), then the button that does it (`confirmLabel`), primary by default or `danger` via `confirmVariant` for a delete that cannot be undone, both at a screen's main size (`size-control-main`). Both say what happens: "Keep it", "Delete Desk".
 - It appears in place; nothing slides or fades.
 
 ## Keyboard and focus
@@ -40,7 +40,8 @@
 | --- | --- | --- |
 | `title` | `ReactNode` | Required. The dialog's name. |
 | `body` | `ReactNode` | Required. Its description. |
-| `confirmLabel` | `string` | Required. The primary button. |
+| `confirmLabel` | `string` | Required. The confirm button. |
+| `confirmVariant` | `'primary' \| 'danger'` | Default `primary`. Use `danger` for a delete that cannot be undone; independent of `tone`. |
 | `cancelLabel` | `string` | Required. The secondary button, focused first. |
 | `tone` | `'default' \| 'danger'` | `danger` adds a refused dot beside the title. |
 | `pending` | `boolean` | Confirm spins, cancel waits without a spinner; neither can be pressed, and Escape does nothing. |

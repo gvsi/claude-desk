@@ -32,6 +32,9 @@ export interface AskClaudePanelProps {
   children: ReactNode;
 }
 
+/** The composer's example, in the empty box: a question about what the Desk does, not a rule change. */
+export const ASK_CLAUDE_PLACEHOLDER = 'What happens if someone asks for a discount?';
+
 /**
  * Below this width the panel is a modal sheet, as AskClaudePanel.css draws it (docked at the right
  * over the scrim, or the whole window on a phone): beside the sidebar's column (264 px) and the
@@ -184,7 +187,7 @@ export function AskClaudePanel({ onClose, onSend, busy = false, children }: AskC
         {busy ? <WritingIndicator language="en" /> : null}
       </div>
       <div className="cd-ask-claude__composer">
-        <Composer variant="owner" label="Ask Claude" placeholder="Ask Claude" sendHeld={busy} onSend={onSend} />
+        <Composer variant="owner" label="Ask Claude" placeholder={ASK_CLAUDE_PLACEHOLDER} sendHeld={busy} onSend={onSend} />
       </div>
     </div>
   );

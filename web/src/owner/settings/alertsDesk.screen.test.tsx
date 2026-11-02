@@ -6,7 +6,7 @@ import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll } from '../../test/screen.ts';
 
-it.each(['desktop', 'phone'] as const)('alerts name a plumber only for the sample business on %s', async (viewport) => {
+it.each(['desktop', 'phone'] as const)('alerts name a plumber only for the sample business, and a salon its own words, on %s', async (viewport) => {
   const starting = await renderRoute(`/app/${RIVERA.deskId}/settings/alerts`, { viewport, pollScale: 100 });
   await expect.element(starting.screen.getByRole('heading', { name: 'Set for a plumber', exact: true })).toBeVisible();
   await expect.element(starting.screen.getByText('From your business type', { exact: true })).toBeVisible();
@@ -19,9 +19,10 @@ it.each(['desktop', 'phone'] as const)('alerts name a plumber only for the sampl
   const { screen } = await renderRoute(`/app/${salon.deskId}/settings/alerts`, { viewport, pollScale: 100 });
   await expect.element(screen.getByText('From your business type', { exact: true })).toBeVisible();
   expect(screen.getByRole('heading', { name: 'Set for a plumber', exact: true }).query()).toBeNull();
-  await expect.element(screen.getByRole('region', { name: 'From your business type', exact: true })).toBeVisible();
-  await expect.element(screen.getByRole('list', { name: 'From your business type', exact: true })).toBeVisible();
-  expect(rightAway(screen.getByRole('list', { name: 'From your business type', exact: true }).element())).toBe('Held requests and paused chats');
+  await expect.element(screen.getByRole('heading', { name: 'Set for your business', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Set for your business', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('list', { name: 'Set for your business', exact: true })).toBeVisible();
+  expect(rightAway(screen.getByRole('list', { name: 'Set for your business', exact: true }).element())).toBe('Held requests and paused chats');
   expectNoHorizontalScroll();
 });
 
@@ -56,9 +57,9 @@ it.each(['desktop', 'phone'] as const)('deleting the starting Desk and reloading
   expect(mockStore.world.desk(RIVERA.deskId)).toBeUndefined();
 
   const { screen } = await renderRoute(`/app/${salon.deskId}/settings/alerts`, { viewport, pollScale: 100 });
-  await expect.element(screen.getByRole('region', { name: 'From your business type', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Set for your business', exact: true })).toBeVisible();
   expect(screen.getByRole('heading', { name: 'Set for a plumber', exact: true }).query()).toBeNull();
-  expect(screen.getByRole('list', { name: 'From your business type', exact: true }).getByRole('listitem').elements()).toHaveLength(3);
+  expect(screen.getByRole('list', { name: 'Set for your business', exact: true }).getByRole('listitem').elements()).toHaveLength(3);
   expectNoHorizontalScroll();
 });
 

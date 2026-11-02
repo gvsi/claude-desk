@@ -280,8 +280,8 @@
 }
 
 /* An attempt open beside the list: its status, category and time on one line, the reason in
-   serif, what the stop means and where the entry came from; then Claude's summary and the two
-   tiers that open on request, each part after a hairline. */
+   serif, what the stop means and where the entry came from; then the visitor's words, Claude's
+   summary and the two tiers that open on request, each part after a hairline. */
 
 .cd-attempt {
   display: flex;

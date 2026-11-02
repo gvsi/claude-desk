@@ -2,7 +2,8 @@
  * What a fresh mock copy holds, by seed. `rivera` is the master plan's Turner seed as far as the
  * mocked routes read it (Turner Plumbing, Mike Turner, the Main line Desk with its rule cards and
  * open status, the public website and price list knowledge, and the seeded hold) plus Dana's live
- * chat and Alex Kim's assistant's, a visiting agent's; `rivera_quiet` has no hold and no chats;
+ * chat and Alex Kim's assistant's, a visiting agent's; `rivera_regulars` adds two earlier chats
+ * Dana verified in, which her page under Customers lists; `rivera_quiet` has no hold and no chats;
  * `rivera_two_desks` adds an "Emergencies" Desk. Seeded chats are replayed through the
  * script's own steps, so their ledger entries, receipts and transcript items line up the way the
  * live ones do.
@@ -13,10 +14,10 @@ import { RIVERA_MONEY_CAP_CENTS, placeholderHex, rivera } from '../ds/fixtures/i
 import { paletteBrand } from '../public/palette.ts';
 import { seedAgentChat } from './agents.ts';
 import { businessToolRows, seedBusinessTools } from './businessTools.ts';
-import { DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
+import { AFTER_VERIFY, DECISIONS, SEEDED_HOLD_STEPS, writing, type Language, type Step } from './script.ts';
 import type { DeskRecord, MockWorld, ReplayTurn, ToolRecord } from './world.ts';
 
-export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document' | 'rivera_no_brand';
+export type MockSeed = 'rivera' | 'rivera_quiet' | 'rivera_two_desks' | 'rivera_ended_document' | 'rivera_no_brand' | 'rivera_regulars';
 
 export interface CopyIds {
   copyId: string;
@@ -390,6 +391,31 @@ function danaTurns(): ReplayTurn[] {
   });
 }
 
+const DAY = 24 * 60 * MINUTE;
+
+/**
+ * Dana's earlier chats (`rivera_regulars`), each verified with a code as her, so her page under
+ * Customers lists them and Bob's lists none: her drain clearing quote 47 days before the copy
+ * opened, and her invoice 35 days before. Both are older than Reports' 30 days and Today's week.
+ */
+function seedDanasEarlierChats(world: MockWorld, desk: DeskRecord, opened: number): void {
+  const { blocks } = rivera;
+  const price: Step[] = [
+    writing,
+    (ctx) => ctx.status('receipt', ctx.decide(DECISIONS.quote)),
+    (ctx) => ctx.reply([blocks.prose.quoteIntro[ctx.language], blocks.quote[ctx.language]]),
+  ];
+  const chats: { sessionId: string; from: number; turn: ReplayTurn }[] = [
+    { sessionId: 'ses-dana-quote', from: opened - 47 * DAY, turn: { text: 'How much is drain clearing?', steps: price } },
+    { sessionId: 'ses-dana-invoice', from: opened - 35 * DAY, turn: { text: 'Can you send me my drain clearing invoice?', steps: [...AFTER_VERIFY] } },
+  ];
+  for (const { sessionId, from, turn } of chats) {
+    const chat = world.at(from, () => world.addSession(desk, { sessionId: world.scoped(sessionId) }));
+    world.at(from, () => world.verify(chat, rivera.people.dana));
+    world.replay(chat, from + MINUTE, [turn]);
+  }
+}
+
 /** Fills a new copy's world for `seed`, with everything dated before `world.now()`. */
 export function seedWorld(world: MockWorld): void {
   const { ids, seed } = world;
@@ -451,6 +477,8 @@ export function seedWorld(world: MockWorld): void {
     chat.ended = true;
     return;
   }
+
+  if (seed === 'rivera_regulars') seedDanasEarlierChats(world, main, opened);
 
   // Alex Kim's assistant, a signed visiting agent, got a quote for the service call deposit and paid
   // it within its signed limit, forty minutes before the copy opened.

@@ -5,7 +5,7 @@
  * alone.
  */
 import { queryOptions, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { request } from '../api/http.ts';
 import { SETUP_STEPS, type BusinessOut, type DeskSetup, type DeskSummary, type NeedsYouItem, type SetupStep } from '../api/views.ts';
@@ -40,9 +40,17 @@ export async function confirmDesks(queryClient: QueryClient): Promise<BusinessOu
 
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
+// Needs you's read never takes the cancellation signal: with it, a read still out would be stopped
+// and sent again whenever its last reader leaves as the next comes, as Today's readers do as it opens.
 export const needsYouQuery = (deskId: string) =>
-  queryOptions({ queryKey: needsYouKey(deskId), queryFn: ({ signal }) => request('needsYou', { params: { desk_id: deskId }, signal }) });
-export const ownerInboxQuery = () => queryOptions({ queryKey: OWNER_INBOX_KEY, queryFn: () => request('ownerInbox') });
+  queryOptions({ queryKey: needsYouKey(deskId), queryFn: () => request('needsYou', { params: { desk_id: deskId } }) });
+// The owner's Demo inbox leaves out the record's signed head checkpoints, which the kernel still sends:
+// they are the record's own engineering text, and Safety says how the record stands in plain words.
+export const ownerInboxQuery = () =>
+  queryOptions({
+    queryKey: OWNER_INBOX_KEY,
+    queryFn: async () => (await request('ownerInbox')).filter((entry) => entry.kind !== 'head_checkpoint'),
+  });
 
 /** How long a page waits for a Desk's Today to be read ahead before it opens Today anyway, still loading. */
 export const READ_AHEAD_MS = 3_000;
@@ -94,16 +102,39 @@ export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = 
 
 /**
  * What waits for the owner on a Desk: held requests and open callbacks, polled. With `readOnOpen`,
- * the page reads it again as it opens however fresh the kept read is, for a page that shows only
- * what a read of its own says (Rules' question about a hold).
+ * for a page that shows only what a read of its own says (Rules' question about a hold), the page
+ * reads it again as it opens, however fresh the kept read is. A read still out as it opens, which
+ * may have gone out before it did (a poll on a page since left), is cancelled whether or not a read
+ * is kept, and React Query drops its answer, so only the page's own read counts as read since it
+ * opened. The page sends that read once, under StrictMode too.
  */
 export function useNeedsYou(deskId: string, { retryOnMount = true, readOnOpen = false }: ReadOptions & { readOnOpen?: boolean } = {}) {
+  const queryClient = useQueryClient();
+  // The Desk whose Needs you this page has read as it opened: StrictMode runs the effect below twice
+  // for one opening, and the second run must not cancel that opening's read for another.
+  const opened = useRef<string | null>(null);
+  // Declared before the query, so it runs before the page subscribes to it (a component's effects
+  // run in order): the cancel below can only reach a read sent before the page opened.
+  useEffect(() => {
+    if (!readOnOpen) return;
+    const key = needsYouKey(deskId);
+    if (opened.current !== deskId) {
+      opened.current = deskId;
+      void queryClient.cancelQueries({ queryKey: key, exact: true });
+    }
+    // The page's own read. With a read kept, it goes out here, and StrictMode's second run joins it,
+    // which puts back the retries its rehearsed unmount stopped. With nothing read yet, React Query
+    // leaves the query to the page's subscription just after, which sends the read, and StrictMode's
+    // second subscription joins it.
+    void queryClient.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false });
+  }, [readOnOpen, queryClient, deskId]);
   return useQuery({
     ...needsYouQuery(deskId),
     staleTime: FRESH_MS,
     refetchInterval: pollMs('needsYou'),
     retryOnMount,
-    ...(readOnOpen ? { refetchOnMount: 'always' as const } : {}),
+    // Not as it mounts, which would join a read already out: the page's read on opening is the one above.
+    ...(readOnOpen ? { refetchOnMount: false } : {}),
   });
 }
 
@@ -262,7 +293,7 @@ export function deskPath(deskId: string): string {
 }
 
 /**
- * A new copy is taking the old one's place (Start over, or a new passcode): drop the old copy's Demo
+ * A new copy is taking the old one's place (Reset demo, or a new passcode): drop the old copy's Demo
  * inbox before anything of the new copy is read, its Today read ahead included. The inbox's key
  * doesn't name a copy, so a read of the old copy's inbox still out would otherwise answer for the
  * new one and count as fresh: it is stopped, and its entries dropped, so the new copy's demo bar reads

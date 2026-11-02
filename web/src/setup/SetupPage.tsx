@@ -52,8 +52,11 @@ function isCompactBar(): boolean {
 }
 
 interface SetupShellProps {
-  /** The business's name, once the API knows it. Someone's own words. */
-  business: string | null;
+  /**
+   * The business's name, once the API knows it: someone's own words. Undefined while it's on its way,
+   * so the bar keeps the name's line and nothing under it moves when it comes; null when there's none.
+   */
+  business: string | null | undefined;
   /** The step the bar marks, counted from 0, or null before the interview is read. */
   step: number | null;
   /**
@@ -104,7 +107,7 @@ function SetupShell({ business, step, live, exitTo, wide = false, chat = false, 
             <Wordmark preview={!compact} />
           </a>
           {/* A name too long for the bar is cut with an ellipsis; its title holds it in full. */}
-          {business ? (
+          {business !== null ? (
             <span className="cd-setup__business cd-type-control" data-copy="user" title={business}>
               {business}
             </span>
@@ -143,10 +146,12 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const [search] = useSearchParams();
   const setup = useQuery({ ...setupQuery(setupId), staleTime: Infinity, refetchOnWindowFocus: false });
   const deskId = setup.data?.desk_id ?? null;
-  // The business's name: the API names it from the owner's words, on the new Desk.
+  // The business's name: the API names it from the owner's words, on the new Desk, so in an interview it's
+  // always coming. Until a Desks read lists this Desk (a reload, or a list read before the Desk was made)
+  // it's on its way (undefined), and the bar holds its line.
   const desks = useQuery({ ...desksQuery(), enabled: deskId !== null });
   const desk = deskId === null || desks.data === undefined ? null : (findDesk(desks.data, deskId)?.desk ?? null);
-  const business = desk?.business_name ?? null;
+  const business = desk?.business_name;
 
   /**
    * The step the API has confirmed the interview at: the step it was read at, then what the API's
@@ -337,7 +342,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
     return (
-      <SetupShell business={null} step={null} exitTo="/">
+      <SetupShell business={undefined} step={null} exitTo="/">
         <SetupOpening loading={!setup.isError}>
           {setup.isError ? (
             <Notice
