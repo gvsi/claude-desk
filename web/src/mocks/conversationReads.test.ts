@@ -56,3 +56,11 @@ it('requires the owner and an existing conversation', async () => {
   store.reset('rivera', { signedIn: false });
   expect(await read(0)).toMatchObject({ status: 401 });
 });
+
+it('answers 404 for the owner preview, as the API does, and stores no marker', async () => {
+  const preview = store.world.addSession(store.world.desk(RIVERA.deskId)!, { ownerPreview: true });
+  store.world.visitorText(preview, 'My own preview.');
+  const answer = await store.dispatch('markConversationRead', { params: { session_id: preview.state.session_id }, body: { through: 1 } });
+  expect(answer).toMatchObject({ status: 404 });
+  expect(preview.readThrough).toBe(0);
+});

@@ -660,7 +660,7 @@ const SERVED: ServedRoutes = {
   markConversationRead(sv, req) {
     if (!req.cookies.owner) return NO_OWNER;
     const session = sv.world.sessions.get(req.params.session_id ?? '');
-    if (!session) return NOT_FOUND;
+    if (!session || session.ownerPreview) return NOT_FOUND;   // the owner's own preview is never unread, as the API says
     if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
     const through = isRecord(req.body) ? req.body.through : undefined;
     if (req.malformed || typeof through !== 'number' || !Number.isSafeInteger(through) || through < 0) return INVALID;
