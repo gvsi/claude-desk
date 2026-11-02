@@ -1045,13 +1045,21 @@ def _over_mandate(call: _Call, evaluation: Evaluation) -> bool:
             and action.amount_cents > left)
 
 
-def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluation | None) -> str:
+# An adapter's step-1 refusal that has its own status line, one Claude can act on, by its check.
+CHECK_STATUS = {"contact_needed": "refused_contact_needed"}
+
+
+def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluation | None,
+                check: str | None = None) -> str:
     """The status line a new decision is stored with: its state's, except for a refusal the
     evaluation made (no early `reason`) with the baseline's mandate rule as its only deciding
     policy, for an agent holding a mandate whose charge is above what that mandate had left
-    (`refused_over_mandate`). Any other refusal by that rule (no mandate, no amount), or one
-    another policy also decided, keeps the generic line, so the line never names a cause that
-    isn't the real one."""
+    (`refused_over_mandate`), and for an adapter's refusal whose check has its own line
+    (`CHECK_STATUS`: a booking with no name and phone number or email, `refused_contact_needed`).
+    Any other refusal by that rule (no mandate, no amount), or one another policy also decided,
+    keeps the generic line, so the line never names a cause that isn't the real one."""
+    if state == "refused" and reason == "adapter_refused" and check in CHECK_STATUS:
+        return CHECK_STATUS[check]
     over = (state == "refused" and reason is None and evaluation is not None
             and _over_mandate(call, evaluation))
     return "refused_over_mandate" if over else state
@@ -1064,8 +1072,8 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
     breaker's strike and the owner's alerts, in the caller's transaction, and signs it with its
     status line (`_status_key`). A twin call that committed first wins: its decision is returned
     instead. `check` is an adapter's own code for a step-1 refusal (`AdapterRefusal.code`), which
-    its `decide` entry records beside the reason, through `ledger.safe_ref`; it changes neither the
-    owner's words nor the visitor's line."""
+    its `decide` entry records beside the reason, through `ledger.safe_ref`; it changes the
+    visitor's line only for a check with its own (`CHECK_STATUS`), never the owner's words."""
     principal, session_row, action = call.principal, call.session_row, call.action
     now = ctx.clock.now()
     state = STATE_OF[outcome]
@@ -1083,7 +1091,7 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         policy_ids=evaluation.policy_ids if evaluation and reason is None else [],
         review=evaluation.review if evaluation else None,
         reason_plain=_reason_plain(call, outcome, reason, evaluation),
-        visitor_plain=render.status(_status_key(call, state, reason, evaluation),
+        visitor_plain=render.status(_status_key(call, state, reason, evaluation, check),
                                     render.language(session_row.last_language),
                                     owner=call.business.owner_display_name),
         expires_at=now + LIFETIME[outcome], ledger_seq=0, created_at=now, updated_at=now,

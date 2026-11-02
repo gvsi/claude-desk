@@ -561,7 +561,7 @@ async def test_agent_gets_a_pending_decisions_final_state_on_its_next_request(ap
     agent = await new_agent(app, browser, fake, kernel_http)
     fake.script("native.book", exec_state="unknown")
     slot_id = next(iter(fake.desks[next(iter(fake.desks))].slots))
-    model.add(response(tool_use("native__book", {"slot_id": slot_id}), reply("I'm checking on that booking.")))
+    model.add(response(tool_use("native__book", {"slot_id": slot_id, "name": "Jane Doe", "contact": "jane@example.com"}), reply("I'm checking on that booking.")))
     first = await agent.send("Book me in, please")
     (receipt,) = first.json()["receipts"]
     assert (receipt["type"], receipt["state"]) == ("receipt", "unknown")
@@ -908,7 +908,7 @@ async def test_a_resend_after_a_booking_ran_never_books_again(app, browser, fake
         model.add(say("Happy to help."))
         assert (await agent.send("Hello")).status_code == 200
         desk_id = fake.sessions[agent.session_id].desk_id
-        model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id)}),
+        model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id), "name": "Jane Doe", "contact": "jane@example.com"}),
                            reply("You're booked.")))
         if lost == "answer":
             fake.drop_response("POST /check_reply")
@@ -942,7 +942,7 @@ async def test_a_resend_after_a_lost_execution_runs_the_booking_once(app, browse
         model.add(say("Happy to help."))
         assert (await agent.send("Hello")).status_code == 200
         desk_id = fake.sessions[agent.session_id].desk_id
-        model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id)}, id="toolu_book"),
+        model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"),
                            reply("You're booked.")))
         if lost == "before the run":
             fake.fail("POST /execute", "connect", times=1)
@@ -969,7 +969,7 @@ async def test_a_resend_after_a_lost_execution_runs_the_booking_once(app, browse
 async def booking_left_open(agent: Agent, fake, model, desk_id: str) -> Sent:
     """Send a booking request whose allow's `/execute` can't reach the kernel: the try says "try later" and leaves
     the call open. The request, to send again."""
-    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id)}, id="toolu_book"),
+    model.add(response(tool_use("native__book", {"slot_id": weekday_slot(fake, desk_id), "name": "Jane Doe", "contact": "jane@example.com"}, id="toolu_book"),
                        reply("You're booked.")))
     fake.fail("POST /execute", "connect", times=1)
     sent = agent.sign(agent.body("Book me the earliest weekday visit."))

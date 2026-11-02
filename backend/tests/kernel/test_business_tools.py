@@ -30,7 +30,9 @@ def test_block_descriptions_use_the_approved_third_person_sentences():
         ('intake', {'questions': ['What?']},
          "Saves the person's name, contact details and answers to the business's questions, so the owner can follow up."),
         ('typed_booking', {'appointment_type': 'Consult', 'minutes': 30},
-         "Books one open time on the business's calendar for this kind of appointment."),
+         "Books one open time on the business's calendar for this kind of appointment. It needs the visitor's "
+         "name and a phone number or email, passed as name and contact, unless the visitor is verified or they "
+         "were saved with capture_lead in this conversation; it's refused without them."),
         ('purpose_payment', {'purpose': 'Retainer', 'amount_cents': 5000},
          'Creates a secure payment link for this purpose, for the amount the owner set.'),
         ('urgent', {'urgent_when': 'A burst pipe'},

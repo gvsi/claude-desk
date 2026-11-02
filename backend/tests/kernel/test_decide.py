@@ -1315,8 +1315,9 @@ def test_status_lines_are_digit_free():
     reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed",
                "refused_rules_changed", "refused_desk_deleted", "refused_fallback", "cancelled_by_booking"}
     # refused_at_execution's line when a connected tool can't be reached, refused's when an agent's charge is over
-    # what its signed mandate has left, and cancelled's when the visitor's own booking closed a held request
-    variants = {"tool_unavailable", "refused_over_mandate", "closed_by_booking"}
+    # what its signed mandate has left, cancelled's when the visitor's own booking closed a held request, and
+    # refused's when a booking has no name and phone number or email
+    variants = {"tool_unavailable", "refused_over_mandate", "closed_by_booking", "refused_contact_needed"}
     assert render.STATUS_KEYS == states | receipts | variants              # one line per decision state, and variants
     # a decision's line is never a receipt, so never the owner's `owner_say_blocked`
     assert (render.DECISION_STATUS_KEYS, render.RECEIPT_KEYS) == (states | variants, receipts)

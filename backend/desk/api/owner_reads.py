@@ -458,6 +458,7 @@ REFUSAL_REASONS: dict[str, RefusalCause] = {
 REFUSAL_CHECKS: dict[str, RefusalCause] = {
     "answer_count": "incomplete_request",  # Intake needs one answer per configured question at normalization.
     "note_canary": "incomplete_request",  # A booking note holding private document text is refused at normalization.
+    "contact_needed": "incomplete_request",  # A booking with no name and phone number or email (#740).
     "no_such_slot": "no_such_slot", "unknown_item": "unknown_item", "over_limit": "over_quote_ceiling",
     "no_such_quote": "quote_unpayable", "quote_paid": "quote_unpayable", "quote_paying": "quote_unpayable",
     "no_such_charge": "no_such_charge", "not_refundable": "not_refundable",
@@ -496,7 +497,7 @@ def refusal_cause(row: dict, entry: dict | None, *, verified: bool) -> RefusalCa
       no_such_charge                                 no_such_charge        Couldn't find that payment
       not_refundable                                 not_refundable        That payment can't be refunded
       no_such_document                               no_such_document      No such document
-      answer_count, note_canary                      incomplete_request    The request wasn't in a form I can use
+      answer_count, note_canary, contact_needed      incomplete_request    The request wasn't in a form I can use
       not_verified, no_mandate, mandate_exhausted,
       not_an_agent_with_a_mandate (unreachable),
       search_limit (execution only)                   null                  (no label)

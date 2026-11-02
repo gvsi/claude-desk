@@ -55,7 +55,7 @@ async def test_note_is_owner_only_and_reconcile_returns_only_the_booking(app, cl
     async with kernel_ctx(app) as ctx:
         ctx.bind(copy.copy_id)
         adapter = await adapters.resolve(ctx, copy.desk_id, tool)
-        assert adapter.free_text_fields == frozenset({'note'})
+        assert adapter.free_text_fields == frozenset({'note', 'name', 'contact', 'address'})
         desk = (await ctx.db.scalars(ctx.repo.scoped(select(Desk).where(Desk.desk_id == copy.desk_id)))).one()
         session = (await ctx.db.scalars(ctx.repo.scoped(select(ActorSession).where(
             ActorSession.session_id == visitor.session_id)))).one()

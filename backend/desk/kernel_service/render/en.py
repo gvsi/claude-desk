@@ -19,6 +19,8 @@ STATUS: dict[str, str] = {
     "refused": "Not something I can do here",
     # refused's line when the baseline's mandate rule alone refused an agent's charge above what its mandate has left
     "refused_over_mandate": "Refused: over the signed limit for this agent",
+    # refused's line when a booking was refused for want of a name and a phone number or email (`contact_needed`)
+    "refused_contact_needed": "To book, I need your name and a phone number or email",
     "approved": "{owner} approved this",
     "denied": "{owner} decided not to go ahead",
     "expired": "This request timed out",
