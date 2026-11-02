@@ -228,7 +228,14 @@ def event(name: str, data: dict) -> dict:
 
 
 def response(events: AsyncIterator[dict]) -> EventSourceResponse:
-    return EventSourceResponse(events, ping=15, ping_message_factory=lambda: ServerSentEvent(comment="ping"))
+    """`events` as an SSE response: an `open` comment at once (a browser's EventSource opens only at the body's first
+    byte), then the events, with a `ping` comment every 15 s while idle. Neither comment has data or an id."""
+    async def opened() -> AsyncIterator[dict | ServerSentEvent]:
+        yield ServerSentEvent(comment="open")
+        async for item in events:
+            yield item
+
+    return EventSourceResponse(opened(), ping=15, ping_message_factory=lambda: ServerSentEvent(comment="ping"))
 
 
 def failure(error: BaseException) -> dict[str, Any]:
