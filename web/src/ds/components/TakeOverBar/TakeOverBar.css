@@ -64,9 +64,10 @@
   margin-top: 5px;
 }
 
-/* Focus lands here only when the button it replaced had it; it is not a control, so no ring. */
+/* Focus lands here only when the button it replaced had it; it is not a control, so it draws nothing. */
 .cd-take-over__first:focus {
   outline: none;
+  box-shadow: none;
 }
 
 .cd-take-over__error {

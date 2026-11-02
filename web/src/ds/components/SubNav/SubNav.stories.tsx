@@ -16,7 +16,6 @@ const meta = {
     // Connectors have their own tab, so Settings has no Integrations or Connectors entry.
     items: [
       { key: 'general', label: 'General', href: '/settings/general' },
-      { key: 'knowledge', label: 'Knowledge', href: '/settings/knowledge' },
       { key: 'notifications', label: 'Notifications', href: '/settings/notifications' },
       { key: 'channels', label: 'Channels', href: '/settings/channels' },
       { key: 'billing', label: 'Billing', href: '/settings/billing' },
@@ -46,7 +45,7 @@ export const Settings: Story = {
     // current_is_marked: a nav named by its label, one link per item, the current one marked.
     const nav = canvas.getByRole('navigation', { name: 'Settings' });
     const links = within(nav).getAllByRole('link');
-    await expect(links.map((link) => link.textContent)).toEqual(['General', 'Knowledge', 'Notifications', 'Channels', 'Billing']);
+    await expect(links.map((link) => link.textContent)).toEqual(['General', 'Notifications', 'Channels', 'Billing']);
     await expect(within(nav).queryByRole('link', { name: /Integrations|Connectors/ })).toBeNull();
     const current = within(nav).getByRole('link', { name: 'General' });
     await expect(current).toHaveAttribute('aria-current', 'page');

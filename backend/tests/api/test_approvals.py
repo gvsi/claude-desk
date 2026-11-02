@@ -21,8 +21,8 @@ from sqlalchemy import text
 
 from desk.api.jobs import RESUME_AFTER_ANSWER, surface_due_decisions
 from desk.api.main import create_app
-from desk.contracts import Claim, Fact, Label
-from desk.kernel_api import AnswerRequest, CreateCopyRequest
+from desk.contracts import Claim, Fact, Label, ToolCall
+from desk.kernel_api import AnswerRequest, CreateCopyRequest, DecideRequest, ExecuteRequest
 from tests.api.fakes import ScriptedModel, response, tool_use
 from tests.api.test_jobs import session_rows
 from tests.api.test_public_chat import DISCOUNTED_QUOTE, Stream, cookie, events_path, open_session, reply, types
@@ -462,6 +462,82 @@ async def test_owner_reason_is_cleared_before_resume_crossings(app, browser, fak
     assert deferred == [None]
     assert delivered == [None]
     assert fake.decisions[held.decision_id].decision.owner_plain == owner_line
+
+
+# The owner's line for a held request a booking closed (the kernel's `render.owner_line("cancelled_by_booking")`).
+BOOKED_LINE = "The visitor booked before you answered, so this request closed."
+
+
+async def test_a_booking_closed_line_stays_on_owner_reads(app, browser, fake, kernel_http, model, engine,
+                                                         jobs_connector, monkeypatch):
+    # The visitor's discount waits for Mike, then they book a time at list price: the kernel closes the stale request,
+    # and Mike's late answer reads why. Only his reads carry that line; the visitor's own read, the resume job, the
+    # chat's events and stored rows, and what Claude reads carry the signed state's line ("Cancelled") alone.
+    from desk.api import jobs
+    from desk.api.routes import owner
+
+    held = await held_request(app, browser, fake, kernel_http, model)
+    visitor = kernel_http.session(held.token)
+    desk = fake.desks[fake.sessions[held.session_id].desk_id]
+    slot = min(slot.slot_id for slot in desk.slots.values() if slot.starts_at > fake.now)
+    booking = await visitor.call("POST /decide", DecideRequest(
+        session_id=held.session_id, generation=0,
+        call=ToolCall(call_id="book-1", tool="native.book", args={"slot_id": slot})))
+    assert booking.state == "allowed", booking.reason_plain
+    await visitor.call("POST /execute", ExecuteRequest(decision_id=booking.decision_id, session_id=held.session_id,
+                                                       generation=0))
+    deferred, delivered = [], []
+    defer, deliver = owner.defer_resume_after_answer, jobs.deliver
+
+    async def defer_seen(app, ids, decision, approved=None, result_fact_ids=None):
+        deferred.append(decision.owner_plain)
+        await defer(app, ids, decision, approved, result_fact_ids=result_fact_ids)
+
+    async def deliver_seen(conn, ids, item, **kwargs):
+        delivered.append(item.decision.owner_plain)
+        return await deliver(conn, ids, item, **kwargs)
+
+    monkeypatch.setattr(owner, "defer_resume_after_answer", defer_seen)
+    monkeypatch.setattr(jobs, "deliver", deliver_seen)
+    model.add(response(reply("You're booked in, so there's nothing more to wait for on that discount.")))
+
+    late = await answer(held, "allow_once")
+
+    assert late.status_code == 409, late.text
+    decision = late.json()["decision"]
+    assert (late.json()["error"], decision["state"], decision["owner_plain"]) == (
+        "already_resolved", "cancelled", BOOKED_LINE)
+    read = await held.owner.get(f"/api/owner/decisions/{held.decision_id}")
+    assert read.status_code == 200 and read.json() == decision
+    visitor_read = await visitor.call("GET /decisions/{id}", path={"id": held.decision_id})
+    assert visitor_read.owner_plain is None and BOOKED_LINE not in visitor_read.model_dump_json()
+    # the line is the only difference: the signed fields the visitor reads are the owner's, unchanged
+    assert visitor_read.model_copy(update={"owner_plain": BOOKED_LINE}).model_dump(mode="json") == decision
+    (shown,) = await resolved(engine, held.session_id)
+    assert shown == signed(decision)
+    (job,) = await resume_jobs(jobs_connector)
+    assert BOOKED_LINE not in json.dumps(job["args"]) and "owner_plain" not in json.dumps(job["args"])
+    assert deferred == [None]
+    assert delivered == [None]
+
+    async with Stream(app, events_path(held.slug), headers=[cookie(held.token)]) as stream:
+        events = await stream.until(lambda events: types(events).count("turn_end") == 2)
+    await app.state.runtime.runner.drain()
+    transcript = await held.visitor.get(f"/api/public/desks/{held.slug}/session")
+    assert transcript.status_code == 200
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(
+            "SELECT row_to_json(m)::text FROM app.messages m WHERE session_id = :s"
+            " UNION ALL SELECT row_to_json(e)::text FROM app.run_events e WHERE session_id = :s"),
+            {"s": held.session_id})).scalars().all()
+        updates = (await conn.execute(text(
+            "SELECT text FROM app.messages WHERE session_id = :s AND kind = 'action_update'"),
+            {"s": held.session_id})).scalars().all()
+    assert updates == ["Cancelled"]
+    for serialized in (transcript.text, json.dumps([event.model_dump(mode="json") for _, event in events]),
+                       json.dumps(rows), json.dumps(model.requests[-1].messages)):
+        assert BOOKED_LINE not in serialized
+        assert "owner_plain" not in serialized
 
 
 async def test_owner_status_and_tool_history_include_refusal_reason(app, browser, fake, kernel_http, model, engine):

@@ -116,6 +116,12 @@
   border-radius: var(--radius-card);
 }
 
+/* A wide table scrolls in its box, a Tab stop: with keyboard focus the box's own border turns line-focus. */
+.cd-md__table:focus-visible {
+  border-color: var(--line-focus);
+  box-shadow: none;
+}
+
 .cd-md table {
   border-collapse: collapse;
   width: 100%;

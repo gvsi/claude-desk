@@ -45,11 +45,13 @@ OWNER_LINES = {
         "refused_rules_changed": "Your rules changed before this ran, so it wasn't done.",
         "refused_desk_deleted": "This Desk was deleted before this ran, so it wasn't done.",
         "refused_fallback": "This couldn't run, so it wasn't done.",
+        "cancelled_by_booking": "The visitor booked before you answered, so this request closed.",
     },
     "es": {
         "refused_rules_changed": "Tus reglas cambiaron antes de que se hiciera, así que no se hizo.",
         "refused_desk_deleted": "Este Desk se eliminó antes de que se hiciera, así que no se hizo.",
         "refused_fallback": "No se pudo hacer, así que no se hizo.",
+        "cancelled_by_booking": "El visitante reservó antes de que respondieras, así que esta solicitud se cerró.",
     },
 }
 SESSION_ENDED = ("refused_contact_changed", "refused_person_removed", "refused_session_closed")
@@ -58,8 +60,8 @@ SESSION_ENDED = ("refused_contact_changed", "refused_person_removed", "refused_s
 @pytest.mark.parametrize("lang", ["en", "es"])
 def test_the_owner_lines_are_owner_only_and_in_both_languages(lang):
     """The rules-changed, Desk-deleted and fallback lines join the session-ended ones in `OWNER_STATUS`,
-    key for key in English and Spanish, and none of them is a status line, so no decision's
-    `visitor_plain` can take one."""
+    with the line for a held request a booking closed, key for key in English and Spanish, and none of
+    them is a status line, so no decision's `visitor_plain` can take one."""
     assert render.OWNER_STATUS_KEYS == {*SESSION_ENDED, *OWNER_LINES["en"]}
     assert {key: render.OWNER_STATUS[lang][key] for key in OWNER_LINES[lang]} == OWNER_LINES[lang]
     assert not render.OWNER_STATUS_KEYS & (render.STATUS_KEYS | render.DECISION_STATUS_KEYS)
@@ -603,8 +605,10 @@ async def in_state(client: httpx.AsyncClient, rows: CopyRows, quote: FakeAdapter
 
 @pytest.mark.parametrize("state", get_args(DecisionState))
 async def test_only_a_refusal_at_execution_carries_an_owner_line(app, client, registry, frozen_clock, state):
-    """The owner's read of a decision in any other state has no owner line; a refusal at execution's has
-    one (here its adapter refused, so it names no cause), and the session's reads never do."""
+    """The owner's read of a decision in any other state, a request the visitor cancelled included, has no
+    owner line; a refusal at execution's has one (here its adapter refused, so it names no cause), and the
+    session's reads never do. A held request a booking closed is `cancelled` with a line of its own
+    (`test_approvals`)."""
     quote, slots = FakeAdapter("native.quote"), FakeAdapter("native.find_slots", effects=["read"])
     rows = await desk_with(app, [quote, slots], [*ASK_QUOTES, card("slots", "native.find_slots")])
     visitor, held = await held_on(client, rows)

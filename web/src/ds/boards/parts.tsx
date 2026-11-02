@@ -69,8 +69,10 @@ export const OWNER_HREFS = {
   today: '#today',
   conversations: '#conversations',
   people: '#customers',
+  knowledge: '#knowledge',
   rules: '#rules',
   safety: '#safety',
+  profile: '#profile',
   share: '#share',
   settings: '#settings',
 } satisfies SidebarHrefs;
@@ -1125,7 +1127,6 @@ export function AgentsCard({ title, lead, holdsCards = false, children }: { titl
 /** Settings' sections, in order. Connectors have their own tab, so there is no Integrations entry. */
 export const SETTINGS_SECTIONS: readonly SubNavItem[] = [
   { key: 'general', label: 'General', href: '#settings-general' },
-  { key: 'knowledge', label: 'Knowledge', href: '#settings-knowledge' },
   { key: 'notifications', label: 'Notifications', href: '#settings-notifications' },
   { key: 'channels', label: 'Channels', href: '#settings-channels' },
   { key: 'billing', label: 'Billing', href: '#settings-billing' },
@@ -1182,10 +1183,6 @@ export function SettingsPage({ current, banner, children }: { current: string; b
 export function GeneralSettings({ answering, onDelete = fn() }: { answering: string; onDelete?: () => void }) {
   return (
     <>
-      <section aria-labelledby="board-settings-business" className="board-settings__section">
-        <SectionHeader id="board-settings-business" title="Your business" />
-        <DetailList items={GENERAL_DETAILS} />
-      </section>
       <Card as="section" label="Claude acts for you" padding={0}>
         <div className="board-settings__answering">
           <Switch label="Claude acts for you" description={answering} checked onChange={fn()} />
@@ -1225,7 +1222,7 @@ export function ChannelsSettings({ banner }: { banner?: ReactNode }) {
 export function VisionNote({ children }: { children: ReactNode }) {
   return (
     <div className="board-settings__vision">
-      <Pill>Vision</Pill>
+      <Pill>Mock</Pill>
       <p className="board-quiet cd-type-meta">{children}</p>
     </div>
   );

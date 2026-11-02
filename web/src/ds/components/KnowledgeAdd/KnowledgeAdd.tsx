@@ -1,3 +1,5 @@
+import { useState } from 'react';
+import { Pill } from '../Pill/Pill.tsx';
 import { useId, useRef, type ChangeEvent, type ReactNode } from 'react';
 
 import { Button } from '../Button/Button.tsx';
@@ -57,12 +59,13 @@ export interface KnowledgeAddProps {
 const FILE_TYPES = '.txt,.md,text/plain,text/markdown';
 
 /**
- * "Add something" on Settings › Knowledge: a note to type and add, or a text or Markdown file to
+ * "Add something" on Knowledge: a note to type and add, or a text or Markdown file to
  * pick, and once the kernel has stored it, an "Added" card whose switch lets customers see it. The
  * switch, and the line above it, show the readers the kernel returned. Nothing here reads, checks or
  * sends anything: the screen does, and passes back what came of it.
  */
 export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, error, added }: KnowledgeAddProps) {
+  const [website, setWebsite] = useState('');
   const ids = useId();
   const headingId = `${ids}-heading`;
   const filesId = `${ids}-files`;
@@ -93,6 +96,12 @@ export function KnowledgeAdd({ note, onNoteChange, onAddNote, onAddFile, busy, e
         <p id={filesId} className="cd-knowledge-add__files cd-type-caption">
           Text or Markdown files, up to 100 KB.
         </p>
+        <TextField label="A website" placeholder="turner-plumbing.example/blog" value={website} onChange={setWebsite} />
+        <div className="cd-knowledge-add__actions">
+          <Button variant="secondary" size="main">Add a website</Button>
+          <Pill>Mock</Pill>
+        </div>
+        <p className="cd-knowledge-add__files cd-type-caption">Claude doesn’t read websites you add in this prototype yet.</p>
         {error !== undefined && error !== '' ? <Notice tone="error">{error}</Notice> : null}
       </section>
       {added !== undefined ? (

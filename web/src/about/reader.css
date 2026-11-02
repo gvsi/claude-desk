@@ -887,7 +887,9 @@
 .cd-about-contents__link {
   display: flex;
   gap: var(--space-14);
-  padding: var(--space-10) 0;
+  /* Give the inset edge room beside the numbers without moving the contents at rest. */
+  padding: var(--space-10) var(--space-8);
+  margin-inline: calc(-1 * var(--space-8));
   color: var(--text-primary);
   text-decoration: none;
 }
@@ -984,9 +986,10 @@
   margin-top: 0;
 }
 
-/* Focus lands on a heading when the contents list's link to it is followed; it is not a control, so no ring. */
+/* Focus lands on a heading when the contents list's link to it is followed; it is not a control, so it draws nothing. */
 .cd-about-article > h2:focus {
   outline: none;
+  box-shadow: none;
 }
 
 .cd-about-article strong {
@@ -1034,11 +1037,11 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
-  transition: border-color var(--motion-instant) var(--motion-ease);
+  transition: background-color var(--motion-instant) var(--motion-ease);
 }
 
 .cd-about-next:hover .cd-card {
-  border-color: var(--line-control-hover);
+  background: var(--fill-hover);
 }
 
 .cd-about-page .cd-about-next__label {
@@ -1057,13 +1060,14 @@
   border-radius: var(--radius-card);
 }
 
+/* With keyboard focus the overlay, which lies over the card's border box, draws 1 px of line-focus just
+   inside it, over the card's own border; the title's own link draws nothing around its words. */
 .cd-about-next__link:focus-visible {
-  outline: none;
+  box-shadow: none;
 }
 
 .cd-about-next__link:focus-visible::after {
-  outline: 2px solid var(--ring-focus);
-  outline-offset: 2px;
+  box-shadow: inset 0 0 0 1px var(--line-focus);
 }
 
 .cd-about-next__summary {
