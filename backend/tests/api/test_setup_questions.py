@@ -2686,6 +2686,10 @@ def test_setup_prompt_keeps_policy_text_public_and_free_of_numbers():
             "will read. Leave hours to the hours question.") in SETUP_TURN_SYSTEM
     assert ("When a customer line changes the owner's words, reply also has the sentence the rule for those lines "
             "asks for.") in SETUP_TURN_SYSTEM
+    assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "
+            "customers on the public page. Write them as the business speaking to its customers; never "
+            "instructions to the Desk, private owner instructions, or a contact route other than the contact "
+            "on record.") in SETUP_TURN_SYSTEM
 
 
 def test_setup_public_line_examples_hold_against_the_kernel_check():
@@ -2714,12 +2718,22 @@ def test_setup_public_line_examples_hold_against_the_kernel_check():
     ("Un aviso del IRS con plazo la próxima semana es urgente.", ["próxima semana"]),
     ("We reply within the hour, and returns are due by next Monday.", ["within the hour", "by next monday"]),
     ("Respondemos antes del viernes.", ["antes del viernes"]),
+    ("We reply in a day or two, within 24 hrs for audits, 48h at most, or the next morning.",
+     ["in a day", "24 hrs", "48h", "next morning"]),
+    ("Respondemos en un dia habil, o la proxima semana.", ["un dia habil", "proxima semana"]),
     # the days it opens are hours, never a deadline
     ("Open Monday to Friday, 9 to 5; abrimos de lunes a viernes.", []),
+    ("Open Monday until Friday; abrimos del lunes hasta el viernes; open 24 hours a day.", []),
+    # rates, frequencies and how long something lasts are no time frames for a customer line
+    ("I charge $150 an hour, rent is $1,500 a month, we service pools once a week.", []),
+    ("Appointments last about an hour; visits last 90 minutes.", []),
     ("We do tax returns for families and small firms.", []),
 ])
 def test_owner_time_frames_are_read_from_the_answer(text, frames):
     assert desk_setup.owner_time_frames(text) == frames
+
+
+POINTER = "you can change it under What customers will read."
 
 
 @pytest.mark.parametrize("text", ["We reply within the hour.", "We reply by Friday.", "Respondemos antes del viernes."])
@@ -2728,15 +2742,38 @@ def test_a_dropped_deadline_gets_the_retry_line(text):
 
     softened = answer_turn(SETUP_TURNS["what_you_do"], intake="We reply soon.")
     assert desk_setup.owner_time_frame_errors(text, softened) == [TIME_FRAME_UNACCOUNTED]
-    named = answer_turn(SETUP_TURNS["what_you_do"], f'Customer lines can\'t name days, so "{text[:-1]}" reads "soon".',
+    named = answer_turn(SETUP_TURNS["what_you_do"],
+                        f'Customer lines can\'t name days, so "{text[:-1]}" reads "soon"; {POINTER}',
                         intake="We reply soon.")
     assert desk_setup.owner_time_frame_errors(text, named) == []
 
 
+def test_saying_the_time_frame_back_is_no_named_change():
+    # Seen in review: the reply says the owner's words back while the line softens them. Only a reply that points the
+    # owner to the lines customers read names a change; the second answer stands either way.
+    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+
+    text = "Take the message; we reply within one business day."
+    lines = {"after_hours": "Leave a message and the team replies once the office reopens."}
+    echoed = answer_turn(SETUP_TURNS["contact_and_after_hours"],
+                         "Got it: after hours you take a message and reply within one business day.", **lines)
+    assert desk_setup.owner_time_frame_errors(text, echoed) == [TIME_FRAME_UNACCOUNTED]
+    named = answer_turn(SETUP_TURNS["contact_and_after_hours"],
+                        f'I wrote "once the office reopens" for "within one business day"; {POINTER}', **lines)
+    assert desk_setup.owner_time_frame_errors(text, named) == []
+
+
+def test_a_time_frame_already_in_a_stored_line_is_kept():
+    # An earlier turn may hold the owner's words already; this turn's lines needn't repeat them.
+    text = "Tax returns for families; we reply within one business day."
+    stored_lines = ["Outside office hours, leave a message and we reply within one business day."]
+    drafted = answer_turn(SETUP_TURNS["what_you_do"], intake="New clients send last year's return.")
+    assert desk_setup.owner_time_frame_errors(text, drafted, stored_lines) == []
+
+
 IRS_ANSWER = "Tax returns for families. Nothing is urgent except an IRS notice with a deadline in the next week."
 SOFTENED = "An IRS notice with a deadline coming up soon counts as urgent."
-NAMED = ('Customer lines can\'t name dates, so "in the next week" reads "within a week"; you can change it under '
-         'What customers will read.')
+NAMED = f'Customer lines can\'t name dates, so "in the next week" reads "within a week"; {POINTER}'
 
 
 @pytest.mark.parametrize("second", ["named", "still_unnamed"])
@@ -2745,7 +2782,7 @@ async def test_a_turn_that_drops_the_owners_time_frame_gets_one_fresh_draft(app,
     # Seen live: "a deadline in the next week" became "a deadline coming up soon", with nothing said. A time frame the
     # owner states is kept word for word in a customer line or named in reply; otherwise the turn gets one fresh
     # draft, whose answer stands either way. The retry never repeats the owner's words.
-    from desk.api.prompts import TIME_FRAME_UNACCOUNTED
+    from desk.api.prompts import ANSWER_RETRY, TIME_FRAME_UNACCOUNTED
 
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model)
@@ -2759,6 +2796,8 @@ async def test_a_turn_that_drops_the_owners_time_frame_gets_one_fresh_draft(app,
     assert len(model.requests) == before + 2
     retry = model.requests[-1].messages[-1]["content"][0]["text"]
     assert TIME_FRAME_UNACCOUNTED in retry and "next week" not in retry and "IRS" not in retry
+    # a neutral header: the turn's cards weren't refused
+    assert retry.startswith(ANSWER_RETRY.split("{errors}")[0]) and "cards" not in retry
     row = await stored(engine, interview_id)
     if second == "named":
         assert row["answers"]["urgent"] == "An IRS notice with a deadline within a week counts as urgent."
@@ -2784,10 +2823,21 @@ async def test_a_turn_that_keeps_or_names_the_owners_time_frame_answers_at_once(
     response = await answer(owner, model, interview_id, text, first)
     assert response.status_code == 200, response.text
     assert len(model.requests) == before + 1
-    assert ("summary, service_area, pricing, intake, after_hours and urgent are rendered word for word to "
-            "customers on the public page. Write them as the business speaking to its customers; never "
-            "instructions to the Desk, private owner instructions, or a contact route other than the contact "
-            "on record.") in SETUP_TURN_SYSTEM
+
+
+async def test_a_retry_with_too_little_time_left_is_skipped(app, browser, kernel_http, model, engine, monkeypatch):
+    # The answer run's deadline bounds the retry, as it does the understanding's: with too little time left the
+    # first answer stands rather than the whole turn running out of time.
+    owner = await new_owner(app, browser, kernel_http)
+    state = await begin(owner, model)
+    interview_id = state["interview_id"]
+    await consent(owner, interview_id, False, model)
+    monkeypatch.setattr(desk_setup, "TURN_RUN_TIMEOUT_S", desk_setup.TURN_FINISH_S + 3)
+    before = len(model.requests)
+    response = await answer(owner, model, interview_id, IRS_ANSWER, turn(urgent=SOFTENED))
+    assert response.status_code == 200, response.text
+    assert len(model.requests) == before + 1
+    assert (await stored(engine, interview_id))["answers"]["urgent"] == SOFTENED
 
 
 UNSET = {"quote_auto_max_cents": None, "discount_auto_max_bp": None, "payment_link_auto_max_cents": None,

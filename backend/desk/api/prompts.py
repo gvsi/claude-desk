@@ -1121,11 +1121,13 @@ SETUP_CLOSING_LINE = ("Every topic is covered and the plan is settled. Write the
                       "Set next to done; only plan and reply will be read.")
 SETUP_RETRY = "That answer didn't fit the format:\n{errors}\nAnswer again in the same format, fixing those fields."
 # An answer turn's one retry when a time frame the owner stated is neither kept in a customer line nor named in reply
-# (`setup.owner_time_frame_errors`); it never repeats the owner's words.
+# as a change (`setup.owner_time_frame_errors`), under a header that says nothing about cards; it never repeats the
+# owner's words.
+ANSWER_RETRY = "That answer needs a fix:\n{errors}\nAnswer again in the same format, fixing it."
 TIME_FRAME_UNACCOUNTED = ("- reply: a time frame from the owner's answer is neither kept word for word in a customer "
-                          "line nor named in reply. Keep their words where the rule for customer lines allows; "
-                          "otherwise use the closest wording it allows and say in reply which words you changed "
-                          "and why.")
+                          "line nor named in reply as a change. Keep their words where the rule for customer lines "
+                          "allows; otherwise use the closest wording it allows and add the sentence that rule asks "
+                          "for. A time frame no line on this turn records stays out: then answer as before.")
 # The setup interview's wrappers (`setup.py`), named in `SETUP_START_SYSTEM` and `SETUP_TURN_SYSTEM`.
 OWNER_DESCRIPTION_TAG = "owner_description"
 OWNER_ANSWER_TAG = "owner_answer"
