@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
 import { buildTokensCss, type DesignTokens, type ThemedValues, type TypeStyle } from '../../scripts/build-tokens.mjs';
-import { CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast, tokenHex } from './contrast';
+import { BRAND_TEXT_COLORS, CONTRAST_PAIRS, DECORATIVE_COLORS, contrastRatio, pairContrast, tokenHex } from './contrast';
 import tokens from './tokens.json' with { type: 'json' };
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
@@ -688,6 +688,20 @@ describe('design tokens', () => {
     expect(tokens.motion.tokens.map((t) => t.name).filter((name) => name.includes('skeleton'))).toEqual([]);
   });
 
+  test('text_on_brand_is_paper_ink_in_both_themes', () => {
+    // Text on an owner's chosen colour, the public header and Profile's header-colour preview: the
+    // dark theme's paper inks in both themes, since every colour an owner can pick is dark.
+    const names = ['text-on-brand', 'text-on-brand-secondary'];
+    expect(names.map(tokenValue)).toEqual(['rgba(250,249,245,0.92)', 'rgba(250,249,245,0.64)']);
+    for (const name of names) {
+      const token = tokens.color.tokens.find((t) => t.name === name);
+      expect(Object.keys(token?.value ?? {}), `${name} has one value for both themes`).toEqual(['dark']);
+    }
+    // The colour under them isn't a token: it is checked where it is chosen, so they are classified
+    // as text on the owner's colour rather than listed against a token.
+    expect(Object.keys(BRAND_TEXT_COLORS).sort()).toEqual(names);
+  });
+
   test('every_color_token_is_classified', () => {
     expect(Object.keys(DECORATIVE_COLORS).sort()).toEqual([
       'clay',
@@ -708,8 +722,13 @@ describe('design tokens', () => {
       expect(reason.trim().length, `${name} says why no contrast applies`).toBeGreaterThan(0);
     }
 
+    for (const [name, reason] of Object.entries(BRAND_TEXT_COLORS)) {
+      expect(colorNames, `${name} is a color token`).toContain(name);
+      expect(reason.trim().length, `${name} says where its contrast is checked`).toBeGreaterThan(0);
+    }
+
     const paired = new Set(CONTRAST_PAIRS.flatMap((p) => [p.fg, p.ground]));
-    const unclassified = colorNames.filter((name) => !paired.has(name) && !(name in DECORATIVE_COLORS));
+    const unclassified = colorNames.filter((name) => !paired.has(name) && !(name in DECORATIVE_COLORS) && !(name in BRAND_TEXT_COLORS));
     expect(unclassified).toEqual([]);
   });
 

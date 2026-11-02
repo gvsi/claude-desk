@@ -226,6 +226,16 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = Object.freeze([
   ...pairs(['button-danger-text'], ['fill-hover'], 4.5, "Deny's answers in its menu while one is hovered or has focus.", 'bg-surface'),
 ]);
 
+/**
+ * Text on an owner's chosen colour. That colour isn't a token, so no pair here can list it: the
+ * colour is checked against these inks where it is chosen, and an owner's palette is tested for them.
+ */
+export const BRAND_TEXT_COLORS: Readonly<Record<string, string>> = Object.freeze({
+  'text-on-brand':
+    "The names on an owner's chosen colour, in the public header and Profile's header-colour preview. A colour is used only where it keeps 4.5:1 with both inks, and every palette colour is tested for it.",
+  'text-on-brand-secondary': "The second line on an owner's chosen colour, checked with text-on-brand.",
+});
+
 export const DECORATIVE_COLORS: Readonly<Record<string, string>> = Object.freeze({
   'line-hairline': 'A seam between regions that already differ in fill; it carries no meaning of its own.',
   'line-card': "A card's edge; the card's content, not its border, is what a person reads.",
