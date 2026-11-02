@@ -272,26 +272,44 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const closingQuestions = state !== undefined && closing.current && !continued && state.step === 'tools';
   // "Change something" (`changeSomethingPath`): the chat again, over a step past it; its "Continue"
   // goes back to the step the API has the interview at. The API's step stays where it is until the
-  // owner sends a change, which the API's reopen takes back to the questions.
-  const changing = state !== undefined && state.step !== 'questions' && opensSetupChat(search);
+  // owner sends a change, which the API's reopen takes back to the questions. Until then the change
+  // runs busy at the step it was sent from (no other turn runs past the questions), so a page opened
+  // or come back to while one runs follows it in the chat too, whatever its address says.
+  const chatOpen = opensSetupChat(search);
+  const changeRuns = state !== undefined && state.busy === true && state.step !== 'questions';
+  const changing = state !== undefined && state.step !== 'questions' && (chatOpen || changeRuns);
   // A change may close the questions in one turn and return tools directly. Remember where this
-  // chat opened so both that response and a polled turn clear the old drafts and show the new plan.
+  // chat opened, or where a running change was found, so both that response and a read of the landed
+  // turn clear the old drafts and show the new plan.
   const changeStartedAt = useRef<number | null>(null);
-  if (!opensSetupChat(search)) changeStartedAt.current = null;
-  else if (state !== undefined && changeStartedAt.current === null) changeStartedAt.current = state.messages.length;
-  const reopened = state !== undefined && !state.busy && opensSetupChat(search)
-    && (state.step === 'questions' || state.messages.length > (changeStartedAt.current ?? state.messages.length));
+  if (state !== undefined && changeStartedAt.current === null && changing) changeStartedAt.current = state.messages.length;
+  // The API's interview is back at its questions after a later step (a change landed, here or
+  // anywhere), or a change followed here landed past them: what was drafted from the answers before
+  // is read again on the way forward.
+  const reopened = state !== undefined && !state.busy
+    && ((state.step === 'questions' && confirmed.current !== null && confirmed.current !== 'questions')
+      || (changeStartedAt.current !== null && (state.step === 'questions' || state.messages.length > changeStartedAt.current)));
+  if (!chatOpen && !changeRuns && !reopened) changeStartedAt.current = null;
   const reopenedStep = state?.step;
   useEffect(() => {
     if (!reopened || reopenedStep === undefined) return;
     confirmed.current = reopenedStep;
     closing.current = reopenedStep === 'tools';
+    changeStartedAt.current = null;
     setContinued(false);
     setOpenedAt('questions');
     for (const read of DRAFTED_READS) queryClient.removeQueries({ queryKey: [read, setupId] });
     void carry();
-    void navigate(setupPath(setupId), { replace: true });
-  }, [reopened, reopenedStep, carry, navigate, queryClient, setupId]);
+    if (chatOpen) void navigate(setupPath(setupId), { replace: true });
+  }, [reopened, reopenedStep, chatOpen, carry, navigate, queryClient, setupId]);
+  // Setup come back to while a turn it last saw was running (a change sent before "Save and exit",
+  // say): the interview the cache holds is read again at once, rather than drawn as it was.
+  const resumedBusy = useRef(setup.data?.busy === true);
+  useEffect(() => {
+    if (!resumedBusy.current) return;
+    resumedBusy.current = false;
+    void reread();
+  }, [reread]);
   // Each step opens at its top, by the bar's step: Your rules' views open at their tops on their own
   // (RulesStep), and the preview going live stays the same screen.
   useOpensAtTop(state === undefined ? null : STEP_INDEX[closingQuestions || changing ? 'questions' : state.step]);

@@ -2126,6 +2126,112 @@ describe('setup', () => {
     await expect.poll(() => requests('setupRules').length).toBeGreaterThan(drafts);
   });
 
+  /**
+   * A change sent from Real situations, held running in the API until `land` (as a slow model turn
+   * is): its send answers 202 with the interview busy at situations, the owner's words in it, and
+   * every read of the interview answers that until it lands. Its event stream can't be followed, so
+   * the page's own reads carry it. `reads` counts the interview's reads.
+   */
+  function holdChange(id: string, text: string) {
+    const held = { sent: false, landed: false, reads: 0, busy: null as SetupState | null };
+    const busyNow = async (): Promise<SetupState | null> => {
+      const read = await mockStore.dispatch('setup', { params: { id } });
+      if ('network' in read) return null;
+      const now = read.body as SetupState;
+      return { ...now, busy: true, messages: [...now.messages, { role: 'owner', text, choices: [], card: null }] };
+    };
+    worker.use(
+      http.post(`/api/owner/setup/${id}/reopen`, async () => {
+        held.busy = await busyNow();
+        held.sent = true;
+        return held.busy === null ? HttpResponse.error() : HttpResponse.json(held.busy, { status: 202 });
+      }),
+      http.get(`/api/owner/setup/${id}`, async () => {
+        held.reads += 1;
+        if (held.busy !== null && !held.landed) return HttpResponse.json(held.busy);
+        const read = await mockStore.dispatch('setup', { params: { id } });
+        return 'network' in read ? HttpResponse.error() : HttpResponse.json(read.body as SetupState);
+      }),
+      http.get(`/api/owner/setup/${id}/events`, () => HttpResponse.error()),
+    );
+    return {
+      held,
+      /** The change shows as running from the start, as a page opened while it runs finds it. */
+      async running() {
+        held.busy = await busyNow();
+        held.sent = true;
+      },
+      /** The API's turn lands: back at the questions, with Claude's reply. */
+      async land() {
+        await mockStore.dispatch('setupReopen', { params: { id }, body: { text, idempotency_key: newIdempotencyKey() } });
+        held.landed = true;
+      },
+    };
+  }
+
+  it('a_page_opened_while_a_change_runs_follows_it_in_the_chat', async () => {
+    // Setup opened at its own address (from Today, say, or another device) while a change sent from Real
+    // situations runs: the API still says situations, but busy, so the page shows the chat and its turn.
+    const { state } = await interviewAtRules();
+    const id = state.interview_id;
+    await mockStore.dispatch('setupSituations', { params: { id } });
+    const change = holdChange(id, 'Closed Saturdays.');
+    await change.running();
+    const { screen, router } = await renderRoute(`/app/setup/${id}`);
+    const transcript = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(transcript.getByText('Closed Saturdays.', { exact: true })).toBeVisible();
+    expect(router.state.location.search).toBe('');
+    expect(screen.getByRole('heading', { level: 1, name: 'Real situations' }).elements()).toHaveLength(0);
+
+    // It lands: Claude's reply, at the questions.
+    await change.land();
+    await expect.element(transcript.getByText(REOPEN_REPLY, { exact: true }), { timeout: 5_000 }).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Use your suggestions', exact: true })).toBeVisible();
+    expect(screen.getByRole('heading', { level: 1, name: 'Real situations' }).elements()).toHaveLength(0);
+  });
+
+  it('a_change_left_while_it_runs_shows_its_reply_on_coming_back_not_the_old_situations', async () => {
+    const { state } = await interviewAtRules();
+    const id = state.interview_id;
+    const change = holdChange(id, 'Closed Saturdays.');
+    const { screen, router } = await renderRoute(`/app/setup/${id}`);
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
+    await screen.getByRole('button', { name: 'Change something', exact: true }).click();
+    await screen.getByRole('textbox', { name: 'Your answer' }).fill('Closed Saturdays.');
+    const answered = answerOf('setupReopen');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await answered;
+    expect(change.held.sent).toBe(true);
+
+    // "Save and exit" while it runs; it lands while the owner is away.
+    await screen.getByRole('link', { name: 'Save and exit', exact: true }).click();
+    await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
+    await change.land();
+    const reads = change.held.reads;
+    const drafts = requests('setupRules').length;
+
+    // Back in setup: the busy interview is read again at once, and the page follows it to the questions.
+    await router.navigate(`/app/setup/${id}`);
+    const transcript = screen.getByRole('log', { name: 'Setup questions' });
+    await expect.element(transcript.getByText(REOPEN_REPLY, { exact: true })).toBeVisible();
+    expect(change.held.reads).toBeGreaterThan(reads);
+    expect(screen.getByRole('heading', { level: 1, name: 'Real situations' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('list', { name: 'Set up your Desk' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('1Questions');
+
+    // What was drafted before is gone: forward again, the rules are drafted again and Real situations tried again.
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(drafts);
+    const tried = requests('setupSituations').length;
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
+    await expect.poll(() => requests('setupSituations').length).toBeGreaterThan(tried);
+  });
+
   it('tools_start_at_the_outcome_rules_shows', async () => {
     // Each tool a review turns on starts at the outcome Rules shows for the same rules once it is on:
     // the most that runs on its own for some visitor.
