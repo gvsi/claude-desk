@@ -466,3 +466,56 @@ def test_an_uploads_size_counts_files_and_links_and_skips_missing_paths(tmp_path
     (tmp_path / 'a.txt').write_bytes(b'x' * 1000)
     (tmp_path / 'link').symlink_to('a.txt')
     assert client.upload_size(tmp_path, ['a.txt', 'link', 'gone.txt']) == 1000 + len('a.txt')
+
+
+def test_a_new_lanes_bundle_goes_alone_while_a_small_source_delta_shares(tmp_path):
+    """The request folder (with any Git bundle) and the changed source files are judged separately, each by its own
+    size, and only what goes over a connection of its own is reported."""
+    from desk_tools import testbox_client as client
+
+    transfer, root = tmp_path / 'transfer', tmp_path / 'repo'
+    (transfer / 'tools').mkdir(parents=True)
+    (transfer / 'source.bundle').write_bytes(b'b' * 2_000_000)
+    (transfer / 'tools' / 'worker.py').write_bytes(b'w' * 1000)
+    root.mkdir()
+    (root / 'small.py').write_bytes(b's' * 1000)
+    shared = ['-o', 'ControlMaster=auto']
+    request, sources, alone = client.upload_plan(shared, transfer, root, ['small.py'])
+    assert request == client.transport(shared, client.BULK_BYTES + 1)
+    assert sources == client.transport(shared, 0)
+    assert alone == 2_001_000
+
+    (transfer / 'source.bundle').unlink()
+    (root / 'big.py').write_bytes(b'x' * 2_000_000)
+    request, sources, alone = client.upload_plan(shared, transfer, root, ['small.py', 'big.py'])
+    assert (request, sources, alone) == (client.transport(shared, 0), client.transport(shared, client.BULK_BYTES + 1), 2_001_000)
+
+
+def test_a_call_that_lost_its_lane_during_an_upload_stops_with_a_message(tmp_path):
+    """A large upload no longer rides on the lane holder's connection, so the holder can end while it runs (the
+    shared connection closed by hand, or its keepalives gave up). The call then stops with a testbox message instead
+    of carrying on into a lane it no longer holds."""
+    import sys
+    from desk_tools import testbox_client as client
+
+    holder = subprocess.Popen([sys.executable, '-c', 'pass'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    holder.wait()
+    with pytest.raises(RuntimeError, match="lost the lane's connection"):
+        client.check_lease(holder)
+    alive = subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read()'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        client.check_lease(alive)
+    finally:
+        alive.stdin.close()
+        alive.wait()
+
+
+def test_closing_the_shared_connections_works_with_none_open(tmp_path):
+    """The documented way to close a silent connection is one script, so an unattended lane can run it, and it
+    copes with a cache that holds no connection at all."""
+    import os
+    script = Path(__file__).resolve().parents[1] / 'testbox' / 'close-connections'
+    (tmp_path / '.cache' / 'desk-testbox').mkdir(parents=True)
+    done = subprocess.run(['bash', str(script)], env={**os.environ, 'HOME': str(tmp_path)}, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == 'testbox: closed 0 shared connection(s)'
