@@ -447,6 +447,8 @@ export interface DecisionSpec {
   listCents?: number | null;
   discountBp?: number | null;
   amountCents?: number | null;
+  /** A booking's start, as the kernel's action holds it. */
+  startsAt?: string | null;
   resource?: NormalizedAction['resource'];
 }
 
@@ -509,6 +511,8 @@ export const DECISIONS = {
     cardIds: ['rv-book-wk'],
     reasonPlain: rivera.bookingReasonPlain,
     resource: { kind: 'slot', id: 'S-20261103-1400', owner_person_id: null },
+    // The slot's start: Tuesday, November 3 at 2:00 pm in Los Angeles.
+    startsAt: '2026-11-03T14:00:00-08:00',
   },
   paymentLink: {
     tool: 'native.payment_link',

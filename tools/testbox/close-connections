@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Close this laptop's shared connections to the test machine. Use it when one went silent without closing (a dropped
+# network, a laptop waking from sleep) and every lane's calls hang. Calls running on them end; the next call opens a
+# new connection. A large upload runs on a connection of its own and keeps going (docs/testbox.md).
+set -euo pipefail
+shopt -s nullglob
+closed=0
+for socket in "$HOME"/.cache/desk-testbox/*.sock; do
+  if ssh -S "$socket" -O exit x 2>/dev/null; then
+    closed=$((closed + 1))
+  fi
+done
+echo "testbox: closed $closed shared connection(s)"

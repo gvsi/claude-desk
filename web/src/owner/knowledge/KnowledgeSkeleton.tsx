@@ -8,13 +8,13 @@ function ListShape({ rows, tiles = false }: { rows: number; tiles?: boolean }) {
       <Skeleton shape="line" text="section" width="55%" />
       <Card padding={0}>
         {Array.from({ length: rows }, (_, i) => (
-          <div className="cd-knowledge-list__row" key={i}>
+          <div className={`cd-knowledge-list__row${tiles ? ' cd-knowledge-list__row--tiled' : ''}`} key={i}>
             {tiles ? <Skeleton shape="block" width="var(--size-nav-row)" height="var(--size-nav-row)" /> : null}
             <div className="cd-knowledge-list__words">
               <Skeleton shape="line" text="body" width="70%" />
               <Skeleton shape="line" text="meta" width="85%" />
             </div>
-            <Skeleton shape="block" width="var(--space-40)" height="var(--space-20)" radius="full" />
+            <Skeleton className="cd-knowledge-list__pill-shape" shape="block" width="var(--space-40)" height="var(--space-20)" radius="full" />
           </div>
         ))}
       </Card>
