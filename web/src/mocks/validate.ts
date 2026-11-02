@@ -3,7 +3,8 @@
  * mock API can't drift from what the kernel and API send. Each model is read from the schema's
  * `$defs` by its key. Models are checked as the API's Pydantic models serialize them: every field
  * they declare, defaulted ones included, and nothing else, so a mock that leaves a field out or
- * adds one is wrong.
+ * adds one is wrong. The one exception is a field the contracts mark `x-omitted-when-default`, which
+ * its model leaves out while it holds its default (a turn end's `generation`): it may be absent.
  */
 import Ajv2020 from 'ajv/dist/2020.js';
 
@@ -22,9 +23,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const mapValues = (record: Record<string, unknown>, fn: (value: unknown) => unknown): Record<string, unknown> =>
   Object.fromEntries(Object.entries(record).map(([key, value]) => [key, fn(value)]));
 
+/** A field its model leaves out while it holds its default, as the contracts mark it. */
+const omittedWhenDefault = (property: unknown): boolean => isRecord(property) && property['x-omitted-when-default'] === true;
+
 /**
  * A copy of a schema node in which every object model sends exactly its fields: each one required,
- * defaults included, and none it doesn't declare (unless it sets its own `additionalProperties`).
+ * defaults included, but those the contracts mark as left out while they hold their default; and none
+ * it doesn't declare (unless it sets its own `additionalProperties`).
  */
 function closed(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(closed);
@@ -36,7 +41,8 @@ function closed(node: unknown): unknown {
   }
   if (isRecord(out.properties)) {
     if (!('additionalProperties' in out)) out.additionalProperties = false;
-    out.required = Object.keys(out.properties);
+    const properties = out.properties;
+    out.required = Object.keys(properties).filter((key) => !omittedWhenDefault(properties[key]));
   }
   return out;
 }

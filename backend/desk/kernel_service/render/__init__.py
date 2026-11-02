@@ -2,11 +2,15 @@
 
 Status lines (`status`) are fixed templates, one per decision state plus the reply receipts
 (an owner's say has its own two: written by the owner, or not sent, which only the owner sees)
-and two variants: `tool_unavailable`, the line a `refused_at_execution` takes when a connected
-tool's server can't be reached, and `refused_over_mandate`, the line a refusal takes when the
-baseline's mandate rule alone refused an agent's charge above what its mandate has left; a
+and four variants: `tool_unavailable`, the line a `refused_at_execution` takes when a connected
+tool's server can't be reached, `refused_over_mandate`, the line a refusal takes when the
+baseline's mandate rule alone refused an agent's charge above what its mandate has left,
+`closed_by_booking`, the line a held request the visitor's own booking closed takes, and
+`refused_contact_needed`, the line a booking refused for want of a name and a phone number or
+email takes (`adapters.book`), which tells Claude, and the visitor, what to give before booking; a
 decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they name the business's
-owner and nothing else, so they never carry an amount, a date or a limit's value. An action a
+owner and no request data (the business itself when the owner gave no name: `shown_owner`), so they
+never carry the request's amount, date or a limit's value. An action a
 visitor or agent asked for that ran says what was done, one line per tool
 (`executed_status`), in place of the generic executed line, which only the owner's own setup
 actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
@@ -28,11 +32,13 @@ once (`register_template`) with the fact kinds it renders, the fact ID (or ID pr
 fact statuses that count as current, and a renderer per language that returns the card's headline
 (`title`) and details (`lines`), plus a choice per open time on a booking options card.
 A card's `text` is the headline and then the details, one per line; the soft checks read it after
-its kind's fixed label (`CHECK_LABELS`, `check_text`). A template that names no fact
-kinds (handoff, verify_prompt) renders without one. `Template.current` says
-whether a fact may still be shown (a status the template renders, not expired), and a fact with
-nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an empty
-card.
+its kind's fixed label (`CHECK_LABELS`, `check_text`), and a session's request receipts after a label
+of their own (`RECEIPT_LABEL`, `receipt_check_text`), each carrying what was asked for and a
+decision's status line, after the owner's approval for a held request that ran. A
+template that names no fact kinds (handoff, verify_prompt) renders without one. `Template.current`
+says whether a fact may still be shown (a status the template renders, not expired), and a fact
+with nothing to render, such as hours with no windows, raises `NothingToShow` rather than make an
+empty card.
 
 A card that links somewhere (a document or payment link) registers `href_for`, which the reply
 check awaits once the cited fact has passed its checks, and passes to `render_clause` as the card's
@@ -47,7 +53,7 @@ from typing import TYPE_CHECKING, Literal
 
 from desk.contracts import BusinessToolDef, CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
 from desk.kernel_service.render import en, es
-from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow
+from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow, shown_owner
 
 if TYPE_CHECKING:
     from desk.kernel_service.repo import KernelCtx
@@ -87,8 +93,8 @@ if (any(set(lines) != OWNER_STATUS_KEYS for lines in OWNER_STATUS.values())
 if any(set(lines) != set(en.EXECUTED) for lines in EXECUTED.values()):
     # so a tool with a line has one in whatever language the session reads by the time it runs
     raise RuntimeError("every language has an executed line for the same tools")
-if set(es.AGENT_TOOLS) != set(en.AGENT_TOOLS) or len(es.AGENT_CARD) != len(en.AGENT_CARD):
-    raise RuntimeError("every language has the whole Agent Card and a label for every agent tool")
+if set(es.AGENT_TOOLS) != set(en.AGENT_TOOLS):
+    raise RuntimeError("every language has a label for every agent tool")
 
 
 def language(last_language: str | None) -> Language:
@@ -133,20 +139,14 @@ def owner_line(key: str) -> str:
     return OWNER_STATUS[OWNER_LANGUAGE][key]
 
 
-def agent_card(lang: str, *, business: str, owner: str, slug: str, tools: Collection[str]) -> list[RenderedBlock]:
-    """The Agent Card of a Desk in `lang`: prose blocks naming who answers (an AI, Claude, within
-    `owner`'s rules), what an agent can do there (the labels of `tools`, in the order the card
-    lists them), the endpoint and how to sign, and that agent keys aren't business credentials.
-    A tool without a label is left out rather than named; nothing carries an amount or a key. An
-    empty `business` or `owner` (a name the public page withholds) reads as fixed words ("this
-    business", "the owner"), never as a blank."""
+def agent_card(lang: str, tools: Collection[str]) -> list[RenderedBlock]:
+    """The Agent Card of a Desk in `lang`: one prose block for each of `tools` an agent can ask
+    for, by its plain label, in the order the card lists them; none when there is nothing yet, so
+    the page says so in its own words. A tool without a label is left out rather than named; no
+    block carries an amount, a key or a name. Where to send requests and how to sign them is the
+    API's card, not this one."""
     module = en if lang == "en" else es
-    labels = [label for tool, label in module.AGENT_TOOLS.items() if tool in tools]
-    listed = module.listing(labels) if labels else module.AGENT_CARD_NO_TOOLS
-    business = business if business.strip() else module.AGENT_CARD_BUSINESS
-    owner = owner if owner.strip() else module.AGENT_CARD_OWNER
-    return [RenderedBlock(kind="prose", text=line.format(business=business, owner=owner, slug=slug, tools=listed))
-            for line in module.AGENT_CARD]
+    return [RenderedBlock(kind="prose", text=label) for tool, label in module.AGENT_TOOLS.items() if tool in tools]
 
 
 def owner_preview(kind: str) -> str:
@@ -270,3 +270,66 @@ def check_text(card: RenderedBlock) -> str:
     """A card as the soft checks (Sonnet's and Jev's) read it: its kind's label, then its text
     ("Payment link card: Service call deposit, $20.00")."""
     return f"{CHECK_LABELS[card.template]} card: {card.text}"
+
+
+# The label of the session's request receipts the soft checks read beside a reply's cards, though the reply
+# doesn't show them again (`reply_check.request_receipts`): a decision's status line, its `visitor_plain`,
+# which the chat already shows as its own event, one label whether the request is held or resolved, since
+# the line itself says which. Not a template's, so kept apart from `CHECK_LABELS`; English, as those are.
+RECEIPT_LABEL = "Request receipt"
+# What was asked for, named before the status line, which alone ("Waiting for Mike Turner to approve") would
+# back a claim about any request; for the checks alone, never shown, in the reply's language, so a Spanish
+# reply about another request reads as one. Keyed by the request's tool, every native and payments tool,
+# since the compiler's default ask can hold any enabled tool, and by `block:<name>` for a business tool's
+# block. A tool named in neither (none today) has no receipt, the stricter way.
+RECEIPT_SUBJECTS: dict[str, dict[str, str]] = {
+    "en": {
+        "native.quote": "Quote request",
+        "native.find_slots": "Open times request",
+        "native.book": "Booking request",
+        "native.release_document": "Document request",
+        "native.payment_link": "Payment link request",
+        "native.charge_mandate": "Charge request",
+        "native.capture_lead": "Contact details request",
+        "native.request_callback": "Callback request",
+        "native.start_verification": "Verification request",
+        "native.fetch_website": "Website request",
+        "native.read_memory": "Records request",
+        "native.web_search": "Web search request",
+        "payments.list_charges": "Payment history request",
+        "payments.create_refund": "Refund request",
+        "block:intake": "Details request",
+        "block:typed_booking": "Booking request",
+        "block:purpose_payment": "Payment request",
+        "block:urgent": "Urgent request",
+    },
+    "es": {
+        "native.quote": "Solicitud de presupuesto",
+        "native.find_slots": "Solicitud de horarios",
+        "native.book": "Solicitud de reserva",
+        "native.release_document": "Solicitud de documento",
+        "native.payment_link": "Solicitud de enlace de pago",
+        "native.charge_mandate": "Solicitud de cobro",
+        "native.capture_lead": "Solicitud de datos de contacto",
+        "native.request_callback": "Solicitud de llamada",
+        "native.start_verification": "Solicitud de verificación",
+        "native.fetch_website": "Solicitud de sitio web",
+        "native.read_memory": "Solicitud de registros",
+        "native.web_search": "Solicitud de búsqueda web",
+        "payments.list_charges": "Solicitud de historial de pagos",
+        "payments.create_refund": "Solicitud de reembolso",
+        "block:intake": "Solicitud de datos",
+        "block:typed_booking": "Solicitud de reserva",
+        "block:purpose_payment": "Solicitud de pago",
+        "block:urgent": "Solicitud urgente",
+    },
+}
+def receipt_check_text(asked: str, visitor_plain: str, lang: Language, *, approved_by: str | None = None) -> str:
+    """A request receipt as the soft checks read it: its English label, what was asked for (`asked`, a tool
+    or `block:<name>`, `RECEIPT_SUBJECTS`) in `lang`, then the decision's status line ("Request receipt card:
+    Quote request: Waiting for Mike Turner to approve"). For a held request that ran, which its owner
+    `approved_by` approved first, the approved status line in `lang` comes before what it did ("Quote request:
+    Mike Turner approved this; Quoted from Mike Turner's price list"), as the chat showed them. An `asked` with
+    no subject raises KeyError."""
+    approval = f"{status('approved', lang, owner=approved_by)}; " if approved_by is not None else ""
+    return f"{RECEIPT_LABEL} card: {RECEIPT_SUBJECTS[lang][asked]}: {approval}{visitor_plain}"

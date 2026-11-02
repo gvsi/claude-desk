@@ -12,12 +12,13 @@ opens and as each control row appears, so a hang-up never cuts that work short.
 for the session's credential, with that credential, then starts the session's turns:
 
 - `run_resumable` (an owner's answer resumed the conversation, Task 8): claimed.
-- `decision_due` (a held request that may have expired or been answered) and `decision_pending` (an allow whose
-  execution's outcome wasn't known when its turn ended): the decision is read with the session's own client
-  (`GET /decisions/{id}`, which applies expiry). Once it is final, one transaction claims the row, publishes the
-  decision as the kernel signed it (`resolved`, or `receipt` for an allow) and, when that is new to the session,
-  an `action_update` row that wakes a turn. A decision not yet final (`unknown` included: it is reconciled
-  later), or one the kernel can't read now, leaves the row for a later request.
+- `decision_due` (a held request that may have expired or been answered, or that the session's own booking closed:
+  left by the minute sweep, or by the turn whose call ran, `loop._surface_settled`) and `decision_pending` (an allow
+  whose execution's outcome wasn't known when its turn ended): the decision is read with the session's own client
+  (`GET /decisions/{id}`, which applies expiry and settles what a booking closed). Once it is final, one transaction
+  claims the row, publishes the decision as the kernel signed it (`resolved`, or `receipt` for an allow) and, when
+  that is new to the session, an `action_update` row that wakes a turn. A decision not yet final (`unknown`
+  included: it is reconciled later), or one the kernel can't read now, leaves the row for a later request.
 
 A paused session's work runs here too: its turn (`run_pending`, under the turn lock) stops the waiting work from
 starting more turns and hands off once, with no model call.

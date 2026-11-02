@@ -28,7 +28,7 @@ from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
 from .helpers import CopyRows, kernel_ctx, ledger_rows, verify_session
-from .test_adapters import Rivera, add_slot, local, quote_args, visitor_of
+from .test_adapters import WHO, Rivera, add_slot, local, quote_args, visitor_of
 from .test_agent_auth import mint, open_agent, turn
 from .test_approvals import (ASK_QUOTES, ENDINGS, add_person, answered, held_on, held_quote, person_id, post_cancel,
                              public_key)
@@ -409,7 +409,7 @@ async def test_a_held_booking_whose_slot_started_names_no_cause(app, client, fro
     await activate(app, copy, [card("ask-book", "native.book", mode="ask")])
     slot_id = "S-20261030-1100"
     await add_slot(app, copy, slot_id)
-    held = await decided(client, visitor, "native.book", {"slot_id": slot_id})
+    held = await decided(client, visitor, "native.book", {"slot_id": slot_id, **WHO})
     assert held.state == "held"
     frozen_clock.travel(local(slot_id))
 

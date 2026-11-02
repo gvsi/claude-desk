@@ -436,7 +436,7 @@ describe('the dev server mock', () => {
     // Chen's setup as the mock app runs it, every turn streamed (faster than a model writes): each
     // card's own button pressed as the page sends it, "Not now" on Stripe and the retainer, then the
     // Tools step's reads, as after a reload. The booking job's card is the owner's own "on its own".
-    const api = createMockApi({ streams: { wordMs: 1, setupTurns: true } });
+    const api = createMockApi({ streams: { wordMs: 1, setupTurns: true, demoVisitorMs: 60 } });
     const tab = browserOf(api).tab();
     await tab.json<CopyOut>('POST', apiPath('copies', {}), { passcode: 'demo' }, 201);
     const description = START_EXAMPLES.en.examples[3]!.description;

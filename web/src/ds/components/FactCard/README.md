@@ -4,9 +4,9 @@
 
 ## When to use
 
-- For every price, date, time, status or record a vision page shows that no reply card template covers (N-R2-Vision-TeamDesk, -CityOffice-Resident): "Customer history", "Job card" (the visit's date and time), "Document, only for Luis", "Your logged hours" (the week's dates), and a resident's "Permit status" (with the fee due) and "Next steps". The city office's code prompt, open inspection times and about cards are drawn with `ReplyCard` under their templates' labels instead, though some of their lines are a vision of what those templates could carry (the board story's note names each).
+- For every price, date, time, status or record a vision page shows that no reply card template covers (N-R2-Vision-TeamDesk, -CityOffice-Resident): "Calendar hold" (the held date and time), "Document, open to colleagues", and a resident's "Permit status" (with the fee due) and "Next steps". The city office's code prompt, open inspection times and about cards are drawn with `ReplyCard` under their templates' labels instead, though some of their lines are a vision of what those templates could carry (the board story's note names each).
 - Not for a booking: a booking is the kernel's `booking_confirmed` card through `ClaudeMessage` and `ReplyCard`, labelled "Booked", even on a vision page (the phone's visit and Dana's last visit).
-- On a vision page, as on every Desk, Claude's words never state a price, date or status and never confirm a booking on their own: the reply leads into the card ("Here's Ana's history."), and the card carries the fact. A booking is confirmed only next to its card.
+- On a vision page, as on every Desk, Claude's words never state a price, date or status and never confirm a booking on their own: the reply leads into the card ("Here it is."), and the card carries the fact. A booking is confirmed only next to its card.
 - Not in a real conversation. There, every fact reaches the visitor as the kernel's rendered block in a `ReplyCard`, whose label comes from its template. `FactCard` is for the static vision pages, whose facts are sample data with labels no template has.
 - Only the vision pages may use it. In the design system the guard `fact_card_only_on_the_vision_pages` allows it only in its own folder, the index and the vision boards' page parts (`boards/vision.tsx`). The web app's guard should likewise allow it only under `web/src/vision/` (the web app plan's vision pages, plan 04).
 
@@ -22,7 +22,7 @@
 
 - `label`: what kind of fact it is, in the page's language.
 - `icon`: `document` for a record or a document, `clock` for a deadline or a booked time.
-- `title` and `lines`: the fact, already written out in the page's language ("Friday, October 30, 10:30 am", "Monday, October 19 to Friday, October 23"). The page's data holds them as typed fields, never as part of Claude's sentences.
+- `title` and `lines`: the fact, already written out in the page's language ("Thursday, November 5, 2:00 pm", "30 minutes with Sam Patel: launch review"). The page's data holds them as typed fields, never as part of Claude's sentences.
 - `language`: `es` for a fact in Spanish; it sets `lang` on the card.
 
 ## Layout

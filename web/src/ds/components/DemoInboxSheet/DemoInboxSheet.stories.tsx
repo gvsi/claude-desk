@@ -22,9 +22,12 @@ const CODE_ENTRY: DemoInboxEntry = {
 };
 const CODE: DemoInboxItem = { notice: CODE_NOTICE, entry: CODE_ENTRY };
 
-/** An alert to the owner about a held request. A visitor never sees it. */
+/**
+ * An alert to the owner about a held request, titled with its preview line as the owner reads it.
+ * A visitor never sees it.
+ */
 const ALERT: DemoInboxItem = {
-  notice: { entry_id: 'inbox-alert-hold', to: 'owner', preview: 'A request is waiting for your answer' },
+  notice: { entry_id: 'inbox-alert-hold', to: 'owner', preview: 'A request needs your answer' },
   entry: {
     entry_id: 'inbox-alert-hold',
     to: 'owner',
@@ -32,6 +35,7 @@ const ALERT: DemoInboxItem = {
     body: 'Dana Whitfield asked for 10% off a drain clearing. Held by your rule: Quotes from your price list, at list price.',
     created_at: '2026-10-30T10:46:00Z',
     decision_id: 'dec-rivera-discount',
+    title: 'A request needs your answer',
   },
   time: 'Today, 10:46 am',
 };
@@ -214,6 +218,7 @@ export const Owner: Story = {
     expectComputed(sheet, { borderLeftWidth: '1px', borderLeftColor: 'rgba(250, 249, 245, 0.14)', backgroundColor: 'rgb(42, 41, 39)' });
     await expect(within(sheet).getByText('What Claude would have sent you by text or email. Nothing is really sent.')).toBeVisible();
     await expect(within(sheet).getByText(ALERT.entry!.body)).toBeVisible();
+    await expect(within(sheet).getByText('A request needs your answer', { exact: true })).toBeVisible();
     await userEvent.keyboard('{Escape}');
     await expect(button).toHaveFocus();
     await expect(args.onOpenChange).toHaveBeenLastCalledWith(false);
