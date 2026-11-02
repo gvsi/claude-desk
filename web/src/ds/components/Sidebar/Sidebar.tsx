@@ -2,6 +2,8 @@ import { useId, useRef, useState, type ComponentType, type KeyboardEvent, type R
 
 import { Icon, type IconName } from '../../icons/index.tsx';
 import { CountPill } from '../CountPill/CountPill.tsx';
+import { AppShellOnly } from '../AppShell/AppShell.tsx';
+import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import { Mark, Wordmark } from '../Mark/Mark.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import { Switch } from '../Switch/Switch.tsx';
@@ -83,6 +85,8 @@ export interface SidebarProps {
   linkComponent?: ComponentType<SidebarLinkProps>;
   /** The "About this prototype" group, just above the Answering block. Left out, nothing shows. */
   about?: SidebarAbout;
+  /** The owner app's concept line under About, in the wide shell only. */
+  conceptFooter?: boolean;
 }
 
 /**
@@ -147,6 +151,7 @@ export function Sidebar({
   owner,
   linkComponent: Link = PlainLink,
   about,
+  conceptFooter = false,
 }: SidebarProps) {
   const preview = true;
   const aboutId = useId();
@@ -221,6 +226,13 @@ export function Sidebar({
               </Link>
             ))}
           </nav>
+        ) : null}
+        {conceptFooter ? (
+          <AppShellOnly layout="wide">
+            <div className="cd-sidebar__concept-footer" data-owner-footer>
+              <ConceptFooter />
+            </div>
+          </AppShellOnly>
         ) : null}
       </div>
       <div className="cd-sidebar__footer">

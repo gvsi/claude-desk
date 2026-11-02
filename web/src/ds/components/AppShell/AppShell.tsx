@@ -3,6 +3,7 @@ import {
   createContext,
   createRef,
   useCallback,
+  useContext,
   useId,
   useLayoutEffect,
   useRef,
@@ -23,6 +24,18 @@ import type { SidebarLinkProps } from '../Sidebar/Sidebar.tsx';
 import { Skeleton } from '../Skeleton/Skeleton.tsx';
 
 import './AppShell.css';
+
+const AppShellLayoutContext = createContext<'wide' | 'compact'>('wide');
+
+export interface AppShellOnlyProps {
+  layout: 'wide' | 'compact';
+  children: ReactNode;
+}
+
+/** Uses the shell's own layout decision, including its forced compact layout. */
+export function AppShellOnly({ layout, children }: AppShellOnlyProps) {
+  return useContext(AppShellLayoutContext) === layout ? <>{children}</> : null;
+}
 
 export interface AppShellProps {
   /** The `Sidebar`: a column at the left, or a sheet behind "Menu" on a narrow screen. */
@@ -143,7 +156,7 @@ export function AppShell({ sidebar, business, todayHref, linkComponent = PlainLi
 
   // Only the navigation changes with the layout. The page stays in the same place in the tree, so
   // crossing the breakpoint (a resized window, a turned phone) keeps its drafts and other state.
-  return (
+  const shell = (
     <div className={`cd-app-shell${compact ? ' cd-app-shell--compact' : ''}`}>
       {skeleton ? null : (
         <a className="cd-app-shell__skip cd-type-control" href={`#${mainId}`} onClick={skipToContent} {...inertWhen(inert)}>
@@ -190,6 +203,7 @@ export function AppShell({ sidebar, business, todayHref, linkComponent = PlainLi
       </div>
     </div>
   );
+  return <AppShellLayoutContext.Provider value={compact ? 'compact' : 'wide'}>{shell}</AppShellLayoutContext.Provider>;
 }
 
 interface MainProps {

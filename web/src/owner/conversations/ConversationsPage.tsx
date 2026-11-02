@@ -11,7 +11,7 @@ import { useLocation, useNavigate, useNavigationType, useParams } from 'react-ro
 import { request } from '../../api/http.ts';
 import type { ConversationSummary } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, SkeletonScreen, TextLink } from '../../ds/index.ts';
+import { AppShellOnly, Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, SkeletonScreen, TextLink } from '../../ds/index.ts';
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
@@ -202,9 +202,11 @@ export function ConversationsPage() {
           </>
         )}
       </div>
-      <footer className="cd-conversations__footer">
-        <ConceptFooter />
-      </footer>
+      <AppShellOnly layout="compact">
+        <footer className="cd-conversations__footer" data-owner-footer>
+          <ConceptFooter />
+        </footer>
+      </AppShellOnly>
     </div>
   );
 }

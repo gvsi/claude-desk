@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Outlet, useLocation } from 'react-router';
 
-import { ConceptFooter, PageHeader, SubNav, type SubNavItem } from '../../ds/index.ts';
+import { AppShellOnly, ConceptFooter, PageHeader, SubNav, type SubNavItem } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
 import { BillingPage } from './BillingPage.tsx';
@@ -39,7 +39,7 @@ export const FIRST_SETTINGS_SECTION = SETTINGS_SECTIONS[0]?.path ?? '';
 
 /**
  * `settings/*`: "Settings" with its sections in SubNav at the left and the section's page beside it,
- * in the content column, the concept footer at the window's foot, as the Settings boards draw it.
+ * in the content column. The concept line is in the desktop sidebar and at the page's foot on phones.
  * On a phone, SubNav is one line across the page over a hairline, and the page under it.
  */
 export function SettingsLayout() {
@@ -65,9 +65,11 @@ export function SettingsLayout() {
             <Outlet />
           </div>
         </div>
-        <footer className="cd-settings__footer">
-          <ConceptFooter />
-        </footer>
+        <AppShellOnly layout="compact">
+          <footer className="cd-settings__footer" data-owner-footer>
+            <ConceptFooter />
+          </footer>
+        </AppShellOnly>
       </div>
     </div>
   );

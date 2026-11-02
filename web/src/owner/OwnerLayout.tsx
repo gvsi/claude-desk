@@ -22,6 +22,7 @@ import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
   AppShell,
+  AppShellOnly,
   Button,
   ConceptFooter,
   Dialog,
@@ -480,9 +481,11 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (
-          <footer className="cd-owner-layout__footer">
-            <ConceptFooter />
-          </footer>
+          <AppShellOnly layout="compact">
+            <footer className="cd-owner-layout__footer" data-owner-footer>
+              <ConceptFooter />
+            </footer>
+          </AppShellOnly>
         )}
       </div>
       {answeringChange !== null ? (
@@ -511,6 +514,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
 }
 
 export interface OwnerSidebarProps {
+  /** The landing's inert preview omits the owner's concept line. */
+  conceptFooter?: boolean;
   businesses: BusinessOut[];
   business: BusinessOut;
   desk: DeskSummary;
@@ -553,6 +558,7 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         owner={{ name: business.owner_display_name, status: 'Available for chats' }}
         linkComponent={RouterLink}
         about={SIDEBAR_ABOUT}
+        conceptFooter={props.conceptFooter ?? true}
       />
       {props.switching ? (
         <BesideTheBusinessRow container={ref}>

@@ -7,6 +7,8 @@
 import { useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
+import { SIDEBAR_ABOUT } from '../../owner/sidebarAbout.ts';
+
 import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEvent, ToolName } from '../../api/contracts.ts';
 import { AlwaysOnList } from '../components/AlwaysOnList/AlwaysOnList.tsx';
 import { Breadcrumb } from '../components/Breadcrumb/Breadcrumb.tsx';
@@ -40,7 +42,7 @@ import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx'
 import { Whisper } from '../components/Whisper/Whisper.tsx';
 import type { TranscriptTurn } from '../fixtures/index.ts';
 
-import { AppShell } from '../components/AppShell/AppShell.tsx';
+import { AppShell, AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
 import { ChainStatus } from '../components/ChainStatus/ChainStatus.tsx';
@@ -81,6 +83,8 @@ export const MAIN_LINE = { id: 'desk-rivera-main', name: rivera.business.deskNam
 export const EMERGENCIES = { id: 'desk-rivera-emergencies', name: 'Emergencies' };
 
 export interface RiveraFrameProps {
+  /** Vision and the landing preview keep their original page-bottom concept line. */
+  conceptFooterInSidebar?: boolean;
   current: NavKey;
   /** The counts beside Conversations and Safety, as each board draws them. */
   counts: { conversations?: NavCount; safety?: NavCount };
@@ -127,6 +131,7 @@ interface OwnerFrameProps extends Omit<RiveraFrameProps, 'twoDesks'> {
 }
 
 function OwnerFrame({
+  conceptFooterInSidebar = true,
   business,
   ownerName,
   desks,
@@ -161,6 +166,8 @@ function OwnerFrame({
           answering
           onAnsweringChange={fn()}
           owner={{ name: ownerName, status: 'Available for chats' }}
+          about={conceptFooterInSidebar ? SIDEBAR_ABOUT : undefined}
+          conceptFooter={conceptFooterInSidebar}
         />
       }
     >
@@ -413,10 +420,12 @@ const WEEK = [64, 32, 0, 64, 100, 32, 64] as const;
  * the short briefing and the last 7 days. `reviewer` adds the reviewer bar across the top.
  */
 export function TodayNeedsYou({
+  conceptFooterInSidebar = true,
   reviewer = true,
   twoDesks = false,
   onSwitchBusiness,
 }: {
+  conceptFooterInSidebar?: boolean;
   reviewer?: boolean;
   /** Both of Turner's Desks, so the sidebar shows its Desk picker. */
   twoDesks?: boolean;
@@ -425,6 +434,7 @@ export function TodayNeedsYou({
   return (
     <RiveraFrame
       current="today"
+      conceptFooterInSidebar={conceptFooterInSidebar}
       reviewer={reviewer}
       twoDesks={twoDesks}
       onSwitchBusiness={onSwitchBusiness}
@@ -473,7 +483,7 @@ export function TodayNeedsYou({
               seeAll="See all 7"
             />
           </section>
-          <ConceptFooter />
+          {conceptFooterInSidebar ? <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly> : <ConceptFooter />}
         </div>
         <LastSevenDays bars={WEEK} />
       </div>
@@ -852,7 +862,7 @@ export function SafetyPage({
         <div className="board-safety__list">{list}</div>
         <div className="board-safety__detail">{detail}</div>
       </div>
-      {history ? <ConceptFooter /> : null}
+      {history ? <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly> : null}
     </div>
   );
   return (
@@ -874,7 +884,7 @@ export function BoardPage({ children }: { children: ReactNode }) {
   return (
     <div className="board-page">
       <div className="board-page__body">{children}</div>
-      <ConceptFooter />
+      <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
     </div>
   );
 }
@@ -1162,9 +1172,9 @@ export const DELETE_DESK_LINE = 'Its public link stops working and its chats clo
  * Settings for Turner Plumbing on `current`: the title, SubNav, the section's content, and the
  * footer. `banner`, such as the vision bar, runs across the top of the app.
  */
-export function SettingsPage({ current, banner, children }: { current: string; banner?: ReactNode; children: ReactNode }) {
+export function SettingsPage({ current, banner, conceptFooterInSidebar = true, children }: { current: string; banner?: ReactNode; conceptFooterInSidebar?: boolean; children: ReactNode }) {
   return (
-    <RiveraFrame current="settings" fill connectors counts={SETTINGS_COUNTS} banner={banner}>
+    <RiveraFrame current="settings" fill connectors counts={SETTINGS_COUNTS} banner={banner} conceptFooterInSidebar={conceptFooterInSidebar}>
       <div className="board-filled-page">
         <div className="board-settings">
           <PageHeader title="Settings" />
@@ -1174,7 +1184,7 @@ export function SettingsPage({ current, banner, children }: { current: string; b
             </div>
             <div className="board-settings__content">{children}</div>
           </div>
-          <ConceptFooter />
+          {conceptFooterInSidebar ? <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly> : <ConceptFooter />}
         </div>
       </div>
     </RiveraFrame>
@@ -1211,9 +1221,9 @@ export const CHANNELS_LEAD = 'Where visitors reach this Desk. Each place proves 
  * channel is, then the channels. With `banner`, the same page under a line across the app, as the
  * vision story draws it under the vision bar (N-R2-Vision-Channels).
  */
-export function ChannelsSettings({ banner }: { banner?: ReactNode }) {
+export function ChannelsSettings({ banner, conceptFooterInSidebar = true }: { banner?: ReactNode; conceptFooterInSidebar?: boolean }) {
   return (
-    <SettingsPage current="channels" banner={banner}>
+    <SettingsPage current="channels" banner={banner} conceptFooterInSidebar={conceptFooterInSidebar}>
       <p className="board-quiet cd-type-body">{CHANNELS_LEAD}</p>
       <ChannelList publicLink={PUBLIC_LINK} />
     </SettingsPage>

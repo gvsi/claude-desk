@@ -84,6 +84,7 @@ function StillToday({ opened, readAt }: { opened: number; readAt: number }) {
               banner={<ReviewerBar ownerName={business.owner_display_name} onStartOver={ignore} actions={<OwnerInbox timezone={business.timezone} />} />}
               sidebar={
                 <OwnerSidebar
+                  conceptFooter={false}
                   businesses={[business]}
                   business={business}
                   desk={desk}

@@ -6,7 +6,7 @@ import type { BusinessOut } from '../api/views.ts';
 import { DESKS_KEY } from './useDesks.ts';
 import { isStartingSampleDesk } from './knowledge/sampleDesk.ts';
 import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
-import { AppShell, ConceptFooter, ReviewerBarSkeleton, SidebarSkeleton, type NavKey } from '../ds/index.ts';
+import { AppShell, AppShellOnly, ConceptFooter, ReviewerBarSkeleton, SidebarSkeleton, type NavKey } from '../ds/index.ts';
 import { ConversationsSkeleton } from './conversations/ConversationsSkeleton.tsx';
 import { CENTERED_PAGES, FILL_PAGES } from './OwnerLayout.tsx';
 import { PeopleSkeleton } from './people/PeopleSkeleton.tsx';
@@ -75,16 +75,18 @@ export function OwnerFrameSkeleton({ pathname, setup }: { pathname: string; setu
       skeleton
       business=""
       banner={<ReviewerBarSkeleton inbox />}
-      sidebar={<SidebarSkeleton rows={9} about={SIDEBAR_ABOUT.links.length} />}
+      sidebar={<SidebarSkeleton rows={9} about={SIDEBAR_ABOUT.links.length} conceptFooter />}
       fill={fill}
     >
       <div className={`cd-owner-layout${fill ? ' cd-owner-layout--fill' : ''}${centered ? ' cd-owner-layout--centered' : ''}`}>
         {page}
         {/* A fill page draws the footer in its own columns, as the landed frame leaves it to the page. */}
         {fill && page !== null ? null : (
-          <footer className="cd-owner-layout__footer" data-skeleton-anchor="owner-footer">
-            <ConceptFooter skeleton />
-          </footer>
+          <AppShellOnly layout="compact">
+            <footer className="cd-owner-layout__footer" data-skeleton-anchor="owner-footer" data-owner-footer>
+              <ConceptFooter skeleton />
+            </footer>
+          </AppShellOnly>
         )}
       </div>
     </AppShell>

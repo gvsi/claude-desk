@@ -39,7 +39,7 @@
 - `business`, the current business's name for the top bar. The `Sidebar` carries it too, but the top bar shows when the sidebar doesn't.
 - `banner`, such as the `ReviewerBar` in the demo.
 - `panel`, such as `AskClaudePanel`, while the screen shows it.
-- `children`, the page. The shell adds no footer: the owner layout puts one `ConceptFooter` under its content.
+- `children`, the page. The shell adds no footer: the owner sidebar carries `ConceptFooter` under About this prototype in the wide layout; the owner page carries it at the bottom in the compact layout.
 
 ## Props
 
@@ -58,3 +58,7 @@
 ## Loading shapes
 
 With `skeleton`, the compact bar draws the mark, business line and Menu as shapes. The sidebar column and main area use divs with the real layout classes instead of aside/main landmarks; the full-page loader supplies one real main and its hidden heading outside the layer. `sidebar`, `banner`, `fill` and `children` still determine the layout. Put the shell in `SkeletonScreen`'s hidden, inert layer and pass `SidebarSkeleton` and `ReviewerBarSkeleton`. The skeleton shell carries no skip link, main target id, main ref or tabindex; only the real shell owns them while both shells are mounted during the fade. The content ref stays attached in both modes for panel layout. The Skeleton stories compare both frames within 2 px at 1512 and 390 and check that the one skip link targets and focuses the real main.
+
+## Layout-dependent content
+
+`AppShellOnly` renders its children only for `layout="wide"` or `layout="compact"`, using the shell's existing breakpoint and forced compact layout. The other layout's content is absent from the DOM. Owner footer placements use it so there is one visible, accessible concept line. Outside a shell it defaults to wide.

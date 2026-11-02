@@ -146,6 +146,13 @@
   margin-top: var(--space-8);
 }
 
+.cd-sidebar__concept-footer {
+  flex: none;
+  min-width: 0;
+  padding: var(--space-8) var(--space-8);
+  overflow-wrap: anywhere;
+}
+
 .cd-sidebar__row {
   gap: var(--space-10);
   height: var(--size-nav-row);
