@@ -4,13 +4,13 @@
 
 ## When to use
 
-- On Settings › Notifications, under the `SectionHeader` "Set for a plumber" with its caption "From your business type", as N-Run2-Settings-Notifications draws it.
-- Not for the alerts themselves, which are the `DemoInboxPanel`'s, and not for anything the owner changes: the prototype sets alerts from the business type and offers no control.
+- On Settings › Alerts, under the `SectionHeader` "Set for a plumber" with its caption "From your business type", as N-Run2-Settings-Notifications draws it.
+- Not for the alerts themselves, which are the Notifications page's, and not for anything the owner changes: the prototype sets alerts from the business type and offers no control.
 
 ## What the consumer provides
 
 - `label`: the list's name, the same as the heading over it ("Set for a plumber").
-- `items`, in order, each in the screen's words: `when` ("Right away", "In your briefing", "Not at all"), `what` ("Held requests, paused chats and emergencies") and, for alerts that reach the owner, `how` ("Demo inbox", "Each morning at 7:00 am"). The screen writes the briefing's time; nothing here formats one.
+- `items`, in order, each in the screen's words: `when` ("Right away", "In your briefing", "Not at all"), `what` ("Held requests, paused chats and emergencies") and, for alerts that reach the owner, `how` ("Notifications", "Each morning at 7:00 am"). The screen writes the briefing's time; nothing here formats one.
 
 ## What it shows
 

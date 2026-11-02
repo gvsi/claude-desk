@@ -104,9 +104,9 @@ describe('knowledge', () => {
     if (viewport === 'phone') await screen.getByRole('button', { name: 'Menu', exact: true }).click();
     const nav = screen.getByRole('navigation', { name: 'Main' });
     await expect.element(nav).toBeVisible();
-    expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(9);
+    expect(nav.element().querySelectorAll('.cd-sidebar__label').length).toBe(10);
     expect([...nav.element().querySelectorAll('.cd-sidebar__label')].map((row) => row.textContent)).toEqual([
-      'Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings',
+      'Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Notifications', 'Profile', 'Share', 'Knowledge', 'Settings',
     ]);
     const link = nav.getByRole('link', { name: 'Knowledge', exact: true });
     await expect.element(link).toHaveAttribute('href', path);
