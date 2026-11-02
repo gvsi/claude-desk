@@ -60,7 +60,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.30"
+PROMPT_VERSION = "2026-10-31.31"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
