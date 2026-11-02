@@ -36,8 +36,8 @@ it('question_run_finishes_after_the_desk_answers', async () => {
     task: 'ask_question',
     state: 'done',
     turns: [
-      { author: 'agent', text: 'Do you work on tankless water heaters, for Alex Kim?' },
-      { author: 'desk', text: null, blocks: [{ text: 'We work on tankless water heaters.' }], receipts: [] },
+      { author: 'agent', text: 'Do you flush water heaters, for Alex Kim?' },
+      { author: 'desk', text: null, blocks: [{ text: 'Yes, we do water heater flushes.' }], receipts: [] },
     ],
   });
 });

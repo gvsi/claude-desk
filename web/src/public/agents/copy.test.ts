@@ -25,14 +25,14 @@ function centsIn(line: string): number[] {
 describe('agents page copy', () => {
   it('question_chips_match_each_business_type', () => {
     expect(Object.values(DEMO_TASK_COPY.en).map((tasks) => tasks.ask_question)).toEqual([
-      'Ask about tankless heaters',
+      'Ask about heater flushes',
       'Ask about small repairs',
       'Ask what to bring',
       'Ask about pets',
       'Ask what to know first',
     ]);
     expect(Object.values(DEMO_TASK_COPY.es).map((tasks) => tasks.ask_question)).toEqual([
-      'Preguntar por calentadores sin tanque',
+      'Preguntar por el lavado de calentadores',
       'Preguntar por reparaciones pequeñas',
       'Preguntar qué llevar',
       'Preguntar por mascotas',

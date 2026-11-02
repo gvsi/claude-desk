@@ -188,8 +188,8 @@ function exchangesFor(task: DemoAgentTask): Exchange[] {
       ];
     case 'ask_question':
       return [{
-        request: 'Do you work on tankless water heaters, for Alex Kim?',
-        reply: [proseBlock('We work on tankless water heaters.')],
+        request: 'Do you flush water heaters, for Alex Kim?',
+        reply: [proseBlock('Yes, we do water heater flushes.')],
       }];
     case 'quote_and_deposit':
       return fixtureExchanges();

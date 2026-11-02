@@ -556,8 +556,8 @@ async def test_the_agent_reads_its_desks_own_task_lines(app, browser, fake, kern
 async def test_send_agent_accepts_a_question(app, browser, fake, kernel_http, agent_model, desk_model):
     slug = await new_slug(kernel_http, fake)
     client, _, _ = await open_session(app, browser, slug)
-    agent_model.add(step("Does your business work on tankless water heaters for Alex Kim?"), step("", done=True))
-    desk_model.add(say("We work on tankless water heaters."))
+    agent_model.add(step("Do you flush water heaters, for Alex Kim?"), step("", done=True))
+    desk_model.add(say("Yes, we do water heater flushes."))
     run = (await read_run(client, slug, await send_agent(app, client, slug, "ask_question"))).json()
     assert (run["task"], run["state"]) == ("ask_question", "done")
     assert [turn["author"] for turn in run["turns"]] == ["agent", "desk"]

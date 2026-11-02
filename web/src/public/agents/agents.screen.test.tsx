@@ -51,7 +51,7 @@ const agentRuns = () => [...mockStore.world.sessions.values()].filter((s) => s.s
 const calls = () => mockStore.requests.map((r) => r.key);
 
 /** The panel's four tasks. */
-const TASKS = ['Book the earliest visit', 'Ask about tankless heaters', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
+const TASKS = ['Book the earliest visit', 'Ask about heater flushes', 'Get a quote and pay the service call deposit', 'Try to pay more than its limit'];
 
 /** The panel's lead before a run, as boards 03 to 05 write it. */
 const LEAD = 'A built-in agent visits Turner Plumbing for Alex Kim. It’s simulated.';
@@ -514,7 +514,7 @@ describe('agents page', () => {
     }
     const { screen } = await renderRoute(PAGE);
     const panel = screen.getByRole('region', { name: 'Send an agent' });
-    const task = panel.getByRole('button', { name: 'Ask about tankless heaters' });
+    const task = panel.getByRole('button', { name: 'Ask about heater flushes' });
     await expect.element(task).toBeVisible();
     expect(chipsIn(screen)).toEqual(payments ? TASKS : TASKS.slice(0, 2));
 
@@ -522,10 +522,10 @@ describe('agents page', () => {
     await expect.element(panel.getByText('The agent finished.', { exact: true })).toBeVisible();
     expect(requests('sendAgent').at(-1)?.body).toMatchObject({ task: 'ask_question' });
     const run = panel.getByRole('log', { name: 'Alex Kim’s assistant’s visit' });
-    await expect.element(run.getByText('We work on tankless water heaters.', { exact: true })).toBeVisible();
+    await expect.element(run.getByText('Yes, we do water heater flushes.', { exact: true })).toBeVisible();
     expect(run.element().querySelectorAll('.cd-agent-message')).toHaveLength(1);
     expect(run.element().querySelectorAll('.cd-claude-message')).toHaveLength(1);
-    expect(run.element().querySelector('.cd-agent-message__title')?.textContent).toBe('Ask about tankless heaters');
+    expect(run.element().querySelector('.cd-agent-message__title')?.textContent).toBe('Ask about heater flushes');
     expect(chipsIn(screen)).toEqual(payments ? TASKS : TASKS.slice(0, 2));
   });
 

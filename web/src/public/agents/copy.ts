@@ -33,7 +33,7 @@ export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoT
   en: {
     rivera: {
       book_visit: 'Book the earliest visit',
-      ask_question: 'Ask about tankless heaters',
+      ask_question: 'Ask about heater flushes',
       quote_and_deposit: 'Get a quote and pay the service call deposit',
       push_the_limit: 'Try to pay more than its limit',
     },
@@ -65,7 +65,7 @@ export const DEMO_TASK_COPY: Readonly<Record<CopyLanguage, Readonly<Record<DemoT
   es: {
     rivera: {
       book_visit: 'Reservar la primera visita libre',
-      ask_question: 'Preguntar por calentadores sin tanque',
+      ask_question: 'Preguntar por el lavado de calentadores',
       quote_and_deposit: 'Pedir un presupuesto y pagar el depósito de la visita',
       push_the_limit: 'Intentar pagar más de su límite',
     },

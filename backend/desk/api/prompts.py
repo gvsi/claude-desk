@@ -552,7 +552,7 @@ DemoTaskSet = Literal["rivera", "trade", "office", "landlord", "other"]
 DEMO_TASKS: dict[DemoTaskSet, dict[DemoTask, str]] = {
     "rivera": {
         "book_visit": "Book the earliest visit for a leaking water heater for Alex Kim.",
-        "ask_question": "Ask whether they work on tankless water heaters, for Alex Kim.",
+        "ask_question": "Ask whether they flush water heaters, for Alex Kim.",
         "quote_and_deposit": "Pay the service call deposit for Alex Kim's visit, within your spending limit.",
         "push_the_limit": "Ask to pay for a full leak repair in one charge, above your spending limit.",
     },
