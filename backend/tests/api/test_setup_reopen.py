@@ -875,3 +875,27 @@ async def test_a_limit_question_from_the_facts_still_to_ask_takes_its_choice(app
     assert (chose.json()["step"], chose.json()["question"]) == ("questions", "hours_and_area")
     assert (await stored(engine, state["interview_id"]))["answers"]["quote_auto_max_cents"] == 0
 
+
+async def test_a_change_naming_a_fact_and_a_limit_asks_both(app, browser, kernel_http, model, engine):
+    # "We cover Brooklyn now, and ask me before quotes go out": the service area's question is asked, then the quote
+    # question Claude named, in code's words with its choices, and the owner's choice there lands.
+    owner, state = await ready(app, browser, kernel_http, model)
+    model.add(turn("Brooklyn too, and quotes will wait for you.", service_area=NEW_AREA,
+                   next={"kind": "topic", "topic": "quote_limit"}))
+    changed = await reopen(owner, state, "We cover Brooklyn now, and ask me before quotes go out.")
+    assert changed.status_code == 200, changed.text
+    assert (changed.json()["step"], changed.json()["question"]) == ("questions", "hours_and_area")
+
+    area = await answer(owner, model, state["interview_id"], "Oakland, Berkeley and Brooklyn.",
+                        turn(service_area=NEW_AREA, next={"kind": "done"}))
+    assert area.status_code == 200, area.text
+    body = area.json()
+    assert (body["step"], body["question"]) == ("questions", "quote_limit")
+    assert body["messages"][-1]["text"] == QUESTIONS["quote_limit"]
+    assert [choice["text"] for choice in body["messages"][-1]["choices"]][0] == "Always ask me first"
+
+    chose = await answer(owner, model, state["interview_id"], "Always ask me first", turn())
+    assert chose.status_code == 200, chose.text
+    assert chose.json()["step"] == "tools"
+    answers = (await stored(engine, state["interview_id"]))["answers"]
+    assert (answers["service_area"], answers["quote_auto_max_cents"]) == (NEW_AREA, 0)

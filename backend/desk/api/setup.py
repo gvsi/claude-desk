@@ -2756,6 +2756,12 @@ async def _question_turn(ctx: OwnerCtx, engine: AsyncEngine, model: ModelClient,
     # is asked in turn, the rest waiting on the one asked (`asks_after`), and the questions close only after the last.
     held = _held_off_topic(interview.answers, updated, patch, key) if interview.reopens else []
     homes = [home for home in dict.fromkeys([*held, *waiting]) if home != key]
+    # The change's own turn may also name a topic covered before (a limit, say), which `_next_ask` would ask: it
+    # waits after the facts' questions, asked in code's words, rather than being lost to them.
+    proposed = getattr(turn, "next", None)
+    if (held and interview.reopening and proposed is not None and proposed.kind == "topic"
+            and proposed.topic in interview.covered and proposed.topic != key and proposed.topic not in homes):
+        homes.append(proposed.topic)
     interview.answers = updated
     interview.transcript += entries
     if held or (turn.step_done and homes):
