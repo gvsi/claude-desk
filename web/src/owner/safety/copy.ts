@@ -37,14 +37,15 @@ export const LEDGER_KIND_COPY = {
 
 /**
  * Where an entry came from, the same words on every row and detail, naming no part: the Desk's
- * kernel wrote it, or the chat (the API) reported it and the kernel recorded the report unchecked.
+ * kernel wrote it, or the chat (the API) reported it and the kernel recorded the report, having
+ * checked its form but not whether it is true.
  * A kernel entry isn't called checked, since some are events ("Chat started"), and says nothing
  * about when, since the sample week's replayed entries are written when a copy is made. The full
  * trace keeps its own technical line (`FullTrace`'s `traceLine.ts`).
  */
 export const ORIGIN_COPY = {
   kernel: 'Recorded by your Desk',
-  api: 'Reported by the chat and recorded as reported, without a check',
+  api: 'Reported by the chat, not verified by your Desk',
 } as const satisfies Record<LedgerEvent['origin'], string>;
 
 /** Each checkpoint event's subject, in the owner's words and order, with one filter per category. */

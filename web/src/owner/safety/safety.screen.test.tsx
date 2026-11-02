@@ -737,7 +737,7 @@ describe('Safety', () => {
 
   it('every_entry_shows_its_origin', async () => {
     const CHECKED = KERNEL_ORIGIN;
-    const REPORTED = 'Reported by the chat and recorded as reported, without a check';
+    const REPORTED = 'Reported by the chat, not verified by your Desk';
     const reported = entry(4, '2026-10-20T16:53:00.000000Z', { kind: 'rate_limit', origin: 'api', session_id: 'ses-2', summary: { limit: 'turns' } });
     injectLedger(ledgerPage([...threeEntries(), reported]));
     injectAttempts([

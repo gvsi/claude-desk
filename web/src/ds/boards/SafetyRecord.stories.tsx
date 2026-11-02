@@ -10,7 +10,7 @@ import { SPEC, expectOwnerFrame, expectTabOrder } from './spec.ts';
 
 const page = rivera.ledger.verified;
 /** Where an entry came from, as the screen words it: the kernel's own entries, and the chat's reports. */
-const ORIGIN = { kernel: 'Recorded by your Desk', api: 'Reported by the chat and recorded as reported, without a check' } as const;
+const ORIGIN = { kernel: 'Recorded by your Desk', api: 'Reported by the chat, not verified by your Desk' } as const;
 /** The entry opened beside the list: the decision that held the discounted quote. */
 const OPEN_SEQ = 2;
 
