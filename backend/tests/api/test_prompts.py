@@ -647,10 +647,11 @@ def test_setup_limits_remain_owner_only_and_money_is_opt_in():
 def test_a_closed_plans_cards_stay_as_decided():
     # Setup points an owner who wants a decided card changed back to it, but not once the plan is closed: at the
     # test-client offer every card is closed, and no later screen changes a job.
-    assert "Once the plan is closed, its cards are closed too" in SETUP_NEXT_SYSTEM
+    assert "Once the plan is closed, its cards are closed too, so don't point to one." in SETUP_NEXT_SYSTEM
     assert "point them to its card" in SETUP_NEXT_SYSTEM
     for words in ("A yes to that offer puts the owner on record", "never point to a card or another place",
-                  "an app it already lists can't be proposed again"):
+                  "an app it already lists can't be proposed again", "A job they turned down, or one left out, can "
+                  "come back", "If they also said yes to the offer, don't say you've added them"):
         assert words in SETUP_OFFER_ANSWER_LINE
 
 

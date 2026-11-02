@@ -734,8 +734,7 @@ reviewed its tools, never that it's already connected. If <setup_plan> shows an 
 "{SETUP_PLAN_NOT_CONNECTED}", its connection didn't go through: never say it's connected, and when you mention it, \
 say they can finish connecting it on the Tools step; jobs that use it stay in the plan. You can't change a card \
 the owner already decided; if they want it different, point them to its card, where a later choice replaces the \
-earlier one. Once the plan is closed, its cards are closed too: a decided job stays as the owner chose, so don't \
-point to its card."""
+earlier one. Once the plan is closed, its cards are closed too, so don't point to one."""
 
 _SAFETY = """\
 What you never decide
@@ -1118,18 +1117,20 @@ SETUP_CLOSING_LINE = ("Every topic is covered and the plan is settled. Write the
 SETUP_OFFER_ANSWER_LINE = (
     "This turn: the plan is closed, and the owner answered the offer to add them as a test client with something "
     "other than yes or no, in <owner_answer>: a request or a question, not a card decision or a limit answer. A yes "
-    "to that offer puts the owner on record as one of the business's clients, with the contact they typed in "
-    "setup, so they can try verification and private answers the way a client would; nothing else changes. In "
-    "reply, answer what they typed in one or two sentences. When they ask for a new job the Desk can do, put it in "
-    "add_jobs and leave next as done; code shows it as a card next, so say you'll propose it, never that it's set "
-    "up. When <setup_plan> already lists a job as planned, it's the one you added for this answer and you've "
-    "replied: set next to its id, with question as the short line before its card, leave reply empty and add "
-    "nothing. When they ask for an app <setup_plan> doesn't list, set next to it, with question as the line before "
-    "its card; an app it already lists can't be proposed again, so say where it stands. Facts, limits and the jobs "
-    "already decided stay as the owner chose: those cards are closed and no later screen changes a job, so never "
-    "say you've changed one, never point to a card or another place to change it, and don't add a job to stand in "
-    "for a decided one; say plainly it stays as they chose. A client that can't show cards gets no jobs or apps "
-    "here: say you can't add one from here. Leave plan empty.")
+    "to that offer puts the owner on record as one of the business's clients, with the contact they typed in setup "
+    "(don't say whether it's a phone or an email), so they can try verification and private answers the way a "
+    "client would; nothing else changes. In reply, answer what they typed in one or two sentences. If they also said "
+    "yes to the offer, don't say you've added them: the offer comes again once this is settled. When they ask for a "
+    "new job the Desk can do, put it in add_jobs and leave next as done; code shows it as a card next, so say you'll "
+    "propose it, never that it's set up. A job they turned down, or one left out, can come back the same way. When "
+    "<setup_plan> already lists a job as planned, it's the one you added for this answer and you've replied: set "
+    "next to its id, with question as the short line before its card, leave reply empty and add nothing. When they "
+    "ask for an app <setup_plan> doesn't list, set next to it, with question as the line before its card; an app it "
+    "already lists can't be proposed again, so say where it stands. Facts, limits and the jobs they accepted stay as "
+    "they are: those cards are closed and no later screen changes a job, so never say you've changed one, never "
+    "point to a card or another place to change it, and don't add a second job to change one; say plainly it stays "
+    "as they chose. A client that can't show cards gets no jobs or apps here: say you can't add one from here. "
+    "Leave plan empty.")
 SETUP_RETRY = "That answer didn't fit the format:\n{errors}\nAnswer again in the same format, fixing those fields."
 # The setup interview's wrappers (`setup.py`), named in `SETUP_START_SYSTEM` and `SETUP_TURN_SYSTEM`.
 OWNER_DESCRIPTION_TAG = "owner_description"
