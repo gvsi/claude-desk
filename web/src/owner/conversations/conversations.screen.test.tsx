@@ -220,6 +220,71 @@ afterEach(() => {
 });
 
 describe('Conversations', () => {
+  it.each([[1512, 982], [390, 844]])('day_rules_and_visitor_previews_fit_at_%sx%s', async (width, height) => {
+    const summaries = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const base = summaries[0]!;
+    const longName = DANA.repeat(16);
+    const longPreview = '<b>Can someone come today?</b> '.repeat(12);
+    const now = Date.now();
+    const rows: ConversationSummary[] = [
+      { ...base, session_id: 'preview-status', display_name: longName, latest_visitor_text: longPreview, outcome_counts: { held: 1 }, replayed: true, last_activity: new Date(now).toISOString() },
+      { ...base, session_id: 'preview-only', display_name: null, verified: false, latest_visitor_text: 'Tuesday at 2 works.', outcome_counts: {}, last_activity: new Date(now - 1000).toISOString() },
+      { ...base, session_id: 'no-message', latest_visitor_text: null, last_activity: new Date(now - 2000).toISOString() },
+      { ...base, session_id: 'agent', kind: 'agent', latest_visitor_text: longPreview, last_activity: new Date(now - 3000).toISOString() },
+      { ...base, session_id: 'owner-preview', owner_preview: true, latest_visitor_text: null, last_activity: new Date(now - 86_400_000).toISOString() },
+    ];
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: new RegExp(`^${DANA}`) }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const links = rows.map(row => document.querySelector<HTMLAnchorElement>(`.cd-conversations__items a[href="${conversation(row.session_id)}"]`)!);
+    const preview = links[0]!.querySelector<HTMLElement>('.cd-conversation-item__quote');
+    expect(preview, 'visitor preview remains above status and Recorded').not.toBeNull();
+    expect(preview!.textContent).toBe(`“${longPreview}”`);
+    expect(preview!.querySelector('b')).toBeNull();
+    expect(preview!.dataset.copy).toBe('user');
+    expect(getComputedStyle(preview!).whiteSpace).toBe('nowrap');
+    expect(getComputedStyle(preview!).textOverflow).toBe('ellipsis');
+    expect(getComputedStyle(preview!).fontSize).toBe('13px');
+    expect(getComputedStyle(preview!).color).toBe(tokenColor('--text-secondary'));
+    expect(preview!.scrollWidth).toBeGreaterThan(preview!.clientWidth);
+    expect(preview!.getBoundingClientRect().height).toBe(18);
+    const status = links[0]!.querySelector('.cd-conversation-item__status')!;
+    expect(status.textContent).toContain('Needs you');
+    expect(status.textContent).toContain('Recorded');
+    expect(status.getBoundingClientRect().top).toBeGreaterThanOrEqual(preview!.getBoundingClientRect().bottom);
+    expect(links[1]!.querySelector('.cd-conversation-item__quote')?.textContent).toBe('“Tuesday at 2 works.”');
+    for (const link of links.slice(2)) expect(link.querySelector('.cd-conversation-item__quote')).toBeNull();
+    const right = links[0]!.querySelector('.cd-conversation-item__time')!.getBoundingClientRect().right;
+    for (const link of links) {
+      expect(link.querySelector('.cd-conversation-item__time')!.getBoundingClientRect().right).toBe(right);
+      expect(link.scrollWidth).toBeLessThanOrEqual(link.clientWidth);
+    }
+    const groups = [...document.querySelectorAll<HTMLElement>('.cd-conversations__under > .cd-conversations__group')];
+    expect(groups).toHaveLength(2);
+    expect(getComputedStyle(groups[1]!).marginTop).toBe('8px');
+    expect(groups[1]!.getBoundingClientRect().top - groups[0]!.getBoundingClientRect().bottom).toBe(24);
+    for (const group of groups) {
+      const day = group.querySelector<HTMLElement>('.cd-conversations__day')!;
+      const style = getComputedStyle(day);
+      const rule = getComputedStyle(day, '::after');
+      expect(style.fontSize).toBe('12px');
+      expect(style.fontWeight).toBe('520');
+      expect(style.color).toBe(tokenColor('--text-tertiary'));
+      expect(style.gap).toBe('8px');
+      expect(style.paddingLeft).toBe('8px');
+      expect(style.paddingRight).toBe('8px');
+      expect(rule.content).toBe('""');
+      expect(rule.height).toBe('1px');
+      expect(rule.backgroundColor).toBe(tokenColor('--line-hairline'));
+      expect(Number.parseFloat(rule.width)).toBeGreaterThan(40);
+      expect(day.getBoundingClientRect().right).toBe(group.getBoundingClientRect().right);
+      const ruleRight = day.firstElementChild!.getBoundingClientRect().right + 8 + Number.parseFloat(rule.width);
+      expect(Math.abs(ruleRight - group.getBoundingClientRect().right)).toBeLessThanOrEqual(1);
+    }
+    expectNoHorizontalScroll();
+  });
+
   it.each([[1440, 900], [1800, 1009], [390, 844]])('open_conversation_centres_its_reading_column_at_%sx%s', async (width, height) => {
     const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width, height } });
     const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });

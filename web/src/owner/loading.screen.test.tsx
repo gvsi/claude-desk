@@ -1242,6 +1242,7 @@ const LIST_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'conversations-caption', page: '.cd-conversations__caption' },
   { name: 'conversations-day-0', page: '.cd-conversations__day' },
   { name: 'conversation-row-0', page: '.cd-conversations__items > li:first-child > .cd-conversation-item', size: true },
+  { name: 'conversation-row-1', page: '.cd-conversations__items > li:nth-child(2) > .cd-conversation-item', size: true },
   { name: 'conversation-row-2', page: '.cd-conversations__items > li:nth-child(3) > .cd-conversation-item', size: true },
 ];
 

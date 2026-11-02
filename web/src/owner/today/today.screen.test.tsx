@@ -1426,10 +1426,12 @@ describe('Today', () => {
     await expect.poll(() => quoteIn(danaRow())?.textContent, { timeout: 5_000 }).toBe('“Actually, could it be 3 pm instead?”');
     expect(live.getByText('“Tuesday at 2 works.”', { exact: true }).elements()).toHaveLength(0);
 
-    // The Conversations list doesn't quote anyone.
+    // Conversations keeps the preview above status; Live now's two-line rows above stay unchanged.
     const list = await renderRoute(CONVERSATIONS);
     await expect.element(list.screen.getByRole('link', { name: /Needs you/ }).first()).toBeVisible();
-    expect(document.querySelectorAll('.cd-conversation-item__quote')).toHaveLength(0);
+    const heldRow = list.screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /50% off/ }).element();
+    expect(quoteIn(heldRow)?.textContent).toBe('“Can I get 50% off if I pay cash?”');
+    expect(heldRow.querySelector('.cd-conversation-item__status')?.textContent).toBe('Needs you');
   });
 
   it('live_now_quotes_named_people_over_what_they_are', async () => {
