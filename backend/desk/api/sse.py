@@ -219,6 +219,11 @@ class Listener:
             if not streams:
                 self._streams.pop(session_id, None)
 
+    def streaming(self, session_id: str) -> bool:
+        """Whether a stream of the session is open in this process now (only the visitor's public stream
+        subscribes)."""
+        return bool(self._streams.get(session_id))
+
     async def _connect(self) -> None:
         conn = await psycopg.AsyncConnection.connect(self._conninfo, autocommit=True,
                                                      application_name="desk-api-run-events")

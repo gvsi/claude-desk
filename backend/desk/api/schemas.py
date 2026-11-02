@@ -472,12 +472,15 @@ class OwnerTranscript(BaseModel):
     """`GET /api/owner/conversations/{session_id}?after=n`: the session's state and its transcript after the cursor, as
     the owner sees it (agent text, whispers, translations and triage included; model, note and context rows never).
     `typing_until` is when the visitor's typing dots stop, while the visitor is typing, else null (Plan 02b): presence,
-    kept in the API's memory and shown to the owner alone."""
+    kept in the API's memory and shown to the owner alone. `visitor_here`, presence too, is true while the visitor's
+    public chat stream is open, when a whisper reaches Claude at once; an agent holds no stream, so its session reads
+    false (Claude reads a whisper at its next request)."""
 
     state: SessionState
     items: list[OwnerTranscriptItem]
     typing_until: AwareDatetime | None
     replayed: bool = False                  # recorded history: no one adds to it and the owner can't take it over
+    visitor_here: bool = False
 
 
 # The owner in a conversation (Plan 02b) ----------------------------------------------------------------------------
