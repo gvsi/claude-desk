@@ -125,7 +125,16 @@ export function HeaderColourCard({ business, desk }: { business: BusinessOut; de
           className="cd-header-colour__preview"
           role="group"
           aria-label="Header preview"
-          style={{ backgroundColor: brand.field, borderBottomColor: brand.accent, color: brand.ink }}
+          // The public header's own field and inks: paper ink on the owner's colour in both themes,
+          // the theme's on the panel.
+          style={
+            {
+              backgroundColor: brand.field,
+              borderBottomColor: brand.accent,
+              color: brand.ink,
+              '--cd-header-colour-ink-secondary': brand.inkSecondary,
+            } as CSSProperties
+          }
         >
           <span className="cd-header-colour__monogram cd-type-wordmark" aria-hidden="true">{brand.monogram}</span>
           <div className="cd-header-colour__names" data-copy="user">

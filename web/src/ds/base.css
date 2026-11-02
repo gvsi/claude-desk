@@ -6,6 +6,8 @@
   box-sizing: border-box;
 }
 
+/* The browser's own scheme (scrollbars, form controls) follows the theme: dark here, and light where
+   tokens.css's light blocks set the light theme, chosen on the root or by the system. */
 html {
   color-scheme: dark;
   -webkit-text-size-adjust: 100%;

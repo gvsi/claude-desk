@@ -1968,6 +1968,12 @@ describe('Conversations', () => {
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
     await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
     const before = quotes().length;
+    const stale = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    let release!: () => void;
+    const until = new Promise<void>((resolve) => { release = resolve; });
+    onTestFinished(() => release());
+    mockStore.inject({ route: 'conversation', status: 200, times: 1, until, body: stale });
+    await readsMore('conversation', 1);
 
     // The owner goes back to the list, and Dana asks and gets her answer meanwhile. Back on the
     // chat, the page shows the read it had first, then the reply where it belongs, drawn still: it
@@ -1976,6 +1982,8 @@ describe('Conversations', () => {
     await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
     priceTurn(chat, 'How much is drain clearing?');
     await router.navigate(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    release();
     await expect.poll(() => quotes().length).toBe(before + 1);
     await readsMore('conversation', 1);
     expect(landed.rows()).toEqual([]);

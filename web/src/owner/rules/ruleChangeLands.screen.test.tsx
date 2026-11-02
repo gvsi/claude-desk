@@ -449,11 +449,14 @@ describe('a preset or a new payment limit', () => {
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     expect(desk().policy.version).toBe(version);
     await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
-    // Every row whose rules it changed lands, and those it left alone (the starter's own) don't.
-    const changed = ['Emergency callback', 'Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
+    // Every row whose rules it changed lands; the starter's own tools and the Desk's jobs stay unchanged.
+    const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
     await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
     for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
-    for (const name of ['Find open times', 'Save a lead', 'Request a callback']) expect(fillOf(toolRow(root, name)), name).toBe('none');
+    for (const name of ['Emergency callback', 'Find open times', 'Save a lead', 'Request a callback']) {
+      expect(fillOf(toolRow(root, name)), name).toBe('none');
+      expect(saysUpdated(toolRow(root, name)), name).toBe(false);
+    }
     expect(flashed).toBe(false);
     await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
     expect(updatedRows(root).sort()).toEqual([...changed].sort());
@@ -994,8 +997,9 @@ describe('under StrictMode, as the app renders', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
-    const changed = ['Emergency callback', 'Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
+    const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
     await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
+    expect(saysUpdated(toolRow(root, 'Emergency callback'))).toBe(false);
     expect(root.textContent).not.toContain('Your rules are updated.');
   });
 });
