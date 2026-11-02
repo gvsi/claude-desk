@@ -6,7 +6,10 @@ import { CopyField } from './CopyField.tsx';
 import { CopyList } from '../CopyList/CopyList.tsx';
 import { CopyLink } from '../../../owner/share/CopyLink.tsx';
 
+const cleanups: (() => void)[] = [];
+
 afterEach(() => {
+  cleanups.splice(0).forEach((cleanup) => cleanup());
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -81,4 +84,106 @@ it('shows only the latest copy, announces each press, and keeps the confirmation
     if (host.hasChildNodes()) act(() => root.unmount());
     host.remove();
   }
+});
+
+async function renderControls(writeText: (text: string) => Promise<void> | void) {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('navigator', { clipboard: { writeText } });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  let mounted = true;
+  const unmount = () => {
+    if (mounted) act(() => root.unmount());
+    mounted = false;
+  };
+  cleanups.push(() => {
+    unmount();
+    host.remove();
+  });
+  await act(async () => root.render(createElement('div', null,
+    createElement(CopyLink, { url: 'https://desk.example/d/turner', look: 'text' }),
+    createElement(CopyField, { value: 'Address', copyLabel: 'Copy address', onCopy: writeText, language: 'en' }),
+  )));
+  return {
+    host,
+    unmount,
+    lines: () => [...host.querySelectorAll('[role="status"]')].filter((el) => el.textContent !== ''),
+    press: async (label: string) => {
+      const button = [...host.querySelectorAll('button')].find((el) => el.textContent === label)!;
+      await act(async () => button.click());
+    },
+  };
+}
+
+it('clears a failed line when another control copies successfully', async () => {
+  const writeText = vi.fn().mockRejectedValueOnce(new Error('Clipboard unavailable')).mockResolvedValue(undefined);
+  const controls = await renderControls(writeText);
+  await controls.press('Copy address');
+  expect(controls.lines().map((el) => el.textContent)).toEqual(['Copy didn’t work. The text is selected, so copy it yourself.']);
+  expect(document.getSelection()?.toString()).toBe('Address');
+  await controls.press('Copy link');
+  expect(controls.lines().map((el) => el.textContent)).toEqual(['Copied.']);
+  expect(controls.lines()[0]?.closest('.cd-copy-link')).not.toBeNull();
+});
+
+it('replaces success with failure on the same control and announces repeated failures', async () => {
+  const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValue(new Error('Clipboard unavailable'));
+  const controls = await renderControls(writeText);
+  await controls.press('Copy address');
+  const status = controls.lines()[0]!;
+  expect(status.textContent).toBe('Copied.');
+  const success = status.firstChild;
+  await controls.press('Copy address');
+  expect(controls.lines()).toEqual([status]);
+  expect(status.textContent).toBe('Copy didn’t work. The text is selected, so copy it yourself.');
+  expect(status.firstChild).not.toBe(success);
+  const failure = status.firstChild;
+  await controls.press('Copy address');
+  expect(status.firstChild).not.toBe(failure);
+  expect(document.getSelection()?.toString()).toBe('Address');
+});
+
+it.each(['resolve', 'reject'] as const)('ignores a copy that finishes after unmount: %s', async (finish) => {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const pending = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+  const old = await renderControls(() => pending);
+  await old.press('Copy address');
+  old.unmount();
+  const current = await renderControls(async () => {});
+  await current.press('Copy link');
+  const selection = document.getSelection()?.toString();
+  await act(async () => {
+    if (finish === 'resolve') resolve();
+    else reject(new Error('Clipboard unavailable'));
+    await pending.catch(() => {});
+  });
+  expect(old.host.childNodes).toHaveLength(0);
+  expect(current.lines().map((el) => el.textContent)).toEqual(['Copied.']);
+  expect(document.getSelection()?.toString()).toBe(selection);
+});
+
+it.each(['resolve', 'reject'] as const)('clears on press and ignores an older pending copy: %s', async (finish) => {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const pending = new Promise<void>((done, fail) => { resolve = done; reject = fail; });
+  const writeText = vi.fn().mockResolvedValueOnce(undefined).mockReturnValueOnce(pending).mockResolvedValue(undefined);
+  const controls = await renderControls(writeText);
+  await controls.press('Copy address');
+  expect(controls.lines().map((el) => el.textContent)).toEqual(['Copied.']);
+  await controls.press('Copy link');
+  expect(controls.lines()).toEqual([]);
+  await controls.press('Copy address');
+  const status = controls.lines()[0]!;
+  const selection = document.getSelection()?.toString();
+  await act(async () => {
+    if (finish === 'resolve') resolve();
+    else reject(new Error('Clipboard unavailable'));
+    await pending.catch(() => {});
+  });
+  expect(controls.lines()).toEqual([status]);
+  expect(status.closest('.cd-copy-field')).not.toBeNull();
+  expect(status.textContent).toBe('Copied.');
+  expect(document.getSelection()?.toString()).toBe(selection);
 });
