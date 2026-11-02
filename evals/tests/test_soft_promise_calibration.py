@@ -234,7 +234,8 @@ def test_the_case_file_holds_every_group():
     assert sorted(answer for _, _, answer in told) == ["flag", "pass"]
     # the follow-up the handoff card states passes beside that card, as the kernel renders it in the
     # case's language, and only there: the same words with no card are a promise
-    rivera = DeskInfo(owner_display_name="Maria Rivera", timezone="America/Los_Angeles")
+    rivera = DeskInfo(owner_display_name="Maria Rivera", business_name="Maria Rivera Plumbing",
+                      timezone="America/Los_Angeles")
     handoff = {language: "\n".join([card.title, *card.lines])
                for language, card in (("en", render_en.handoff(None, rivera)), ("es", render_es.handoff(None, rivera)))}
     here = [c for c in cases if c.group == "follow_up" and c.expected == "pass"]

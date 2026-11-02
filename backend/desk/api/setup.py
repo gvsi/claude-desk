@@ -304,6 +304,7 @@ from desk.contracts import (
     AUTO_MONEY_HARD_CAP_CENTS,
     MCP_TOOLS,
     MONEY_TOOLS,
+    OWNER_NAME_FALLBACK,
     BusinessSeed,
     CalendarSlot,
     Claim,
@@ -391,7 +392,6 @@ MEMORY_QUERY = "business services prices hours area contact website"
 READ_TEXT_MAX = 8000             # what a read keeps for later turns: the website tool's own model_view cut
 URL_MAX = 2048                   # the website tool's url argument
 OWNER_NAME_MAX = 40
-OWNER_NAME_FALLBACK = "Owner"
 # Outside Plan 01a's owner_display_name pattern (`OWNER_NAME_PATTERN`): dropped from a name.
 _OUTSIDE_OWNER_NAME = re.compile(rf"[^{OWNER_NAME_CHARS}]")
 _HOST = re.compile(r"[a-z0-9.-]{1,253}")

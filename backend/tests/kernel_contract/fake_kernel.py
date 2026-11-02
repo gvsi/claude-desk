@@ -156,6 +156,7 @@ from desk.contracts import (
     ITEM_ID_PATTERN,
     MCP_TOOLS,
     MONEY_TOOLS,
+    OWNER_NAME_FALLBACK,
     SLOT_ID_PATTERN,
     ApprovalResult,
     BusinessSeed,
@@ -1354,6 +1355,14 @@ class Desk:
 
     def person(self, ref: str) -> Person:
         return next(person for person in self.people.values() if person.ref == ref)
+
+    @property
+    def shown_owner(self) -> str:
+        """The name the kernel's visitor lines give the owner (the kernel's `render.shown_owner`): the business's
+        name when the owner's is setup's fallback for an owner who gave none, else the owner's."""
+        if self.owner_display_name == OWNER_NAME_FALLBACK and self.business_name:
+            return self.business_name
+        return self.owner_display_name
 
 
 @dataclass
@@ -2776,7 +2785,7 @@ class FakeKernelState:
             card_ids=card_ids,
             reason_plain=self._reason(session, desk, call, action, card_ids),
             visitor_plain=status_line(state, tool=tool, session_kind=session.kind, language=session.last_language,
-                                      owner=desk.owner_display_name),
+                                      owner=desk.shown_owner),
             answers=answers, expires_at=expires_at, ledger_seq=entry.seq, signature=""))
         # the alerts travel once, on this answer: the record every read answers from carries none
         record = DecisionRecord(decision=decision, copy_id=desk.copy_id, desk_id=desk.desk_id,
@@ -2869,7 +2878,7 @@ class FakeKernelState:
         entry = self.append(desk, kind, {"decision_id": decision.decision_id, "state": state, **summary},
                             session_id=decision.session_id, ref_id=decision.decision_id)
         line = status_line(state, tool=record.tool, session_kind=session.kind, language=session.last_language,
-                           owner=desk.owner_display_name,
+                           owner=desk.shown_owner,
                            business=desk.tools[record.tool].business if record.tool in desk.tools else None)
         owner_plain = None
         if state == "refused_at_execution":
@@ -3472,7 +3481,7 @@ class FakeKernelState:
             if clause.fact_id is not None:
                 return refuse("unknown_fact", "names_no_fact")
             key = "handoff" if template == "handoff" else "verify"
-            text = REPLY_TEXT[language][key].format(owner=desk.owner_display_name)
+            text = REPLY_TEXT[language][key].format(owner=desk.shown_owner)
             return RenderedBlock(kind="card", template=template, text=text, title=text)
         fact = desk.facts.get(clause.fact_id or "")
         if fact is None:
@@ -3507,7 +3516,8 @@ class FakeKernelState:
             if 'appointment_type' in claims:
                 from desk.kernel_service import render
                 return render.render_clause(Clause(template=template, fact_id=fact.fact_id), fact, language,
-                    render.DeskInfo(owner_display_name=desk.owner_display_name, timezone=desk.timezone))
+                    render.DeskInfo(owner_display_name=desk.owner_display_name, business_name=desk.business_name,
+                                    timezone=desk.timezone))
         elif template == "hours":
             title = REPLY_TEXT[language]["hours"]
             lines = [f"{', '.join(window.days)} {window.start:%H:%M}-{window.end:%H:%M}" for window in desk.hours]
@@ -3517,7 +3527,7 @@ class FakeKernelState:
             title, lines = claims["title"], [money(claims["total"])]
             href = f"/pay/{self.payment_links[claims['ref']].token}"
         elif template == "callback_confirmed":
-            title = f"{desk.owner_display_name} will call you back."
+            title = f"{desk.shown_owner} will call you back."
         elif template == "charge_confirmed":
             title, lines = claims.get("title", "Payment"), [money(claims["total"])]
         else:
@@ -3544,7 +3554,7 @@ class FakeKernelState:
             blocks = []
         elif not ok:
             kept = [block for block in blocks if block.kind == "card" and block.template != "handoff"]
-            text = REPLY_TEXT[language]["handoff"].format(owner=desk.owner_display_name)
+            text = REPLY_TEXT[language]["handoff"].format(owner=desk.shown_owner)
             handoff = RenderedBlock(kind="card", template="handoff", text=text, title=text)
             prose_only = all(violation.kind in PROSE_ONLY for violation in violations)
             if prose_only and final and author == "claude" and self._status_line_fits(session, blocks, violations):
@@ -3573,7 +3583,7 @@ class FakeKernelState:
             session_id=session.session_id, ref_id=message_id)
         plain = ("owner_said" if ok else "owner_say_blocked") if author == "owner" else (
             "handed_off" if not shown or any(block.template == "handoff" for block in blocks) else "checked")
-        visitor_plain = REPLY_TEXT[language][plain].format(owner=desk.owner_display_name)
+        visitor_plain = REPLY_TEXT[language][plain].format(owner=desk.shown_owner)
         blocks_sha256 = sha256_hex(canonical([block.model_dump(mode="json") for block in blocks]))
         return ReplyVerdict(
             ok=ok, language=language, blocks=blocks, violations=violations, message_id=message_id,
@@ -4115,9 +4125,9 @@ class FakeKernelState:
                     or link.cancelled_by_version != version or session.closed_at is not None):
                 continue
             language = session.last_language or "en"
-            reason = (f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
+            reason = (f"This payment link was cancelled because {desk.shown_owner}'s rules changed. "
                       "Ask again if you still want to pay." if language == "en" else
-                      f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "
+                      f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.shown_owner}. "
                       "Pídelo de nuevo si todavía quieres pagar.")
             title, lines = money(link.amount_cents), [link.title, reason]
             block = RenderedBlock(kind="card", template="link_cancelled", text="\n".join([title, *lines]),

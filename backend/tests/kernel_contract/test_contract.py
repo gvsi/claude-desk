@@ -24,6 +24,7 @@ from desk.api.owner_reads import refusal_cause
 from desk.api.ro import KernelRO
 from desk.contracts import (
     BRAND_PALETTE,
+    OWNER_NAME_FALLBACK,
     AgentAuth,
     ApprovalResult,
     BusinessSeed,
@@ -836,6 +837,42 @@ async def test_status_lines_are_the_kernels(kernel, ro_read):
         "Respuesta revisada con las reglas de Mike Turner")
     assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain))).visitor_plain == (
         "Revisado con las reglas de Mike Turner")
+
+
+@pytest.mark.kernel_plan("01b")
+async def test_status_lines_name_the_business_when_the_owner_gave_no_name(kernel, ro_read):
+    """With the owner named as setup names one who gave no name (`OWNER_NAME_FALLBACK`), the kernel's status lines
+    and handoff card name the business instead, in the session's language; only the name changes."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    slug = desk_slug(ro_read, ro_schema, copy)
+    drain = item_id(ro_read, ro_schema, copy, "Drain clearing")
+    await http.owner(copy.owner_token).call("PUT /desks/{id}/business", DeskBusinessRequest(
+        name="Turner Plumbing", owner_display_name=OWNER_NAME_FALLBACK, timezone="America/Los_Angeles"),
+        path={"id": copy.desk_ids[0]})
+    visitor = await new_visitor(http, slug)
+    view, session_id = http.session(visitor.session_token), visitor.state.session_id
+    allowed = await decide(view, session_id, 0, "call-allow", "native.quote", quote_args(drain))
+    held = await decide(view, session_id, 0, "call-hold", "native.quote", quote_args(drain, 1500))
+    assert [decision.visitor_plain for decision in (allowed, held)] == [
+        "Checked against Turner Plumbing's rules", "Waiting for Turner Plumbing to approve"]
+    assert (await check_reply(view, session_id, 0, "Happy to help.")).visitor_plain == (
+        "Reply checked against Turner Plumbing's rules")
+    draft = ReplyDraft(session_id=session_id, generation=0, prose="", clauses=[Clause(template="handoff")])
+    handed = await view.call("POST /check_reply", CheckReplyRequest(draft=draft, final=True))
+    assert ([block.title for block in handed.blocks], handed.visitor_plain) == (
+        ["Let me check with Turner Plumbing."], "Passed to Turner Plumbing to answer")
+
+    spanish = await new_visitor(http, slug)
+    view, session_id = http.session(spanish.session_token), spanish.state.session_id
+    assert (await check_reply(view, session_id, 0, "Hola, puedo ayudarle con eso.")).visitor_plain == (
+        "Respuesta revisada con las reglas de Turner Plumbing")
+    assert (await decide(view, session_id, 0, "call-1", "native.quote", quote_args(drain))).visitor_plain == (
+        "Revisado con las reglas de Turner Plumbing")
+    draft = ReplyDraft(session_id=session_id, generation=0, prose="", clauses=[Clause(template="handoff")])
+    handed = await view.call("POST /check_reply", CheckReplyRequest(draft=draft, final=True))
+    assert ([block.title for block in handed.blocks], handed.visitor_plain) == (
+        ["Déjame consultarlo con Turner Plumbing."], "Pasado a Turner Plumbing para responder")
 
 
 @pytest.mark.kernel_plan("01b")

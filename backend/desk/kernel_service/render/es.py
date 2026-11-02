@@ -131,7 +131,7 @@ def quote(fact: Fact | None, desk: DeskInfo) -> Card:
 
 def handoff(fact: Fact | None, desk: DeskInfo) -> Card:
     """`Déjame consultarlo con {owner}.` / `{owner} te responderá aquí.`"""
-    owner = desk.owner_display_name
+    owner = desk.owner
     return Card(title=f"Déjame consultarlo con {owner}.", lines=(f"{owner} te responderá aquí.",))
 
 
@@ -155,9 +155,9 @@ def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
         from desk.kernel_service.adapters.base import quoted
         return Card(title=date(start), lines=(f"{quoted(found['appointment_type'])} a las {clock(start)}",
                                               f"Unos {found['appointment_minutes']} minutos",
-                                              f"Con {desk.owner_display_name}"))
+                                              f"Con {desk.owner}"))
     return Card(title=date(start), lines=(f"De {clock(start)} a {clock(end)}",
-                                          f"Con {desk.owner_display_name}"))
+                                          f"Con {desk.owner}"))
 
 
 def charter_text(fact: Fact | None, desk: DeskInfo) -> Card:
@@ -172,7 +172,7 @@ def verify_prompt(fact: Fact | None, desk: DeskInfo) -> Card:
 def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
     """`{owner} te llamará el {day}, entre las {start} y las {end}`; sin horario `{owner} te llamará`.
     El hecho guarda solo el horario, nunca el texto del visitante."""
-    owner = desk.owner_display_name
+    owner = desk.owner
     window = callback_window(fact, desk)
     if window is None:
         return Card(title=f"{owner} te llamará")
@@ -229,7 +229,7 @@ def link_cancelled(fact: Fact | None, desk: DeskInfo) -> Card:
     canceló un cambio de reglas, desde el hecho `payment_link` de ese mismo enlace."""
     return Card(title=money(claims(fact)["total"]), lines=(
         title_claim(fact),
-        f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "
+        f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner}. "
         "Pídelo de nuevo si todavía quieres pagar."))
 
 
