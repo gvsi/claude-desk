@@ -1619,7 +1619,7 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     shown = [row for row in rows
              if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
     asked = await _receipt_asked(ctx, session_row, shown)
-    owner = ((await _desk_info(ctx, session_row.desk_id)).owner_display_name
+    owner = ((await _desk_info(ctx, session_row.desk_id)).owner
              if any(row.state == "executed" for row in shown) else None)
     return [(key, row.visitor_plain, owner if row.state == "executed" else None)
             for row, key in zip(shown, asked, strict=True) if key is not None]

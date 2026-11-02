@@ -72,7 +72,7 @@ def test_no_kernel_line_takes_the_stored_owner_name_unresolved():
     # Every status line and receipt names the owner through `render.shown_owner` (cards through `DeskInfo.owner`):
     # a caller passing the stored name as it is would bring "Owner" back on a Desk whose owner gave none.
     root = Path(render.__file__).resolve().parent.parent
-    raw = re.compile(r"owner=(?!(?:render\.)?shown_owner\()[^,)]*owner_display_name")
+    raw = re.compile(r"\bowner\s*=\s*(?!(?:render\.)?shown_owner\().*\.owner_display_name\b")
     assert [f"{path.relative_to(root)}:{number}" for path in sorted(root.rglob("*.py"))
             for number, line in enumerate(path.read_text().splitlines(), 1) if raw.search(line)] == []
 
@@ -169,6 +169,21 @@ async def test_a_requests_status_lines_and_receipts_name_the_business(app, clien
     assert held.visitor_plain == "Esperando la aprobación de Turner Plumbing"
     denied = await answered(client, copy.owner, held.decision_id, "deny_once")
     assert denied.decision.visitor_plain == "Turner Plumbing decidió no seguir adelante"
+
+
+async def test_an_approved_request_that_ran_reads_the_business_approval_in_its_receipt(app, client, reviewer):
+    # The check reads an approved request's receipt as the chat showed it ("Turner Plumbing approved this", then what
+    # it did), so a reply saying the business approved it is backed on a Desk whose owner gave no name too.
+    from .test_soft_promise import CLEAN, held_quote
+
+    copy, visitor = await visitor_of(app, client)
+    await unnamed(client, copy)
+    held = await held_quote(client, visitor)
+    result = await answered(client, copy.owner, held.decision_id, "allow_once")
+    assert result.decision.state == "executed", result
+    assert (await checked(client, visitor, CLEAN)).ok
+    assert reviewer.soft_inputs[-1].cards == [
+        "Request receipt card: Quote request: Turner Plumbing approved this; Quoted from Turner Plumbing's price list"]
 
 
 async def test_a_replys_receipt_and_the_handoff_card_name_the_business(app, client):
