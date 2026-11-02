@@ -929,6 +929,9 @@ def test_demo_visitor_plays_an_honest_customer_who_reads_the_chat_as_information
     # It stops on its own: a hold isn't the end, and done carries no message.
     assert "Set done to true, with an empty message" in DEMO_VISITOR_SYSTEM
     assert "A request the business is checking with the owner isn't the end" in DEMO_VISITOR_SYSTEM
+    assert "the chat has been handed off and answered" in DEMO_VISITOR_SYSTEM
+    assert "Never set done just because the business handed the chat to its owner" in DEMO_VISITOR_SYSTEM
+    assert "Wait for the owner's answer; if none arrives, the runner handles silence and limits" in DEMO_VISITOR_SYSTEM
     assert VisitorStep.model_json_schema()["required"] == ["message", "done"]
     assert VisitorStep.model_config["extra"] == "forbid" and VisitorStep.model_fields["message"].metadata
 

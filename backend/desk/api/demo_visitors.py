@@ -271,9 +271,8 @@ class _Answer:
 def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
     """Whether the events after `mark` (the feed's length when the message went) answer it: Claude's turn ending while
     Claude has the chat, or the owner's words or an idle hand-back. A hand-back resuming work waits for Claude's
-    turn to end. The stream's `session` error is the
-    chat ending."""
-    mode, heard = "ai", None
+    turn to end. An unanswered handoff waits under the owner-silence rule. The stream's `session` error ends the chat."""
+    mode, heard, handoff = "ai", None, False
     for index, seen in enumerate(events):
         event = seen.event
         kind = event.type
@@ -287,11 +286,19 @@ def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
             raise _Ended("chat_ended")
         if kind in ("owner_joined", "owner_typing"):
             heard = seen.at
-        elif (kind == "owner_left" and not event.resuming) or (kind == "message" and event.author == "owner"):
+        elif kind == "message":
+            if event.author == "owner":
+                return _Answer(True, mode, heard)
+            if event.author == "claude":
+                if event.handoff and not handoff:
+                    heard = seen.at
+                handoff = event.handoff
+        elif kind == "owner_left" and not event.resuming and not handoff:
             return _Answer(True, mode, heard)
-        elif kind == "turn_end" and mode != "owner":
+        elif kind == "turn_end" and mode != "owner" and not handoff:
             return _Answer(True, mode, heard)
-    return _Answer(False, mode, heard)
+    # A handoff is a wait for an answer, even when the session still routes messages to Claude.
+    return _Answer(False, "owner" if handoff else mode, heard)
 
 
 async def _first(feed: _Feed, timer: Awaitable[None]) -> None:

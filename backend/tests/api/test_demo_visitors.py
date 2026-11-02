@@ -619,6 +619,37 @@ async def test_nudges_the_quiet_owner_once_then_ends_owner_silent(app, browser, 
     assert sleeps.timers == [NUDGE_AFTER_S, OWNER_SILENT_S - NUDGE_AFTER_S]
 
 
+@pytest.mark.parametrize("owner_answers", [True, False])
+async def test_handoff_waits_for_an_answer_or_owner_silence(
+        app, browser, fake, visitors, visitor_model, desk_model, engine, copy, sleeps, owner_answers):
+    visitor_model.add(step("Can you fix a leaking sink?"), step("", done=True))
+    desk_model.add(response(reply("", {"template": "handoff"})),
+                   response(reply("", {"template": "handoff"})))
+    started = await start(visitors, fake, copy)
+    await until(lambda: turn_ends_at_least(engine, started.session_id, 1))
+    await asyncio.sleep(0.1)
+    assert len(visitor_model.requests) == 1, "An unanswered handoff reached the model's done step"
+    assert visitors.run(started.run_id, copy.copy_id).state == "running"
+    assert await sleeps.waiting(NUDGE_AFTER_S) == NUDGE_AFTER_S
+    if owner_answers:
+        owner = owner_of(app, browser, copy)
+        await change_mode(owner, fake, started.session_id, "takeover")
+        await owner_writes(owner, started.session_id, "I can help arrange your visit.")
+    else:
+        assert await sleeps.elapse(NUDGE_AFTER_S) == NUDGE_AFTER_S
+        assert await sleeps.elapse(OWNER_SILENT_S - NUDGE_AFTER_S) == OWNER_SILENT_S - NUDGE_AFTER_S
+    await asyncio.wait_for(visitors.drain(), 5)
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended) == ("done", "finished" if owner_answers else "owner_silent")
+    if owner_answers:
+        assert "Mike Turner (the owner, a person): I can help arrange your visit." in last_input(
+            visitor_model.requests[1])
+    else:
+        assert len(visitor_model.requests) == 1
+        assert await rows(engine, started.session_id, "visitor_text") == [
+            "Can you fix a leaking sink?", "Are you still there?"]
+
+
 # How a run ends ---------------------------------------------------------------------------------------------------
 
 
