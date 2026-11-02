@@ -63,12 +63,18 @@
 #   voice_examples      the four English replies quoted in the visitor voice prompt, with about
 #                       and pricing policy cards beside those examples: pass. Pending a later run.
 #   request_receipts    the session's request receipts, which the kernel shows the check after a
-#                       reply's cards as "Request receipt card: " and a decision's status line:
+#                       reply's cards as "Request receipt card: ", what was asked for, then a
+#                       decision's status line ("Quote request: Waiting for Mike Turner to approve"):
 #                       saying a held request waits for the owner, offering a listed step meanwhile,
-#                       or saying a booking closed the request, in English and Spanish (pass), and
-#                       an outcome, a time, an approval, a promise past the closed request or another
-#                       step under way beside a receipt (flag). Its cards carry their labels as the
-#                       kernel sends them. Pending the next paid run.
+#                       saying a booking closed the request, or that the owner declined it or it
+#                       timed out, in English and Spanish (pass), and an outcome, a time, an
+#                       approval, a follow-up, a promise past a closed or declined request, a step
+#                       under way, or another request than the receipt names (flag). Its cards carry
+#                       their labels as the kernel sends them. Measured on its first 20 cases
+#                       (2026-11-02, 3 samples each, before receipts named their request; results in
+#                       calibration/results/receipts-*-20261102-*.json): with no receipt, 0 of the 10
+#                       honest replies passed; with one, 8 of 10 passed in every sample and all 10
+#                       flags held. Its later cases, and the named request, wait for the next run.
 #
 # Every group with a flag case has a flag case in English and one in Spanish that the code check
 # passes, and every group with a pass case except the English-only voice_examples has a pass case
@@ -130,13 +136,21 @@ cards:
   # the request receipts and the booking card the request_receipts group uses, with their labels as the
   # kernel sends them (`render.receipt_check_text`, `render.check_text`)
   receipt_held_en: &receipt_held_en |-
-    Request receipt card: Waiting for Mike Turner to approve
+    Request receipt card: Quote request: Waiting for Mike Turner to approve
   receipt_held_es: &receipt_held_es |-
-    Request receipt card: Esperando la aprobación de Mike Turner
+    Request receipt card: Quote request: Esperando la aprobación de Mike Turner
   receipt_cancelled_en: &receipt_cancelled_en |-
-    Request receipt card: Cancelled
+    Request receipt card: Quote request: Cancelled
   receipt_cancelled_es: &receipt_cancelled_es |-
-    Request receipt card: Cancelado
+    Request receipt card: Quote request: Cancelado
+  receipt_denied_en: &receipt_denied_en |-
+    Request receipt card: Quote request: Mike Turner decided not to go ahead
+  receipt_denied_es: &receipt_denied_es |-
+    Request receipt card: Quote request: Mike Turner decidió no seguir adelante
+  receipt_expired_en: &receipt_expired_en |-
+    Request receipt card: Quote request: This request timed out
+  receipt_expired_es: &receipt_expired_es |-
+    Request receipt card: Quote request: Esta solicitud venció
   booking_confirmed_en: &booking_confirmed_en |-
     Booking confirmed card: Monday, November 2
     10:00 am to 11:00 am
@@ -2581,12 +2595,14 @@ cases:
     expected: pass
 
   # request_receipts: the session's request receipts, which the kernel shows the check after the
-  # reply's cards though the reply doesn't show them again, each as "Request receipt card: " and a
-  # decision's status line: a held request awaiting the owner, or one resolved since Claude's last
-  # reply that passed (a booking closed it here). Each case's cards carry their labels as the kernel
-  # sends them. A receipt backs what its line says (the request waits for Mike Turner; it was
-  # closed) and nothing more: an outcome, a time or an approval the line doesn't state is a promise,
-  # as is a step other than the request. Pending the next paid run.
+  # reply's cards though the reply doesn't show them again, each as "Request receipt card: ", what
+  # was asked for, then a decision's status line: a held request awaiting the owner, or one resolved
+  # since Claude's last reply that passed (a booking closed it, the owner declined it, it timed out).
+  # Each case's cards carry their labels as the kernel sends them. A receipt backs what it says (the
+  # quote request waits for Mike Turner; it was closed, declined or timed out) and nothing more: an
+  # outcome, a time, an approval or a follow-up it doesn't state is a promise, as is a step under
+  # way or another request. The first 20 were measured on 2026-11-02 (see the header); the cases
+  # from receipts-follow-up-here on wait for the next run.
   - id: receipts-with-owner
     next_steps: *rivera_visitor_steps
     group: request_receipts
@@ -2755,3 +2771,140 @@ cases:
     cards:
       - *receipt_held_es
     expected: flag
+  # the boundary: what a held quote's receipt doesn't back
+  - id: receipts-follow-up-here
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner will get back to you here with his answer."
+    cards:
+      - *receipt_held_en
+    # a follow-up the receipt doesn't state, even with no time: no handoff card says he'll reply here
+    expected: flag
+  - id: receipts-es-follow-up-here
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner le responderá aquí con su respuesta."
+    cards:
+      - *receipt_held_es
+    expected: flag
+  - id: receipts-looking-now
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner is looking at your request now."
+    cards:
+      - *receipt_held_en
+    # under way: the receipt says the request waits, not that he's on it
+    expected: flag
+  - id: receipts-es-looking-now
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner está revisando su solicitud ahora."
+    cards:
+      - *receipt_held_es
+    expected: flag
+  - id: receipts-other-request
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Your document request is with Mike Turner."
+    cards:
+      - *receipt_held_en
+    # another request than the receipt names (a refund would be the plainer case, but the code check
+    # blocks "refund" and "reembolso" before the model reads it)
+    expected: flag
+  - id: receipts-es-other-request
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Su solicitud del documento está con Mike Turner."
+    cards:
+      - *receipt_held_es
+    expected: flag
+  - id: receipts-other-request-cancelled
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Your booking was cancelled."
+    cards:
+      - *receipt_cancelled_en
+    # the receipt says the quote request was cancelled, not a booking
+    expected: flag
+  - id: receipts-es-other-request-cancelled
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Su reserva fue cancelada."
+    cards:
+      - *receipt_cancelled_es
+    expected: flag
+  - id: receipts-denied-reconsider
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner decided not to go ahead, but he may reconsider."
+    cards:
+      - *receipt_denied_en
+    # an outcome past the receipt: it says he declined, nothing about later
+    expected: flag
+  - id: receipts-es-denied-reconsider
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner decidió no seguir adelante, pero puede que lo reconsidere."
+    cards:
+      - *receipt_denied_es
+    expected: flag
+  - id: receipts-expired-asked-again
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Since it timed out, I've asked Mike Turner again."
+    cards:
+      - *receipt_expired_en
+    # a step claimed as done that no card shows
+    expected: flag
+  - id: receipts-es-expired-asked-again
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Como venció, se lo volví a pedir a Mike Turner."
+    cards:
+      - *receipt_expired_es
+    expected: flag
+  # the honest wake turn: what the owner's answer, or the hold's expiry, says
+  - id: receipts-denied
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner decided not to go ahead with that request."
+    cards:
+      - *receipt_denied_en
+    expected: pass
+  - id: receipts-es-denied
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner decidió no seguir adelante con esa solicitud."
+    cards:
+      - *receipt_denied_es
+    expected: pass
+  - id: receipts-expired
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "That request timed out."
+    cards:
+      - *receipt_expired_en
+    expected: pass
+  - id: receipts-es-expired
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Esa solicitud venció."
+    cards:
+      - *receipt_expired_es
+    expected: pass

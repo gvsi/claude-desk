@@ -195,7 +195,7 @@ def test_the_case_file_holds_every_group():
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
         "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4,
-        "request_receipts": 20}
+        "request_receipts": 36}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
@@ -203,7 +203,7 @@ def test_the_case_file_holds_every_group():
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
         "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
-        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 10, "flag": 10}}
+        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 14, "flag": 22}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
     from desk.api.prompts import VOICE_EXAMPLES
@@ -283,30 +283,42 @@ def test_the_case_file_holds_every_group():
 
 def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
     """The session's request receipts reach the check after the reply's cards, each as the kernel's receipt
-    label and a decision's status line in the case's language (`render.receipt_check_text`), so each case
-    holds the receipt it leans on as the kernel would send it, and its other cards with their kinds' labels."""
+    label, what was asked for and a decision's status line in the case's language
+    (`render.receipt_check_text`), so each case holds the receipt it leans on as the kernel would send it, and
+    its other cards with their kinds' labels. Any status a held request can reach may be on one."""
+    from desk.kernel_service import render as kernel_render
     from desk.kernel_service.render import receipt_check_text
 
     cases = {c.id: c for c in load_cases(CASES_FILE) if c.group == "request_receipts"}
-    status = {"en": render_en.STATUS, "es": render_es.STATUS}
-    receipts = {receipt_check_text(status[language][key].format(owner="Mike Turner")): language
-                for language in ("en", "es") for key in ("held", "cancelled")}
+    reached = ("held", "approved", "denied", "expired", "cancelled", "failed", "unknown", "refused_at_execution",
+               "tool_unavailable")
+    receipts = {}
+    for language in ("en", "es"):
+        for tool, subject in kernel_render.RECEIPT_SUBJECTS.items():
+            lines = [kernel_render.status(key, language, owner="Mike Turner") for key in reached]
+            if tool in kernel_render.EXECUTED[language]:
+                lines.append(kernel_render.executed_status(tool, language, owner="Mike Turner"))
+            receipts.update({receipt_check_text(subject, line): language for line in lines})
     for case_ in cases.values():
         assert [receipts[card] for card in case_.cards if card in receipts] == [case_.language], case_.id
         assert all(card in receipts or card.startswith("Booking confirmed card: ") for card in case_.cards), case_.id
         assert not code_blocked(case_), case_.id
     # the held status line alone backs saying the request waits for approval, in each language
-    held = {language: receipt_check_text(status[language]["held"].format(owner="Mike Turner"))
+    held = {language: receipt_check_text("Quote", kernel_render.status("held", language, owner="Mike Turner"))
             for language in ("en", "es")}
-    assert held == {"en": "Request receipt card: Waiting for Mike Turner to approve",
-                    "es": "Request receipt card: Esperando la aprobación de Mike Turner"}
+    assert held == {"en": "Request receipt card: Quote request: Waiting for Mike Turner to approve",
+                    "es": "Request receipt card: Quote request: Esperando la aprobación de Mike Turner"}
     assert {(c.language, c.prose, c.expected): c.cards for c in cases.values() if c.id.endswith("waiting-approval")} == {
         ("en", "This is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
         ("es", "Esto está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
-    # a cancelled request's receipt backs that it closed, beside the booking that closed it, and no promise
-    closed = [c for c in cases.values() if c.cards[-1].endswith(("Cancelled", "Cancelado"))]
-    assert sorted((c.language, c.expected, len(c.cards)) for c in closed) == [
-        ("en", "flag", 1), ("en", "pass", 2), ("es", "flag", 1), ("es", "pass", 2)]
+    # each resolved receipt, in each language, backs one honest reply and stops at least one promise past it
+    for key in ("cancelled", "denied", "expired"):
+        lines = {receipt_check_text("Quote", kernel_render.status(key, language, owner="Mike Turner"))
+                 for language in ("en", "es")}
+        beside = [(c.language, c.expected) for c in cases.values() if c.cards[-1] in lines]
+        assert {("en", "pass"), ("es", "pass"), ("en", "flag"), ("es", "flag")} <= set(beside), key
+    # the cancelled request's honest reply stands beside the booking that closed it
+    assert all(len(c.cards) == 2 for c in cases.values() if c.id.endswith("closed-by-booking"))
 
 
 def uncovered(cases: list[Case], expected: tuple[str, ...] = ("flag", "flag_ai")) -> set[tuple[str, str]]:
