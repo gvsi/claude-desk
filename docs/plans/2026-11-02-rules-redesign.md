@@ -42,7 +42,7 @@
 - `ruleSentence(card: RuleCard, words: { business: BusinessTools; people?: PeopleOut | null; agents?: AgentNames }): SentencePart[]`:
   - **Lead by mode:** `auto` "Claude can ", `ask` "Claude asks you before ", `never` "Claude never ".
   - **Tool phrase** from `TOOL_PHRASES`: per built-in tool and effect group, a `can` phrase and a `before` phrase, in the boards' words. Examples:
-    - `native.quote`: "send quotes from your price list", before "any discount";
+    - `native.quote`: "send quotes from your price list", before "any discount" for the discount hold past a list-price quote rule, and "any quote" for an ask card on every quote (listed for the owner's sign-off, since no board draws it);
     - `native.book`: "book visits";
     - `native.create_payment_link`: "send payment links";
     - `native.charge_mandate`: "take agent payments";
@@ -69,7 +69,7 @@
   - the sentence, with key parts in `<strong>` (medium weight, tabular figures);
   - under it the meta line, with tool names set off as the owner's text (as #849 does) and " · " before who;
   - an optional outcome at the right (a dot plus the word, `OUTCOME_TONE`), stacked under the sentence on a phone.
-- **`<EffectTags effects reversible>`:** small fixed tags "Money", "Can't undo" and "Private data", as C4 draws them. They replace the effect sentences ("Changes something. Can be undone.") wherever a tool shows.
+- **`<EffectTags effects reversible>`:** small fixed tags "Money", "Can't be undone" and "Private data", as C4 draws them with the design review's v339 wording (matching the tool line and the signed N-Conn-19), 8 px after the tool title and 4 px between tags. They replace the effect sentences ("Changes something. Can be undone.") wherever a tool shows.
 
 **Tests:**
 - `ruleSentence` and `ruleMeta` on the Rivera fixture's cards give C1's exact rows, for example:
