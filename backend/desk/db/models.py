@@ -669,6 +669,19 @@ class Message(Base):
     replay_id: Mapped[str | None] = mapped_column(Text)            # recorded history: the copy's replayed night
 
 
+class ConversationRead(Base):
+    """The owner's read marker on one conversation (migration api_conversation_reads): the transcript cursor they have
+    seen, which only moves forward. One owner per copy, so it is keyed by the copy and the session."""
+
+    __tablename__ = "conversation_reads"
+    __table_args__ = {"schema": "app"}
+    copy_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    desk_id: Mapped[str] = mapped_column(Text)
+    read_through_n: Mapped[int] = mapped_column(BigInteger)        # an app.messages.n of the session
+    read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=NOW)   # when it last moved
+
+
 class RunEvent(Base):
     __tablename__ = "run_events"
     __table_args__ = {"schema": "app"}
