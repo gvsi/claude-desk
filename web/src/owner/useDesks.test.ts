@@ -194,29 +194,50 @@ describe('a page that reads Needs you as it opens', () => {
   });
 
   for (const strict of [false, true]) {
-    it(`replaces_a_read_sent_before_it_opened${strict ? '_under_strict_mode' : ''}`, async () => {
-      // The app kept a read with the quote held, and another went out on a page since left. The
-      // quote is answered meanwhile; that read's answer, from before this page opened, isn't the
-      // page's own. Its own read goes out once as it opens, under StrictMode too.
-      const reads = serveNeedsYou([heldQuote, []]);
+    const underStrictMode = strict ? '_under_strict_mode' : '';
+    for (const kept of [true, false]) {
+      it(`replaces_a_read_sent_before_it_opened${kept ? '' : '_with_nothing_kept'}${underStrictMode}`, async () => {
+        // Another read went out on a page since left (the app kept an earlier read with the quote
+        // held, or none yet). The quote is answered meanwhile: that read's answer, from before this
+        // page opened, isn't the page's own. Its own read goes out once as it opens, before the
+        // earlier read comes back, under StrictMode too.
+        const reads = serveNeedsYou([heldQuote, []]);
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+        stops.push(() => queryClient.clear());
+        if (kept) queryClient.setQueryData(needsYouKey(RIVERA.deskId), heldQuote);
+        const leave = new QueryObserver(queryClient, needsYouQuery(RIVERA.deskId)).subscribe(() => undefined);
+        await vi.waitFor(() => expect(reads.received).toHaveLength(1));
+        leave();
+
+        open(queryClient, strict);
+        await vi.waitFor(() => expect(reads.received).toHaveLength(2));
+        reads.release(0);
+        // Time for the earlier read's answer to land, had it been kept.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(page?.isFetchedAfterMount).toBe(false);
+        expect(page?.data).toEqual(kept ? heldQuote : undefined);
+
+        reads.release(1);
+        await vi.waitFor(() => expect(page?.isFetchedAfterMount).toBe(true));
+        expect(page?.data).toEqual([]);
+        expect(reads.received).toHaveLength(2);
+      });
+    }
+
+    it(`reads_once_as_it_first_opens${underStrictMode}`, async () => {
+      // Nothing read yet and no read out: the page's read as it mounts is its own, sent once.
+      const reads = serveNeedsYou();
       const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       stops.push(() => queryClient.clear());
-      queryClient.setQueryData(needsYouKey(RIVERA.deskId), heldQuote);
-      const leave = new QueryObserver(queryClient, needsYouQuery(RIVERA.deskId)).subscribe(() => undefined);
-      await vi.waitFor(() => expect(reads.received).toHaveLength(1));
-      leave();
 
       open(queryClient, strict);
-      await vi.waitFor(() => expect(reads.received).toHaveLength(2));
-      reads.release(0);
-      // Time for the earlier read's answer to land, had it been kept.
+      await vi.waitFor(() => expect(reads.received).toHaveLength(1));
+      // Time for a second read to go out, had there been one.
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(page?.isFetchedAfterMount).toBe(false);
-
-      reads.release(1);
+      expect(reads.received).toHaveLength(1);
+      reads.release(0);
       await vi.waitFor(() => expect(page?.isFetchedAfterMount).toBe(true));
       expect(page?.data).toEqual([]);
-      expect(reads.received).toHaveLength(2);
     });
   }
 });

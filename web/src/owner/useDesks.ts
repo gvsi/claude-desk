@@ -96,33 +96,39 @@ export function useToday(deskId: string, { retryOnMount = true }: ReadOptions = 
 
 /**
  * What waits for the owner on a Desk: held requests and open callbacks, polled. With `readOnOpen`,
- * the page reads it again as it opens however fresh the kept read is, for a page that shows only
- * what a read of its own says (Rules' question about a hold): a read already out, which may have
- * gone out before the page opened (on a page since left), gives way to the page's own, and its
- * answer is dropped.
+ * for a page that shows only what a read of its own says (Rules' question about a hold), the page
+ * reads it again as it opens, however fresh the kept read is. A read still out as it opens, which
+ * may have gone out before it did (a poll on a page since left), is cancelled whether or not a read
+ * is kept, and React Query drops its answer, so only the page's own read counts as read since it
+ * opened. The page sends that read once, under StrictMode too.
  */
 export function useNeedsYou(deskId: string, { retryOnMount = true, readOnOpen = false }: ReadOptions & { readOnOpen?: boolean } = {}) {
   const queryClient = useQueryClient();
-  const needsYou = useQuery({
+  // The Desk whose Needs you this page has read as it opened: StrictMode runs the effect below twice
+  // for one opening, and the second run joins the first run's read rather than cancel it for another.
+  const opened = useRef<string | null>(null);
+  // Declared before the query, so it runs before the page subscribes to it (a component's effects
+  // run in order): the cancel below can only reach a read sent before the page opened.
+  useEffect(() => {
+    if (!readOnOpen) return;
+    const key = needsYouKey(deskId);
+    if (opened.current !== deskId) {
+      opened.current = deskId;
+      void queryClient.cancelQueries({ queryKey: key, exact: true });
+    }
+    // The page's own read. With nothing read yet, React Query leaves the query to the page's
+    // subscription just after, which sends it. StrictMode's second run joins the read the first run
+    // sent, which puts back the retries its rehearsed unmount stopped.
+    void queryClient.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: false });
+  }, [readOnOpen, queryClient, deskId]);
+  return useQuery({
     ...needsYouQuery(deskId),
     staleTime: FRESH_MS,
     refetchInterval: pollMs('needsYou'),
     retryOnMount,
-    // Not as it mounts, which would join a read already out: the page's read on opening is the one below.
+    // Not as it mounts, which would join a read already out: the page's read on opening is the one above.
     ...(readOnOpen ? { refetchOnMount: false } : {}),
   });
-  // The Desk whose Needs you this page has read as it opened: StrictMode runs the effect below twice
-  // for one opening, and the second run joins the first run's read rather than send another.
-  const opened = useRef<string | null>(null);
-  useEffect(() => {
-    if (!readOnOpen) return;
-    // A read already out is cancelled for the page's own, and React Query drops its answer, so it
-    // never lands after the page's. With nothing read yet, a read already out (the Desk's first) is
-    // joined instead.
-    void queryClient.refetchQueries({ queryKey: needsYouKey(deskId), exact: true }, { cancelRefetch: opened.current !== deskId });
-    opened.current = deskId;
-  }, [readOnOpen, queryClient, deskId]);
-  return needsYou;
 }
 
 /**

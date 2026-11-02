@@ -1566,19 +1566,11 @@ describe("Ask Claude's question about a hold", () => {
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
   });
 
-  it('hold_question_does_not_reuse_a_read_after_the_demo_inbox_opened', async () => {
-    // Opened once, the Demo inbox keeps a reader of Needs you for the Desk its alert names, idle
-    // while the sheet is closed: Rules is then not the read's last reader as the owner leaves, so
-    // the read started before leaving is still out as Rules opens again.
-    const { screen, router } = await renderRoute(`${DESK}/rules`);
-    const group = screen.getByRole('group', { name: 'Suggestions' });
-    await expect.element(group.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
-    await screen.getByRole('button', { name: /^Demo inbox \d+ entr(?:y|ies)$/ }).click();
-    const sheet = screen.getByRole('dialog', { name: 'Demo inbox' });
-    await expect.element(sheet.getByRole('link', { name: 'Open the request' })).toBeVisible();
-    await sheet.getByRole('button', { name: 'Close' }).click();
-    await expect.poll(() => sheet.elements().length === 0 || !sheet.element().checkVisibility()).toBe(true);
-
+  it('hold_question_does_not_use_a_read_sent_on_today', async () => {
+    // A poll on Today is still out as the owner moves to Rules, and the quote is answered meanwhile.
+    // When the poll comes back, its answer, from before Rules opened, asks nothing about the quote.
+    const { screen, router } = await renderRoute(`${DESK}/today`);
+    await expect.element(screen.getByRole('region', { name: 'Needs you' })).toBeVisible();
     const answer = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
     let release!: () => void;
     const until = new Promise<void>((resolve) => { release = resolve; });
@@ -1586,17 +1578,26 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.inject({ route: 'needsYou', status: 200, body: (answer as { body: unknown }).body, until });
     const before = requests('needsYou').length;
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before);
-    await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
     const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
     if (!held) throw new Error('the seed holds a quote');
     mockStore.world.answer(held, 'deny_once');
 
     const current = holdNeedsYou();
+    let answered = 0;
+    onTestFinished(observeRequests(({ key, ok }) => { if (key === 'needsYou' && ok) answered += 1; }));
     await router.navigate(`${DESK}/rules`);
+    const group = screen.getByRole('group', { name: 'Suggestions' });
     await expect.element(group.getByRole('button', { name: FIXED_CHIPS[0] })).toBeVisible();
     release();
-    await expect.poll(() => current.held()).toBeGreaterThan(0);
+    await expect.poll(() => answered).toBe(1);
+    // Time for the poll's answer to be drawn, had Rules taken it as its own.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
+
+    // Rules' own read, once it comes back, finds the quote answered.
+    current.release();
+    await expect.poll(() => answered).toBeGreaterThan(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(chipWords(group)).toEqual([...FIXED_CHIPS]);
   });
 
