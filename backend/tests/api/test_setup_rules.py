@@ -747,19 +747,19 @@ async def drafted_rules(owner: Owner, model: ScriptedModel, state: dict, *cards:
 OWNER_EMAIL = "mike@turner-plumbing.example"
 CONTACT_SAID = f"Mike Turner. Email {OWNER_EMAIL} or call (510) 555-0142, and take a message after hours."
 CLOSING_PLAN = {"role": "claude", "text": "Your Desk will take customer requests.", "choices": [], "card": None,
-                "owner_decided": False}
+                "several": False, "owner_decided": False}
 OFFER = {"role": "claude", "text": setup.TEST_CLIENT_OFFER,
          "choices": [{"text": setup.TEST_CLIENT_YES, "recommended": True},
-                     {"text": setup.TEST_CLIENT_NO, "recommended": False}], "card": None, "owner_decided": False}
-ADDED = {"role": "claude", "text": setup.TEST_CLIENT_ADDED, "choices": [], "card": None, "owner_decided": False}
+                     {"text": setup.TEST_CLIENT_NO, "recommended": False}], "card": None, "several": False, "owner_decided": False}
+ADDED = {"role": "claude", "text": setup.TEST_CLIENT_ADDED, "choices": [], "card": None, "several": False, "owner_decided": False}
 
 
 def owner_line(text: str) -> dict:
-    return {"role": "owner", "text": text, "choices": [], "card": None, "owner_decided": False}
+    return {"role": "owner", "text": text, "choices": [], "card": None, "several": False, "owner_decided": False}
 
 
 def claude_line(text: str) -> dict:
-    return {"role": "claude", "text": text, "choices": [], "card": None, "owner_decided": False}
+    return {"role": "claude", "text": text, "choices": [], "card": None, "several": False, "owner_decided": False}
 
 
 def kernel_writes(fake) -> list[tuple[str, object]]:

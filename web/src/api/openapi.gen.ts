@@ -952,8 +952,10 @@ export interface SendAgentIn {
   idempotency_key: string;
 }
 /**
- * `POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
- * Naming the ask prevents a repeated answer from answering the next one.
+ * `POST /api/owner/setup/{id}/answer`: the owner's answer to exactly one waiting question or card id, typed
+ * (`text`), picked from the question's choices (`picks`) or both, never neither. Naming the ask prevents a repeated
+ * answer from answering the next one. Picks answer a question, never a card: each is the exact text of one of its
+ * choices, once, and more than one only when the question has `several` (422 `invalid` otherwise).
  */
 export interface SetupAnswerIn {
   question?:
@@ -969,7 +971,11 @@ export interface SetupAnswerIn {
       )
     | null;
   card?: string | null;
-  text: string;
+  text?: string;
+  /**
+   * @maxItems 4
+   */
+  picks?: [] | [string] | [string, string] | [string, string, string] | [string, string, string, string];
 }
 /**
  * `POST /api/owner/setup/{id}/consent`: whether Claude may read the owner's Claude memory and website.
@@ -979,8 +985,9 @@ export interface SetupConsentIn {
 }
 /**
  * One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
- * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
- * only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+ * owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices, and `several`
+ * marks one whose choices the owner may pick more than one of (`SetupAnswerIn.picks`); a card belongs only to a
+ * card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
  * themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
  * false. Read-only: it only says what happened.
  */
@@ -988,6 +995,7 @@ export interface SetupMessage {
   role: "claude" | "owner" | "tool_label";
   text: string;
   choices?: Choice[];
+  several?: boolean;
   card?: ProposalCard | null;
   owner_decided?: boolean;
 }

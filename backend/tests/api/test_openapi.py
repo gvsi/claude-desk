@@ -60,6 +60,18 @@ def test_business_definition_and_setup_proposals_have_distinct_config_schemas():
     assert schemas["PurposePaymentConfig"]["properties"]["amount_cents"]["type"] == "integer"
 
 
+def test_a_setup_answer_takes_picks_and_a_question_says_when_several_apply():
+    schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
+    answer = schemas["SetupAnswerIn"]
+    assert "text" not in answer.get("required", [])
+    assert answer["properties"]["text"]["maxLength"] == 2000 and "minLength" not in answer["properties"]["text"]
+    picks = answer["properties"]["picks"]
+    assert (picks["maxItems"], picks["default"]) == (4, [])
+    assert (picks["items"]["minLength"], picks["items"]["maxLength"]) == (1, 80)
+    several = schemas["SetupMessage"]["properties"]["several"]
+    assert (several["type"], several["default"]) == ("boolean", False)
+
+
 def test_briefing_contract_counts_only_turned_down_requests():
     schemas = json.loads(OPENAPI_PATH.read_text())["components"]["schemas"]
     item = schemas["BriefingItem"]

@@ -41,6 +41,7 @@ type SetupMessage = {
   role: "claude" | "owner" | "tool_label";
   text: string;                    // "" on a card message
   choices: Choice[];               // [] unless this Claude message asks a question with choices
+  several: boolean;                // true only on a question with choices when more than one can be picked
   card: ProposalCard | null;       // set only on a card message (role "claude", text "")
   owner_decided: boolean;          // read-only: true only on a card the owner decided
 };
@@ -49,7 +50,7 @@ type Choice = { text: string; recommended: boolean };   // 2..4 choices, each te
 
 - **Card messages only on request:** every setup route that answers `SetupState` (GET, consent, answer, proposals, suggestions) includes card messages only when the request carries `?cards=1`. Without it they're left out, so today's screens never show an empty bubble.
 - **Asynchronous consent (A1c):** `POST …/consent` answers 200 with the state when the reads and Claude's opening land within `CONSENT_INLINE_S` (25 s), else 202 with the state as stored and `busy: true`; the web polls GET until `busy` is false. A repeat while it runs answers 202 with no second run; a failed run puts `consent` back to null with nothing half-stored.
-- **Choices:** a click sends today's answer request, `POST /api/owner/setup/{interview_id}/answer` with `{question, text: choice.text}`; typing still works. Choices are live on the latest Claude message that has them, as long as no owner message came after it; card messages never carry choices. A limit question's choices come from code (`LIMIT_CHOICES`, none marked recommended), and choosing one sets exactly the limit it names; the web can't tell them apart and needn't.
+- **Choices:** a click sends today's answer request, `POST /api/owner/setup/{interview_id}/answer` with `{question, text: choice.text}` or `{question, picks: [choice.text]}`; typing still works. On a question with `several`, the owner may send up to four `picks`, each a choice's exact text, with or without typed `text`; code turns them into one answer, the picks in the question's order joined by ", " and the text on its own line after them. Choices are live on the latest Claude message that has them, as long as no owner message came after it; card messages never carry choices. A limit question's choices come from code (`LIMIT_CHOICES`, none marked recommended), and choosing one sets exactly the limit it names; the web can't tell them apart and needn't.
 - `tool_label` messages keep their shape; web search adds labels such as "Searched the web".
 
 A proposal card is its own message, right after the Claude message that introduces it, one card per message, in order:

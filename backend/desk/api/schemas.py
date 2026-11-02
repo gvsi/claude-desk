@@ -733,19 +733,28 @@ class SetupConsentIn(BaseModel):
 
 
 class SetupAnswerIn(BaseModel):
-    """`POST /api/owner/setup/{id}/answer`: the owner's text and exactly one waiting question or card id.
-    Naming the ask prevents a repeated answer from answering the next one."""
+    """`POST /api/owner/setup/{id}/answer`: the owner's answer to exactly one waiting question or card id, typed
+    (`text`), picked from the question's choices (`picks`) or both, never neither. Naming the ask prevents a repeated
+    answer from answering the next one. Picks answer a question, never a card: each is the exact text of one of its
+    choices, once, and more than one only when the question has `several` (422 `invalid` otherwise)."""
 
     model_config = ConfigDict(extra="forbid")
 
     question: SetupQuestion | None = None
     card: str | None = None
-    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+    text: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = ""
+    picks: list[Annotated[str, StringConstraints(min_length=1, max_length=80)]] = Field([], max_length=4)
 
     @model_validator(mode="after")
     def one_ask(self) -> "SetupAnswerIn":
         if (self.question is None) == (self.card is None):
             raise ValueError("exactly one of question and card is required")
+        if not self.text and not self.picks:
+            raise ValueError("an answer needs text or picks")
+        if self.picks and self.card is not None:
+            raise ValueError("picks answer a question, never a card")
+        if len(set(self.picks)) != len(self.picks):
+            raise ValueError("each choice is picked at most once")
         return self
 
 
@@ -794,14 +803,16 @@ class SetupSuggestionsIn(BaseModel):
 
 class SetupMessage(BaseModel):
     """One line of the setup conversation, owner-facing: Claude's, the owner's, or an inline label for a read of the
-    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices; a card belongs
-    only to a card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
+    owner's memory or website (`tool_label`). Choices belong only to a Claude question with choices, and `several`
+    marks one whose choices the owner may pick more than one of (`SetupAnswerIn.picks`); a card belongs only to a
+    card message, with role `claude` and empty text. `owner_decided` marks a card the owner decided
     themselves, by a click or a typed answer; a card setup settled for them (as "Use your suggestions" does) stays
     false. Read-only: it only says what happened."""
 
     role: Literal["claude", "owner", "tool_label"]
     text: str
     choices: list[Choice] = []
+    several: bool = False
     card: ProposalCard | None = None
     owner_decided: bool = False
 

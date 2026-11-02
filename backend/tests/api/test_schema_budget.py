@@ -163,6 +163,21 @@ def test_setup_planning_uses_one_required_shape(output):
     assert [variant["properties"]["kind"]["const"] for variant in variants] == ["topic", "job", "connector", "done"]
     assert all(variant["additionalProperties"] is False for variant in variants)
     assert "_draft_errors" not in schema["properties"]
+    # Whether several of a topic's choices can be true at once rides on the topic, never a new top-level field, and
+    # only in the consultant's next step and a typed card answer: inside the fact turns' `next` it made the API refuse
+    # to compile the hours and the contact turns, so theirs keeps the plain topic.
+    assert "several" not in schema["properties"]
+    if output in (SetupNextStep, SetupCardAnswer):
+        assert variants[0]["properties"]["several"]["type"] == "boolean"
+        assert variants[0]["required"] == ["kind", "topic", "several"]
+    else:
+        assert variants[0]["required"] == ["kind", "topic"] and "several" not in variants[0]["properties"]
+
+
+def test_the_understanding_says_whether_its_opening_question_takes_several_answers():
+    schema = strict_schema(SetupUnderstanding)
+    assert schema["properties"]["several"]["type"] == "boolean"
+    assert "several" in schema["required"]
 
 
 @pytest.mark.parametrize(("route", "output"), SENT, ids=[f"{route}-{output.__name__}" for route, output in SENT])
