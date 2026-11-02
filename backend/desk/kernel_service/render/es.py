@@ -72,7 +72,7 @@ MESSAGES: dict[str, str] = {
     "inbox_code_body": ("Tu código de {business} es {code}. Vence en diez minutos. "
                         "Si no lo pediste, ignora este mensaje."),
     "offer_callback": "¿Quiere que solicite una llamada?",
-    "check_status": "Esto está esperando aprobación; puede consultar su estado en este chat.",
+    "check_status": "Su solicitud está esperando aprobación; puede consultar su estado en este chat.",
 }
 
 WEEKDAYS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")

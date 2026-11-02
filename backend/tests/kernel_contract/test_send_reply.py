@@ -168,8 +168,8 @@ async def test_a_final_prose_failure_with_nothing_to_keep_delivers_the_call_back
 
 
 # The kernel's status line, the API's signed `STATUS_LINES["check_status"]`.
-STATUS_LINE = {"en": "This is waiting for approval; you can see where it stands in this chat.",
-               "es": "Esto está esperando aprobación; puede consultar su estado en este chat."}
+STATUS_LINE = {"en": "Your request is waiting for approval; you can see where it stands in this chat.",
+               "es": "Su solicitud está esperando aprobación; puede consultar su estado en este chat."}
 
 
 @pytest.mark.kernel_plan("01b")

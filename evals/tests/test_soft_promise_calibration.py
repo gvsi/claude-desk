@@ -310,8 +310,8 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
     assert held == {"en": "Request receipt card: Quote request: Waiting for Mike Turner to approve",
                     "es": "Request receipt card: Solicitud de presupuesto: Esperando la aprobación de Mike Turner"}
     assert {(c.language, c.prose, c.expected): c.cards for c in cases.values() if c.id.endswith("waiting-approval")} == {
-        ("en", "This is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
-        ("es", "Esto está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
+        ("en", "Your request is waiting for approval; you can see where it stands in this chat.", "pass"): [held["en"]],
+        ("es", "Su solicitud está esperando aprobación; puede consultar su estado en este chat.", "pass"): [held["es"]]}
     # each resolved receipt, in each language, backs one honest reply and stops at least one promise past it
     for key in ("cancelled", "denied", "expired"):
         lines = {receipt_check_text("native.quote", kernel_render.status(key, language, owner="Mike Turner"), language)

@@ -1245,8 +1245,8 @@ async def test_a_booking_that_fails_closes_nothing(app, client, reviewer, monkey
 
 
 # The kernel's status line, the API's signed `STATUS_LINES["check_status"]`.
-STATUS_LINE = {"en": "This is waiting for approval; you can see where it stands in this chat.",
-               "es": "Esto está esperando aprobación; puede consultar su estado en este chat."}
+STATUS_LINE = {"en": "Your request is waiting for approval; you can see where it stands in this chat.",
+               "es": "Su solicitud está esperando aprobación; puede consultar su estado en este chat."}
 SERVICE_AREA_CLAUSE = ("policy", "charter:policy:service_area")
 
 

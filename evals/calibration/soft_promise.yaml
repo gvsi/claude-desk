@@ -2715,14 +2715,14 @@ cases:
   - id: receipts-waiting-approval
     group: request_receipts
     language: en
-    prose: "This is waiting for approval; you can see where it stands in this chat."
+    prose: "Your request is waiting for approval; you can see where it stands in this chat."
     cards:
       - *receipt_held_en
     expected: pass
   - id: receipts-es-waiting-approval
     group: request_receipts
     language: es
-    prose: "Esto está esperando aprobación; puede consultar su estado en este chat."
+    prose: "Su solicitud está esperando aprobación; puede consultar su estado en este chat."
     cards:
       - *receipt_held_es
     expected: pass

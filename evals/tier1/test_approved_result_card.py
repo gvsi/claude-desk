@@ -32,7 +32,7 @@ async def test_approved_refund_shows_its_result_card_once(k, api, fake, records)
                       if row["display_name"].startswith("Dana"))
         charge = charge_id(await records.facts(copy["copy_id"]), person, 25_000, "Leak repair")
         fake.script(OPUS, ToolUse("payments__create_refund", refund_args(charge)),
-                    send_reply("This is waiting for approval; you can see where it stands in this chat."))
+                    send_reply("Your request is waiting for approval; you can see where it stands in this chat."))
         held = await chat_turn(client, "Please refund my payment.", last_id(verified))
         (decision_id,) = [event.data["decision_id"] for event in held if event.type == "held"]
         associated = []
