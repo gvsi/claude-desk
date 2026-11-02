@@ -28,7 +28,7 @@ describe('the header palette', () => {
   it('keeps both header inks readable and preserves every coloured field', () => {
     for (const [palette, colors] of Object.entries(BRAND_PALETTE)) {
       if (!('primary' in colors)) continue;
-      for (const ink of ['var(--text-primary)', 'var(--text-secondary)']) {
+      for (const ink of ['var(--text-on-brand)', 'var(--text-on-brand-secondary)']) {
         expect(contrastRatio(ink, colors.primary), `${palette}: ${ink}`).toBeGreaterThanOrEqual(4.5);
       }
       expect(brandFrom({ ...rivera.publicDesk.en, brand: { palette, ...colors } }).brand.field).toBe(colors.primary);

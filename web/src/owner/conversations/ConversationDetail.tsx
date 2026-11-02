@@ -149,7 +149,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice }: Con
 
   const chat = useQuery({
     queryKey: conversationKey(sessionId),
-    queryFn: () => request('conversation', { params: { session_id: sessionId } }),
+    queryFn: ({ signal }) => request('conversation', { params: { session_id: sessionId }, signal }),
     refetchInterval: pollMs('conversation'),
   });
   // A read taken since the chat opened has come in, not only one kept from an earlier visit.

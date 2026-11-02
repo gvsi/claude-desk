@@ -1883,8 +1883,9 @@ it('rules_outcome_shapes_remeasure_when_fonts_become_ready', async () => {
   await vi.waitFor(() => expect(Number.parseFloat(shape.style.width)).toBeGreaterThan(before));
 });
 
-it.each(['desktop', 'phone'] as const)('rules_load_in_place at %s', async (viewport) => {
-  const { screen, router } = await openToday(viewport);
+it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async (viewport) => {
+  const { screen, router } = await openToday(viewport === 'phone' ? 'phone' : 'desktop');
+  if (typeof viewport === 'number') await page.viewport(viewport, 768);
   const read = holdReads(RULES_READ);
   const landing = watchPaneLanding(RULES_ANCHORS, '.cd-rules__region .cd-skeleton-screen__layer');
   const headings = watchTopHeadings();
@@ -1895,6 +1896,18 @@ it.each(['desktop', 'phone'] as const)('rules_load_in_place at %s', async (viewp
       await router.navigate(RULES);
       await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
       expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
+      if (typeof viewport === 'number') {
+        await nextFrames();
+        const rows = document.querySelectorAll('.cd-rules__region .cd-skeleton-screen__layer .cd-connector-section__tool');
+        expect(rows.length).toBeGreaterThan(0);
+        for (const row of rows) {
+          const summary = row.querySelector('.cd-connector-section__tool-summary')!;
+          const outcome = row.querySelector('.cd-connector-section__tool-outcome')!;
+          expect(summary.getBoundingClientRect().right, row.getAttribute('data-skeleton-anchor')!).toBeLessThanOrEqual(outcome.getBoundingClientRect().left);
+        }
+        const paymentSummary = document.querySelector('[data-skeleton-anchor="rules-tool-5-0"] .cd-connector-section__tool-summary')!;
+        expect(paymentSummary.querySelectorAll('.cd-skeleton')).toHaveLength(2);
+      }
     }, release: read.release,
   });
   await landing.expectStill();

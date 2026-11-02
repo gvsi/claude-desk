@@ -2527,7 +2527,7 @@ describe('Things to try ticks off', () => {
     await router.navigate(`/app/${RIVERA.deskId}/settings/general`);
     const section = screen.getByRole('region', { name: 'Delete this Desk' });
     await section.getByRole('button', { name: 'Delete this Desk' }).click();
-    await screen.getByRole('dialog', { name: 'Delete Main line?' }).getByRole('button', { name: 'Delete Desk' }).click();
+    await screen.getByRole('dialog', { name: "Delete Main line for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
     const animated = watchListAnimations();
     // The copy's Desks are read again without the main line: the Desk switcher goes.

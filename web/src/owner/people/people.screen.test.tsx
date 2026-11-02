@@ -519,6 +519,30 @@ describe('customers', () => {
 });
 
 describe('a person outside the list', () => {
+  it('person_page_does_not_reuse_a_read_started_before_leaving', async () => {
+    const stale = { people: [{ person_id: bob.personId, display_name: bob.name, masked_contact: bob.maskedContact }], leads: [] };
+    mockStore.inject({ route: 'people', status: 200, body: stale });
+    const { screen, router } = await renderRoute(PEOPLE);
+    await expect.element(screen.getByRole('list', { name: 'Contacts on record' })).toBeVisible();
+
+    const old = held();
+    const before = mockStore.requests.filter((r) => r.key === 'people').length;
+    mockStore.inject({ route: 'people', status: 200, body: stale, until: old.until });
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'people').length).toBeGreaterThan(before);
+    await router.navigate(`${DESK}/share`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Share', exact: true })).toBeVisible();
+
+    const now = held();
+    const answer = await mockStore.dispatch('people', { params: { desk_id: RIVERA.deskId } });
+    mockStore.inject({ route: 'people', status: 200, until: now.until, body: (answer as { body: unknown }).body });
+    await router.navigate(`${PEOPLE}/${dana.personId}`);
+    await expect.element(screen.getByRole('status').filter({ hasText: /^Loading this customer$/ })).toBeVisible();
+    old.release();
+    now.release();
+    await expect.element(screen.getByRole('heading', { level: 1, name: dana.name })).toBeVisible();
+    expect(screen.getByText("This page doesn't exist").query()).toBeNull();
+  });
+
   it('person_page_reads_the_list_again_before_not_found', async () => {
     // Customers read the list before Dana was on it.
     mockStore.inject({ route: 'people', status: 200, body: { people: [{ person_id: bob.personId, display_name: bob.name, masked_contact: bob.maskedContact }], leads: [] } });
