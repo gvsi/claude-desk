@@ -10,7 +10,7 @@ export interface SuggestionChipsProps {
   label: string;
   /** Things to ask, in the person's words. At most `max` show (three by default). */
   suggestions: readonly string[];
-  /** The most suggestions shown, three by default. Setup's four starters raise it. */
+  /** The most suggestions shown, three by default. Only setup's start step raises it, to four starters. */
   max?: number;
   /** Called with the picked suggestion's words. */
   onPick: (suggestion: string) => void;
