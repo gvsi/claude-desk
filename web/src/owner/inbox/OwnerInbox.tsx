@@ -24,7 +24,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { pollMs } from '../../app/poll.ts';
-import { Button, DemoInboxSheet, Notice, type DemoInboxItem } from '../../ds/index.ts';
+import { Button, DemoInboxSheet, Notice, ReviewerBarInboxSkeleton, type DemoInboxItem } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { decisionQuery } from '../conversations/ownerReceipt.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
@@ -166,10 +166,11 @@ export function OwnerInbox({ timezone, onOpenChange }: OwnerInboxProps) {
       </Notice>
     );
 
-  // Nothing drawn until the first read settles. Every entry here is read whole, so nothing waits to
-  // open; a retry reads them all again. A failed read's line shows inside the sheet, which stays
-  // open as it comes or goes; with nothing read, the sheet holds the line alone.
-  if (inbox.data === undefined && failed === null) return null;
+  // Until the first read settles, the button's shape, as the bar's loading shapes draw it, so Start over
+  // doesn't move when it lands. Every entry here is read whole, so nothing waits to open; a retry reads
+  // them all again. A failed read's line shows inside the sheet, which stays open as it comes or goes;
+  // with nothing read, the sheet holds the line alone.
+  if (inbox.data === undefined && failed === null) return <ReviewerBarInboxSkeleton />;
   return (
     // "Open the request" goes through the router, so the app stays loaded.
     <div className="cd-owner-inbox" onClick={followInAppLinks(navigate)}>

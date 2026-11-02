@@ -503,6 +503,27 @@ it.each(['desktop', 'phone'] as const)('setup_reload_marks_no_step_until_read at
   }
 });
 
+it.each(['desktop', 'phone'] as const)('setup_reload_keeps_the_bar_still_when_the_business_name_comes at %s', async (viewport) => {
+  // The Desks come after the step: the bar holds the business's line meanwhile, so it doesn't grow
+  // and move the page when the name lands.
+  const state = await interviewAt('rules');
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+  const steps = screen.getByRole('list', { name: 'Set up your Desk' });
+  await vi.waitFor(() => expect(steps.element().querySelector('[aria-current="step"]')).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__column .cd-skeleton-screen__layer')).toBeNull());
+  expect(document.querySelector('.cd-setup__business')?.textContent ?? '').toBe('');
+  const bar = () => document.querySelector('.cd-setup__bar')!.getBoundingClientRect();
+  const before = bar();
+
+  desks.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__business')?.textContent ?? '').not.toBe(''));
+  const after = bar();
+  expect(after.height, `the bar's height: ${before.height}, then ${after.height}`).toBeCloseTo(before.height, 1);
+});
+
 it.each(['desktop', 'phone'] as const)('fresh_setup_starts_at_questions at %s', async (viewport) => {
   const { screen } = await renderRoute('/app/setup', { viewport });
   const steps = screen.getByRole('list', { name: 'Set up your Desk' });

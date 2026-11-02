@@ -18,6 +18,14 @@ const INBOX = {
   suffix: { label: '1', className: 'cd-count-pill cd-type-count' },
 };
 
+/**
+ * The Demo inbox's shape in the landed bar while its first read is out: the same block the bar's
+ * loading shapes draw before Start over, so Start over keeps its place when the button lands.
+ */
+export function ReviewerBarInboxSkeleton() {
+  return <Skeleton shape="block" measure={INBOX} height="var(--size-control)" anchor="inbox" />;
+}
+
 /** The bar's controls wrap under its words on a phone when the screen adds its own. */
 const PHONE = '(max-width: 639.98px)';
 
