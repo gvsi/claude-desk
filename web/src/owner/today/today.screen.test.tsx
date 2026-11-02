@@ -1291,8 +1291,8 @@ describe('Today', () => {
   it.each(['desktop', 'phone'] as const)('this_week_bars_are_24_px_wide_%s', async (viewport) => {
     // The signed Today boards draw each day's bar 24 px wide, centered over its initial in one of
     // seven equal columns 6 px apart, at every width: a busy day is a taller bar, never a wider one.
-    // The seed's booking comes minutes before the copy opens, so a fresh copy opens at a fixed
-    // afternoon on the Desk's clock: just after midnight, that booking would fall on yesterday's bar.
+    // The seed's booking comes under a minute before the copy opens, so a fresh copy opens at a fixed
+    // afternoon on the Desk's clock: in the first minute after midnight, it would fall on yesterday's bar.
     // Only Date is faked: the page's timers and polling stay real.
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
