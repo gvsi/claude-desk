@@ -27,7 +27,7 @@ export const Default: Story = {
   play: async ({ args, canvas, userEvent }) => {
     // A quiet note above the app, full width, on the muted fill with a hairline under it.
     const bar = canvas.getByRole('note');
-    await expect(bar).toHaveTextContent("You're Mike Turner today. This is a concept prototype.Start over");
+    await expect(bar).toHaveTextContent("You're Mike Turner today. This is a concept prototype.Reset demo");
     expectComputed(bar, {
       height: '36px',
       backgroundColor: 'rgb(46, 44, 38)',
@@ -41,8 +41,8 @@ export const Default: Story = {
     await expect(canvas.getByText(rivera.business.ownerName)).toHaveAttribute('data-copy', 'user');
     expectComputed(canvas.getByText('This is a concept prototype.'), { color: 'rgba(250, 249, 245, 0.64)' });
 
-    // Start over is a ghost button, reached and pressed from the keyboard.
-    const startOver = canvas.getByRole('button', { name: 'Start over' });
+    // Reset demo is a ghost button, reached and pressed from the keyboard.
+    const startOver = canvas.getByRole('button', { name: 'Reset demo' });
     expectComputed(startOver, { backgroundColor: 'rgba(0, 0, 0, 0)' });
     await userEvent.tab();
     await expect(startOver).toHaveFocus();
@@ -86,18 +86,18 @@ export const ReviewerBarSkeleton: Story = {
   },
 };
 
-/** The screen's own control before Start over, as the owner app has its Demo inbox. */
+/** The screen's own control before Reset demo, as the owner app has its Demo inbox. */
 export const WithActions: Story = {
   args: { actions: <Button variant="ghost">Demo inbox</Button> },
   parameters: {
     canvas: 'none',
-    canvasNote: 'TOD-04 (signed 2026-11-01) draws the Demo inbox in the demo bar, just before Start over; no reference board draws it, and the nearest is N-Today-Run1.',
+    canvasNote: 'TOD-04 (signed 2026-11-01) draws the Demo inbox in the demo bar, just before Reset demo; no reference board draws it, and the nearest is N-Today-Run1.',
   },
   play: async ({ canvas }) => {
     const bar = canvas.getByRole('note');
     const action = canvas.getByRole('button', { name: 'Demo inbox' }).getBoundingClientRect();
-    const startOver = canvas.getByRole('button', { name: 'Start over' }).getBoundingClientRect();
-    // One line, the control 16 px before Start over at the bar's right.
+    const startOver = canvas.getByRole('button', { name: 'Reset demo' }).getBoundingClientRect();
+    // One line, the control 16 px before Reset demo at the bar's right.
     expectComputed(bar, { height: '36px' });
     await expect(startOver.left - action.right).toBeCloseTo(16, 0);
     await expect(action.top).toBeCloseTo(startOver.top, 0);
@@ -110,12 +110,12 @@ export const WithActionsOnAPhone: Story = {
   args: WithActions.args,
   parameters: {
     canvas: 'none',
-    canvasNote: "TOD-04's phone board (signed 2026-11-01): the words on the first line, the Demo inbox and Start over on the next, 4 px under them.",
+    canvasNote: "TOD-04's phone board (signed 2026-11-01): the words on the first line, the Demo inbox and Reset demo on the next, 4 px under them.",
   },
   play: async ({ canvas }) => {
     const words = canvas.getByText(/^You're/).getBoundingClientRect();
     const action = canvas.getByRole('button', { name: 'Demo inbox' }).getBoundingClientRect();
-    const startOver = canvas.getByRole('button', { name: 'Start over' }).getBoundingClientRect();
+    const startOver = canvas.getByRole('button', { name: 'Reset demo' }).getBoundingClientRect();
     await expect(action.top - words.bottom).toBeGreaterThanOrEqual(4);
     await expect(action.top).toBeCloseTo(startOver.top, 0);
     await expect(startOver.left - action.right).toBeCloseTo(16, 0);

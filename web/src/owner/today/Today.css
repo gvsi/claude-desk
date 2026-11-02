@@ -333,6 +333,12 @@
   color: var(--text-secondary);
 }
 
+/* A start that failed: a refused dot, then the line in the detail's place. */
+.cd-things__detail > .cd-status-dot,
+.cd-things__detail-now > .cd-status-dot {
+  margin-right: var(--space-6);
+}
+
 /* The waiting words and unseen longest end line share a cell, so an answer never grows the row. */
 .cd-things__detail[data-room] {
   display: grid;
@@ -360,8 +366,8 @@
 }
 
 /* From 640 px: the card around the list goes, and each thing is a card of its own, its next step
-   at the foot, so the steps of a row of cards share a line (grid rows stretch). Two to a row, four
-   from 1280 px, where the band is wide enough for each step's words. */
+   at the foot, so the steps of a row of cards share a line (grid rows stretch). Two to a row, three
+   from 1280 px, two rows for the five things, where the band is wide enough for each step's words. */
 @media (min-width: 640px) {
   .cd-things > .cd-card {
     padding: 0;
@@ -401,7 +407,7 @@
 
 @media (min-width: 1280px) {
   .cd-things__list {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -656,6 +662,12 @@
    whole line rather than a name inside the interface's words. */
 .cd-briefing-row__who .cd-user-name {
   font-weight: inherit;
+}
+
+/* A demo visitor's pill, 8 px after the name, or after the answer's words. */
+.cd-briefing-row__who > .cd-pill,
+.cd-briefing-row__line > .cd-pill {
+  margin-left: var(--space-8);
 }
 
 /* A booking's or a lead's own words, under whose they are. */

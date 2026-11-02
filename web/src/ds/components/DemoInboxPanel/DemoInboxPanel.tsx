@@ -171,6 +171,7 @@ export function DemoInboxPanel({ viewer, items, language, onRetry, action, title
                 notice={item.notice}
                 time={viewer === 'owner' ? item.time : undefined}
                 requestHref={viewer === 'owner' ? inAppHref(item.requestHref) : undefined}
+                titled={viewer === 'owner' && language === 'en'}
                 view={viewOf(item)}
                 copy={copy}
                 onRetry={onRetry}
@@ -189,12 +190,27 @@ interface InboxItemProps {
   time: string | undefined;
   /** The owner's link to the held request, or nothing for a visitor. */
   requestHref: string | undefined;
+  /**
+   * An entry's `title` may show, as it may on the owner's panel in English only: the kernel's titles
+   * are English, so a panel in another language shows the kind.
+   */
+  titled: boolean;
   view: ItemView;
   copy: InboxCopy;
   onRetry: (entryId: string) => void;
 }
 
-function InboxItem({ notice, time, requestHref, view, copy, onRetry }: InboxItemProps) {
+/**
+ * The line above an opened entry's body: on the owner's panel in English, the title the kernel
+ * gives the owner's alerts (the alert's fixed preview line, in English only); otherwise, or when it
+ * is missing or blank, the entry's kind.
+ */
+function headingOf(entry: DemoInboxEntry, titled: boolean, copy: InboxCopy): string {
+  const title = titled ? entry.title?.trim() : undefined;
+  return title ? title : copy.kinds[entry.kind];
+}
+
+function InboxItem({ notice, time, requestHref, titled, view, copy, onRetry }: InboxItemProps) {
   return (
     <li className="cd-demo-inbox__item">
       <p className="cd-demo-inbox__head cd-type-caption">
@@ -203,7 +219,7 @@ function InboxItem({ notice, time, requestHref, view, copy, onRetry }: InboxItem
       </p>
       {view.kind === 'open' ? (
         <>
-          <p className="cd-demo-inbox__kind cd-type-meta">{copy.kinds[view.entry.kind]}</p>
+          <p className="cd-demo-inbox__kind cd-type-meta">{headingOf(view.entry, titled, copy)}</p>
           {/* A ledger checkpoint is a signed record, so it reads in the trace's monospace. */}
           <p className={`cd-demo-inbox__body ${view.entry.kind === 'head_checkpoint' ? 'cd-type-trace' : 'cd-type-body'}`}>
             {view.entry.body}

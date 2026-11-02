@@ -723,6 +723,18 @@ describe('setup', () => {
     expect(line.element().classList.contains('cd-type-meta')).toBe(true);
   });
 
+  it('the_empty_start_box_shows_an_example_under_its_label_and_hint', async () => {
+    // Empty, the box shows an example of the few sentences it wants, first name first as the hint
+    // asks; the label and the hint stay as they are, and nothing is typed in it.
+    const { screen } = await renderRoute('/app/setup');
+    const box = screen.getByRole('textbox', { name: 'Your business', exact: true });
+    await expect.element(box).toHaveAttribute('placeholder', "I'm Sam. I run a dog grooming shop in Portland.");
+    await expect.element(box).toHaveAccessibleDescription('Include your first name as customers should see it.');
+    await expect.element(box).toHaveValue('');
+    // The example is the setup's copy, not the screen's own words.
+    expect(SETUP_COPY.start.placeholder).toBe("I'm Sam. I run a dog grooming shop in Portland.");
+  });
+
   it('each_of_four_examples_fills_the_box_and_starts_nothing', async () => {
     // A chip puts its example in the box, the owner's first name in it as the hint asks, and gives
     // the box focus with the caret at its end, ready for more detail. A word
@@ -908,19 +920,19 @@ describe('setup', () => {
         examples: [
           {
             chip: 'A hair salon in Oakland',
-            description: 'I’m Priya Shah. Juniper Hair Studio is a four-chair salon in Oakland doing cuts, color and balayage. Most clients book ahead; we take a deposit for color appointments and charge for late cancellations. We’re open Tuesday to Saturday.',
+            description: 'I’m Priya Shah. Juniper Hair Studio is a four-chair salon in Oakland doing cuts, color and balayage, open Tuesday to Saturday. Clients book their own appointments, color takes a $40 deposit by secure link, and many of our clients write in Spanish.',
           },
           {
             chip: 'A plumber in Oakland',
-            description: 'I’m Mike Turner. Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley, and I take emergency calls after hours.',
+            description: 'I’m Mike Turner. Turner Plumbing fixes leaks, water heaters and drains around Oakland and Berkeley. A service call is $129, you can take up to 10% off without asking me, and I want to hear about burst pipes and flooding right away, day or night.',
           },
           {
             chip: 'Apartments in Sacramento',
-            description: 'I’m Sam Okafor. Maple Street Rentals manages 14 apartments in two buildings in Sacramento. People ask about open units and viewings, tenants report maintenance problems, and I collect application fees and deposits.',
+            description: 'I’m Sam Okafor. Maple Street Rentals manages 14 apartments in two buildings in Sacramento. People book viewings of open units and pay the $45 application fee by secure link, and tenants report maintenance problems; a leak or a lockout should reach me at once.',
           },
           {
             chip: 'A CPA firm in San Jose',
-            description: 'I’m Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.',
+            description: 'I’m Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping. New clients book a free 20-minute consult, a personal return is $350, and each engagement starts with a $500 retainer by secure link. A client’s AI assistant can book and pay for them, within a limit the client signs.',
           },
         ],
       },
@@ -930,19 +942,19 @@ describe('setup', () => {
         examples: [
           {
             chip: 'Una peluquería en Oakland',
-            description: 'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage. Casi todos los clientes reservan con anticipación; pedimos un depósito para las citas de color y cobramos las cancelaciones tardías. Abrimos de martes a sábado.',
+            description: 'Soy Priya Shah. Juniper Hair Studio es una peluquería de cuatro sillas en Oakland: hacemos cortes, color y balayage, de martes a sábado. Los clientes agendan su propia cita, el color lleva un depósito de $40 con un enlace seguro, y atendemos a clientes en español y en inglés.',
           },
           {
             chip: 'Un plomero en Oakland',
-            description: 'Soy Mike Turner. Turner Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley, y atiendo emergencias fuera de horario.',
+            description: 'Soy Mike Turner. Turner Plumbing arregla fugas, calentadores de agua y drenajes en Oakland y Berkeley. La visita de servicio cuesta $129, puedes descontar hasta un 10% sin preguntarme, y quiero saber de inmediato de tuberías reventadas o inundaciones, de día o de noche.',
           },
           {
             chip: 'Departamentos en Sacramento',
-            description: 'Soy Sam Okafor. Maple Street Rentals administra 14 departamentos en dos edificios de Sacramento. La gente pregunta por unidades disponibles y visitas, los inquilinos reportan problemas de mantenimiento, y yo cobro las cuotas de solicitud y los depósitos.',
+            description: 'Soy Sam Okafor. Maple Street Rentals administra 14 departamentos en dos edificios de Sacramento. La gente agenda visitas a unidades disponibles y paga la cuota de solicitud de $45 con un enlace seguro, y los inquilinos reportan problemas de mantenimiento; una fuga o alguien que se quedó sin llaves me tiene que llegar de inmediato.',
           },
           {
             chip: 'Un despacho contable en San José',
-            description: 'Soy Linda Chen. Chen & Co. es un despacho contable de dos personas en San José que prepara declaraciones de impuestos y lleva la contabilidad de personas y pequeños negocios. Los clientes nuevos empiezan con una consulta gratis de 20 minutos, y cotizamos cada trabajo después de ella.',
+            description: 'Soy Linda Chen. Chen & Co. es un despacho contable de dos personas en San José que prepara declaraciones de impuestos y lleva contabilidad. Los clientes nuevos agendan una consulta gratis de 20 minutos, una declaración personal cuesta $350 y cada trabajo empieza con un anticipo de $500 con un enlace seguro. El asistente de IA de un cliente también puede agendar y pagar por él, dentro del límite que el cliente firme.',
           },
         ],
       },
@@ -3056,6 +3068,13 @@ describe('setup', () => {
     expect(screen.getByText('Not live yet').elements()).toHaveLength(0);
   });
 
+  /** The first path of the round bubble, the square bubble and the phone, Lucide's line icons. */
+  const CHANNEL_FIRST_PATHS = [
+    'M7.9 20A9 9 0 1 0 4 16.1L2 22Z',
+    'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+    'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z',
+  ];
+
   it.each([1440, 390])('at %i px, live lists more channels, coming later, in a card after Share it', async (width) => {
     const state = await interviewAtPreview();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
@@ -3079,6 +3098,21 @@ describe('setup', () => {
     );
     const pads = rows.map((row) => [getComputedStyle(row).paddingTop, getComputedStyle(row).paddingBottom, getComputedStyle(row).borderTopWidth]);
     expect(pads).toEqual([['0px', '12px', '0px'], ['12px', '12px', '1px'], ['12px', '0px', '1px']]);
+    // Each with its line icon on the connector tile, as Share draws it (board REV-CHAN A): a round
+    // and a square speech bubble, and a phone, 12 px before the words and centred on them.
+    const embedRow = share.querySelector<HTMLElement>('.cd-setup-live__embed')!;
+    const tiled: [HTMLElement, string | undefined][] = [[embedRow, 'M2 8h20M6 4v4M10 4v4'], ...rows.map((row, index): [HTMLElement, string | undefined] => [row as HTMLElement, CHANNEL_FIRST_PATHS[index]])];
+    for (const [row, glyph] of tiled) {
+      const tile = row.firstElementChild as HTMLElement;
+      expect(tile.className).toBe('cd-connector-icon cd-connector-icon--section cd-connector-icon--built-in');
+      expect(tile.getAttribute('aria-hidden')).toBe('true');
+      const box = tile.getBoundingClientRect();
+      expect([box.width, box.height]).toEqual([36, 36]);
+      const text = row.querySelector('.cd-setup-live__embed-text')!.getBoundingClientRect();
+      expect(Math.round(text.left - box.right)).toBe(12);
+      expect(Math.abs((box.top + box.bottom) / 2 - (text.top + text.bottom) / 2)).toBeLessThanOrEqual(1);
+      expect(tile.querySelector('path')?.getAttribute('d')).toBe(glyph);
+    }
     expectNoHorizontalScroll();
   });
 
@@ -4108,7 +4142,7 @@ describe('setup', () => {
   });
 });
 
-const CPA_DESCRIPTION = "I'm Linda Chen. Chen & Co. is a two-person CPA firm in San Jose doing tax returns and bookkeeping for individuals and small businesses. New clients start with a free 20-minute consult, and we price each engagement after it.";
+const CPA_DESCRIPTION = START_EXAMPLES.en.examples[3]!.description;
 
 async function consultantAt(kind = 'opening'): Promise<SetupState> {
   const start = await startInterview(null, CPA_DESCRIPTION);
@@ -4323,7 +4357,7 @@ describe('consultant setup', () => {
     await expect.element(other).toBeVisible();
     const row = other.element().closest<HTMLElement>('.cd-setup-q3__row--other');
     if (!row) throw new Error('the "Something else" input sits in its row');
-    const edge = tokenColor('--line-field-focus');
+    const edge = tokenColor('--line-focus');
     expect(getComputedStyle(row).boxShadow).not.toContain(edge);
     await other.click();
     expect(getComputedStyle(row).boxShadow).toContain(edge);
@@ -4686,6 +4720,110 @@ describe('consultant setup', () => {
     await expect.poll(() => requests('setupAnswer').length).toBe(1);
     expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: question.choices![2]!.text });
     await expect.element(screen.getByRole('article', { name: 'Google Calendar', exact: true }).getByRole('button', { name: 'Connect', exact: true })).toHaveFocus();
+  });
+
+  it.each([0, 2])('typing_on_highlighted_choice_%i_goes_to_something_else_and_enter_sends_the_words', async (row) => {
+    // A highlighted row is a button, which takes no text: what the owner types goes to "Something else…",
+    // and Enter sends their words, never the row's label.
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.nth(row).element() as HTMLElement).focus();
+    await expect.element(options.nth(row)).toHaveAttribute('aria-current', 'true');
+    await userEvent.keyboard('We use Xero');
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveFocus();
+    await expect.element(other).toHaveValue('We use Xero');
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: 'We use Xero' });
+  });
+
+  it.each([['12 clients', '12 clients'], ['150 an hour', '150 an hour'], ['14 clients', '14 clients'], ['2{Shift>}FA{/Shift} clients', '2FA clients']])('an_answer_starting_with_digits_typed_on_a_choice_arrives_whole: %s', async (keys, words) => {
+    // The digits first move between rows, as row keys do, then go into "Something else…" with the words
+    // that follow them.
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.first().element() as HTMLElement).focus();
+    await userEvent.keyboard(keys);
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveFocus();
+    await expect.element(other).toHaveValue(words);
+    expect(requests('setupAnswer')).toHaveLength(0);
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: words });
+  });
+
+  it('digits_typed_before_focus_left_the_question_are_forgotten', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.first().element() as HTMLElement).focus();
+    await userEvent.keyboard('1');
+    (document.activeElement as HTMLElement | null)?.blur();
+    await userEvent.keyboard('2 clients');
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await expect.element(other).toHaveValue('2 clients');
+    await userEvent.keyboard('{Enter}');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: '2 clients' });
+  });
+
+  it('space_on_a_choice_still_sends_it', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const options = panel.getByRole('list').getByRole('button');
+    await options.first().click({ trial: true });
+    (options.nth(1).element() as HTMLElement).focus();
+    await userEvent.keyboard(' ');
+    await expect.poll(() => requests('setupAnswer').length).toBe(1);
+    expect(requests('setupAnswer')[0]?.body).toEqual({ question: state.question, text: question.choices![1]!.text });
+  });
+
+  it('typing_on_a_choice_adds_to_words_already_in_something_else', async () => {
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    const other = panel.getByRole('textbox', { name: 'Something else…', exact: true });
+    await other.fill('Half and ');
+    await userEvent.keyboard('{ArrowUp}');
+    await expect.element(other).not.toHaveFocus();
+    await userEvent.keyboard('half');
+    await expect.element(other).toHaveFocus();
+    await expect.element(other).toHaveValue('Half and half');
+    expect(requests('setupAnswer')).toHaveLength(0);
+  });
+
+  it('typing_with_nothing_focused_leaves_the_question_alone', async () => {
+    // Only a highlighted choice hands its keys to "Something else…": with focus on the page, typing
+    // moves nothing into the question and sends nothing.
+    const state = await consultantAt();
+    const question = state.messages.findLast((message) => message.choices?.length)!;
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const panel = screen.getByRole('region', { name: question.text, exact: true });
+    await expect.element(panel).toBeVisible();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    await userEvent.keyboard('s');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(document.activeElement).toBe(document.body);
+    await expect.element(panel.getByRole('textbox', { name: 'Something else…', exact: true })).toHaveValue('');
+    expect(requests('setupAnswer')).toHaveLength(0);
   });
 
   it('docks_only_the_live_question_above_the_composer_without_repeating_it', async () => {

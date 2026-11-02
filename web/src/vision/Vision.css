@@ -43,7 +43,7 @@
   margin-top: var(--space-20);
 }
 
-/* The team Desk: the title and its line, then the teammates (220 px), Luis's conversation and his
+/* The team Desk: the title and its line, then the colleagues (220 px), Jordan's conversation and his
    access (260 px), 28 px apart; the day's line and the footer at the foot, 16 px apart. */
 .cd-vision-team__lead {
   margin: var(--space-8) 0 0;

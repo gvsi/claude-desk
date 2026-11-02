@@ -37,7 +37,7 @@ from evals.tier2.artifact import RunArtifact
 
 # The API's model routes, as `app.model_calls` names them (master "Data model and database roles").
 ApiRoute = Literal["conversation", "setup", "card_draft", "situations", "rules_chat", "visiting_agent", "triage",
-                   "translation"]
+                   "translation", "demo_visitor"]
 Route = ApiRoute | Literal["reviewer", "soft_promise", "simulator"]
 KERNEL_ROUTES: dict[str, Route] = {"review": "reviewer", "reply": "soft_promise"}   # ledger kind: route
 CONVERSATION_ROUTES = frozenset({"conversation", "reviewer", "soft_promise", "triage", "translation"})

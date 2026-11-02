@@ -83,7 +83,7 @@ from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
 from desk.kernel_api import ExecuteRequest
 from desk.kernel_service import (activation, adapters, auth, decide, labels, ledger, mandates, mcp_client, mcp_pins,
-                                 repo)
+                                 render, repo)
 from desk.kernel_service.adapters.base import (Adapter, AdapterFailure, AdapterRefusal, AdapterResult, AdapterUnknown,
                                                ExecCtx, Normalized, NormalizeCtx)
 from desk.kernel_service.adapters.web_search import SearchFailure, record_usage
@@ -405,7 +405,7 @@ def _receipt_ready(target: _Target) -> None:
     ledger head while it waits for a row."""
     try:
         decide.status_line("executed", tool=target.action.tool, session=target.session_row,
-                           owner=target.business.owner_display_name,
+                           owner=render.shown_owner(target.business.owner_display_name, target.business.name),
                            business=target.adapter.profile.business if target.adapter is not None else None)
     except KeyError:
         decision = target.decision

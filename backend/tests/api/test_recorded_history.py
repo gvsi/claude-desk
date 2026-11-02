@@ -683,7 +683,8 @@ async def live_visit(fake, kernel_http, engine, copy: dict) -> None:
                                                                                      kind="visitor"))
     session_id, view = created.state.session_id, kernel_http.session(created.session_token)
     slot = min((slot for slot in desk.slots.values() if slot.slot_id not in desk.booked), key=lambda s: s.starts_at)
-    call = ToolCall(call_id="call-live-booking", tool="native.book", args={"slot_id": slot.slot_id})
+    call = ToolCall(call_id="call-live-booking", tool="native.book", args={
+        "slot_id": slot.slot_id, "name": "Jane Doe", "contact": "jane@example.com"})
     decision = await view.call("POST /decide", DecideRequest(session_id=session_id, generation=0, call=call))
     await view.call("POST /execute", ExecuteRequest(decision_id=decision.decision_id, session_id=session_id,
                                                     generation=0))
@@ -834,6 +835,29 @@ async def test_a_refusal_of_unknown_origin_reads_as_recorded_history_everywhere(
         assert shown["briefing"]["turned_down"] == shown["this_week"]["stopped"] == 1
         assert [(row["decision_id"], row["replayed"]) for row in rows] == [(refused.decision_id, flagged)]
     assert [attempt["ref_id"] for attempt in safety] == [refused.decision_id]
+
+
+async def test_safety_quotes_a_replayed_refusals_own_turn(db, fake, api_settings, clock, browser):
+    """A refusal replayed into the copy quotes the replayed visitor's words for it, the turn its replayed receipt
+    closes, as a live refusal does: not their earlier question, nor what they wrote after Claude's answer. The quote
+    reaches only the owner, whose entry already says it is recorded history."""
+    asked = "Can you send me the invoice for the job at my landlord's place? He asked me to pay it."
+    fake.record_night(RecordedSession(steps=(
+        RecordedStep("said", LAST_NIGHT, "Hi, do you clear drains?"),
+        RecordedStep("replied", LAST_NIGHT + timedelta(seconds=20), "Yes, Mike clears drains."),
+        RecordedStep("said", LAST_NIGHT + timedelta(seconds=60), asked),
+        RecordedStep("refused", LAST_NIGHT + timedelta(seconds=80)),
+        RecordedStep("replied", LAST_NIGHT + timedelta(seconds=100), "I can only share an invoice with its owner."),
+        RecordedStep("said", LAST_NIGHT + timedelta(seconds=120), "OK, thanks."))))
+    async with running(api_settings, fake, clock) as app:
+        client = browser(app)
+        copy = await new_copy(client)
+        safety = await client.get(f"/api/owner/desks/{copy['desks'][0]['desk_id']}/safety")
+    _, events = fake.replayed_nights[copy["copy_id"]]
+    (refused,) = [event.decision for event in events if event.decision and event.decision.state == "refused"]
+    assert safety.status_code == 200, safety.text
+    assert [(attempt["ref_id"], attempt["from_the_visitor"]) for attempt in safety.json()] == [
+        (refused.decision_id, asked)]
 
 
 async def test_copy_without_a_replay_claims_no_recorded_history(db, fake, api_settings, clock, browser, kernel_http,

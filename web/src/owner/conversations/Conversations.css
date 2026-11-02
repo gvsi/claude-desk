@@ -1,7 +1,7 @@
 /* Conversations: the page fills the main area (AppShell `fill`), as the signed boards draw it, and
    takes the height the main area gives it, never its content's, so the main area doesn't scroll:
    the list and the open conversation each scroll on their own. From 1024 px the list is its own
-   column at the sidebar's edge, 260 px wide with a hairline at its right that runs to the bottom of
+   column at the sidebar's edge, 24% of the window between 280 and 400 px wide, with a hairline at its right that runs to the bottom of
    the window, and the open conversation sits beside it, its content no wider than the reading
    column, with the concept footer under it. In the open conversation its bar stays at the top
    and the owner's controls at the foot, and the transcript between them scrolls; in a window too
@@ -206,9 +206,22 @@
   margin-inline: auto;
 }
 
-.cd-conversations__quiet {
-  margin: 0;
-  color: var(--text-secondary);
+/* With no conversation open, from 1024 px, the pane says what opens there (board REV-CNVW): an
+   EmptyState at most 480 px wide, its lines balanced, centred on the pane both ways. The wrapper
+   fills the pane, reaching over its top and bottom padding, which differ, so the middle it centres
+   on is the pane's own. Under 1024 px the pane isn't shown. No size token is the 480 px measure. */
+.cd-conversations__empty {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin-block: calc(-1 * var(--cd-open-top)) calc(-1 * var(--space-20));
+}
+
+.cd-conversations__empty > .cd-empty-state {
+  max-width: 480px;
+  text-align: center;
+  text-wrap: balance;
 }
 
 .cd-conversations__back {
@@ -217,8 +230,10 @@
 
 @media (min-width: 1024px) {
   .cd-conversations {
-    /* 260 px: the boards' list column, the sidebar's width less 4. */
-    grid-template-columns: calc(var(--size-sidebar) - var(--space-4)) minmax(0, 1fr);
+    /* Board REV-CNVW B: the list grows with the window, 24% of it, from 280 px up to 400 px. No
+       size token is either bound. The page's loading shapes draw from this class too, so the
+       column holds its width while the list loads. */
+    grid-template-columns: clamp(280px, 24vw, 400px) minmax(0, 1fr);
   }
 
   .cd-conversations__list {
@@ -445,6 +460,16 @@
 /* A replayed chat's RecordedNote, 8 px under the bar. */
 .cd-conversation__recorded {
   margin-top: calc(var(--space-8) - var(--space-16));
+}
+
+/* A demo visitor's note, at the top of the transcript's region: 16 px under the bar, where the
+   chat's first line would rest, and 16 px over its opening lines, so it scrolls away with them and
+   the pinned bar keeps its height. A Stop that failed says why under it. */
+.cd-conversation__demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
 }
 
 /* A held request's card, and a receipt's full trace, in the conversation's column. */

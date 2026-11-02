@@ -38,6 +38,8 @@ export function aboutTheRequest(item: HeldItem, now: Date) {
         </>
       ) : undefined,
     waiting: `${session.kind === 'agent' ? 'Agent' : 'Web chat'}, ${relativeWait(item.held_at, now)}`,
+    // A demo visitor's request is tagged as one, never passed off as a real customer's.
+    demoVisitor: session.demo_visitor === true,
     // The verified person's name on record, or the agent's own: "Only for {name}, always".
     personName: session.verified || session.kind === 'agent' ? name : undefined,
   };

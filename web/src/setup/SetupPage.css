@@ -440,8 +440,9 @@
 }
 
 /* Live: "Share it" (N-R2-Setup-14-Live), a card padded 16 px with its title, then 10 px under it the
-   link's QR code at 132 px, its corners rounded as a control's, and 24 px to its right "Website
-   embed" over its line, 2 px apart, with the "Coming later" pill 12 px to their right. The code
+   link's QR code at 132 px, its corners rounded as a control's, and 24 px to its right the website
+   embed's connector tile (its line icon, as More channels draws it) with, 12 px after it, "Website
+   embed" over its line, 2 px apart, and the "Coming later" pill 12 px to their right. The code
    keeps its own light quiet zone, so any phone scans it. With less room than the code, the gap
    and a readable column of words (as on a phone), the words wrap 16 px under the code, as the
    share kit stacks there. */
@@ -480,6 +481,12 @@
 .cd-setup-live__embed-text {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* Each channel's line icon on a connector tile, 12 px before its words, as Share's More channels
+   draws it (board REV-CHAN A), centred on them. */
+.cd-setup-live__embed > .cd-connector-icon {
+  align-self: center;
 }
 
 .cd-setup-live__embed-text p {

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from desk.contracts import Fact, HoursWindow
+from desk.contracts import Fact, HoursWindow, shown_owner
 
 WEEK = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
@@ -23,10 +23,16 @@ class NothingToShow(ValueError):
 
 @dataclass(frozen=True)
 class DeskInfo:
-    """What a card may say about the Desk: the owner's name and the business's time zone."""
+    """What a card may say about the Desk: the owner's name, the business's name and time zone."""
 
     owner_display_name: str
+    business_name: str
     timezone: str
+
+    @property
+    def owner(self) -> str:
+        """The name a card gives the owner (`shown_owner`)."""
+        return shown_owner(self.owner_display_name, self.business_name)
 
     @property
     def tz(self) -> ZoneInfo:

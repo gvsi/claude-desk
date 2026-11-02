@@ -12,6 +12,7 @@ import type {
   DecisionState,
   DemoInboxEntry,
   EvMessage,
+  InboxNotice,
   NormalizedAction,
   RenderedBlock,
   RuleCard,
@@ -429,9 +430,9 @@ describe('fixtures', () => {
     // booking ID (render/en.py and es.py). The fixture's card below draws the same words.
     const render = (language: string) => readFileSync(path.join(BACKEND, 'kernel_service', 'render', `${language}.py`), 'utf8');
     expect(render('en')).toContain('f"{clock(start)} to {clock(end)}"');
-    expect(render('en')).toContain('f"With {desk.owner_display_name}"');
+    expect(render('en')).toContain('f"With {desk.owner}"');
     expect(render('es')).toContain('f"De {clock(start)} a {clock(end)}"');
-    expect(render('es')).toContain('f"Con {desk.owner_display_name}"');
+    expect(render('es')).toContain('f"Con {desk.owner}"');
     const owner = rivera.business.ownerName;
     const card = (language: 'en' | 'es') => rivera.blocks.booking_confirmed[language];
     expect(card('en').title).toBe('Tuesday, November 3');
@@ -454,11 +455,11 @@ describe('fixtures', () => {
     };
     const fragments = {
       en: [
-        `f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "`,
+        `f"This payment link was cancelled because {desk.owner}'s rules changed. "`,
         '"Ask again if you still want to pay."',
       ],
       es: [
-        'f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner_display_name}. "',
+        'f"Este enlace de pago se canceló porque cambiaron las reglas de {desk.owner}. "',
         '"Pídelo de nuevo si todavía quieres pagar."',
       ],
     };
@@ -915,6 +916,48 @@ describe('fixtures', () => {
     }
     // At least one alert names its request, so a clean result means something.
     expect(alerts).toBeGreaterThan(0);
+  });
+
+  test('inbox_titles_are_the_owner_alerts_preview_lines', () => {
+    // The kernel titles only an alert to the owner, with the alert's fixed preview line (its
+    // OWNER_PREVIEWS), the line its notice carried too. A code or a checkpoint has no title.
+    const ownerPreviews = new Set([
+      'A request needs your answer',
+      'A conversation was paused',
+      'New booking',
+      'Verification paused for a contact',
+      'New lead',
+      'Callback requested',
+      'Urgent callback requested',
+      'A conversation was handed to you',
+      'Your rules need checking',
+      'Hidden from your public page',
+      'A connected tool changed',
+    ]);
+    const entries = collect<DemoInboxEntry>(
+      (node) =>
+        typeof node.entry_id === 'string' &&
+        typeof node.body === 'string' &&
+        typeof node.created_at === 'string' &&
+        ['verification_code', 'alert', 'head_checkpoint'].includes(node.kind as string),
+    );
+    const notices = new Map(
+      collect<InboxNotice>(
+        (node) => typeof node.entry_id === 'string' && typeof node.to === 'string' && typeof node.preview === 'string',
+      ).map((notice) => [notice.entry_id, notice]),
+    );
+    let titled = 0;
+    for (const entry of entries) {
+      const where = entry.entry_id;
+      if (entry.title === undefined || entry.title === null) continue;
+      titled += 1;
+      expect([entry.kind, entry.to], where).toEqual(['alert', 'owner']);
+      expect(ownerPreviews.has(entry.title), `${where} is titled with an owner preview line`).toBe(true);
+      const notice = notices.get(entry.entry_id);
+      if (notice) expect(notice.preview, `${where} is titled with its notice's preview`).toBe(entry.title);
+    }
+    // At least one alert is titled, so a clean result means something.
+    expect(titled).toBeGreaterThan(0);
   });
 
   test('request_href_is_the_held_requests_place_on_the_page', () => {

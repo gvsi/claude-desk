@@ -14,12 +14,11 @@
 
 sse-starlette keeps a process-wide shutdown flag and a per-thread watcher bound to the event loop that
 started it; both are reset before each test, since every test runs on a loop of its own. `create_app` installs the
-API's link-token redaction as the process's log record factory for good (`log_redaction.install()`); the factory is
-put back after each test, so a later test outside these (a kernel test logging its own `/document_links/{token}`
-route) logs as it would on its own (`tests/test_log_record_factory.py`).
+API's link-token redaction as the process's log record factory for good (`log_redaction.install()`); every backend
+test puts the factory back after it runs (`tests/conftest.py`), so a later test (a kernel test logging its own
+`/document_links/{token}` route) logs as it would on its own (`tests/test_log_record_factory.py`).
 """
 
-import logging
 from collections.abc import AsyncIterator, Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -161,13 +160,6 @@ def _reset_sse_starlette() -> Iterator[None]:
     yield
     sse_starlette.AppStatus.should_exit = False
     sse_starlette._thread_state.__dict__.clear()
-
-
-@pytest.fixture(autouse=True)
-def _restore_log_record_factory() -> Iterator[None]:
-    factory = logging.getLogRecordFactory()
-    yield
-    logging.setLogRecordFactory(factory)
 
 
 class Clock:

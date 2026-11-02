@@ -396,6 +396,8 @@ def owner_refusal_key(reason: str | None, check: str | None) -> str:
 
 # The key of the owner's line for a held request a booking closed (`supersede_if_booked`, `set_state`).
 BOOKING_CLOSED_KEY = "cancelled_by_booking"
+# The key of the visitor's line for it: their own booking replaced the request (`supersede_if_booked`).
+BOOKING_CLOSED_STATUS = "closed_by_booking"
 
 # Every line `owner_refusal_key` picks is an owner line, and so is a booking's, checked at import: a missing one
 # would raise in `set_state` and leave a refusal at execution without its line (in T2, an action settled `unknown`).
@@ -404,6 +406,8 @@ if not {owner_refusal_key(reason, check) for reason in ("session_ended", "rules_
     raise RuntimeError("every refusal at execution has an owner line")
 if BOOKING_CLOSED_KEY not in render.OWNER_STATUS_KEYS:
     raise RuntimeError("a held request a booking closed has an owner line")
+if BOOKING_CLOSED_STATUS not in render.DECISION_STATUS_KEYS:
+    raise RuntimeError("a held request a booking closed has a visitor line")
 
 
 async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str = "decide",
@@ -427,9 +431,10 @@ async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str =
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     adapter = await adapters.resolve(ctx, row.desk_id, row.tool) if state == "executed" else None
+    business_row = await _business(ctx, row.desk_id)
     visitor_plain = status_line(state, tool=row.tool, session=session,
-                                owner=(await _business(ctx, row.desk_id)).owner_display_name, key=status,
-                                business=adapter.profile.business if adapter is not None else None)
+                                owner=render.shown_owner(business_row.owner_display_name, business_row.name),
+                                key=status, business=adapter.profile.business if adapter is not None else None)
     owner_plain = None
     if state == "refused_at_execution":
         owner_plain = render.owner_line(owner_refusal_key(summary.get("reason"), summary.get("check")))
@@ -499,8 +504,9 @@ async def supersede_if_booked(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
     only ever closes a request, never runs one, and the booking's own transaction takes no decision
     row. Ledgered `decide` `{decision_id, action_id, state, cancelled_by: "booking", booking_id,
     policy_version, auto_money_cap_cents}`, the Desk's active version and its cap as `_answers_now`
-    reads them (both left out only when it has none), and re-signed; the visitor's line is the
-    state's own, and the owner's (`owner_plain`, unsigned, on the owner's reads alone) says the
+    reads them (both left out only when it has none), and re-signed; the visitor's line says their
+    booking replaced the request (`closed_by_booking`, where a visitor's own cancel keeps the state's
+    "Cancelled"), and the owner's (`owner_plain`, unsigned, on the owner's reads alone) says the
     visitor booked before the owner answered. The row is locked and checked again before it changes,
     so two readers cancel it once."""
     if await _superseding_booking(ctx, row) is None:
@@ -516,7 +522,7 @@ async def supersede_if_booked(ctx: KernelCtx, row: DecisionRow) -> DecisionRow:
     version_row = await activation.active_version(ctx, locked.desk_id)
     if version_row is not None:
         summary.update(policy_version=version_row.version, auto_money_cap_cents=activation.version_cap(version_row))
-    await set_state(ctx, locked, "cancelled", summary=summary)
+    await set_state(ctx, locked, "cancelled", summary=summary, status=BOOKING_CLOSED_STATUS)
     return locked
 
 
@@ -1040,13 +1046,21 @@ def _over_mandate(call: _Call, evaluation: Evaluation) -> bool:
             and action.amount_cents > left)
 
 
-def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluation | None) -> str:
+# An adapter's step-1 refusal that has its own status line, one Claude can act on, by its check.
+CHECK_STATUS = {"contact_needed": "refused_contact_needed"}
+
+
+def _status_key(call: _Call, state: str, reason: str | None, evaluation: Evaluation | None,
+                check: str | None = None) -> str:
     """The status line a new decision is stored with: its state's, except for a refusal the
     evaluation made (no early `reason`) with the baseline's mandate rule as its only deciding
     policy, for an agent holding a mandate whose charge is above what that mandate had left
-    (`refused_over_mandate`). Any other refusal by that rule (no mandate, no amount), or one
-    another policy also decided, keeps the generic line, so the line never names a cause that
-    isn't the real one."""
+    (`refused_over_mandate`), and for an adapter's refusal whose check has its own line
+    (`CHECK_STATUS`: a booking with no name and phone number or email, `refused_contact_needed`).
+    Any other refusal by that rule (no mandate, no amount), or one another policy also decided,
+    keeps the generic line, so the line never names a cause that isn't the real one."""
+    if state == "refused" and reason == "adapter_refused" and check in CHECK_STATUS:
+        return CHECK_STATUS[check]
     over = (state == "refused" and reason is None and evaluation is not None
             and _over_mandate(call, evaluation))
     return "refused_over_mandate" if over else state
@@ -1059,8 +1073,8 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
     breaker's strike and the owner's alerts, in the caller's transaction, and signs it with its
     status line (`_status_key`). A twin call that committed first wins: its decision is returned
     instead. `check` is an adapter's own code for a step-1 refusal (`AdapterRefusal.code`), which
-    its `decide` entry records beside the reason, through `ledger.safe_ref`; it changes neither the
-    owner's words nor the visitor's line."""
+    its `decide` entry records beside the reason, through `ledger.safe_ref`; it changes the
+    visitor's line only for a check with its own (`CHECK_STATUS`), never the owner's words."""
     principal, session_row, action = call.principal, call.session_row, call.action
     now = ctx.clock.now()
     state = STATE_OF[outcome]
@@ -1078,9 +1092,9 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         policy_ids=evaluation.policy_ids if evaluation and reason is None else [],
         review=evaluation.review if evaluation else None,
         reason_plain=_reason_plain(call, outcome, reason, evaluation),
-        visitor_plain=render.status(_status_key(call, state, reason, evaluation),
+        visitor_plain=render.status(_status_key(call, state, reason, evaluation, check),
                                     render.language(session_row.last_language),
-                                    owner=call.business.owner_display_name),
+                                    owner=render.shown_owner(call.business.owner_display_name, call.business.name)),
         expires_at=now + LIFETIME[outcome], ledger_seq=0, created_at=now, updated_at=now,
         action_id=action.action_id if action else None)
     try:

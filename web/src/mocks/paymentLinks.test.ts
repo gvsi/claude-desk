@@ -91,6 +91,33 @@ it('cancels an ended session link without posting a chat card', () => {
   expect(chat.events).toHaveLength(before);
 });
 
+it('cancels a link on its next read once another payment paid its quote, with no reason or card', async () => {
+  const { world } = mockStore;
+  const desk = world.desk(RIVERA.deskId)!;
+  const chat = world.addSession(desk);
+  const issue = (quoteId: string) => {
+    const token = world.issueLink(chat, { title: 'Deposit', amountCents: 2000, language: 'en' });
+    world.links.get(token)!.quoteId = quoteId;
+    return token;
+  };
+  const read = (token: string) => mockStore.dispatch('paymentLink', { params: { token } });
+  const [charged, unpaid, paying, other] = [issue('Q-1'), issue('Q-2'), issue('Q-3'), issue('Q-3')];
+  expect(await read(charged)).toMatchObject({ body: { state: 'issued' } });
+  const before = chat.events.length;
+  // the agent's mandate charge of its quote lands: the link can never be paid now
+  world.quotePaid('Q-1');
+  expect(await read(charged)).toMatchObject({ body: { state: 'cancelled', cancel_reason: null } });
+  expect(await mockStore.dispatch('completePayment', { params: { token: charged } })).toMatchObject({ status: 409 });
+  expect(await read(unpaid)).toMatchObject({ body: { state: 'issued' } });
+  // one of a quote's links is paid: its other link is cancelled when next read, and so is a completion of it
+  await mockStore.dispatch('completePayment', { params: { token: paying } });
+  expect(chat.events.length).toBe(before + 1);              // the paid link's payment_confirmed card, and nothing else
+  expect(await mockStore.dispatch('completePayment', { params: { token: other } })).toMatchObject({ status: 409 });
+  expect(await read(other)).toMatchObject({ body: { state: 'cancelled', cancel_reason: null } });
+  expect(await read(paying)).toMatchObject({ body: { state: 'paid' } });
+  expect(chat.events.length).toBe(before + 1);
+});
+
 it('preserves an injected JSON null response body', async () => {
   mockStore.inject({ route: 'paymentLink', status: 200, body: null });
   expect(await mockStore.dispatch('paymentLink', { params: { token: 'unused' } })).toEqual({ status: 200, body: null });

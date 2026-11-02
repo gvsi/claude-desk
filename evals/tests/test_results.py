@@ -28,6 +28,7 @@ from evals.results import (
     pass_target,
     results_check,
     results_file,
+    selection_problems,
     write_results,
 )
 from evals.tests.eval_repo import commit, git, make_repo, scenario_yaml, set_landed, write
@@ -390,6 +391,43 @@ async def test_check_fails_on_an_incomplete_run(repo):
     await results_at_head(repo, Scripted(errors={("leg-held", 1): ["timeout"]}))
     passed, reason = check(repo)
     assert not passed and "1 incomplete runs: leg-held run 1" in reason
+
+
+@dataclass
+class SimulatorRefusal:
+    """`run_one` whose runs in `refused` the visitor simulator refused, on every attempt, mid-conversation (two
+    simulator calls and no artifact); every other run is clean."""
+
+    refused: set[tuple[str, int]]
+
+    async def __call__(self, scenario: Any, rep: int, target: Any, simulator: Any, **kwargs: Any) -> Any:
+        made = outcome(scenario, rep, kwargs.get("pass_id", "p"),
+                       error="simulator_refused" if (scenario.id, rep) in self.refused else None)
+        return made
+
+
+async def test_a_simulator_refusal_beside_a_scored_run_passes_and_is_listed(repo):
+    """The project owner's decision (2026-11-02): the results file lists the run, and the check passes."""
+    branch(repo)
+    path = await results_at_head(repo, SimulatorRefusal({("atk-cal", 2)}), runs=2)
+    file = ResultsFile.model_validate_json(path.read_text())
+    assert [(r.scenario_id, r.rep) for r in file.refused_runs] == [("atk-cal", 2)]
+    assert file.gate.passed and [(r.scenario_id, r.rep) for r in file.gate.refused_runs] == [("atk-cal", 2)]
+    assert ResultsFile.model_validate_json(file.dumps()) == file
+    passed, reason = check(repo)
+    assert passed, reason
+    # A refused run must be an incomplete row of the file, named once.
+    data = json.loads(path.read_text())
+    for listed in ([{"scenario_id": "atk-cal", "rep": 1}], [{"scenario_id": "atk-cal", "rep": 2}] * 2):
+        with pytest.raises(ValueError):
+            ResultsFile.model_validate_json(json.dumps({**data, "refused_runs": listed}))
+
+
+async def test_check_fails_when_every_run_of_a_scenario_was_refused(repo):
+    branch(repo)
+    await results_at_head(repo, SimulatorRefusal({("atk-cal", 1), ("atk-cal", 2)}), runs=2)
+    passed, reason = check(repo)
+    assert not passed and "2 incomplete runs: atk-cal run 1, atk-cal run 2" in reason
 
 
 async def test_check_fails_on_a_changed_suite_or_recorded_rate(repo):
@@ -1730,3 +1768,35 @@ def _only_pass(passes: Path) -> Any:
     full = [p for p in finished if p.config.runs == 3 and p.config.results]
     assert len(full) == 1
     return full[0]
+
+
+async def test_record_rate_takes_a_pass_whose_refused_runs_are_attacks(repo):
+    """The held-out rate counts held-out legitimate runs only, so a refused attack run leaves it whole."""
+    refusing = SimulatorRefusal({("atk-cal", 2), ("atk-held", 3)})
+    result = await run_pass(config(runs=3, results=True), deps(repo, refusing))
+    assert [(r.scenario_id, r.rep) for r in gate(result, EMPTY).refused_runs] == [("atk-cal", 2), ("atk-held", 3)]
+    recorded = record_rate(result, root=repo, **RECORD)
+    assert (recorded.run_id, recorded.trials) == (result.pass_id, 3)
+
+
+async def test_record_rate_refuses_a_pass_with_a_refused_heldout_legitimate_run(repo):
+    """The rate would count fewer held-out legitimate runs than the pass made, so none is recorded."""
+    result = await run_pass(config(runs=3, results=True), deps(repo, SimulatorRefusal({("leg-held", 2)})))
+    assert gate(result, EMPTY).passed
+    with pytest.raises(PassRefused, match="^a rate is recorded only from a pass whose held-out legitimate runs all "
+                                          "scored, and the visitor simulator refused leg-held run 2$"):
+        record_rate(result, root=repo, **RECORD)
+    assert (repo / "evals" / "recorded_rates.json").read_text() == '{"history": []}\n'
+
+
+async def test_selection_skips_an_excused_refused_run_for_the_report_only(repo):
+    """The report's coverage skips a refused run the gate excuses; calibration's stays strict."""
+    result = await run_pass(config(runs=2), deps(repo, SimulatorRefusal({("atk-cal", 2), ("leg-held", 1),
+                                                                        ("leg-held", 2)})))
+    assert [(r.scenario_id, r.rep) for r in result.refused_runs] == [("atk-cal", 2), ("leg-held", 1), ("leg-held", 2)]
+    # Every run of leg-held was refused, so it isn't excused and stays unjudged.
+    assert selection_problems(result, repo, excuse_refused=True) == [
+        "2 runs weren't judged (an error, or records the verdict couldn't read): leg-held run 1, leg-held run 2"]
+    assert selection_problems(result, repo) == [
+        "3 runs weren't judged (an error, or records the verdict couldn't read): atk-cal run 2, leg-held run 1, "
+        "leg-held run 2"]

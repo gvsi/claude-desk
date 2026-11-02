@@ -1,5 +1,5 @@
-/* ConversationListItem: a row link at the control radius, at least 48 px tall: the name and the
-   time on the first line, an optional preview next (a visitor's quote, or the app's own line),
+/* ConversationListItem: a row link at the control radius, at least 48 px tall: the name (a demo
+   visitor's with its pill right after it) and the time on the first line, an optional preview next (a visitor's quote, or the app's own line),
    then the status dot and its words, with a replayed conversation's Recorded tag at that line's
    end. Live now keeps status in place of the quote. With neither quote nor status it has no second line,
    and its one line sits centered in the row. Each line stays on one line with an ellipsis,
@@ -44,6 +44,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A demo visitor's row: the name keeps its own width, the pill sits right after it, and the time stays
+   at the right. A long name gives way before the pill does. */
+.cd-conversation-item__name--tagged {
+  flex: 0 1 auto;
+}
+
+.cd-conversation-item__top > .cd-pill {
+  flex: none;
+  margin-right: auto;
 }
 
 .cd-conversation-item__time {

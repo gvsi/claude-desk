@@ -27,7 +27,7 @@ from desk.kernel_service.seed import RIVERA_CARDS
 
 from .fakes import FakeAdapter
 from .helpers import CopyRows, activate_cards, kernel_ctx, ledger_rows, make_copy_rows, rows_of, verify_session
-from .test_adapters import Rivera, book, quote_args, visitor_of
+from .test_adapters import WHO_NOTE, Rivera, book, quote_args, visitor_of
 from .test_compiler import card
 from .test_decide import PASS, Visitor, decided, desk_with, open_visitor, owner_decide, set_mode, verify_signature
 
@@ -161,7 +161,7 @@ async def test_a_bookings_owner_alert_reaches_only_the_owners_inbox(app, client,
     assert response.status_code == 200, response.text
     assert [(entry["to"], entry["kind"], entry["body"]) for entry in response.json()
             if " booked " in entry["body"]] == [
-        ("owner", "alert", "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm.")]
+        ("owner", "alert", "A stranger booked Monday, November 2, from 10:00 am to 12:00 pm." + WHO_NOTE)]
 
 
 async def test_an_owner_notice_never_rides_in_the_result(app, client, registry, caplog):
