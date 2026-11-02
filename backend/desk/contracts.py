@@ -160,9 +160,22 @@ def effective_brand(stored: Mapping[str, str]) -> dict[str, str]:
         key = DEFAULT_BRAND_PALETTE
     return {"palette": key, **BRAND_PALETTE[key]}
 
+# The owner's display name setup gives an owner who gave no name. The kernel's visitor lines and Claude's prompt
+# name the business instead of an owner with this name ("Let me check with Turner Plumbing."; `shown_owner`).
+OWNER_NAME_FALLBACK = "Owner"
+
+
+def shown_owner(owner_display_name: str, business_name: str) -> str:
+    """The name the kernel's visitor lines ("Checked against {owner}'s rules", "Let me check with {owner}.") and
+    Claude's prompt give the owner: the business's name when the owner's name is the one setup gives an owner who
+    gave none (`OWNER_NAME_FALLBACK`), else the owner's name as it is. A business with no name keeps the fallback."""
+    return business_name if owner_display_name == OWNER_NAME_FALLBACK and business_name else owner_display_name
+
+
 class BusinessSeed(BaseModel):
     name: str
     owner_display_name: str               # "Mike Turner"; the handoff clause, visitor status lines and owner_joined render it
+                                          # (the kernel's lines name the business instead of `OWNER_NAME_FALLBACK`)
     timezone: str                         # IANA; Cedar's local_dow and local_minute use it
     brand: Brand = {}                     # public-page colors; the kernel stores a `palette` pick as `stored_brand` makes it
     existing_business_id: str | None = None   # add a Desk to a business in this copy

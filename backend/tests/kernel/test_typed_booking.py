@@ -19,7 +19,7 @@ from .test_execute import executed, read
 
 TOOL = 'desk.consult'
 SLOT = 'S-20261102-1000'
-DESK = DeskInfo(owner_display_name='Mike Turner', timezone='America/Los_Angeles')
+DESK = DeskInfo(owner_display_name='Mike Turner', business_name='Turner Plumbing', timezone='America/Los_Angeles')
 
 
 @pytest.mark.parametrize('config', [None, {'block': 'intake', 'questions': ['What?']},

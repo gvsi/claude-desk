@@ -24,7 +24,7 @@ from desk.api.model import AnthropicModel, ModelUsage
 from desk.api.prompts import NOTES, REWRITE_INSTRUCTION, DeskIdentity, conversation_system
 from desk.api.store import append_message, append_note_once, has_pending, start_fresh_context, transcript
 from desk.api.tools import Caller
-from desk.contracts import AgentAuth, Claim, Fact, Label
+from desk.contracts import OWNER_NAME_FALLBACK, AgentAuth, Claim, Fact, Label
 from desk.events import SseEvent
 from tests.api.conftest import new_visitor, without_call_backs
 from tests.api.fakes import (
@@ -1438,6 +1438,20 @@ async def test_a_context_sends_the_prompt_it_opened_with_and_a_new_template_star
     assert [block["text"].split(">")[0] for block in fresh.messages[0]["content"][1:]] == [
         "<visitor_message", "<desk_context"]                       # the new words in full, and the facts again
     assert await frozen_systems(api_conn, caller.session_id) == [(0, opened_with), (1, renders_now)]
+
+
+async def test_a_desk_whose_owner_gave_no_name_names_the_business_to_claude(api_conn, caller, fake):
+    """With setup's fallback owner name, the prompt calls the owner by the business's name, as the kernel's lines do
+    (`shown_owner`), so Claude never writes "Owner" beside the kernel's "Let me check with Turner Plumbing."."""
+    desk = fake.desks[caller.desk_id]
+    desk.owner_display_name = OWNER_NAME_FALLBACK
+    fake._put_business(desk)
+    fake.flush()
+    await said(api_conn, caller, "Hi, can I book a visit?")
+    model = ScriptedModel([response(reply("Sure, what day suits you?"))])
+    assert await run_turn(api_conn, caller, model) == "done"
+    (request,) = model.requests
+    assert request.system == conversation_system(RIVERA.model_copy(update={"owner_name": RIVERA.business_name}))
 
 
 NEW_NAMES = {"business_name": "Turner Plumbing & Sons", "desk_name": "Evenings line",

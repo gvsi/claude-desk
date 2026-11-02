@@ -1114,7 +1114,8 @@ async def check_clauses(ctx: KernelCtx, session_row: SessionRow, desk_id: str, d
 async def _desk_info(ctx: KernelCtx, desk_id: str) -> DeskInfo:
     business = (await ctx.db.scalars(ctx.repo.scoped(
         select(Business).join(Desk, Desk.business_id == Business.business_id).where(Desk.desk_id == desk_id)))).one()
-    return DeskInfo(owner_display_name=business.owner_display_name, timezone=business.timezone)
+    return DeskInfo(owner_display_name=business.owner_display_name, business_name=business.name,
+                    timezone=business.timezone)
 
 
 async def desk_names(ctx: KernelCtx, desk_id: str) -> list[str]:
@@ -1503,7 +1504,7 @@ async def finalize(ctx: KernelCtx, session_row: SessionRow, *, blocks: Sequence[
                "final": final}
     entry = await ledger.append(ctx, copy_id=session_row.copy_id, desk_id=session_row.desk_id, event=LedgerEvent(
         kind="reply", origin="kernel", session_id=session_row.session_id, ref_id=message_id, summary=summary))
-    owner = (await _desk_info(ctx, session_row.desk_id)).owner_display_name
+    owner = (await _desk_info(ctx, session_row.desk_id)).owner
     if visitor_plain_key is None:
         visitor_plain_key = ("reply_handed_off" if not shown or any(block.template == "handoff" for block in blocks)
                              else "reply_checked")
@@ -1618,7 +1619,7 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     shown = [row for row in rows
              if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
     asked = await _receipt_asked(ctx, session_row, shown)
-    owner = ((await _desk_info(ctx, session_row.desk_id)).owner_display_name
+    owner = ((await _desk_info(ctx, session_row.desk_id)).owner
              if any(row.state == "executed" for row in shown) else None)
     return [(key, row.visitor_plain, owner if row.state == "executed" else None)
             for row, key in zip(shown, asked, strict=True) if key is not None]

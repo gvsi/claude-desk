@@ -1195,7 +1195,8 @@ def short_name(display_name: str) -> str | None:
 
 
 async def _desk_info(ctx: KernelCtx, desk_id: str) -> DeskInfo:
-    """What a kernel card renders from the Desk's business: the owner's name and the time zone."""
+    """What a kernel card renders from the Desk's business: the owner's and business's names and the time zone."""
     business = (await ctx.db.scalars(ctx.repo.scoped(select(Business).join(
         Desk, Desk.business_id == Business.business_id).where(Desk.desk_id == desk_id)))).one()
-    return DeskInfo(owner_display_name=business.owner_display_name, timezone=business.timezone)
+    return DeskInfo(owner_display_name=business.owner_display_name, business_name=business.name,
+                    timezone=business.timezone)

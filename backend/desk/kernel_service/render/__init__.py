@@ -9,7 +9,8 @@ baseline's mandate rule alone refused an agent's charge above what its mandate h
 `refused_contact_needed`, the line a booking refused for want of a name and a phone number or
 email takes (`adapters.book`), which tells Claude, and the visitor, what to give before booking; a
 decision's status line is never a receipt (`DECISION_STATUS_KEYS`); they name the business's
-owner and nothing else, so they never carry an amount, a date or a limit's value. An action a
+owner and no request data (the business itself when the owner gave no name: `shown_owner`), so they
+never carry the request's amount, date or a limit's value. An action a
 visitor or agent asked for that ran says what was done, one line per tool
 (`executed_status`), in place of the generic executed line, which only the owner's own setup
 actions keep. `status` also serves the kernel's other visitor texts (`MESSAGES`): the verify card's
@@ -52,7 +53,7 @@ from typing import TYPE_CHECKING, Literal
 
 from desk.contracts import BusinessToolDef, CardOption, Clause, ClauseTemplate, Fact, RenderedBlock
 from desk.kernel_service.render import en, es
-from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow
+from desk.kernel_service.render.cards import Card, DeskInfo, NothingToShow, shown_owner
 
 if TYPE_CHECKING:
     from desk.kernel_service.repo import KernelCtx

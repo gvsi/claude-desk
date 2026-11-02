@@ -1,9 +1,10 @@
 """English: the visitor's status lines, the owner's alert previews and owner-only lines, and the
 clause cards.
 
-`{owner}` is the business's `owner_display_name`. Status lines carry no digits, currency or
-percentages: only clause cards rendered from facts do. Cards read datetimes in the business's
-time zone ("Tuesday, November 3, 2:00 pm"), money as `$1,234.56` and percentages as "10%".
+`{owner}` is the business's `owner_display_name`, or the business's name when the owner gave none
+(`cards.shown_owner`). Status lines carry no digits, currency or percentages: only clause cards
+rendered from facts do. Cards read datetimes in the business's time zone ("Tuesday, November 3,
+2:00 pm"), money as `$1,234.56` and percentages as "10%".
 """
 
 from datetime import datetime, time, timedelta
@@ -58,7 +59,7 @@ OWNER_STATUS: dict[str, str] = {
 
 # What an executed action did, one line per tool, key for key with `es.EXECUTED`: the receipt a
 # visitor or another agent sees instead of the generic "executed" line. Like the status lines they
-# name the owner and nothing else, so they never carry an amount, a time or a date.
+# name the owner (or the business when the owner gave none) and no request data: no amount, time or date.
 EXECUTED: dict[str, str] = {
     "purpose_payment": "{title}: payment link made",
     "urgent": "{title}: urgent request sent to {owner}",
@@ -163,9 +164,11 @@ def quote(fact: Fact | None, desk: DeskInfo) -> Card:
 
 
 def handoff(fact: Fact | None, desk: DeskInfo) -> Card:
-    """`Let me check with {owner}.` / `{owner} will reply here.`"""
-    owner = desk.owner_display_name
-    return Card(title=f"Let me check with {owner}.", lines=(f"{owner} will reply here.",))
+    """`Let me check with {owner}.` / `{owner} will reply here.`, the first ending on the name's own full stop
+    when it has one (a business name such as "Turner Plumbing, Inc.")."""
+    owner = desk.owner
+    stop = "" if owner.endswith(".") else "."
+    return Card(title=f"Let me check with {owner}{stop}", lines=(f"{owner} will reply here.",))
 
 
 def booking_options(fact: Fact | None, desk: DeskInfo) -> Card:
@@ -188,9 +191,9 @@ def booking_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
         from desk.kernel_service.adapters.base import quoted
         return Card(title=date(start), lines=(f"{quoted(found['appointment_type'])} at {clock(start)}",
                                               f"About {found['appointment_minutes']} minutes",
-                                              f"With {desk.owner_display_name}"))
+                                              f"With {desk.owner}"))
     return Card(title=date(start), lines=(f"{clock(start)} to {clock(end)}",
-                                          f"With {desk.owner_display_name}"))
+                                          f"With {desk.owner}"))
 
 
 def charter_text(fact: Fact | None, desk: DeskInfo) -> Card:
@@ -205,7 +208,7 @@ def verify_prompt(fact: Fact | None, desk: DeskInfo) -> Card:
 def callback_confirmed(fact: Fact | None, desk: DeskInfo) -> Card:
     """`{owner} will call you back on {day}, between {start} and {end}`; without a window
     `{owner} will call you back`. The fact holds only the window, never the visitor's text."""
-    owner = desk.owner_display_name
+    owner = desk.owner
     window = callback_window(fact, desk)
     if window is None:
         return Card(title=f"{owner} will call you back")
@@ -262,7 +265,7 @@ def link_cancelled(fact: Fact | None, desk: DeskInfo) -> Card:
     from that link's own `payment_link` fact."""
     return Card(title=money(claims(fact)["total"]), lines=(
         title_claim(fact),
-        f"This payment link was cancelled because {desk.owner_display_name}'s rules changed. "
+        f"This payment link was cancelled because {desk.owner}'s rules changed. "
         "Ask again if you still want to pay."))
 
 

@@ -190,7 +190,8 @@ async def public_desk(ctx: KernelCtx, slug: str, lang: render.Language) -> Publi
     header, withheld = header_of(desk, business, canaries)
     if withheld:
         await _alert_withheld(ctx, desk.desk_id, withheld)
-    info = DeskInfo(owner_display_name=header["owner_display_name"], timezone=business.timezone)
+    info = DeskInfo(owner_display_name=header["owner_display_name"], business_name=header["business_name"],
+                    timezone=business.timezone)
     now = ctx.clock.now()
     charter: list[RenderedBlock] = []
     for name in CHARTER_TEMPLATES:

@@ -431,9 +431,10 @@ async def set_state(ctx: KernelCtx, row: DecisionRow, state: str, *, kind: str =
     session = (await ctx.db.scalars(ctx.repo.scoped(
         select(SessionRow).where(SessionRow.session_id == row.session_id)))).one()
     adapter = await adapters.resolve(ctx, row.desk_id, row.tool) if state == "executed" else None
+    business_row = await _business(ctx, row.desk_id)
     visitor_plain = status_line(state, tool=row.tool, session=session,
-                                owner=(await _business(ctx, row.desk_id)).owner_display_name, key=status,
-                                business=adapter.profile.business if adapter is not None else None)
+                                owner=render.shown_owner(business_row.owner_display_name, business_row.name),
+                                key=status, business=adapter.profile.business if adapter is not None else None)
     owner_plain = None
     if state == "refused_at_execution":
         owner_plain = render.owner_line(owner_refusal_key(summary.get("reason"), summary.get("check")))
@@ -1093,7 +1094,7 @@ async def _store(ctx: KernelCtx, call: _Call, outcome: Outcome, *, reason: str |
         reason_plain=_reason_plain(call, outcome, reason, evaluation),
         visitor_plain=render.status(_status_key(call, state, reason, evaluation, check),
                                     render.language(session_row.last_language),
-                                    owner=call.business.owner_display_name),
+                                    owner=render.shown_owner(call.business.owner_display_name, call.business.name)),
         expires_at=now + LIFETIME[outcome], ledger_seq=0, created_at=now, updated_at=now,
         action_id=action.action_id if action else None)
     try:
