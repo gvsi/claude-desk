@@ -21,7 +21,7 @@ export interface SentencePart {
  * The line under a rule's sentence: the tools it covers, by their titles (`{ titles }`, each the
  * tool's own words, set off as user text and joined "Payment link, Charge within a signed limit
  * and Refund") or the screen's own words for a group of tools ("Every tool"); then who it is for
- * ("Anyone", "The record's owner, verified").
+ * ("Anyone", "The customer, once verified").
  */
 export interface RuleMeta {
   tools: RuleTarget;

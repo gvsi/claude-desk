@@ -243,6 +243,89 @@ describe('rules page', () => {
     expectNoHorizontalScroll();
   });
 
+  it('a_built_in_connector_wears_a_built_in_pill_as_a_mock_wears_its_own', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const tools = screen.getByRole('region', { name: 'Tool by tool' });
+    await expect.element(tools.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const badge = (name: string) => tools.getByRole('region', { name }).element().querySelector('.cd-house-rules__connector-header .cd-pill')?.textContent;
+    for (const name of SECTIONS.filter((section) => section !== 'Stripe')) expect(badge(name), name).toBe('Built in');
+    expect(badge('Stripe')).toBe('Mock');
+    expect(tools.element().querySelector('.cd-connector-name__built-in')).toBeNull();
+  });
+
+  it('anything_not_listed_keeps_the_whole_place_of_details_so_its_dot_lines_up', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const across = screen.getByRole('region', { name: 'Across your Desk' });
+    await expect.element(across).toBeVisible();
+    const row = across.element().querySelector<HTMLElement>('[data-fallback]')!;
+    const actions = row.querySelector<HTMLElement>('.cd-house-rules__rule-actions')!;
+    const slot = actions.querySelector<HTMLElement>('.cd-advanced-details__slot')!;
+    const dot = actions.querySelector<HTMLElement>('.cd-status-dot')!;
+    // Details' empty place keeps its whole box, as a row's Details does on the board, 2 px under the
+    // row's top, so the row is as tall as the place and its dot sits at the place's middle.
+    expect(getComputedStyle(slot).marginTop).toBe('0px');
+    const style = getComputedStyle(row);
+    const edges = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'] as const;
+    const inner = row.getBoundingClientRect().height - edges.reduce((sum, edge) => sum + Number.parseFloat(style[edge]), 0);
+    const top = Number.parseFloat(getComputedStyle(actions).paddingTop);
+    expect(top).toBeGreaterThan(0);
+    expect(Math.round(inner)).toBe(Math.round(slot.getBoundingClientRect().height + top));
+    const middle = (el: Element) => (el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2;
+    expect(Math.abs(middle(dot) - middle(slot))).toBeLessThan(1);
+  });
+
+  it('sets_every_apostrophe_it_writes_as_a_typographic_one', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Tool by tool' }).getByRole('region', { name: 'Stripe' })).toBeVisible();
+    const straight: string[] = [];
+    const walker = document.createTreeWalker(screen.getByRole('main').element(), NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      if (node.parentElement?.closest('.cd-skeleton-screen__layer, [hidden]')) continue;
+      if (node.textContent?.includes("'")) straight.push(node.textContent.trim());
+    }
+    expect(straight).toEqual([]);
+    for (const words of ['Claude always says it’s an AI', 'Confirm it’s them', 'Lets a visiting agent pay from its owner’s signed limit.', 'Your customers’ charges and refunds. Test mode, no money moves.']) {
+      expect(screen.getByText(words, { exact: true }).elements().length, words).toBeGreaterThan(0);
+    }
+  });
+
+  it('a_rule_for_a_tool_this_version_cannot_name_shows_under_other_tools', async () => {
+    // A stored rule whose target isn't on the Desk, nor in this version's catalog.
+    mockStore.world.addActiveRules(desk(), [{ ...rivera.ruleCards['rv-quote'], card_id: 'future-rule', applies_to: 'native.teleport' }]);
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const tools = screen.getByRole('region', { name: 'Tool by tool' });
+    const other = tools.getByRole('region', { name: 'Other tools' });
+    await expect.element(other).toBeVisible();
+    // The last card, after every connector.
+    expect([...tools.element().querySelectorAll('.cd-card')].at(-1)).toBe(other.element());
+    const row = other.element().querySelector<HTMLElement>('[data-rule-id="future-rule"]')!;
+    expect(row.querySelector('.cd-rule-sentence__sentence')?.textContent).toBe("A rule for a tool this version can't name");
+    expect(row.querySelector('.cd-status-dot--handled')).not.toBeNull();
+    expect(row.querySelector('.cd-advanced-details__toggle:not(.cd-advanced-details__slot)')?.textContent).toBe('Details');
+    expect(other.element().textContent).not.toContain('teleport');
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('a_connected_tool_outside_the_catalog_shows_under_other_tools_with_its_rules', async () => {
+    // A tool a connector lists that this version's catalog doesn't know, with a rule of its own.
+    const like = desk().tools.find((tool) => tool.tool === 'payments.list_charges')!;
+    desk().tools.push({ ...like, tool: 'mcp.secret_tool' as typeof like.tool, effects: ['read'], status: 'enabled', review_reason: null });
+    mockStore.world.addActiveRules(desk(), [{ ...rivera.ruleCards['rv-quote'], card_id: 'secret-rule', applies_to: 'mcp.secret_tool' }]);
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    const other = screen.getByRole('region', { name: 'Tool by tool' }).getByRole('region', { name: 'Other tools' });
+    await expect.element(other).toBeVisible();
+    const tool = other.getByRole('region', { name: 'A connected tool' });
+    await expect.element(tool.getByRole('heading', { level: 3, name: 'A connected tool' })).toBeVisible();
+    expect(ruleCells(tool.element())).toEqual(['Claude can use a connected tool / Anyone']);
+    expect(other.element().textContent).not.toContain('mcp.secret_tool');
+  });
+
+  it('turners_rules_have_no_other_tools_card', async () => {
+    const { screen } = await renderRoute(`${DESK}/rules`);
+    await expect.element(screen.getByRole('region', { name: 'Tool by tool' }).getByRole('region', { name: 'Stripe' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Other tools' }).elements()).toHaveLength(0);
+  });
+
   it('all_rules_opens_rules_in_its_place', async () => {
     const { screen, router } = await renderRoute(`${DESK}/rules/all`);
     await expect.element(screen.getByRole('region', { name: 'Tool by tool' }).getByRole('region', { name: 'Stripe' })).toBeVisible();
@@ -804,7 +887,7 @@ describe('rules page', () => {
     const across = screen.getByRole('region', { name: 'Across your Desk' });
     await expect.element(across).toBeVisible();
     expect(ruleCells(across.element())).toEqual([
-      "Claude always says it's an AI / In every reply",
+      'Claude always says it’s an AI / In every reply',
       'Claude logs every request, allowed or not, and shows it to you in Safety',
       'Anything not listed here, Claude asks you first',
     ]);
@@ -816,7 +899,7 @@ describe('rules page', () => {
     // The always-on rules for one tool sit in its list.
     const tools = screen.getByRole('region', { name: 'Tool by tool' });
     for (const [name, sentence] of [
-      ["Confirm it's them", 'Claude never sends a code anywhere but the contact on record'],
+      ['Confirm it’s them', 'Claude never sends a code anywhere but the contact on record'],
       ['Share a document', 'Claude never shows private data to anyone but its verified owner'],
       ['See charges', 'Claude never shows private data to anyone but its verified owner'],
     ] as const) {

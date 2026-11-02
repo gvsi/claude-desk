@@ -74,11 +74,11 @@ export const TOOL_PHRASES: Readonly<Record<string, ToolPhrase>> = {
   'native.book': { can: 'book visits', before: 'booking', over: 'bookings' },
   'native.capture_lead': { can: 'take a name and a way to reach them', before: 'taking a name and a way to reach them' },
   'native.request_callback': { can: 'take callback requests', before: 'taking a callback request' },
-  'native.start_verification': { can: "send a code when someone asks to confirm it's them", before: 'sending a code', never: 'send codes' },
-  'native.release_document': { can: [{ text: "share customers' " }, key('own documents')], before: [{ text: 'sharing ' }, key('documents')] },
+  'native.start_verification': { can: 'send a code when someone asks to confirm it’s them', before: 'sending a code', never: 'send codes' },
+  'native.release_document': { can: [{ text: 'share customers’ ' }, key('own documents')], before: [{ text: 'sharing ' }, key('documents')] },
   'native.payment_link': { can: 'send payment links', before: [{ text: 'sending ' }, key('payment links')], over: 'payment links' },
   'native.charge_mandate': {
-    can: "take a visiting agent's payment",
+    can: 'take a visiting agent’s payment',
     before: [key('any agent payment')],
     upTo: ', up to ',
     after: ', from its signed limit',
@@ -112,7 +112,7 @@ export const JOINED_PHRASES: readonly { targets: readonly string[]; phrase: Tool
   },
   {
     targets: ['native.release_document', 'payments.list_charges'],
-    phrase: { can: "share customers' own documents and charges", before: 'sharing a document or a charge' },
+    phrase: { can: 'share customers’ own documents and charges', before: 'sharing a document or a charge' },
   },
 ];
 
@@ -544,7 +544,7 @@ export interface AcrossDeskSentence {
 
 /** The always-on rules over every tool, as Rules' "Across your Desk" lists them (REV-RULES-D, v354). */
 export const ACROSS_DESK_SENTENCES: readonly AcrossDeskSentence[] = [
-  { key: 'ai', parts: [{ text: "Claude always says it's an AI" }], line: 'In every reply' },
+  { key: 'ai', parts: [{ text: 'Claude always says it’s an AI' }], line: 'In every reply' },
   { key: 'log', parts: [{ text: 'Claude logs every request, allowed or not, and shows it to you in Safety' }] },
 ];
 

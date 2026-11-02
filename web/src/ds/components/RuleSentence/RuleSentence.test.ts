@@ -29,11 +29,11 @@ it('key_parts_are_strong_and_the_rest_plain', () => {
 
 it('the_meta_line_names_each_tool_as_user_text_then_who', () => {
   const el = draw({
-    parts: [{ text: "Claude can share customers' own documents and charges" }],
-    meta: { tools: { titles: ['Share a document', 'See charges'] }, who: "The record's owner, verified" },
+    parts: [{ text: 'Claude can share customers’ own documents and charges' }],
+    meta: { tools: { titles: ['Share a document', 'See charges'] }, who: 'The customer, once verified' },
   });
   const meta = el.querySelector('.cd-rule-sentence__meta');
-  expect(meta?.textContent).toBe("Share a document and See charges · The record's owner, verified");
+  expect(meta?.textContent).toBe('Share a document and See charges · The customer, once verified');
   const titles = [...(meta?.querySelectorAll('.cd-user-name[data-copy="user"]') ?? [])].map((title) => title.textContent);
   expect(titles).toEqual(['Share a document', 'See charges']);
 });

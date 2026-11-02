@@ -487,7 +487,7 @@ describe('rule drafts', () => {
     // The preset's own cards, which Turner's rules didn't have here, are added rows.
     const added = rows.filter((row) => row.change === 'added');
     expect(added.map((row) => row.key)).toEqual(ids(preset));
-    expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', "Confirm it's them", 'Website reading', 'Memory reading', 'Web search']);
+    expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', 'Confirm it’s them', 'Website reading', 'Memory reading', 'Web search']);
     expect(rows).toHaveLength(owner.length + preset.length);
   });
 
@@ -513,7 +513,7 @@ describe('rule drafts', () => {
     expect(rowFor('card-never-private')?.connector).toBeUndefined();
     // An automatic one covers a tool with other effects only jointly, so messages alone don't
     // cover Share a document, which also touches private data: only "Confirm it's them".
-    expect(rowFor('card-auto-messages')).toMatchObject({ title: "Confirm it's them", connector: view('verification') });
+    expect(rowFor('card-auto-messages')).toMatchObject({ title: 'Confirm it’s them', connector: view('verification') });
     // The added rows by the tools' places: Verification, then Payments, then the one that spans.
     // Each shared rule's row says so ("Payments · Shared rule", or "Shared rule" leading with no
     // connector); a tool's own rule doesn't.

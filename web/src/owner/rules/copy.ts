@@ -15,6 +15,9 @@ export const RULES_FALLBACK = 'Anything not listed here, Claude asks you first';
 /** The line under "Your Desk’s jobs" on Rules. */
 export const JOBS_LINE = 'Jobs you set up in your own words.';
 
+/** The last card on Rules, for the tools and rules no card above lists. */
+export const OTHER_TOOLS = 'Other tools';
+
 /** All rules' line under its subtitle: who "Checked by the reviewer" means, and that it can only hold. */
 export const REVIEWER_LINE = 'The reviewer is a separate model that reads each request before it runs. It can only hold a request for your answer, never let one through.';
 

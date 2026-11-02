@@ -69,7 +69,7 @@ describe('the C1 rows', () => {
   });
 
   it('agent_payments_from_a_signed_limit', () => {
-    expect(read(ruleSentence(cards['rv-mandate'], words))).toBe("Claude can take a visiting agent's payment, up to **$20**, from its signed limit");
+    expect(read(ruleSentence(cards['rv-mandate'], words))).toBe('Claude can take a visiting agent’s payment, up to **$20**, from its signed limit');
     expect(line(ruleMeta(cards['rv-mandate'], words))).toBe('Charge within a signed limit · Anyone');
   });
 
@@ -135,7 +135,7 @@ describe('the C1 rows that join several tools', () => {
   it('documents_and_charges_for_the_verified_customer', () => {
     // Who it is for is on the line under it, not in the sentence.
     const row = [cards['rv-docs'], cards['rv-charges']];
-    expect(read(ruleSentence(row, words))).toBe("Claude can share customers' own documents and charges");
+    expect(read(ruleSentence(row, words))).toBe('Claude can share customers’ own documents and charges');
     expect(line(ruleMeta(row, words))).toBe('Share a document and See charges · The customer, once verified');
   });
 });
@@ -172,7 +172,7 @@ describe('the always-on rules', () => {
     expect(ALWAYS_ON_SENTENCES.map((rule) => `${read(rule.parts)} / ${line(rule.meta)}`)).toEqual([
       "Claude never says it's anything but an AI / Every tool · Everyone",
       'Claude never shows private data to anyone but its verified owner / Share a document and See charges · Everyone',
-      "Claude never sends a code anywhere but the contact on record / Confirm it's them · Everyone",
+      'Claude never sends a code anywhere but the contact on record / Confirm it’s them · Everyone',
       'Claude never moves money without your rule or a signed limit / Payment link, Charge within a signed limit and Refund · Everyone',
     ]);
   });
@@ -377,7 +377,7 @@ describe("the rule cell's second line (REV-RULES-D, v354)", () => {
 
   it('the_desk_wide_rules_are_the_ai_disclosure_and_the_log', () => {
     expect(ACROSS_DESK_SENTENCES.map((rule) => [rule.key, read(rule.parts), rule.line ?? null])).toEqual([
-      ['ai', "Claude always says it's an AI", 'In every reply'],
+      ['ai', 'Claude always says it’s an AI', 'In every reply'],
       ['log', 'Claude logs every request, allowed or not, and shows it to you in Safety', null],
     ]);
   });
@@ -390,8 +390,8 @@ describe("option A's sentences (REV-RULES-D and REV-SETUP-3, signed)", () => {
     expect(read(ruleSentence(anyone('native.find_slots', 'auto'), words))).toBe('Claude can show the times you have open');
     expect(read(ruleSentence(anyone('native.capture_lead', 'auto'), words))).toBe('Claude can take a name and a way to reach them');
     expect(read(ruleSentence(anyone('native.request_callback', 'auto'), words))).toBe('Claude can take callback requests');
-    expect(read(ruleSentence(anyone('native.start_verification', 'auto'), words))).toBe("Claude can send a code when someone asks to confirm it's them");
-    expect(read(ruleSentence(cards['rv-docs'], words))).toBe("Claude can share customers' **own documents**");
+    expect(read(ruleSentence(anyone('native.start_verification', 'auto'), words))).toBe('Claude can send a code when someone asks to confirm it’s them');
+    expect(read(ruleSentence(cards['rv-docs'], words))).toBe('Claude can share customers’ **own documents**');
     expect(read(ruleSentence(cards['rv-charges'], words))).toBe('Claude can show customers **their own charges**');
     expect(read(ruleSentence(cards['rv-link'], words))).toBe('Claude can send payment links up to **$300**');
     expect(read(ruleSentence(cards['rv-refund'], words))).toBe('Claude asks you before **any refund**');
@@ -400,8 +400,8 @@ describe("option A's sentences (REV-RULES-D and REV-SETUP-3, signed)", () => {
 
   it('a_signed_limit_payment_reads_its_limit_or_the_signed_limit', () => {
     // The agent's own signed limit bounds it; a card's amount, when it has one, is set off.
-    expect(read(ruleSentence(cards['rv-mandate'], words))).toBe("Claude can take a visiting agent's payment, up to **$20**, from its signed limit");
-    expect(read(ruleSentence(anyone('native.charge_mandate', 'auto'), words))).toBe("Claude can take a visiting agent's payment within **its signed limit**");
+    expect(read(ruleSentence(cards['rv-mandate'], words))).toBe('Claude can take a visiting agent’s payment, up to **$20**, from its signed limit');
+    expect(read(ruleSentence(anyone('native.charge_mandate', 'auto'), words))).toBe('Claude can take a visiting agent’s payment within **its signed limit**');
   });
 
   it('asks_in_the_setup_boards_words', () => {

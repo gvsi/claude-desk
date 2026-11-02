@@ -24,7 +24,7 @@ import { connectorPageHref } from '../connectors/pages.ts';
 import { BUSINESS_WORDS, businessOwnerLine, businessRulesDescription } from '../connectors/businessWords.ts';
 import { businessTools, isBusinessToolName, isCatalogTool, TOOL_NAMES, toolDisplayName, toolState } from '../connectors/catalog.ts';
 import { RouterLink } from '../OwnerLayout.tsx';
-import { JOBS_LINE } from './copy.ts';
+import { JOBS_LINE, OTHER_TOOLS } from './copy.ts';
 import { RuleDetails, ToolDetails } from './details.tsx';
 import { governingRules, hubSections } from './hub.ts';
 import { ALWAYS_ON_SENTENCES, ruleQualifiers, ruleSentence, type AlwaysOnSentence, type SentenceWords } from './ruleSentence.ts';
@@ -223,19 +223,29 @@ export interface ToolEntry {
   always?: AlwaysOnSentence;
 }
 
-/** One card on Rules: the Desk's own jobs (no connector) or a connector, with its line, whether a money band leads it, and its tools. */
+/**
+ * One card on Rules: the Desk's own jobs, a connector, or "Other tools" (no connector), with its
+ * line, whether a money band leads it, its tools, and, on "Other tools", the rules that cover no
+ * tool on the page (`loose`).
+ */
 export interface ToolGroupEntry extends ToolGroup {
   connector: ConnectorView | null;
   line: string;
   money: boolean;
   entries: ToolEntry[];
+  loose: ToolRuleEntry[];
 }
+
+/** The tools Claude reads to learn about the business, which act for no visitor, so Rules lists none of them. */
+const LEARNING_TOOLS: ReadonlySet<string> = new Set(['native.fetch_website', 'native.read_memory', 'native.web_search']);
 
 /**
  * Rules' tools, tool by tool, as words: the Desk's own jobs, then one card per connector that is on
  * (`hubSections`), each tool with the rules that cover it (`governingRules`) in its sentences and
- * cell lines, in one order, so each shared rule is expanded exactly once across connectors. The
- * page and its loading shapes both draw from it.
+ * cell lines, in one order, so each shared rule is expanded exactly once across connectors. Last,
+ * "Other tools" holds what no card above lists: a connected tool this version's catalog doesn't
+ * know, and a stored rule that covers no tool on the page ("A rule for a tool this version can't
+ * name"), so no rule ever leaves the page. The page and its loading shapes both draw from it.
  */
 export function toolGroups(view: RulesView, people: PeopleOut | null): ToolGroupEntry[] {
   const business = businessTools(view.tools);
@@ -243,7 +253,7 @@ export function toolGroups(view: RulesView, people: PeopleOut | null): ToolGroup
   const jobs = view.tools.filter((row) => row.source === 'business' && isBusinessToolName(row.tool)
     && Array.isArray(row.effects) && row.effects.every((effect) => ['read', 'private_data', 'change', 'charge', 'pay_out', 'send_message'].includes(effect))
     && ['on', 'changed'].includes(toolState(row)));
-  const groups = [
+  const groups: { key: string; name: string; connector: ConnectorView | null; line: string; money: boolean; tools: ToolRow[] }[] = [
     ...(jobs.length === 0 ? [] : [{ key: 'jobs', name: BUSINESS_WORDS.jobs, connector: null, line: JOBS_LINE, money: false, tools: jobs }]),
     ...hubSections(view, people).map((section) => ({
       key: section.connector.id, name: section.connector.name, connector: section.connector,
@@ -251,8 +261,24 @@ export function toolGroups(view: RulesView, people: PeopleOut | null): ToolGroup
       tools: section.tools.flatMap((tool) => view.tools.filter((row) => row.tool === tool.key).slice(0, 1)),
     })),
   ];
-  const tools = groups.flatMap((group) => group.tools);
+  // A tool that is on or waits for review but that no card above lists: one this version's catalog
+  // doesn't know. A catalog tool off with its connector, and a job off, stay off the page.
+  const shown = new Set(groups.flatMap((group) => group.tools.map((row) => row.tool)));
+  const unlisted = view.tools.filter((row) => !shown.has(row.tool) && !isCatalogTool(row.tool) && !LEARNING_TOOLS.has(row.tool)
+    && row.source !== 'business' && ['on', 'changed'].includes(toolState(row)));
+  const other = { key: 'other', name: OTHER_TOOLS, connector: null, line: '', money: false, tools: unlisted };
+  const tools = [...groups.flatMap((group) => group.tools), ...unlisted];
   const cards = new Map(tools.map((row) => [row.tool, governingRules(row, view.active)]));
+  // A stored rule that covers no tool on the page: on a target the Desk doesn't have, or a group
+  // of tools none of which is listed. A rule on a tool the Desk has turned off stays with it, off the page.
+  const covered = new Set([...cards.values()].flat().map((card) => card.card_id));
+  const onDesk = new Set<string>(view.tools.map((row) => row.tool));
+  const looseCards = view.active.cards.filter((card) => card.is_default !== true && !covered.has(card.card_id)
+    && !LEARNING_TOOLS.has(card.applies_to) && (card.applies_to.startsWith('effect:') || !onDesk.has(card.applies_to)));
+  const loose = looseCards.map((card): ToolRuleEntry => ({
+    card, parts: ruleSentence(card, words), line: ruleQualifiers(card, words), status: OUTCOME_TONE[card.mode],
+  }));
+  if (unlisted.length > 0 || loose.length > 0) groups.push(other);
   const sharedCoverage = new Map<string, ToolRow[]>();
   for (const row of tools) {
     for (const card of cards.get(row.tool) ?? []) {
@@ -265,6 +291,7 @@ export function toolGroups(view: RulesView, people: PeopleOut | null): ToolGroup
 
   return groups.map((group) => ({
     ...group,
+    loose: group === other ? loose : [],
     entries: group.tools.map((row): ToolEntry => {
       const status = toolStatus(row);
       const covering = cards.get(row.tool) ?? [];
@@ -319,8 +346,8 @@ export function ToolConnectors({ deskId, view, people, landed = NOTHING_LANDED, 
           <div className="cd-house-rules__identity">
             {group.connector === null
               ? <span className="cd-house-rules__jobs-name cd-type-section">{group.name}</span>
-              : <ConnectorName connector={group.connector} size="section" />}
-            <p className="cd-house-rules__identity-line cd-type-meta">{group.line}</p>
+              : <ConnectorName connector={group.connector} size="section" builtInPill />}
+            {group.line === '' ? null : <p className="cd-house-rules__identity-line cd-type-meta">{group.line}</p>}
           </div>
         </div>
         {group.money && moneyBand !== undefined ? (
@@ -353,6 +380,23 @@ export function ToolConnectors({ deskId, view, people, landed = NOTHING_LANDED, 
             </section>
           );
         })}
+        {group.loose.length === 0 ? null : (
+          <div className="cd-house-rules__tool">
+            <ul className="cd-house-rules__rules cd-house-rules__rules--loose" role="list">
+              {group.loose.map((rule) => (
+                <ToolRule
+                  key={rule.card.card_id}
+                  parts={rule.parts}
+                  line={rule.line}
+                  status={rule.status}
+                  card={rule.card}
+                  landed={latest(landed.cards.get(rule.card.card_id))}
+                  details={{ version: view.active, cards: [rule.card] }}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </Card>
   ));

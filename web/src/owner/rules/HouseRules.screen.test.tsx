@@ -124,7 +124,7 @@ it('Payments and Stripe open with the money band, then each tool with its rules'
     'Claude can send payment links up to $300 / Anyone · Checked by the reviewer · Over $300, it asks you first',
   ]);
   expect(cells(payments.getByRole('region', { name: 'Charge within a signed limit' }).element())).toEqual([
-    "Claude can take a visiting agent's payment, up to $20, from its signed limit / Anyone · Over $20, it asks you first",
+    'Claude can take a visiting agent’s payment, up to $20, from its signed limit / Anyone · Over $20, it asks you first',
   ]);
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
   await expect.element(stripe.getByText('Mock', { exact: true })).toBeVisible();

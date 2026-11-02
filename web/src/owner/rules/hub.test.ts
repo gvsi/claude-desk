@@ -69,7 +69,7 @@ describe('the Rules hub', () => {
     // A charge can't be taken back: the kernel's payment link and signed-limit profiles say so.
     const rules = view();
     expect(hubTool(rules, 'native.payment_link').description).toBe("Makes a one-time link for a quote. Charges money. Can't be undone.");
-    expect(hubTool(rules, 'native.charge_mandate').description).toBe("Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.");
+    expect(hubTool(rules, 'native.charge_mandate').description).toBe("Lets a visiting agent pay from its owner’s signed limit. Charges money. Can't be undone.");
   });
 
   it('uses a business description followed by its effects', () => {

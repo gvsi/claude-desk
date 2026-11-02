@@ -92,6 +92,11 @@
   list-style: none;
 }
 
+/* Rules that cover no tool on the page sit under no tool's title: no space above them. */
+.cd-house-rules__rules--loose {
+  margin-top: 0;
+}
+
 .cd-house-rules__rules--band,
 .cd-house-rules__rules--card {
   margin: 0;
@@ -152,6 +157,17 @@
 .cd-house-rules__rule-actions > .cd-advanced-details__toggle,
 .cd-house-rules__tool-header > .cd-advanced-details__toggle {
   margin-block: calc(-1 * var(--space-2));
+}
+
+/* Details' empty place, on a row without Details ("Anything not listed here"), keeps the button's
+   whole box 2 px under the row's top, as the board draws every Details, so the row is as tall as
+   the place and its dot sits at the place's middle. */
+.cd-house-rules__rule-actions:has(> .cd-advanced-details__slot) {
+  padding-top: var(--space-2);
+}
+
+.cd-house-rules__rule-actions > .cd-advanced-details__slot {
+  margin-block: 0;
 }
 
 /* An always-on rule's lock and "Always on", flush right where Details ends: no dot, no Details. */
