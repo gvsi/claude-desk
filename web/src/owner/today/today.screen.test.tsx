@@ -4132,7 +4132,7 @@ describe('Notifications from Today', () => {
     const page = await openNotifications(screen);
     const line = page.getByText(`Couldn't open your notifications. ${UNAVAILABLE}`, { exact: true });
     await expect.element(line, { timeout: 4_000 }).toBeVisible();
-    const subtitle = page.getByText('What Claude would have sent you by text or email. Nothing is really sent.').element();
+    const subtitle = page.getByText('What Claude would have sent you and your customers by text or email. Nothing is really sent.').element();
     const entries = page.getByRole('list').element();
     expect(subtitle.compareDocumentPosition(line.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(line.element().compareDocumentPosition(entries) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

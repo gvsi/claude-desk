@@ -20,7 +20,7 @@ const DESK = `/app/${RIVERA.deskId}`;
 const TODAY = `${DESK}/today`;
 const NOTIFICATIONS = `${DESK}/notifications`;
 const TIMEZONE = 'America/Los_Angeles';
-const SUBTITLE = 'What Claude would have sent you by text or email. Nothing is really sent.';
+const SUBTITLE = 'What Claude would have sent you and your customers by text or email. Nothing is really sent.';
 const PRIMARY = 'rgba(250, 249, 245, 0.92)';
 const SECONDARY = 'rgba(250, 249, 245, 0.64)';
 

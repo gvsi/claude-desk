@@ -37,7 +37,7 @@ const INBOX_FAILED = 'Couldn’t open the Demo inbox, where your code arrives.';
 const VISITOR_SUBTITLE = 'Stands in for a phone or email inbox. Nothing is really sent.';
 
 /** What the owner's notifications stand for, under their page's title. */
-const OWNER_SUBTITLE = 'What Claude would have sent you by text or email. Nothing is really sent.';
+const OWNER_SUBTITLE = 'What Claude would have sent you and your customers by text or email. Nothing is really sent.';
 
 /** The owner's line for a read the server failed. */
 const UNAVAILABLE = 'Something went wrong on our side. Try again in a moment.';

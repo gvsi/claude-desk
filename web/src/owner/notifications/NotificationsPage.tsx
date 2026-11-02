@@ -41,6 +41,8 @@ import '../conversations/Conversations.css';
 import './NotificationsPage.css';
 
 const TITLE = 'Notifications';
+/** Under the title: the entries are the owner's and their customers' codes (owner, 2026-11-02). */
+const SUBTITLE = 'What Claude would have sent you and your customers by text or email. Nothing is really sent.';
 const COPY = INBOX_COPY.en;
 /** The empty state's title and line: the inbox's one empty line, split at its first full stop. */
 const [EMPTY_TITLE = '', ...EMPTY_REST] = COPY.empty.split('. ');
@@ -219,7 +221,7 @@ export function NotificationsPage() {
   return (
     // A request's row goes through the router, so the app stays loaded.
     <div className="cd-notifications" onClick={followInAppLinks(navigate)}>
-      <PageHeader title={TITLE} subtitle={COPY.ownerSubtitle} />
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
       <div className="cd-notifications__body" aria-live="polite">
         {failed}
         {list}
