@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
+import { SCRIPT } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
@@ -274,6 +275,22 @@ describe('Demo visitor', () => {
     const pill = tagged[0]!.querySelector('.cd-pill')!;
     expect(pill.closest('.cd-approval-card__top')).not.toBeNull();
     expect(tagged[0]!.textContent).toContain('Could I get 10% off as a returning customer?');
+    expectNoHorizontalScroll();
+  });
+
+  it('needs_you_tags_the_demo_visitors_handoff_too', async () => {
+    const { run_id: runId } = await startOne('handoff');
+    mockStore.demoVisitors.endRun(runId, 'finished');
+    const chat = demoChats()[0]!;
+    // Its chat asks for a call back, which opens a handoff for the owner.
+    const callback = SCRIPT.find((rule) => rule.name === 'callback');
+    if (!callback) throw new Error('the script has its call-back row');
+    mockStore.world.replay(chat, mockStore.world.now() - 30_000, [{ text: 'Can you call me back?', steps: callback.steps }], 10_000);
+    const { screen } = await renderRoute(TODAY);
+    const wants = screen.getByRole('region', { name: 'Needs you' }).getByRole('article', { name: 'Wants you' });
+    await expect.element(wants).toBeVisible();
+    const pill = wants.element().querySelector('.cd-callback__top .cd-pill');
+    expect(pill?.textContent).toBe('Demo visitor');
     expectNoHorizontalScroll();
   });
 

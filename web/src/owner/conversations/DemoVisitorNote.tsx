@@ -73,17 +73,15 @@ export function useDemoVisitorRun(deskId: string, sessionId: string, demo: boole
     refetchInterval: (query) => (query.state.data === undefined || query.state.data.state === 'running' ? pollMs('conversation') : false),
   });
 
-  let phase: DemoVisitorPhase = { phase: 'unknown' };
-  if (!demo) phase = { phase: 'unknown' };
-  else if (learned === null) {
+  if (!demo) return { phase: 'unknown' };
+  if (learned === null) {
     // The Desk has no run kept, or its newest is another chat's: this chat's run has ended.
-    if (newestRead !== null && (notFound(newestRead.error) || (newestRead.data !== undefined && !newestIsThisChat))) phase = { phase: 'ended', ended: null };
-  } else if (run.data !== undefined) {
-    phase = run.data.state === 'running' ? { phase: 'running', run: run.data } : { phase: 'ended', ended: run.data.ended };
-  } else if (notFound(run.error)) {
-    phase = { phase: 'ended', ended: null };
+    const ended = newestRead !== null && (notFound(newestRead.error) || (newestRead.data !== undefined && !newestIsThisChat));
+    return ended ? { phase: 'ended', ended: null } : { phase: 'unknown' };
   }
-  return phase;
+  if (run.data !== undefined) return run.data.state === 'running' ? { phase: 'running', run: run.data } : { phase: 'ended', ended: run.data.ended };
+  // No longer kept: it has ended.
+  return notFound(run.error) ? { phase: 'ended', ended: null } : { phase: 'unknown' };
 }
 
 export interface DemoVisitorNoteProps {
