@@ -2066,6 +2066,27 @@ describe('rules and tools', () => {
     expect((await confirm(8)).status).toBe(401);
   });
 
+  it.each(['ask_first', 'auto'] as const)('preset_%s_removes_automatic_money_job_cards', async (preset) => {
+    const desk = mockStore.world.desks[0]!;
+    const urgent = desk.tools.find((row) => row.tool === 'desk.emergency-callback')!;
+    const payment: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: 'deposit', applies_to: 'desk.deposit', max_amount_cents: 5000 };
+    const payout: RuleCard = { ...payment, card_id: 'payout', applies_to: 'desk.payout' };
+    desk.tools.push({ ...urgent, tool: 'desk.deposit', effects: ['change', 'charge'] },
+      { ...urgent, tool: 'desk.payout', effects: ['change', 'pay_out'] });
+    desk.policy.cards.push(payment, payout);
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    for (const card of [payment, payout]) {
+      expect(draft.cards).not.toContainEqual(card);
+      expect(draft.diff?.removed).toContainEqual(card);
+    }
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe(preset);
+    desk.policy.cards.push(payment);
+    expect((await rules()).preset).toBeNull();
+  });
+
   it.each(['ask_first', 'auto'] as const)('preset_%s_keeps_the_desks_job_cards', async (preset) => {
     const before = await rules();
     const urgent = before.active.cards.find((card) => card.card_id === 'rv-urgent');

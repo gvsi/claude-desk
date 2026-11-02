@@ -874,6 +874,26 @@ async def test_preset_with_job_awaiting_review(app, browser, fake, kernel_http, 
 
 
 @pytest.mark.parametrize("preset", ["ask_first", "auto"])
+@pytest.mark.parametrize("effect", ["charge", "pay_out"])
+async def test_preset_removes_automatic_money_job_cards(app, browser, fake, kernel_http, preset, effect):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    await put_deposit(owner, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    fake._put_tool(desk, desk.tools["desk.deposit"].model_copy(update={
+        "status": "enabled", "review_reason": None, "effects": ["change", effect]}))
+    deposit = card("deposit", "desk.deposit", max_amount_cents=5000)
+    await confirmed(owner, kernel_http, owner.desk_id, [*preset_cards(preset, desk.hours), deposit],
+                    desk.policy_version)
+    # An otherwise matching preset still counts the money job's extra card.
+    assert (await owner.browser.get(rules_url(owner))).json()["preset"] is None
+    draft = await drafted(owner, rules_path(owner, "preset"), {"preset": preset})
+    assert deposit not in draft.cards
+    assert deposit in draft.diff.removed
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
+    assert (await owner.browser.get(rules_url(owner))).json()["preset"] == preset
+
+
+@pytest.mark.parametrize("preset", ["ask_first", "auto"])
 async def test_preset_keeps_the_desks_job_cards(app, browser, fake, kernel_http, preset):
     owner = await new_owner(app, browser, fake, kernel_http)
     before = owner_cards(fake, owner.desk_id)

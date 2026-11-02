@@ -1,13 +1,15 @@
 /** Chen & Co. CPA's own tools, as the kernel lists them for setup and the owner's rules. */
 import type { JobProposal, ToolRow } from '../api/views.ts';
+import { MONEY_EFFECTS } from '../api/contracts.ts';
 import { placeholderHex } from '../ds/fixtures/index.ts';
 import { isBusinessDef } from '../owner/connectors/businessWords.ts';
 import { isBusinessToolName, toolState } from '../owner/connectors/catalog.ts';
 import type { DeskRecord, ToolRecord } from './world.ts';
 
-/** The business tools shown under Rules' "Your Desk's jobs", as BusinessJobs groups them. */
+/** Non-money jobs whose cards a preset keeps: enabled or awaiting review of a changed pin. */
 export function deskJobTools(rows: readonly ToolRow[]): ReadonlySet<string> {
   return new Set(rows.filter((row) => row.source === 'business' && isBusinessToolName(row.tool)
+    && !row.effects.some((effect) => MONEY_EFFECTS.has(effect))
     && (toolState(row) === 'on' || toolState(row) === 'changed')).map((row) => row.tool));
 }
 

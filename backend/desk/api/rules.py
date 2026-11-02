@@ -63,7 +63,8 @@ from desk.api.versions import (
     version_from_row,
 )
 from desk.contracts import (
-    AUTO_MONEY_NEEDS_LIMIT, MONEY_TOOLS, Effect, HoursWindow, PolicyVersion, RuleCard, is_business_tool, money_tools_of,
+    AUTO_MONEY_NEEDS_LIMIT, MONEY_EFFECTS, MONEY_TOOLS, Effect, HoursWindow, PolicyVersion, RuleCard,
+    is_business_tool, money_tools_of,
 )
 from desk.kernel_api import PolicyConfirmRequest
 from desk.money_cap import Language, auto_money, lower_to_cap
@@ -121,8 +122,9 @@ def card_diff(before: list[RuleCard], after: list[RuleCard]) -> CardDiff:
 
 
 def desk_job_tools(rows: Iterable[ToolRow]) -> frozenset[str]:
-    """The business tools shown under Rules' "Your Desk's jobs": enabled or awaiting review of a changed pin."""
+    """Non-money jobs whose cards a preset keeps: enabled or awaiting review of a changed pin."""
     return frozenset(row.tool for row in rows if row.source == "business" and is_business_tool(row.tool)
+                     and MONEY_EFFECTS.isdisjoint(row.effects)
                      and (row.status == "enabled" or row.status == "needs_review" and row.review_reason == "changed"))
 
 
