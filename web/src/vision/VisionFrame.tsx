@@ -5,7 +5,7 @@ import { usePagePlace } from '../about/usePagePlace.ts';
 import { forgetVisionCard, openedVisionCard } from '../about/vision/cardReturn.ts';
 import { AppShell, ClaudeMessage, Sidebar, VisionBar } from '../ds/index.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
-import { followInAppLinks } from '../owner/inAppLinks.ts';
+import { followInAppLinks, returnThroughHistory } from '../owner/inAppLinks.ts';
 import { proseOf, VISION_BACK_HREF, VISION_SIDEBAR_HREFS, type VisionOwner } from './data.ts';
 
 import './Vision.css';
@@ -44,19 +44,9 @@ export function VisionFrame({ title, children }: VisionFrameProps) {
 
   useDocumentTitle(title);
 
+  const remembered = typeof state?.fromVision === 'string' && openedVisionCard(navigator, state.fromVision) === pathname;
   return (
-    <div className="cd-vision-frame" onClick={followInAppLinks(navigate)} onClickCapture={(event) => {
-      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      const link = event.target instanceof Element ? event.target.closest('a[href]') : null;
-      if (!(link instanceof HTMLAnchorElement) || link.target !== '' || link.getAttribute('href') !== VISION_BACK_HREF) return;
-      event.preventDefault();
-      if (typeof state?.fromVision === 'string' && openedVisionCard(navigator, state.fromVision) === pathname) {
-        // This router still remembers the article entry and the reader's place there.
-        void navigate(-1);
-      } else {
-        void navigate(VISION_BACK_HREF, { state: { visionCard: pathname } });
-      }
-    }}>
+    <div className="cd-vision-frame" onClick={followInAppLinks(navigate)} onClickCapture={returnThroughHistory(navigate, VISION_BACK_HREF, remembered, { state: { visionCard: pathname } })}>
       {children(<VisionBar backHref={VISION_BACK_HREF} />)}
     </div>
   );
