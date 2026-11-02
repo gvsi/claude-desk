@@ -10,12 +10,13 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import { useLocation } from 'react-router';
 
 import { clickedControl } from '../../ds/index.ts';
+import { pressedByTouch } from '../../lib/pressedByTouch.ts';
 import { DRAFT_FAILED, RuleChat, chatTurn, type ChatTurn } from './RuleChat.tsx';
 
 /** What a page under a Desk can do with the panel. */
 export interface AskClaude {
   /** Opens the panel, if it isn't open, with the owner's words, and asks Claude. */
-  ask: (words: string) => void;
+  ask: (words: string, options?: { fromSuggestion: boolean }) => void;
   /** The panel is open. */
   open: boolean;
   /**
@@ -81,7 +82,7 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
   };
 
   const ask = useCallback(
-    (words: string) => {
+    (words: string, options?: { fromSuggestion: boolean }) => {
       const text = words.trim();
       if (text === '') return;
       if (!open) {
@@ -89,11 +90,10 @@ export function useAskClaudeHost(deskId: string, ownerName: string): { value: As
         opener.current = active instanceof HTMLElement && active !== document.body ? active : clickedControl();
         setOpen(true);
         setFocusComposer(true);
-      } else {
+      } else if (options?.fromSuggestion) {
         // A page suggestion is disabled as this answer starts. Hand its focus on as a typed
         // question does; touch uses Close so it doesn't summon the phone keyboard.
-        const touch = window.matchMedia('(pointer: coarse)').matches && !document.activeElement?.matches(':focus-visible');
-        panelRoot.current?.querySelector<HTMLElement>(touch ? 'button[aria-label="Close"]' : 'textarea')?.focus();
+        panelRoot.current?.querySelector<HTMLElement>(pressedByTouch() ? '.cd-ask-claude__header button' : 'textarea')?.focus();
       }
       const at = conversation.current;
       setTurns((now) => [...now, { id: id(), kind: 'owner', text }]);

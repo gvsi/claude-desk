@@ -13,6 +13,7 @@ import type { RuleChatOut, RulesDraft } from '../../api/views.ts';
 import { AskClaudePanel, ClaudeMessage, Notice, VisitorMessage, type NoticeTone } from '../../ds/index.ts';
 import { aboveMoneyCapCopy } from '../../lib/format.ts';
 import { GrowingReply, settledWords } from '../../lib/GrowingReply.tsx';
+import { pressedByTouch } from '../../lib/pressedByTouch.ts';
 import { draftFromDiff, type RuleDraft } from './drafts.ts';
 import { land } from './landing.ts';
 import { RuleDraftReview, rulesQuery } from './RuleDraftReview.tsx';
@@ -309,8 +310,8 @@ export const RuleChat = forwardRef<HTMLDivElement, RuleChatProps>(function RuleC
                     const box = root.current;
                     const active = document.activeElement;
                     if (box !== null && (outcome === 'kept' || !box.contains(active))) {
-                      const touch = outcome === 'kept' && window.matchMedia('(pointer: coarse)').matches && !active?.matches(':focus-visible');
-                      box.querySelector<HTMLElement>(touch ? 'button[aria-label="Close"]' : 'textarea')?.focus();
+                      const touch = outcome === 'kept' && pressedByTouch();
+                      box.querySelector<HTMLElement>(touch ? '.cd-ask-claude__header button' : 'textarea')?.focus();
                     }
                   }}
                 />

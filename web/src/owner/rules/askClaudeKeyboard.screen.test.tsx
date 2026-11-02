@@ -72,6 +72,36 @@ async function closeByKeyboard(panel: Locator, closing: Closing): Promise<void> 
 }
 
 describe('ask claude opened from a suggestion by keyboard', () => {
+  it('the_page_composer_keeps_focus_when_asking_with_the_panel_open', async () => {
+    const { composer, panel } = await openFromSuggestionByKeyboard('beside the page', 'Stop quoting on weekends');
+    await composer.fill('Keep weekday quotes as they are');
+    await userEvent.keyboard('{Enter}');
+    await expect.element(panel.getByRole('log').getByText('Keep weekday quotes as they are', { exact: true })).toBeVisible();
+    await expect.element(composer).toHaveFocus();
+  });
+
+  it('the_phone_panel_send_keeps_focus_in_its_composer_without_visiting_close', async () => {
+    await coarsePointer();
+    const { screen } = await renderRoute(RULES, { viewport: 'phone' });
+    await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
+    await userEvent.keyboard('{Enter}');
+    const panel = screen.getByRole('dialog', { name: 'Ask Claude' });
+    await expect.element(panel.getByRole('button', { name: 'Keep my rules' })).toBeEnabled();
+    const composer = panel.getByRole('textbox', { name: 'Ask Claude' });
+    await composer.fill('Keep weekday quotes as they are');
+    const close = panel.getByRole('button', { name: 'Close' }).element();
+    let visitedClose = false;
+    const visit = () => { visitedClose = true; };
+    close.addEventListener('focus', visit);
+    try {
+      await panel.getByRole('button', { name: 'Send', exact: true }).click();
+      await expect.element(composer).toHaveFocus();
+      expect(visitedClose).toBe(false);
+    } finally {
+      close.removeEventListener('focus', visit);
+    }
+  });
+
   it.each(['keyboard', 'touch'] as const)('a_suggestion_in_an_open_panel_hands_focus_on_by_%s', async (input) => {
     if (input === 'touch') await coarsePointer();
     const { screen, panel } = await openFromSuggestionByKeyboard('beside the page', 'Stop quoting on weekends');
@@ -84,6 +114,7 @@ describe('ask claude opened from a suggestion by keyboard', () => {
     } else {
       await chip.click();
       await expect.element(panel.getByRole('button', { name: 'Close' })).toHaveFocus();
+      expect(document.activeElement?.matches(':focus-visible')).toBe(false);
     }
     await expect.element(panel.getByRole('log').getByText(words, { exact: true })).toBeVisible();
   });
@@ -112,6 +143,7 @@ describe('ask claude opened from a suggestion by keyboard', () => {
     await keep.click();
     await expect.element(panel.getByText('Nothing changed. Your rules stay as they are.')).toBeVisible();
     await expect.element(panel.getByRole('button', { name: 'Close' })).toHaveFocus();
+    expect(document.activeElement?.matches(':focus-visible')).toBe(false);
   });
 
   it.each(CASES)('closing_with_%s_gives_focus_back_to_the_suggestion %s', async (closing, place) => {
