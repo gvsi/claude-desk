@@ -1309,10 +1309,11 @@ def test_status_lines_are_digit_free():
     states = {"allowed", "held", "refused", "approved", "denied", "expired", "cancelled", "executed", "failed",
               "unknown", "refused_at_execution"}
     receipts = {"reply_checked", "reply_handed_off", "owner_said", "owner_say_blocked"}   # a reply's, an owner say's
-    # why an action was refused at execution, for the owner alone (`owner_plain`): the visitor mustn't read why
-    # their session ended, so these aren't status lines and `render.status` can't render them
+    # why an action was refused at execution, or that a booking closed a held request, for the owner alone
+    # (`owner_plain`): the visitor mustn't read why their session ended, so these aren't status lines and
+    # `render.status` can't render them
     reasons = {"refused_contact_changed", "refused_person_removed", "refused_session_closed",
-               "refused_rules_changed", "refused_desk_deleted", "refused_fallback"}
+               "refused_rules_changed", "refused_desk_deleted", "refused_fallback", "cancelled_by_booking"}
     # refused_at_execution's line when a connected tool can't be reached, and refused's when an agent's charge is
     # over what its signed mandate has left
     variants = {"tool_unavailable", "refused_over_mandate"}
@@ -1338,13 +1339,13 @@ def test_status_lines_are_digit_free():
 
 @pytest.mark.parametrize("key", ["refused_contact_changed", "refused_person_removed", "refused_session_closed",
                                  "refused_rules_changed", "refused_desk_deleted", "refused_fallback",
-                                 "owner_say_blocked", "owner_said", "verify_started"])
+                                 "cancelled_by_booking", "owner_say_blocked", "owner_said", "verify_started"])
 async def test_a_decision_takes_only_a_visitor_status_line(app, client, registry, key):
     """A decision's status line is `visitor_plain`, which the visitor reads, so `set_state` takes only a
     decision's status line as its template: an owner-only line (why an approved release went nowhere,
-    or the receipt of an owner's say that was never sent), a reply's or an owner say's receipt, or any
-    other text (a verify card's message) raises `ValueError` before anything changes, so the decision
-    keeps its state and line and nothing is ledgered."""
+    that a booking closed a held request, or the receipt of an owner's say that was never sent), a
+    reply's or an owner say's receipt, or any other text (a verify card's message) raises `ValueError`
+    before anything changes, so the decision keeps its state and line and nothing is ledgered."""
     rows = await desk_with(app, [FakeAdapter("native.quote")],
                            [rule("ask-quotes", "ask", "Quotes wait for your answer.")])
     held = await decided(client, await open_visitor(client, rows), "native.quote", {"qty": 1})

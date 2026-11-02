@@ -375,29 +375,60 @@ describe('The Vision article', () => {
     }
   });
 
-  it('keyboard_focus_rings_in_the_papers_secondary_ink', async () => {
-    // No blue focus ring on the paper either: keyboard focus on a link in the bar, a picture card and the way to the
-    // next page shows the 2 px ring in the paper's secondary ink, 3:1 and more against the paper.
+  it('keyboard_focus_edges_in_the_papers_secondary_ink', async () => {
+    // No ring and no blue on the paper either: keyboard focus on the link in the bar draws a 1 px edge inside it,
+    // and on a picture card and the way to the next page turns the card's own border, all in the paper's
+    // secondary ink, 3:1 and more against the paper.
     const { screen } = await renderRoute(PATH);
     await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
     const article = screen.getByRole('article').element();
     const paper = getComputedStyle(article.closest('.vision-article') as Element).backgroundColor;
     expect(paper).toBe('rgb(244, 242, 236)');
+    const ink2 = 'rgb(92, 88, 80)';
+    expect(contrastRatio(ink2, paper)).toBeGreaterThanOrEqual(3);
     const inBar = document.querySelector<HTMLElement>('.cd-about-top a');
     const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
     const next = document.querySelector<HTMLElement>('.va-next__link');
-    for (const [name, link, ring] of [
-      ['a link in the bar', inBar, (el: Element) => getComputedStyle(el)],
-      ['a picture card', card, (el: Element) => getComputedStyle(el)],
-      ['the next page', next, (el: Element) => getComputedStyle(el, '::after')],
-    ] as const) {
+    const keyboardFocus = async (name: string, link: HTMLElement | null) => {
       if (link === null) throw new Error(`no ${name}`);
       await userEvent.keyboard('{Shift}');
       link.focus();
       expect(link.matches(':focus-visible'), name).toBe(true);
-      const style = ring(link);
-      expect([style.outlineStyle, style.outlineWidth, style.outlineColor], name).toEqual(['solid', '2px', 'rgb(92, 88, 80)']);
-      expect(contrastRatio(style.outlineColor, paper), name).toBeGreaterThanOrEqual(3);
+      return link;
+    };
+    const drawn = (el: Element) => [getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow];
+    const border = (el: Element) => [getComputedStyle(el).borderTopColor, getComputedStyle(el).borderBottomColor];
+
+    const bar = await keyboardFocus('a link in the bar', inBar);
+    expect(drawn(bar), 'a link in the bar').toEqual(['none', `${ink2} 0px 0px 0px 1px inset`]);
+
+    const picture = await keyboardFocus('a picture card', card);
+    expect([...drawn(picture), ...border(picture)], 'a picture card').toEqual(['none', 'none', ink2, ink2]);
+
+    const nextLink = await keyboardFocus('the next page', next);
+    const nextCard = nextLink.closest('.va-next') as HTMLElement;
+    expect([...drawn(nextLink), ...drawn(nextCard), ...border(nextCard)], 'the next page').toEqual(['none', 'none', 'none', 'none', ink2, ink2]);
+    expect(getComputedStyle(nextLink, '::after').boxShadow, 'the next page').toBe('none');
+  });
+
+  it('cards_fill_on_hover_and_keep_their_border', async () => {
+    // Hover is a fill only, in the paper's own hover ink, and a card's border stays as it rests: only keyboard focus
+    // changes a border.
+    const { screen } = await renderRoute(PATH);
+    await expect.element(screen.getByRole('heading', { level: 1, name: HEADLINE, exact: true })).toBeVisible();
+    const card = screen.getByRole('link', { name: `${CARDS[0].name} ${CARDS[0].line}`, exact: true }).element() as HTMLElement;
+    const next = document.querySelector<HTMLElement>('.va-next');
+    if (next === null) throw new Error('no Read next');
+    const hoverInk = 'rgba(28, 27, 25, 0.06)';
+    for (const [name, el] of [['a picture card', card], ['Read next', next]] as const) {
+      el.scrollIntoView({ block: 'center' });
+      const rest = { fill: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderTopColor };
+      expect(rest.fill, name).not.toBe(hoverInk);
+      await userEvent.hover(el);
+      expect(el.matches(':hover'), name).toBe(true);
+      await expect.poll(() => getComputedStyle(el).backgroundColor, { message: name }).toBe(hoverInk);
+      expect(getComputedStyle(el).borderTopColor, name).toBe(rest.border);
+      await userEvent.unhover(el);
     }
   });
 

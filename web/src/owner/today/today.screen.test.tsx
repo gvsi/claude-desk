@@ -39,6 +39,7 @@ import {
   expectScreenBasics,
   focusIsOn,
   nextFrames,
+  tokenColor,
 } from '../../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../../test/watch.ts';
 import { customerLink } from '../customerLink.ts';
@@ -2550,12 +2551,14 @@ describe("Today's top band", () => {
     const answerRow = things.getByRole('button', { name: 'Answer a held request', exact: true });
     const answerTitle = box(things.getByRole('heading', { level: 3, name: 'Answer a held request' }).element());
     expect(document.elementFromPoint(answerTitle.left + 4, answerTitle.top + answerTitle.height / 2)).toBe(answerRow.element());
-    // Tabbed to, the row shows the focus ring around the whole row.
+    // Tabbed to, the row shows the focus edge just inside the whole row, 1 px of line-focus, and no ring
+    // outside it; its chevron draws nothing of its own.
     things.getByRole('button', { name: 'Try to break it', exact: true }).element().focus();
     await userEvent.keyboard('{Tab}');
     expect(document.activeElement).toBe(answerRow.element());
     const ring = getComputedStyle(answerRow.element(), '::after');
-    expect([ring.outlineStyle, ring.outlineWidth]).toEqual(['solid', '2px']);
+    expect([ring.outlineStyle, ring.boxShadow]).toEqual(['none', `${tokenColor('--line-focus')} 0px 0px 0px 1px inset`]);
+    expect([getComputedStyle(answerRow.element()).outlineStyle, getComputedStyle(answerRow.element()).boxShadow]).toEqual(['none', 'none']);
     const ringBox = { top: rows[2]!.getBoundingClientRect().top, bottom: rows[2]!.getBoundingClientRect().bottom };
     expect(ringBox.bottom - ringBox.top).toBeGreaterThan(box(answerRow.element()).height);
     await answerRow.click();

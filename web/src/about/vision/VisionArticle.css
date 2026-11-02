@@ -44,8 +44,11 @@
   text-decoration-thickness: 1px;
 }
 
-.vision-article :focus-visible {
-  outline-color: var(--va-ink-2);
+/* Keyboard focus in the article's own ink, as the app draws it (base.css): a 1 px edge inside the control,
+   never a ring outside it; a bordered card turns its own border instead (below). No more specific than the
+   base rule, so a component's own focus (a text link's words) still wins. */
+.vision-article :where(:focus-visible) {
+  box-shadow: inset 0 0 0 1px var(--va-ink-2);
 }
 
 /* What keyboard focus scrolls to stops clear of the top bar, whose height is on the root (AboutBar.css). */
@@ -269,12 +272,12 @@
 }
 
 .vision-article .va-card:hover {
-  border-color: var(--va-line-strong);
+  background: var(--va-hover);
 }
 
 .vision-article .va-card:focus-visible {
-  outline: 2px solid var(--va-ink-2);
-  outline-offset: 2px;
+  border-color: var(--va-ink-2);
+  box-shadow: none;
 }
 
 /* The phone keeps its own height rather than the picture's, so its frame runs on past the picture's foot and the
@@ -350,7 +353,7 @@
 }
 
 .vision-article .va-next:hover {
-  border-color: var(--va-line-strong);
+  background: var(--va-hover);
 }
 
 .vision-article .va-end .va-next__label {
@@ -376,13 +379,13 @@
   border-radius: 14px;
 }
 
-.vision-article .va-next__link:focus-visible {
-  outline: none;
+/* With keyboard focus on its link, the card's own border turns the ink; the link draws nothing around its words. */
+.vision-article .va-next:has(.va-next__link:focus-visible) {
+  border-color: var(--va-ink-2);
 }
 
-.vision-article .va-next__link:focus-visible::after {
-  outline: 2px solid var(--va-ink-2);
-  outline-offset: 2px;
+.vision-article .va-next__link:focus-visible {
+  box-shadow: none;
 }
 
 .vision-article .va-end .va-next__summary {

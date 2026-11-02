@@ -10,9 +10,18 @@
   min-width: 0;
 }
 
-/* The card's own box, which takes focus when the screen asks: its ring follows the card's corners. */
+/* The card's own box, which takes focus when the screen asks. With focus from the keyboard, the
+   card's own border turns line-focus, with no edge or ring of the box's own. */
 .cd-approval-card__card {
   border-radius: var(--radius-card);
+}
+
+.cd-approval-card__card:focus-visible {
+  box-shadow: none;
+}
+
+.cd-approval-card__card:focus-visible > .cd-card {
+  border-color: var(--line-focus);
 }
 
 /* The card's body: the answered layer, and while an answer lands the outgoing one, in one cell.
@@ -103,9 +112,10 @@
   margin-top: 5px;
 }
 
-/* Focus lands here only when the answers it replaced had it; it is not a control, so no ring. */
+/* Focus lands here only when the answers it replaced had it; it is not a control, so it draws nothing. */
 .cd-approval-card__status-line:focus {
   outline: none;
+  box-shadow: none;
 }
 
 .cd-approval-card__waiting {
@@ -209,11 +219,6 @@
 .cd-approval-card__item:hover,
 .cd-approval-card__item:focus-visible {
   background: var(--fill-hover);
-}
-
-/* The focus ring sits just inside the item, so it clears the menu's edge and the next item. */
-.cd-approval-card__item:focus-visible {
-  outline-offset: -2px;
 }
 
 .cd-approval-card__item-words {
