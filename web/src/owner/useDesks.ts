@@ -26,7 +26,7 @@ export const needsYouKey = (deskId: string) => ['needsYou', deskId] as const;
 export const OWNER_INBOX_KEY = ['ownerInbox'] as const;
 
 // The reads, which go out whenever they are asked for (a read ahead, a `fetchQuery`); only the hooks wait out `FRESH_MS`.
-export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: () => request('desks') });
+export const desksQuery = () => queryOptions({ queryKey: DESKS_KEY, queryFn: ({ signal }) => request('desks', { signal }) });
 const todayQuery = (deskId: string) =>
   queryOptions({ queryKey: todayKey(deskId), queryFn: () => request('today', { params: { desk_id: deskId } }) });
 export const needsYouQuery = (deskId: string) =>
