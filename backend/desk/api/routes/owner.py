@@ -5,13 +5,14 @@ kernel's `GET /whoami` answer for the owner cookie (`deps.owner_ctx`), never fro
 
 A new copy (`copies`, `start_over`) stores the seeded hold's visitor question and signed held receipt. It also asks
 the kernel for the recorded night when the settings do (Plan 01d), and stores what the kernel replayed into it
-(`store_replayed_night`) before answering: recorded history for the owner's reads, never a turn.
+(`store_replayed_night`) before answering: recorded history for the owner's reads, never a turn. It then marks the
+seeded conversations read but for the newest few (`conversation_reads.seed_reads`).
 """
 
 import asyncio
 import logging
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from fastapi.responses import JSONResponse
@@ -26,7 +27,7 @@ from desk.api.deps import (ApiProblem, OwnerCtx, Runtime, client_ip, owner_conte
                            runtime)
 from desk.api.idempotency import IdempotencyKey
 from desk.api.jobs import defer_resume_after_answer, resume_after_answer
-from desk.api import owner_reads
+from desk.api import conversation_reads, owner_reads
 from desk.api.agents import demo_task_set, demo_task_sets
 from desk.api.kernel_client import KernelFailed, KernelUnavailable
 from desk.api.passcode import check_passcode
@@ -54,6 +55,7 @@ from desk.api.schemas import (
     OwnerTranscript,
     PeopleOut,
     PersonOnRecord,
+    ReadThroughIn,
     Reports,
     Today,
     VisitorSession,
@@ -95,29 +97,40 @@ class CopyRequest(BaseModel):
     passcode: Annotated[str, StringConstraints(min_length=1, max_length=200)]
 
 
-async def _desks(ctx: OwnerCtx) -> tuple[list[dict], dict[str, dict], dict[str, DeskSetup], dict[str, DemoTaskSet]]:
+class _Desks(NamedTuple):
+    desks: list[dict]
+    businesses: dict[str, dict]
+    setups: dict[str, DeskSetup]
+    types: dict[str, DemoTaskSet]
+    unread: dict[str, set[str]]
+
+
+async def _desks(ctx: OwnerCtx) -> _Desks:
     """The copy's Desks in the order they were made and their businesses by ID, from its kernel_ro rows, and the
-    unfinished setup interviews and business types by Desk ID, from the API's own rows."""
+    unfinished setup interviews, business types and unread conversations by Desk ID, from the API's own rows."""
     # Deleted Desks still consume pending setup claims; whoami lists only the active Desks to show.
     all_desks = await ctx.ro.desks()
     desks = [row for row in all_desks if row["desk_id"] in ctx.desk_ids]
     businesses = {row["business_id"]: row
                   for row in await ctx.ro.rows("businesses", business_id=[desk["business_id"] for desk in desks])}
     types = await demo_task_sets(ctx.ro.conn, ctx.ro, [desk["desk_id"] for desk in desks], all_desks=all_desks)
-    return desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks), types
+    return _Desks(desks, businesses, await owner_reads.unfinished_setups(ctx, all_desks), types,
+                  await conversation_reads.unread(ctx, [desk["desk_id"] for desk in desks]))
 
 
-def _summary(desk: dict, business: dict, setups: dict[str, DeskSetup], types: dict[str, DemoTaskSet]) -> DeskSummary:
-    return DeskSummary(desk_id=desk["desk_id"], slug=desk["slug"], name=desk["name"], business_name=business["name"],
-                       hours=desk["hours"], answering=desk["answering"], setup=setups.get(desk["desk_id"]),
-                       business_type=types[desk["desk_id"]])
+def _summary(desk: dict, found: _Desks) -> DeskSummary:
+    desk_id = desk["desk_id"]
+    return DeskSummary(desk_id=desk_id, slug=desk["slug"], name=desk["name"],
+                       business_name=found.businesses[desk["business_id"]]["name"], hours=desk["hours"],
+                       answering=desk["answering"], setup=found.setups.get(desk_id), business_type=found.types[desk_id],
+                       unread_conversations=len(found.unread.get(desk_id, ())))
 
 
 async def copy_out(ctx: OwnerCtx) -> CopyOut:
-    """The copy's Desks, from its kernel_ro rows, in the order they were made, each with its unfinished setup."""
-    desks, businesses, setups, types = await _desks(ctx)
-    return CopyOut(copy_id=ctx.copy_id,
-                   desks=[_summary(desk, businesses[desk["business_id"]], setups, types) for desk in desks])
+    """The copy's Desks, from its kernel_ro rows, in the order they were made, each with its unfinished setup and
+    its count of unread conversations."""
+    found = await _desks(ctx)
+    return CopyOut(copy_id=ctx.copy_id, desks=[_summary(desk, found) for desk in found.desks])
 
 
 # A replayed visitor's words, by the kind of session they were said in; and the record each event kind carries
@@ -237,13 +250,28 @@ async def _create_copy(state: Runtime) -> CopyCreated:
     return await kernel.call("POST /copies", CreateCopyRequest())
 
 
+async def _seed_reads(state: Runtime, created: CopyCreated) -> None:
+    """Mark the conversations stored for the new copy read, but for the newest few (`conversation_reads.seed_reads`),
+    in a transaction of its own. It never fails the copy: when marking fails, the error's type alone is logged and
+    every seeded conversation stays unread."""
+    try:
+        async with state.database().connect() as conn:
+            await conversation_reads.seed_reads(conn, created.copy_id)
+            await conn.commit()
+    except Exception as error:
+        logger.error("the seeded conversations couldn't be marked read (%s); they all show as unread",
+                     type(error).__name__)
+
+
 async def _new_copy(state: Runtime, response: Response) -> CopyOut:
     """A new copy of the Turner seed, read back through its own owner token, which goes only into the cookie. It asks
     for the recorded night when the settings do (`replay_night`). The seeded hold's chat commits first, then the
-    replayed night in its own transaction, so either can be stored even if the other fails."""
+    replayed night in its own transaction, so either can be stored even if the other fails; then whatever was stored
+    is marked read but for the newest visitor conversations."""
     created = await _create_copy(state)
     await _store_seeded(state, created)
     await _store_replayed(state, created)
+    await _seed_reads(state, created)
     async with owner_context(state, created.owner_token) as ctx:
         copy = await copy_out(ctx)
     set_owner_cookie(response, created.owner_token)
@@ -283,17 +311,17 @@ async def me(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> CopyOut:
 @router.get("/desks", response_model=list[BusinessOut], responses=error_responses(401, 503))
 async def desks(ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> list[BusinessOut]:
     """The copy's businesses, each with its Desks, in the order the Desks were made: the Desk switcher. Each Desk
-    names its setup interview while that isn't finished."""
-    found, businesses, setups, types = await _desks(ctx)
+    names its setup interview while that isn't finished, and counts its unread conversations, all read in one query."""
+    found = await _desks(ctx)
     listed: dict[str, BusinessOut] = {}
-    for desk in found:
-        business = businesses[desk["business_id"]]
+    for desk in found.desks:
+        business = found.businesses[desk["business_id"]]
         if business["business_id"] not in listed:
             listed[business["business_id"]] = BusinessOut(
                 business_id=business["business_id"], name=business["name"],
                 owner_display_name=business["owner_display_name"], timezone=business["timezone"],
                 brand=effective_brand(business["brand"] or {}), desks=[])
-        listed[business["business_id"]].desks.append(_summary(desk, business, setups, types))
+        listed[business["business_id"]].desks.append(_summary(desk, found))
     return list(listed.values())
 
 
@@ -852,6 +880,25 @@ async def typing(session_id: SessionId, body: GenerationIn, request: Request,
         await conn.commit()
         if until is not None:                                # counted once sent: a failure holds nothing back
             process.presence.owner_typing_sent(session_id, now)
+    except BaseException:
+        await conn.rollback()
+        raise
+
+
+@router.post("/conversations/{session_id}/read", status_code=204, response_class=Response,
+             responses=error_responses(401, 404, 422, 503))
+async def mark_read(session_id: SessionId, body: ReadThroughIn,
+                    ctx: Annotated[OwnerCtx, Depends(owner_ctx)]) -> None:
+    """The owner has seen the conversation through the transcript cursor `through` (the `n` of the last item their
+    screen showed): its read marker moves there, held at the session's newest row, and never moves back, so a stale or
+    replayed call marks nothing unread again and a message that arrived after the screen drew stays unread. A session
+    that isn't a visitor's or an agent's on one of the copy's Desks is 404. No kernel call and no ledger entry: the
+    marker is the API's own row, for the owner's reads alone."""
+    ids = await _conversation(ctx, session_id)
+    conn = ctx.ro.conn
+    try:
+        await conversation_reads.mark_read(conn, ids, body.through)
+        await conn.commit()
     except BaseException:
         await conn.rollback()
         raise

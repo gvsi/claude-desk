@@ -472,6 +472,40 @@ async def test_owner_transcript_shows_the_recorded_times(db, fake, api_settings,
     assert seeded_transcript["replayed"] is False
 
 
+async def test_a_new_demo_copy_leaves_its_two_newest_visitor_conversations_unread(db, fake, api_settings, clock,
+                                                                                   browser):
+    """A demo copy opens with some conversations read and some not: each seeded conversation is read through its last
+    message but the two newest visitor conversations, here the live seeded hold and the night's latest visitor. An
+    agent's conversation is read, however recent."""
+    newest_visitor = LAST_NIGHT - timedelta(hours=1)
+    fake.record_night(booked_visit(EARLIER), booked_visit(LAST_NIGHT - timedelta(hours=2)), booked_visit(newest_visitor),
+                      agent_visit(LAST_NIGHT))
+    async with running(api_settings, fake, clock) as app:
+        client = browser(app)
+        created = await client.post("/api/owner/copies", json={"passcode": PASSCODE})
+        assert created.status_code == 201, created.text
+        copy = created.json()
+        desk_id = copy["desks"][0]["desk_id"]
+        listed = {row["session_id"]: row["unread"]
+                  for row in (await client.get(f"/api/owner/desks/{desk_id}/conversations")).json()}
+        (business,) = (await client.get("/api/owner/desks")).json()
+    _, events = fake.replayed_nights[copy["copy_id"]]
+    began = {}
+    for event in events:
+        began.setdefault(event.session_id, shown_at(event))
+    (seeded,) = set(listed) - set(began)
+    (night,) = [session_id for session_id, at in began.items() if at == newest_visitor]
+    assert len(listed) == 5
+    assert {session_id for session_id, unread in listed.items() if unread} == {seeded, night}
+    assert copy["desks"][0]["unread_conversations"] == business["desks"][0]["unread_conversations"] == 2
+    # the rest are read through their last message
+    marks = dict(db.execute("SELECT session_id, read_through_n FROM app.conversation_reads WHERE copy_id = %s",
+                            (copy["copy_id"],)).fetchall())
+    newest = dict(db.execute("SELECT session_id, max(n) FROM app.messages WHERE copy_id = %s GROUP BY session_id",
+                             (copy["copy_id"],)).fetchall())
+    assert marks == {session_id: n for session_id, n in newest.items() if session_id not in {seeded, night}}
+
+
 async def test_failed_replay_storage_still_creates_the_copy(db, fake, api_settings, clock, browser, monkeypatch,
                                                             caplog):
     """A replay never fails the copy: when storing a replayed row raises, nothing replayed is stored (the night's

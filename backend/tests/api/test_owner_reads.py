@@ -414,7 +414,7 @@ async def test_switcher_lists_only_this_copys_businesses(app, browser, fake, ker
         "desks": [{"desk_id": owner.desk_id, "slug": owner.slug, "name": "Main line",
                    "business_name": "Turner Plumbing",
                    "hours": [window.model_dump(mode="json") for window in desk.hours], "answering": True,
-                   "setup": None, "business_type": "rivera"}]}]
+                   "setup": None, "business_type": "rivera", "unread_conversations": 0}]}]
     assert other.desk_id not in listed.text and fake.desks[other.desk_id].business_id not in listed.text
     assert (await browser(app).get("/api/owner/desks")).status_code == 401          # no owner cookie
 
@@ -1795,6 +1795,125 @@ async def test_conversations_name_a_verified_visitors_person(scene, clock):
     expected = {dana.session_id: danas, stranger.session_id: None, preview.session_id: None, agent.session_id: None}
     assert {session_id: listed[session_id]["person_id"] for session_id in expected} == expected
     assert {session_id: live[session_id]["person_id"] for session_id in expected} == expected
+
+
+# Unread conversations: the owner's read marker, per conversation ---------------------------------------------------
+
+
+async def unread(owner: Owner) -> set[str]:
+    """The listed conversations that are unread (the seed's held request's session, which has no messages, never is)."""
+    listed = await owner.get(f"desks/{owner.desk_id}/conversations")
+    assert listed.status_code == 200, listed.text
+    return {summary["session_id"] for summary in listed.json() if summary["unread"]}
+
+
+async def unread_count(owner: Owner) -> int:
+    """The owner's Desk's `unread_conversations`, as the Desk switcher and `me` both give it."""
+    (business,) = (await owner.get("desks")).json()
+    (desk,) = business["desks"]
+    (mine,) = (await owner.get("me")).json()["desks"]
+    assert mine["unread_conversations"] == desk["unread_conversations"]
+    return desk["unread_conversations"]
+
+
+async def mark_read(owner: Owner, session_id: str, through: int) -> httpx.Response:
+    return await owner.browser.post(f"/api/owner/conversations/{session_id}/read", json={"through": through})
+
+
+async def test_a_visitors_message_after_the_owners_marker_is_unread(scene):
+    at = local(2026, 10, 30, 8, 57)
+    owner, chat = scene.owner, await scene.visitor(at)
+    first = await scene.text(chat, at, "Do you fix leaks?")
+    assert await unread(owner) == {chat.session_id}               # no marker yet
+    assert await unread_count(owner) == 1
+
+    marked = await mark_read(owner, chat.session_id, first)
+
+    assert (marked.status_code, marked.content) == (204, b"")
+    assert await unread(owner) == set()
+    assert await unread_count(owner) == 0
+    later = await scene.text(chat, at + timedelta(minutes=1), "Are you there?")
+    assert await unread(owner) == {chat.session_id}
+    assert await unread_count(owner) == 1
+    assert (await mark_read(owner, chat.session_id, later)).status_code == 204
+    assert await unread(owner) == set()
+    assert await unread_count(owner) == 0
+
+
+async def test_only_a_visitors_or_an_agents_words_make_a_conversation_unread(scene):
+    at = local(2026, 10, 30, 8, 57)
+    owner, chat = scene.owner, await scene.visitor(at)
+    said = await scene.text(chat, at, "Do you fix leaks?")
+    assert (await mark_read(owner, chat.session_id, said)).status_code == 204
+    then = at + timedelta(minutes=1)
+    await scene.reply(chat, then)                                                           # Claude's
+    await write(scene.engine, scene.admin, chat.ids, "owner_say", then, text="I can come at 3.")   # the owner's
+    await write(scene.engine, scene.admin, chat.ids, "whisper", then, text="Offer Tuesday.")
+    await write(scene.engine, scene.admin, chat.ids, "note", then, text="The owner took over.")    # the API's
+    await write(scene.engine, scene.admin, chat.ids, "annotation", then, ref_id="msg-earlier")
+    await write(scene.engine, scene.admin, chat.ids, "status", then, ref_id="decision-earlier")    # the kernel's
+
+    assert await unread(owner) == set()
+    assert await unread_count(owner) == 0
+
+    scene.fake.now = then                                                # another person's agent
+    agent, _ = scene.fake._new_session(owner.copy_id, owner.desk_id, "agent")
+    scene.fake.flush()
+    agent_ids = Ids(copy_id=owner.copy_id, desk_id=owner.desk_id, session_id=agent.session_id)
+    await write(scene.engine, scene.admin, agent_ids, "agent_text", then, text="Book the earliest visit for Alex Kim.")
+    assert await unread(owner) == {agent.session_id}
+    assert await unread_count(owner) == 1
+
+
+async def test_marking_read_only_moves_forward_and_stops_at_the_newest_message(scene, db):
+    at = local(2026, 10, 30, 8, 57)
+    owner, chat = scene.owner, await scene.visitor(at)
+    first = await scene.text(chat, at, "Do you fix leaks?")
+    second = await scene.text(chat, at + timedelta(minutes=1), "Today?")
+
+    def marker() -> int:
+        (through,) = db.execute("SELECT read_through_n FROM app.conversation_reads WHERE session_id = %s",
+                                (chat.session_id,)).fetchone()
+        return through
+
+    assert (await mark_read(owner, chat.session_id, second)).status_code == 204
+    assert (await mark_read(owner, chat.session_id, first)).status_code == 204         # a stale or replayed call
+    assert marker() == second
+    assert await unread(owner) == set()
+    # A cursor past the newest message is held at it, so a message that comes later is still new.
+    assert (await mark_read(owner, chat.session_id, second + 1_000)).status_code == 204
+    assert marker() == second
+    third = await scene.text(chat, at + timedelta(minutes=2), "Hello?")
+    assert third < second + 1_000
+    assert await unread(owner) == {chat.session_id}
+    assert await unread_count(owner) == 1
+    for body in ({"through": -1}, {}, {"through": third, "all": True}, {"through": "all"}):
+        refused = await owner.browser.post(f"/api/owner/conversations/{chat.session_id}/read", json=body)
+        assert (refused.status_code, refused.json()) == (422, {"error": "invalid"}), body
+    assert marker() == second
+
+
+async def test_another_copys_conversation_is_not_found_and_a_preview_is_never_unread(app, browser, fake, kernel_http,
+                                                                                    scene, db):
+    at = local(2026, 10, 30, 8, 57)
+    other = await new_owner(app, browser, fake, kernel_http)
+    theirs = await guest(kernel_http, fake, other)
+    said = await write(scene.engine, scene.admin, theirs.ids, "visitor_text", at, text="Hi, are you open?")
+
+    for session_id in (theirs.session_id, "session-unknown"):
+        refused = await mark_read(scene.owner, session_id, said)
+        assert (refused.status_code, refused.json()) == (404, {"error": "not_found"}), session_id
+    assert db.execute("SELECT count(*) FROM app.conversation_reads").fetchone() == (0,)
+    assert await unread(other) == {theirs.session_id}             # still unread for its own owner
+    assert await unread_count(other) == 1
+
+    preview = await scene.visitor(at, preview=True)                     # the owner's own preview
+    await scene.text(preview, at, "Testing my own Desk")
+    listed = (await scene.owner.get(f"desks/{scene.owner.desk_id}/conversations")).json()
+    assert [(row["owner_preview"], row["unread"]) for row in listed if row["session_id"] == preview.session_id] == [
+        (True, False)]
+    assert await unread(scene.owner) == set()
+    assert await unread_count(scene.owner) == 0
 
 
 async def test_booked_amount_is_the_conversations_newest_quote(scene, clock):
