@@ -10108,6 +10108,18 @@
             "type": "boolean",
             "title": "Resuming",
             "default": false
+          },
+          "generation": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation"
           }
         },
         "type": "object",

@@ -43,7 +43,7 @@ import contextlib
 import logging
 import math
 import secrets
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -225,12 +225,29 @@ def _owner_names(events: Sequence[_Seen]) -> list[str]:
     return names
 
 
+def _unfenced_events(events: Sequence[_Seen]) -> Iterator[tuple[int, _Seen]]:
+    """Keep presence and owner replies, but discard Claude's stale replies and ends after a resuming hand-back.
+    Replies already carry their generation; the hand-back and turn end identify which resumed work can answer."""
+    generation = None
+    for index, seen in enumerate(events):
+        event = seen.event
+        if event.type == "owner_left" and event.generation is not None:
+            generation = event.generation
+        if generation is not None and (event.type == "turn_end" or (
+                event.type == "message" and event.author == "claude")):
+            if event.generation is None or event.generation < generation:
+                continue
+        yield index, seen
+
+
 def _lines(events: Sequence[_Seen], start: int) -> list[str]:
     """How the chat's events from `start` on read to the visitor's model, each labelled by who said it (the Desk's
     own text, which the caller wraps)."""
     names, lines = _owner_names(events), []
-    for index in range(start, len(events)):
-        event = events[index].event
+    for index, seen in _unfenced_events(events):
+        if index < start:
+            continue
+        event = seen.event
         kind = event.type
         if kind == "message":
             said = "\n".join(block.text for block in event.blocks)
@@ -271,9 +288,10 @@ class _Answer:
 def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
     """Whether the events after `mark` (the feed's length when the message went) answer it: Claude's turn ending while
     Claude has the chat, or the owner's words or an idle hand-back. A hand-back resuming work waits for Claude's
-    turn to end. An unanswered handoff waits under the owner-silence rule. The stream's `session` error ends the chat."""
+    own generation's turn to end. An unanswered handoff waits under the owner-silence rule.
+    The stream's `session` error ends the chat."""
     mode, heard, handoff = "ai", None, False
-    for index, seen in enumerate(events):
+    for index, seen in _unfenced_events(events):
         event = seen.event
         kind = event.type
         if kind == "owner_joined":

@@ -881,6 +881,7 @@ export interface EvOwnerJoined {
 export interface EvOwnerLeft {
   type: "owner_left";
   resuming?: boolean;
+  generation?: number | null;
 }
 export interface EvOwnerTyping {
   type: "owner_typing";
@@ -889,6 +890,7 @@ export interface EvOwnerTyping {
 }
 export interface EvTurnEnd {
   type: "turn_end";
+  generation?: number | null;
 }
 export interface EvWriting {
   type: "writing";

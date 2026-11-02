@@ -558,6 +558,59 @@ async def test_handback_waits_for_a_pending_whispers_delayed_claude_reply(
     assert "Check the available times for Riley." not in last_input(visitor_model.requests[2])
 
 
+async def test_handback_ignores_a_fenced_turn_end_until_the_resumed_turn_ends(
+        app, browser, fake, visitors, visitor_model, desk_model, copy, engine, monkeypatch):
+    from desk.api import loop
+
+    owner = owner_of(app, browser, copy)
+    release_old, release_reply, release_end = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    ending = asyncio.Event()
+    old = gated(say("This answer was generated before the owner joined."), release_old)
+    resumed = gated(say("I can check the available times for you."), release_reply)
+    visitor_model.add(step("Can you fix a leaking sink?"), step("Thanks, what should I do next?"),
+                      step("", done=True))
+    desk_model.add(old, resumed, say("Please describe the leak."))
+    emit = loop.emit
+
+    async def hold_resumed_end(conn, ids, event):
+        if event.type == "turn_end" and release_reply.is_set():
+            ending.set()
+            await release_end.wait()
+        return await emit(conn, ids, event)
+
+    monkeypatch.setattr(loop, "emit", hold_resumed_end)
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(old.entered.wait(), 5)
+    await change_mode(owner, fake, started.session_id, "takeover")
+    await owner_writes(owner, started.session_id, "Check the available times for Riley.", kind="whisper")
+    try:
+        await change_mode(owner, fake, started.session_id, "handback")
+        release_old.set()
+        await asyncio.wait_for(resumed.entered.wait(), 5)
+        await until(lambda: turn_ends_at_least(engine, started.session_id, 1))
+        await asyncio.sleep(0.1)
+        assert len(visitor_model.requests) == 1, "A fenced turn's end triggered a visitor model call"
+        assert visitors.run(started.run_id, copy.copy_id).messages_sent == 1
+        assert await rows(engine, started.session_id, "visitor_text") == ["Can you fix a leaking sink?"]
+
+        release_reply.set()
+        await asyncio.wait_for(ending.wait(), 5)
+        await asyncio.sleep(0.1)
+        assert len(visitor_model.requests) == 1, "The resumed reply needs its own turn end"
+        assert visitors.run(started.run_id, copy.copy_id).messages_sent == 1
+    finally:
+        release_old.set()
+        release_reply.set()
+        release_end.set()
+    await asyncio.wait_for(visitors.drain(), 5)
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 2)
+    assert "Claude (the business's AI): I can check the available times for you." in last_input(
+        visitor_model.requests[1])
+    assert "This answer was generated before the owner joined." not in last_input(visitor_model.requests[1])
+    assert "Check the available times for Riley." not in last_input(visitor_model.requests[1])
+
+
 async def turn_ends(engine, session_id: str) -> int:
     async with engine.connect() as conn:
         return (await conn.execute(text("SELECT count(*) FROM app.run_events WHERE session_id = :s AND kind = 'sse'"

@@ -707,7 +707,8 @@ async def _announce(conn: AsyncConnection, ids: Ids, before: str, now: SessionSt
         return
     resuming = await has_pending(conn, ids.session_id)
     if before == "owner":
-        await _transcribed(conn, ids, EvOwnerLeft(type="owner_left", resuming=resuming))
+        await _transcribed(conn, ids, EvOwnerLeft(type="owner_left", resuming=resuming,
+                                                generation=now.generation if resuming else None))
     await append_message(conn, ids, "note", text=NOTES["handed_back" if before == "owner" else "resumed"],
                          wake=False)
     if resuming:
