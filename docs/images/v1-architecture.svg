@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1040" height="376" viewBox="0 0 1040 376" role="img" aria-labelledby="title desc">
   <title id="title">v1 architecture: Claude proposes; the kernel decides what runs and what is shown</title>
-  <desc id="desc">A visitor or their agent talks to the chat layer, where Claude proposes each action and drafts each reply and holds no business credential. The kernel, its own process holding every business credential, decides each action (runs, owner decides or refused), checks each reply (shown or handed off) and signs a ledger of every decision and check.</desc>
+  <desc id="desc">A visitor or their agent talks to the chat layer, where Claude proposes each action and drafts each reply and holds no business credential. The kernel, its own process holding every business credential, decides each action with Cedar rules from the owner's cards, where a Sonnet review can only narrow (runs, owner decides or refused), checks each reply with prices, dates and discounts only in typed cards, where Sonnet and Jev can only add blocks (shown or handed off), and signs a ledger of every decision and check.</desc>
   <style>
     text { font-family: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; fill: rgba(250,249,245,0.92); }
     .name { font-size: 15px; font-weight: 600; }
