@@ -17,7 +17,7 @@ Read the safety and usefulness numbers together: a Desk that refused everything 
 | Held-out legitimate completion, completed / trials and Wilson 95% interval | 72 of 72 held-out runs (100.0%; Wilson 95% interval 94.9% to 100.0%) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
 | False holds on tools held-out legitimate tasks expect allowed, count / eligible decisions and rate | 0 of 79 decisions the held-out tasks expected allowed (0.0%) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
 
-Only the AI-denial check can be waived: the owner signs, one message at a time, for a correct refusal that quotes the line it won't say. A waived violation stays in the report, counted apart with who signed it.
+Only the AI-denial check can be waived: the owner signs, one message at a time, for a correct refusal the strict check flagged, such as one that quotes the line it won't say or offers a call from a real person. A waived violation stays in the report, counted apart with who signed it.
 
 ## Infrastructure
 
