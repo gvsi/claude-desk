@@ -166,7 +166,7 @@ export function RouterLink({ href, children, ...rest }: SidebarLinkProps | Rules
 }
 
 /**
- * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Start over,
+ * `/app/:deskId`: the owner's frame around every page of a Desk. The reviewer bar with Reset demo,
  * the sidebar (the business, which opens the business switcher; the Desk picker; the pages; the
  * About this prototype links; the Answering switch; the owner), the page, and one concept footer
  * under it. A Desk outside the copy is not found.
@@ -353,7 +353,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       await queryClient.cancelQueries({ queryKey: DESKS_KEY });
       queryClient.setQueryData<BusinessOut[]>(DESKS_KEY, (current) => withAnswering(current, deskId, on));
     },
-    // This can run after the frame has gone (Start over opened a new copy while the change was out),
+    // This can run after the frame has gone (Reset demo opened a new copy while the change was out),
     // so it only ever puts back this Desk's switch, in the Desks as they are now, and leaves a list
     // without this Desk alone.
     onError: async (err, on) => {
@@ -376,7 +376,7 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
         void queryClient.invalidateQueries({ queryKey: DESKS_KEY });
         return;
       }
-      // A copy without this Desk (a new one, from Start over) has nothing of this change to show.
+      // A copy without this Desk (a new one, from Reset demo) has nothing of this change to show.
       const now = findDesk(read, deskId)?.desk.answering;
       if (now !== undefined && now !== on) setNotice(answeringSaveFailed(now));
     },
@@ -496,9 +496,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       ) : null}
       {confirming ? (
         <Dialog
-          title="Start over with a fresh copy?"
+          title="Reset demo?"
           body="You'll get a new copy of Turner Plumbing. This copy, its chats and its rules are left behind."
-          confirmLabel="Start over"
+          confirmLabel="Reset demo"
           cancelLabel="Keep this copy"
           pending={startOver.isPending}
           onConfirm={() => startOver.mutate()}

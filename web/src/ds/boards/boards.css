@@ -1411,9 +1411,9 @@
   gap: var(--space-8);
 }
 
-/* The switch adds 8 px at each side; these 8 px align its words with the business details. */
+/* The row's padding combines with these 10 px and 8 px to put the words and switch 16 px in on every side. */
 .board-settings__answering {
-  padding: var(--space-20) var(--space-8);
+  padding: var(--space-10) var(--space-8);
 }
 
 /* A vision note: the Pill, then its line 12 px after it. */

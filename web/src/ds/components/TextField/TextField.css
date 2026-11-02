@@ -29,12 +29,10 @@
   color: var(--text-primary);
 }
 
-/* With focus, by pointer or keyboard, a field that can be typed in shows its caret and its border one
-   step stronger (base.css), never a ring (owner, 2026-11-01, WCAG 2.4.7). A held field rings instead. */
+/* Editable and held fields share the 2 px line-focus edge in base.css, without changing size. */
 
 /* Held words stay readable and selectable; the muted fill distinguishes them from editable words. */
 .cd-text-field__input[readonly] {
-  border-color: var(--line-control);
   background: var(--fill-secondary);
   color: var(--text-primary);
   cursor: default;

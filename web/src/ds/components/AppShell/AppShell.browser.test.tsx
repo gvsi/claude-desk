@@ -93,7 +93,7 @@ it('fill_never_changes_the_sidebar', () => {
 });
 
 it('skip_link_is_the_first_stop_and_moves_focus_to_the_page', async () => {
-  // "Skip to content" is the first Tab stop, before the banner's Start over and the navigation.
+  // "Skip to content" is the first Tab stop, before the banner's Reset demo and the navigation.
   // Hidden until keyboard focus, it shows at the top left over the sidebar with the standard focus
   // ring; Enter moves focus to the page, and the next Tab continues inside it. A mouse never shows it.
   for (const layout of ['auto', 'compact'] as const) {
@@ -101,7 +101,7 @@ it('skip_link_is_the_first_stop_and_moves_focus_to_the_page', async () => {
       root.render(
         <AppShell
           layout={layout}
-          banner={<button type="button">Start over</button>}
+          banner={<button type="button">Reset demo</button>}
           sidebar={
             <nav aria-label="Main">
               <a href="#today">Today</a>
@@ -151,7 +151,7 @@ it('skip_link_is_the_first_stop_and_moves_focus_to_the_page', async () => {
     expect(document.activeElement).toBe(page.getByRole('button', { name: 'First on the page' }).element());
 
     // After a click, focus a script puts on it doesn't show it: only the keyboard does.
-    await userEvent.click(page.getByRole('button', { name: 'Start over' }));
+    await userEvent.click(page.getByRole('button', { name: 'Reset demo' }));
     skip.focus();
     expect([layout, document.activeElement, hidden()]).toEqual([layout, skip, true]);
   }

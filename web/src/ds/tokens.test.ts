@@ -167,10 +167,13 @@ describe('design tokens', () => {
     expect(actual).toEqual(expected);
   });
 
-  test('a_focused_fields_edge_is_the_tertiary_ink', () => {
-    // A text field with focus shows its caret and its own border one step stronger, never a ring and
-    // never blue (owner, 2026-11-01, WCAG 2.4.7): line-field-focus, the tertiary ink.
-    expect(tokenValue('line-field-focus')).toBe('{text-tertiary}');
+  test('focused_field_edges_use_the_control_focus_token_on_every_ground', () => {
+    expect(colorNames).not.toContain('line-field-focus');
+    for (const ground of ['bg-app', 'bg-surface']) {
+      const pair = CONTRAST_PAIRS.find((p) => p.fg === 'line-focus' && p.ground === ground);
+      expect(pair).toBeDefined();
+      for (const theme of THEMES) expect(pairContrast(pair!, theme)).toBeGreaterThanOrEqual(3);
+    }
   });
 
   test('focus_edge_is_the_secondary_ink', () => {
@@ -377,7 +380,7 @@ describe('design tokens', () => {
     // The light theme's values, as the design system set them: warm paper, the dark theme's ink at its
     // alpha steps, an ink primary button, darker steps of the status hues, a darker clay, a lighter
     // scrim and shadows, and Stripe's mark in Stripe's own purple, since its white would vanish on
-    // paper. The aliases (line-field-focus, line-focus, button-primary-text, status-info) follow the
+    // paper. The aliases (line-focus, button-primary-text, status-info) follow the
     // light values by themselves; the mark, Google Calendar's blue, the illustration's other inks, the
     // QR tile and its hairline, and the inks on an owner's colour are the same in both themes. The
     // illustration's ink and the QR code's, which alias bg-app in dark, stay dark ink on paper.
@@ -556,7 +559,7 @@ describe('design tokens', () => {
     // A text field's outline is its boundary, so it needs 3:1 on every ground a field sits on.
     add(['line-field'], ['bg-surface', 'bg-app'], 3);
     // A text field's border while it has focus, one step stronger than its outline.
-    add(['line-field-focus'], ['bg-surface', 'bg-app'], 3);
+    add(['line-focus'], ['bg-surface', 'bg-app'], 3);
     // The outlined value of an inline CopyField, in a card on the agents page.
     add(['line-field'], ['fill-card'], 3, 'bg-app');
     // The deny answers in a held request's card: danger at rest and on hover, then danger-ghost,
@@ -636,6 +639,16 @@ describe('design tokens', () => {
       const dark = CONTRAST_PAIRS.find((p) => p.fg === exempt.fg && p.ground === exempt.ground && p.themes?.join() === 'dark');
       expect(dark, `${label(exempt)} is listed for the dark theme`).toBeDefined();
       expect(pairContrast(exempt, 'light'), label(exempt)).toBeLessThan(dark?.min ?? 0);
+    }
+  });
+
+  test('state_change_pairs_compare_each_edge_on_the_same_ground_without_a_3_to_1_floor', () => {
+    for (const theme of THEMES) {
+      const resting = pairContrast({ fg: 'line-field', ground: 'bg-app' }, theme);
+      const before = pairContrast({ fg: 'text-tertiary', ground: 'bg-app' }, theme) / resting;
+      const after = pairContrast({ fg: 'line-focus', ground: 'bg-app' }, theme) / resting;
+      expect(after).toBeGreaterThan(before);
+      expect(after).toBeCloseTo(theme === 'light' ? 1.46 : 2.27, 2);
     }
   });
 
