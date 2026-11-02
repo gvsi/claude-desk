@@ -21,6 +21,10 @@ interface LocalTime {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+] as const;
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
 /** `at` on the business's clock. */
@@ -125,6 +129,17 @@ export function formatDate(iso: string, timeZone: string): string {
   if (at === null) return '';
   const local = localTime(at, timeZone);
   return `${MONTHS[local.month - 1] ?? ''} ${local.day}`;
+}
+
+/**
+ * A day and time written whole on the business's clock, as a booking's start reads:
+ * "Monday, November 2 at 10:00 am". A time that can't be read shows as nothing.
+ */
+export function formatDayAndTime(iso: string, timeZone: string): string {
+  const at = readDate(iso);
+  if (at === null) return '';
+  const local = localTime(at, timeZone);
+  return `${local.weekday}, ${MONTH_NAMES[local.month - 1] ?? ''} ${local.day} at ${clock(local)}`;
 }
 
 /** Whole days from `at`'s local date to `now`'s, on the business's clock: 0 today, 1 yesterday. */
