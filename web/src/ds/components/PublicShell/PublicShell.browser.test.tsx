@@ -1314,6 +1314,131 @@ it('a_place_read_on_the_side_holds_as_the_phone_turns_back', async () => {
   expect(Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px`).toBe('within 1 px');
 });
 
+it('the_reading_place_survives_a_width_change_that_keeps_the_layout', async () => {
+  // A visitor reading at message 6 whose window gets wider while the shell stays short or tall: a
+  // phone turned with the keyboard open, a short window widened, a phone a little wider. The
+  // messages and the chat's head still wrap onto other lines, and message 6 stays where it was under
+  // the chat's head, whether the browser's own scroll anchoring moves the conversation first or
+  // doesn't.
+  const seen = [];
+  for (const anchoring of ['browser', 'none'] as const) {
+    for (const [from, to] of [
+      [[390, 380], [568, 380]],
+      [[568, 320], [700, 320]],
+      [[390, 844], [430, 844]],
+    ] satisfies [Size, Size][]) {
+      const noAnchoring = document.createElement('style');
+      noAnchoring.textContent = anchoring === 'none' ? '* { overflow-anchor: none; }' : '';
+      document.head.append(noAnchoring);
+      try {
+        await renderLongChat(from);
+        const short = isShort();
+        const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[5] as HTMLElement;
+        const head = one('.cd-public-shell__chat-head');
+        const offset = () => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+        // Twice: on a short shell, scrolling moves the chat's head too until the brand header is gone.
+        for (let pass = 0; pass < 2; pass += 1) scroller().scrollTop += offset() - 10;
+        await nextFrames();
+        const before = offset();
+        expect(Math.round(before)).toBe(10);
+
+        await page.viewport(...to);
+        await vi.waitFor(() => expect(window.innerWidth).toBe(to[0]));
+        await nextFrames();
+        expect(isShort()).toBe(short);
+        const drift = offset() - before;
+        seen.push({ anchoring, change: `${named(from)} to ${named(to)}`, drift: Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px` });
+      } finally {
+        noAnchoring.remove();
+      }
+    }
+  }
+  expect(seen).toEqual([
+    { anchoring: 'browser', change: '390x380 to 568x380', drift: 'within 1 px' },
+    { anchoring: 'browser', change: '568x320 to 700x320', drift: 'within 1 px' },
+    { anchoring: 'browser', change: '390x844 to 430x844', drift: 'within 1 px' },
+    { anchoring: 'none', change: '390x380 to 568x380', drift: 'within 1 px' },
+    { anchoring: 'none', change: '568x320 to 700x320', drift: 'within 1 px' },
+    { anchoring: 'none', change: '390x844 to 430x844', drift: 'within 1 px' },
+  ]);
+});
+
+it('a_switch_just_after_a_width_change_keeps_the_reading_place', async () => {
+  // The shell can turn short just after it has laid itself out at a new width: here the composer
+  // area grows as soon as the window is wider, as a draft's text box can resize to the new width.
+  // The shell then reads the place at a width it has already laid out, and message 6 still stays
+  // where the visitor last saw it under the chat's head.
+  const seen = [];
+  for (const anchoring of ['browser', 'none'] as const) {
+    const noAnchoring = document.createElement('style');
+    noAnchoring.textContent = anchoring === 'none' ? '* { overflow-anchor: none; }' : '';
+    document.head.append(noAnchoring);
+    let grow: ResizeObserver | undefined;
+    try {
+      await renderLongChat([390, 640], { lineAbove: true });
+      expect(isShort()).toBe(false);
+      // Made after the shell's own observer, so it hears of the new width just after the shell does.
+      grow = new ResizeObserver(() => {
+        if (window.innerWidth === 430) one('[data-testid="line-above"]').style.height = '400px';
+      });
+      const row = container.querySelectorAll<HTMLElement>('.cd-transcript-row')[5] as HTMLElement;
+      const head = one('.cd-public-shell__chat-head');
+      const offset = () => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+      scroller().scrollTop += offset() - 10;
+      await nextFrames();
+      const before = offset();
+      expect(Math.round(before)).toBe(10);
+
+      grow.observe(one('.cd-public-shell'));
+      await page.viewport(430, 640);
+      await vi.waitFor(() => expect(isShort()).toBe(true));
+      await nextFrames();
+      const drift = offset() - before;
+      seen.push({ anchoring, drift: Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px` });
+    } finally {
+      grow?.disconnect();
+      noAnchoring.remove();
+    }
+  }
+  expect(seen).toEqual([
+    { anchoring: 'browser', drift: 'within 1 px' },
+    { anchoring: 'none', drift: 'within 1 px' },
+  ]);
+});
+
+it('a_message_above_the_place_changing_height_moves_the_place_with_it', async () => {
+  // Where the browser doesn't anchor scrolling, a message above the one being read changing height
+  // moves what shows under the chat's head without any scroll. The place kept is what the visitor
+  // now sees: message 3 grows by one message's height, so message 5 comes to where message 6 was,
+  // and once the phone turns, message 5 is still there.
+  const noAnchoring = document.createElement('style');
+  noAnchoring.textContent = '* { overflow-anchor: none; }';
+  document.head.append(noAnchoring);
+  onTestFinished(() => noAnchoring.remove());
+  await renderLongChat([390, 844]);
+  const rows = container.querySelectorAll<HTMLElement>('.cd-transcript-row');
+  const third = rows[2] as HTMLElement;
+  const fifth = rows[4] as HTMLElement;
+  const sixth = rows[5] as HTMLElement;
+  const head = one('.cd-public-shell__chat-head');
+  const offset = (row: HTMLElement) => row.getBoundingClientRect().top - head.getBoundingClientRect().bottom;
+  scroller().scrollTop += offset(sixth) - 10;
+  await nextFrames();
+  expect(Math.round(offset(sixth))).toBe(10);
+
+  const step = sixth.getBoundingClientRect().top - fifth.getBoundingClientRect().top;
+  third.style.paddingTop = `${parseFloat(getComputedStyle(third).paddingTop) + step}px`;
+  await nextFrames();
+  const before = offset(fifth);
+  expect(Math.round(before)).toBe(10);
+
+  await page.viewport(568, 320);
+  await vi.waitFor(() => expect(isShort()).toBe(true));
+  await nextFrames();
+  const drift = offset(fifth) - before;
+  expect(Math.abs(drift) <= 1 ? 'within 1 px' : `${drift.toFixed(1)} px`).toBe('within 1 px');
+});
+
 it('follows_the_visual_viewport_when_the_keyboard_opens', async () => {
   // Safari on an iPhone doesn't shrink the page for the on-screen keyboard; it shrinks the visual
   // viewport and pans it. The shell takes the visual viewport's height and place instead, so it is
