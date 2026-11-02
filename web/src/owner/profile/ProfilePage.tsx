@@ -3,6 +3,7 @@ import { useId } from 'react';
 import { DetailList, NAV_LABELS, PageHeader, SectionHeader, type DetailItem } from '../../ds/index.ts';
 import { hoursParts } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { HeaderColourCard } from '../settings/HeaderColourCard.tsx';
 
@@ -43,7 +44,8 @@ export function ProfilePage() {
   const details: DetailItem[] = [
     { label: 'Business', value: business.name },
     { label: 'This Desk', value: desk.name },
-    { label: 'Customers see you as', value: business.owner_display_name },
+    // With no owner's name, customers see the business's (owner, 2026-11-02).
+    { label: 'Customers see you as', value: givenOwnerName(business.owner_display_name) ?? business.name },
     { label: 'Time zone', value: timeZoneWords(business.timezone) },
   ];
   // In the signed board's words: "Weekdays 8:00 am to 6:00 pm, Saturdays 9:00 am to 1:00 pm".

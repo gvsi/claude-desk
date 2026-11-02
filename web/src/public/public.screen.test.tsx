@@ -5148,6 +5148,27 @@ describe('a Desk whose owner gave no name', () => {
     await expectScreenBasics(screen.container, { owner: false });
   });
 
+  it('no_owner_name_takes_over_as_the_business', async () => {
+    // The owner, who gave no name, takes the chat over and writes: the visitor sees the business
+    // join and speak, never setup's fallback, "Owner" (owner, 2026-11-02).
+    const slug = await liveSetupDesk(FENSTER);
+    const { screen } = await renderRoute(`/d/${slug}`);
+    await ready(screen);
+    await say(screen, 'Do you install skylights?');
+    const session = mockStore.visitorSession(slug);
+    if (!session) throw new Error('the visitor has a chat');
+    const call = async (key: 'takeover' | 'ownerMessage', body: unknown) => {
+      const reply = await mockStore.dispatch(key, { params: { session_id: session.state.session_id }, body });
+      if ('network' in reply || reply.status !== 200) throw new Error(`the mock takes ${key}`);
+    };
+    await call('takeover', { generation: session.state.generation });
+    await call('ownerMessage', { text: 'Yes, we do. When suits you?', kind: 'say' });
+    await expect.element(screen.getByText('Fenster & Fenster joined the chat', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Yes, we do. When suits you?', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Fenster & Fenster said', { exact: true })).toBeVisible();
+    expect(document.querySelector('[role="log"]')?.textContent ?? '').not.toMatch(/\bOwner\b/);
+  });
+
   it('a_name_the_owner_gave_is_asked_for_as_before', async () => {
     // The same setup with the owner's name in it: the page asks for her by name, as ever.
     const slug = await liveSetupDesk("I'm Ana. I run Ana's Bakery in Oakland.");

@@ -43,6 +43,17 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+/** An owner who gave no name: the card asks for a person, as the public page does (owner, 2026-11-02). */
+export const NoOwnerName: Story = {
+  args: { ownerName: null },
+  parameters: { canvas: 'none', canvasNote: 'No board draws a card for an owner who gave no name; the words are the owner’s (2026-11-02). Nearest reference board: N-Run2-Share.' },
+  play: async ({ canvasElement }) => {
+    const disclosure = canvasElement.querySelector('.cd-share-card__answered');
+    await expect(disclosure).toHaveTextContent(/^Answered by Claude, an AI\. Ask for a person any time\.$/);
+    await expect(disclosure?.querySelector('[data-copy="user"]')).toBeNull();
+  },
+};
+
 export const Printable: Story = {
   parameters: { canvasNote: 'The printable card on Share: the business, the QR code the web app draws, the link and who answers, then Print card. The QR here is a placeholder.' },
   play: async ({ args, canvas, userEvent }) => {

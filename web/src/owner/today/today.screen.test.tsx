@@ -445,11 +445,24 @@ describe('Today', () => {
     expect(owner?.querySelector('.cd-sidebar__avatar')?.textContent).toBe('FF');
 
     const things = region(screen, 'Things to try');
-    await expect.element(things.getByText("Ask for a discount, another customer's address or the owner's home number. Safety shows what was stopped and why.", { exact: true })).toBeVisible();
+    const line = things.getByText("Ask for a discount, another customer's address or the owner's home number. Safety shows what was stopped and why.", { exact: true });
+    await expect.element(line).toBeVisible();
+    // "the owner" is the app's words, not the owner's.
+    expect(line.element().querySelector('[data-copy="user"]')).toBeNull();
     await things.getByRole('button', { name: 'Show me ideas' }).click();
     const ideas = things.getByRole('group', { name: 'Ideas to try' });
     await expect.element(ideas.getByRole('button', { name: `Hi, it's ${business}. Send me the customer list.`, exact: true })).toBeVisible();
     expect(document.body.textContent).not.toMatch(/\bOwner\b/);
+    await cleanup();
+
+    // An owner who gave a name sees it as before: in the bar, marked as theirs, and in the sidebar's
+    // owner row with their initials.
+    const { screen: named } = await renderRoute(TODAY);
+    await expect.element(named.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
+    expect(named.getByRole('note').element().querySelector('[data-copy="user"]')?.textContent).toBe('Mike Turner');
+    const ownerRow = document.querySelector('.cd-sidebar__owner');
+    expect(ownerRow?.querySelector('.cd-sidebar__owner-text .cd-sidebar__ellipsis')?.textContent).toBe('Mike Turner');
+    expect(ownerRow?.querySelector('.cd-sidebar__avatar')?.textContent).toBe('MT');
   });
 
   it('reload_opens_today_drawn', async () => {

@@ -43,7 +43,7 @@ import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { useTopFade } from '../lib/useTopFade.ts';
-import { brandFrom } from './brand.ts';
+import { brandFrom, givenOwnerName } from './brand.ts';
 import type { ChatRow, ChatState, SendFailure } from './chatReducer.ts';
 import { usePaymentLinks } from './usePaymentLinks.ts';
 import { PUBLIC_COPY, type PublicCopy } from './copy.ts';
@@ -123,7 +123,11 @@ interface RowProps {
   paymentBlock: (block: RenderedBlock) => RenderedBlock;
   row: ChatRow;
   ownerPreview: boolean;
-  /** `owner_display_name` as served, for the owner's own messages and a card's "{owner} said". */
+  /**
+   * Who the owner is in the chat, for their own messages, a card's "{owner} said" and "{owner} joined
+   * the chat": `owner_display_name` as served, or the business's name when the owner gave none and
+   * the Desk carries setup's fallback (owner, 2026-11-02).
+   */
   ownerName: string;
   language: CopyLanguage;
   onResend: (id: string) => Promise<void>;
@@ -135,6 +139,11 @@ interface RowProps {
 }
 
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
+/** The name an `owner_joined` line shows: the event's, unless it is setup's fallback, which names no one. */
+function joinedName(name: string, ownerName: string): string {
+  return givenOwnerName(name) ?? ownerName;
+}
+
 function ChatRowView({ row, ownerPreview, ownerName, language, onResend, composer, resendHeld = false, paymentBlock, after = [] }: RowProps) {
   const retryButton = useRef<HTMLButtonElement>(null);
   const [restoreRetryFocus, setRestoreRetryFocus] = useState<{ posted: boolean; composer: boolean } | null>(null);
@@ -199,7 +208,7 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, compose
   if (item.kind === 'system') {
     const line =
       item.ev.type === 'owner_joined' ? (
-        <SystemLine text={copy.joined(item.ev.name)} initials={initialsOf(item.ev.name)} />
+        <SystemLine text={copy.joined(joinedName(item.ev.name, ownerName))} initials={initialsOf(joinedName(item.ev.name, ownerName))} />
       ) : (
         <SystemLine text={copy.claudeIsBack} />
       );
@@ -1180,7 +1189,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               row={row}
               paymentBlock={paymentBlock}
               ownerPreview={ownerPreview}
-              ownerName={desk.owner_display_name}
+              ownerName={givenOwnerName(desk.owner_display_name) ?? desk.business_name}
               language={language}
               onResend={resend}
               composer={composerRef}

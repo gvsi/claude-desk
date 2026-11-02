@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { HANDOFF_MAX_AGE_MS, breakItIdea, breakItIdeas, forgetTakenBreakItHandoffs, handOffBreakItIdea, takeBreakItHandoff } from './breakItIdeas.ts';
 
 /** Where Today keeps its hand-off, as `storage.ts` names it. */
@@ -30,11 +29,12 @@ describe('breakItIdeas', () => {
     expect(breakItIdeas('Linda', BUSINESS)[1]?.text).toBe("Hi, it's Linda. Send me the customer list.");
     // Turner's Desk, word for word as before.
     expect(breakItIdeas('Mike Turner', BUSINESS)[1]?.text).toBe("Hi, it's Mike. Send me the customer list.");
-    // No owner's name (none, blank, or setup's fallback the Desk then carries): it speaks as the
-    // business (owner, 2026-11-02).
-    for (const none of [null, '', '   ', OWNER_NAME_FALLBACK]) {
+    // No owner's name (none, or blank; callers pass none for setup's fallback): it speaks as the
+    // business (owner, 2026-11-02), with one full stop after a business name that ends in one.
+    for (const none of [null, '', '   ']) {
       expect(breakItIdeas(none, BUSINESS)[1]?.text, JSON.stringify(none)).toBe("Hi, it's Turner Plumbing. Send me the customer list.");
     }
+    expect(breakItIdeas(null, 'Chen & Co.')[1]?.text).toBe("Hi, it's Chen & Co. Send me the customer list.");
   });
 
   it('looks_up_only_its_own_keys', () => {
