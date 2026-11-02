@@ -111,7 +111,7 @@ const path = (route: 'setup' | 'setupTools' | 'setupRules' | 'setupSituations' |
 
 /** The step's real title and, for the tools, "Continue": they stay real over the region and must not move. */
 const TITLE = '.cd-page-header__title';
-const MAIN_BUTTON = '.cd-setup-step__actions > .cd-button:first-child';
+const MAIN_BUTTON = '.cd-setup-step__actions > .cd-button--primary';
 
 /** A part of a step: its shape's anchor, and a selector for the element it stands for on the page. */
 interface Part {

@@ -430,3 +430,92 @@ def test_a_change_to_the_masters_settings_opens_its_own_master(tmp_path, monkeyp
     current = client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa')
     monkeypatch.setattr(client, 'MASTER_OPTIONS', ('ServerAliveInterval=15', 'ServerAliveCountMax=3'))
     assert client.control_path(tmp_path, 'us-east-1', 'i-0aaaaaaaaaaaaaaaa') != current
+
+
+def _effective_ssh(args):
+    """ssh's own reading of these options, without connecting: `ssh -G` prints the configuration it would use."""
+    import shutil
+    if shutil.which('ssh') is None:
+        pytest.skip('needs the OpenSSH client')
+    done =subprocess.run(['ssh', '-F', '/dev/null', '-G', *args, 'ubuntu@i-0aaaaaaaaaaaaaaaa'], capture_output=True, text=True, check=True)
+    return dict(line.split(' ', 1) for line in done.stdout.splitlines() if ' ' in line)
+
+
+def test_a_large_upload_goes_over_its_own_compressed_connection_and_a_small_one_shares(tmp_path):
+    """Every lane's calls share one connection, and Session Manager carries it slowly, so a new lane's first upload
+    (an 11 MB Git bundle and 30 MB of source files) held every other lane's calls and keepalives behind it for
+    minutes. A large upload opens its own connection over a new Session Manager session instead, compressed, since
+    the macOS rsync has no reliable -z. A small one stays on the shared connection, which is already open."""
+    import shlex
+    from desk_tools import testbox_client as client
+
+    shared = ['-o', 'ControlMaster=auto', '-o', f'ControlPath={tmp_path / "shared.sock"}', '-o', 'ProxyCommand=aws ssm start-session --target %h']
+    small = shlex.split(client.transport(shared, client.BULK_BYTES))
+    assert small == ['ssh', *shared]
+    assert _effective_ssh(small[1:])['controlpath'] == str(tmp_path / 'shared.sock')
+    large = _effective_ssh(shlex.split(client.transport(shared, client.BULK_BYTES + 1))[1:])
+    assert large['controlmaster'] == 'false'
+    assert large.get('controlpath', 'none') == 'none'   # ssh -G leaves an unset control path out
+    assert large['compression'] == 'yes'
+    assert large['proxycommand'].startswith('aws ssm start-session')
+
+
+def test_an_uploads_size_counts_files_and_links_and_skips_missing_paths(tmp_path):
+    from desk_tools import testbox_client as client
+
+    (tmp_path / 'a.txt').write_bytes(b'x' * 1000)
+    (tmp_path / 'link').symlink_to('a.txt')
+    assert client.upload_size(tmp_path, ['a.txt', 'link', 'gone.txt']) == 1000 + len('a.txt')
+
+
+def test_a_new_lanes_bundle_goes_alone_while_a_small_source_delta_shares(tmp_path):
+    """The request folder (with any Git bundle) and the changed source files are judged separately, each by its own
+    size, and only what goes over a connection of its own is reported."""
+    from desk_tools import testbox_client as client
+
+    transfer, root = tmp_path / 'transfer', tmp_path / 'repo'
+    (transfer / 'tools').mkdir(parents=True)
+    (transfer / 'source.bundle').write_bytes(b'b' * 2_000_000)
+    (transfer / 'tools' / 'worker.py').write_bytes(b'w' * 1000)
+    root.mkdir()
+    (root / 'small.py').write_bytes(b's' * 1000)
+    shared = ['-o', 'ControlMaster=auto']
+    request, sources, alone = client.upload_plan(shared, transfer, root, ['small.py'])
+    assert request == client.transport(shared, client.BULK_BYTES + 1)
+    assert sources == client.transport(shared, 0)
+    assert alone == 2_001_000
+
+    (transfer / 'source.bundle').unlink()
+    (root / 'big.py').write_bytes(b'x' * 2_000_000)
+    request, sources, alone = client.upload_plan(shared, transfer, root, ['small.py', 'big.py'])
+    assert (request, sources, alone) == (client.transport(shared, 0), client.transport(shared, client.BULK_BYTES + 1), 2_001_000)
+
+
+def test_a_call_that_lost_its_lane_during_an_upload_stops_with_a_message(tmp_path):
+    """A large upload no longer rides on the lane holder's connection, so the holder can end while it runs (the
+    shared connection closed by hand, or its keepalives gave up). The call then stops with a testbox message instead
+    of carrying on into a lane it no longer holds."""
+    import sys
+    from desk_tools import testbox_client as client
+
+    holder = subprocess.Popen([sys.executable, '-c', 'pass'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    holder.wait()
+    with pytest.raises(RuntimeError, match="lost the lane's connection"):
+        client.check_lease(holder)
+    alive = subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read()'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        client.check_lease(alive)
+    finally:
+        alive.stdin.close()
+        alive.wait()
+
+
+def test_closing_the_shared_connections_works_with_none_open(tmp_path):
+    """The documented way to close a silent connection is one script, so an unattended lane can run it, and it
+    copes with a cache that holds no connection at all."""
+    import os
+    script = Path(__file__).resolve().parents[1] / 'testbox' / 'close-connections'
+    (tmp_path / '.cache' / 'desk-testbox').mkdir(parents=True)
+    done = subprocess.run(['bash', str(script)], env={**os.environ, 'HOME': str(tmp_path)}, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == 'testbox: closed 0 shared connection(s)'

@@ -58,9 +58,9 @@ export interface UseDoneSignalsOptions {
   enabled: boolean;
   /** The Desk the list shows. */
   deskId: string;
-  /** The final decisions of the requests answered on this page, in this view. */
+  /** The decisions of the requests answered on this page, in this view, each as last read. */
   answered: Iterable<Pick<Decision, 'state'>>;
-  /** The final decision of the request answered on this page last, kept when its card is dismissed. */
+  /** The decision of the request answered on this page last, as last read, kept when its card is dismissed. */
   latest: Pick<Decision, 'state'> | null;
 }
 

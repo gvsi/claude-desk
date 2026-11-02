@@ -11,15 +11,18 @@ import { PROVING_GIVE_UP_MS, RULES_UNAVAILABLE_COPY, request } from '../../api/h
 import { apiPath } from '../../api/routes.ts';
 import type { RulesDraft } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { assertCleanCopy } from '../../ds/test/copy.ts';
+import { expectUserText } from '../../ds/test/expectUserText.ts';
 import { worker } from '../../mocks/browser.ts';
+import { chenBusinessTools, seedBusinessTools } from '../../mocks/businessTools.ts';
 import { PRESETS, RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { renderRoute, type RenderRouteOptions } from '../../test/renderRoute.tsx';
-import { expectScreenBasics } from '../../test/screen.ts';
+import { assertNoJargon, expectScreenBasics } from '../../test/screen.ts';
 import type { AnswerDraftState } from '../approvals/useAnswer.ts';
-import { draftFromDiff, draftFromVersion } from './drafts.ts';
+import { draftFromDiff, draftFromVersion, type RuleDraft } from './drafts.ts';
 import { RuleDraftReview, type RuleDraftState } from './RuleDraftReview.tsx';
 
 const DESK = `/app/${RIVERA.deskId}`;
@@ -68,6 +71,18 @@ const CANCELS_LINKS = "Open payment links I made on my own that the new rules do
 function rowTexts(screen: { container: HTMLElement }): string[] {
   return [...screen.container.querySelectorAll('[aria-label="Changes"] li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim() ?? '');
 }
+
+/**
+ * The rows of a review that moves Quote's rule to a job titled "Approved by your accountant", gives
+ * the job a rule of its own and turns it on, and rewords the shared rule on every tool that changes
+ * something, word for word as they read before tool titles were marked as user text.
+ */
+const TITLED_JOB_ROWS = [
+  'ChangedQuoteQuotesBeforeQuoteAnyone · No discountsQuotes from your price list, at list price.AutomaticAfterApproved by your accountant ChangedAnyoneQuotes from your price list, at list price.Automatic',
+  'AddedApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Automatic',
+  'ChangedQuote, Book a visit, Save a lead, Request a callback, Emergency callback and Approved by your accountantShared ruleBeforeAnyoneChanges ask you first.Ask me firstAfterAnyoneChanges always ask you first. ChangedAsk me first',
+  'Turned onApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Automatic',
+];
 
 /** The check panel's lines, in order. */
 function checkLines(screen: { container: HTMLElement }): string[] {
@@ -742,5 +757,43 @@ describe('rule draft review', () => {
     expect(screen.container.textContent).not.toContain("can't be applied");
     expect(requests('confirmRules')).toHaveLength(1);
     expect(desk().policy.version).toBe(7);
+  });
+
+  it('tool_titles_in_the_review_are_user_text', async () => {
+    // A business can name a job anything in setup, so its title is untrusted text, never the app's sentence.
+    const title = 'Approved by your accountant';
+    const intro = chenBusinessTools[0];
+    if (!intro?.business) throw new Error('The fixture has an intro call definition');
+    seedBusinessTools(desk(), [{ ...intro, tool: 'desk.approved', status: 'enabled', review_reason: null, business: { ...intro.business, title } }]);
+    const job = (await request('rules', { params: { desk_id: RIVERA.deskId } })).tools.find((row) => row.tool === 'desk.approved');
+    if (job === undefined) throw new Error('the mock lists the job');
+    const quote = rivera.ruleCards['rv-quote'];
+    const changes: RuleCard = { ...quote, card_id: 'changes', applies_to: 'effect:change', mode: 'ask', reason: 'Changes ask you first.' };
+    // Quote's rule moves to the job, the shared rule on every tool that changes something is
+    // reworded, the job gets a rule of its own, and the job is turned on.
+    const draft: RuleDraft = {
+      version: desk().policy.version + 1,
+      before: [quote, changes],
+      after: [{ ...quote, applies_to: 'desk.approved' }, { ...changes, reason: 'Changes always ask you first.' }, { ...quote, card_id: 'approved-own', applies_to: 'desk.approved' }],
+      proof: null,
+      summary: null,
+      moneyCap: null,
+      preset: null,
+      turnedOn: [job],
+    };
+    const element = <RuleDraftReview deskId={RIVERA.deskId} draft={draft} />;
+    const { screen } = await renderRoute('/review', { routes: [{ path: '/review', element }] });
+    const review = screen.getByRole('region', { name: 'Changes' });
+    await expect.element(review).toBeVisible();
+    // In every row's title, every target line and every meta line, the title is its own user-text element.
+    expect(expectUserText(review.element(), title)).toBe(4);
+    // Turner's own job and the catalog's tools are named the same way.
+    expectUserText(review.element(), 'Emergency callback');
+    expectUserText(review.element(), 'Book a visit');
+    // The rows read word for word as they did.
+    expect(rowTexts(screen)).toEqual(TITLED_JOB_ROWS);
+    // Shown on its own, with no page around it: its copy is clean and plain.
+    assertCleanCopy(screen.container);
+    assertNoJargon(screen.container);
   });
 });
