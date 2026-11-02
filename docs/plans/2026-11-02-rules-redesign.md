@@ -104,9 +104,12 @@
 - Title "Your tools", subtitle "Your connectors, their tools, and the rules that cover each."
 - The intro line: Each connector brings tools; each tool lists the rules that cover it. A rule shared with other tools says so once, then reads "the same rule as above".
 - **One card per connector:** its icon, its name with "Built in" or "Mock", and its line.
-- **Each tool:** its name, its `EffectTags` and its one-line description. Then the covering cards (`ToolRow.cards`, or `rulesForTool`), each as a `RuleSentence` with its outcome at the right.
+- **Each tool:** its name, its `EffectTags` and its one-line description. Then the covering cards (`ToolRow.cards`, or `rulesForTool`), each as a `RuleSentence`.
   - An auto card with a limit adds its hold line ("Over **$300**, Claude asks you first").
-  - A shared rule (`shared`, or the money cap) shows in full at its first tool with "Also covers …", and later as "… · the same rule as above".
+  - **The design review's changes to C4 (canvas v339):** the outcome words live in the sentence, and the right side shows only the status dot, with no label.
+  - **A shared rule** (`shared`, or the money cap) reads "Shared rule. Also applies to:", with the other tools' titles on the next line, set off as #849 sets titles. Under the other tools it's one quiet line, "{sentence} · Shared rule, as above".
+  - **The money cap** uses C4's own wording ("Any payment over **$500** asks you first"), as a variant beside Task A's C1 sentence.
+  - **Verified wording** follows C1 (", once they've confirmed it's them"). The PR flags C4's ", once verified" for the owner.
 - The reviewer note and "Anything else here: ask me." go.
 
 **Tests:** a screen test for Rivera's Payments and Stripe cards with C4's exact lines, and one that a shared rule shows in full once.
@@ -128,7 +131,10 @@
 
 ## Task E: setup's Tools and Your rules
 
-**Board:** B4.
+**Boards:** the REV-SETUP boards at canvas v343, which the owner signed. They refine B4, and where this section and the boards differ, the boards win:
+- **Connector review:** its box is "The rules that will cover them", with one rule line per tool, so private data never sits beside "Anyone".
+- **Your rules:** Refund and a See charges row move under Ask me first. Never holds only the four always-on rules, headed "Never · always on, on every Desk".
+- **Real situations:** the retainer reason reads "Claude asks you before any payment over **$250**".
 
 **Connector review** ("Review what Claude could do with Payments"):
 - Each tool shows its name, its `EffectTags` and its line.
@@ -145,9 +151,24 @@
 
 **Tests:** setup screen tests for the connector review, a job review and the Your rules groups.
 
+## Task E2: setup's situations, safety check and the chat's job card
+
+**Boards:** canvas v343. The owner signed these three additions on 2026-11-02:
+1. **Real situations:** each reason line becomes the rule's Claude-led sentence, with `RuleSentence` parts and the key value at weight 520 in tabular figures. The outcome label above it stays, and so do the situation's title and who.
+2. **Safety check:** each row drops its "Action checkpoint" line, and nothing replaces it. Outcomes read Never and Ask me first.
+3. **The chat's job proposal card:** a box with a 1 px card line and the control radius, inside the card's indent. It sits after the card's Who, Uses and Next for you rows, and before Set it up and Not now.
+   - **Label:** "The rule it will start under" (caption type, secondary text).
+   - **Content:** the job's `RuleSentence`, its tools · who line, and its outcome at the right. The outcome comes from the job's autonomy: auto → Allow, ask → Ask me first.
+
+**Tests:** setup screen tests for a situation's sentence, a safety check row without the label, and the job card's rule box for an auto job and an ask job.
+
 ## Task F: held cards, Safety and the agents page
 
 **Board:** B5.
+
+**The owner's answers:**
+- Conversations' decision receipt starts "Allowed." where it said "Automatic.". The other event words stay.
+- The agents page's outcome per ability is Task H, not this task.
 
 **Held card**, on Today's Needs you and Conversations' held card:
 - A "Your rule" box: the `RuleSentence` of the rule that held it, with its outcome.
@@ -163,24 +184,48 @@
 
 **Tests:** screen tests for a held quote with a discount (B5's "Any discount" box), a hold past a limit and a Safety turned-down entry.
 
-## Task G: the advanced details
+## Task G: the details disclosure
 
-**Boards:** C5 and C6. Build them last, from the final boards.
+**Board:** REV-RULES-D in its shipping state (canvas v339), which the owner signed and which replaces C5 and C6. It leaves out Parameters and the compiled Cedar until the kernel can read them.
 
 **What it shows:**
-- A disclosure under each tool (Your tools) and each rule (Rules), collapsed by default.
-- For a rule: the card's own fields as pretty-printed JSON (`mode`, `applies_to`, `who`, limits, `hours`, `review` and `reason`), and "Checked by the reviewer" when `review` is set.
-- For a tool: its name, effects, reversible and source.
-- Never shown: input schemas, Cedar text or anything the boards leave out.
-- **The component:** `<AdvancedDetails>` in the design system, keyboard operable, with `aria-expanded`.
+- **The Details button:** every tool (Your tools) and every rule (Rules) ends with a quiet "Details" button with a chevron, in control type with secondary text and `aria-expanded`. On a rule it sits after the status dot. Expanded, the chevron turns down, the button gets the hover fill, and a panel opens under the row: surface background, card line, control radius.
+- **Tool panel:** a label and value list, with a 104 px label column in meta type.
+  - Name: trace mono, the tool's ID.
+  - Source.
+  - Claude sees: its confirmed description.
+  - Effects: "Charges money · Can't be undone".
+  - Status.
+  - Pinned: "Matches its pin" with a handled dot, or "Needs your review".
+  - Then a code block, "As your Desk lists it": the `ToolRow` fields as JSON.
+- **Rule panel:**
+  - Rule: the card ID, in mono.
+  - Version: "7, proved against the always-on rules".
+  - Policy hash: `cedar_sha256`, in mono, shortened.
+  - Then a code block, "The rule as you set it": the `RuleCard` as JSON.
+- **Code blocks:**
+  - **Layout:** pretty JSON with a 2-space indent, in `<pre class="cd-type-trace">` on the secondary fill, with the control radius, 12 px padding, `white-space: pre`, horizontal scroll and `font-variant-ligatures: none`.
+  - **Tint:** keys in accent blue, strings in primary text, numbers and booleans in secondary, punctuation in tertiary. No status colours.
+  - **Label row:** the label in meta type, and a ghost "Copy" button that reuses CopyField's "Copied.".
+- **Never shown:** input schemas, Cedar text, or empty "coming later" blocks.
 
-**Tests:** collapsed by default, it opens and closes with the keyboard, and the JSON matches the card.
+**Tests:**
+- It's collapsed by default, and opens and closes with the keyboard.
+- The JSON matches the card and the row, and Copy copies it.
+- No input schema or Cedar text is anywhere in the page.
+
+## Task H: the agents page's outcome per ability (kernel, public API and web)
+
+The owner asked for this today, kept minimal:
+- **Words:** each ability the public agents page lists shows only its outcome: "Allowed", "Asks first" or "Never" (in Spanish "Permitido", "Pregunta primero", "Nunca"). It names nobody, and carries no limit, amount or private rule data.
+- **Where it's computed:** the kernel's public card, from the active version's anyone cards and the baseline, as a closed key. Person- and agent-key-scoped cards never count and never show.
+- **How it ships:** on its own branch from the integration branch, rebased onto `main` once the integration PR lands. It keeps both review seats and gets an eval pass of its own this afternoon.
 
 ## Delivery
 
-- **One stack of pull requests**, bottom to top: A, C, B, D, E, F. G sits on top of B and C once those are up.
-- **Parallel work:** B to F start in their own worktrees from A's head as soon as A's review is clean. Each rebases onto the PR below it before pushing.
-- **Reviews:** each task gets a task review (Sol), then the two-seat panel on its PR.
+- **One stack of pull requests**, bottom to top: A, C, B, D, E, E2, F. G sits on top of B and C once those are up. H is separate, as above.
+- **Parallel work:** B to F start in their own worktrees from A's head. Each rebases onto the PR below it before pushing.
+- **Reviews:** each task gets a task review (Sol). Each web-only PR then gets the Sol seat alone (owner, 2026-11-02), and H gets both seats.
 - **Merge:** the stack merges together once every PR is green, panel-clean and signed by the owner.
 
 ## Review ledger
