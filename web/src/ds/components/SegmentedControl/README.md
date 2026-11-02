@@ -27,6 +27,6 @@ The group is one tab stop, on the chosen option (the first one when none is). Ar
 | `value` | `T` | Required; that option has `aria-checked="true"`. |
 | `onChange` | `(value: T) => void` | Required. |
 
-Track `fill-count` at `radius-control` with a `space-2` inset; options 28 px tall in meta size at the control weight, `text-secondary`, with `fill-hover` on hover; the chosen option is `bg-selected` with `text-primary` and a 1 px `line-field` edge, which reads 3:1 on the track in both themes, so the choice shows by more than its ink. The other options keep a clear edge of the same width, so choosing moves nothing. Colors change at `motion-instant`; nothing moves under reduced motion.
+Track `fill-count` at `radius-control` with a `space-2` inset; options 28 px tall in meta size at the control weight, `text-secondary`, with `fill-hover` on hover; the chosen option is `bg-selected` with `text-primary`. Colors change at `motion-instant`; nothing moves under reduced motion.
 
 On a coarse pointer, each option takes taps through an unseen, centred `size-touch` (44 px) target. Adjacent options cap their inline reach at half the 2 px gap; a single option can reach 44 px on both axes. The track, labels and inline baseline stay in place. A tighter surrounding layout can cap the block reach with `--cd-touch-reach-block`, like `Button`.

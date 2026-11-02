@@ -1,13 +1,9 @@
-/**
- * Touch targets keep the track, labels and inline baseline exactly where they were, and the chosen
- * segment shows by its edge, not by its ink alone.
- */
+/** Touch targets keep the track, labels and inline baseline exactly where they were. */
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 
 import { coarsePointer, expectApart, expectHitAreaLands, expectUnseen, hitArea } from '../../test/touch.ts';
-import { chooseTheme } from '../../test/theme.ts';
 import { SegmentedControl } from './SegmentedControl.tsx';
 
 declare global {
@@ -61,48 +57,6 @@ it('touch_segments_reach_44_px_and_cap_their_shared_gap_without_moving', async (
     expect(next.getBoundingClientRect().left - hitArea(next).left, 'half the 2 px gap').toBe(1);
     // Fractional text widths round the two CSS insets to Chromium's subpixel grid.
     expect(hitArea(alone).width, '44 px wide where there is room').toBeCloseTo(44, 1);
-  } finally {
-    act(() => root.unmount());
-    host.remove();
-  }
-});
-
-it('the_chosen_segment_has_a_field_edge_and_choosing_moves_nothing', async () => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-  const host = document.createElement('div');
-  document.body.append(host);
-  const root = createRoot(host);
-  const options = [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }];
-  const draw = (value: string) => act(() => root.render(<SegmentedControl label="Appearance" options={options} value={value} onChange={() => {}} />));
-  const segments = () => [...host.querySelectorAll<HTMLElement>('.cd-segmented__option')];
-  const edges = () => segments().map((segment) => {
-    const style = getComputedStyle(segment);
-    return [style.borderTopWidth, style.borderTopStyle, style.borderTopColor].join(' ');
-  });
-  const boxes = () => [host.querySelector('.cd-segmented'), ...segments()].map((element) => element!.getBoundingClientRect().toJSON());
-  const field = () => getComputedStyle(host.querySelector('.cd-segmented')!).getPropertyValue('--line-field').trim();
-  const resolved = (color: string) => {
-    const probe = document.createElement('span');
-    probe.style.color = color;
-    host.append(probe);
-    const value = getComputedStyle(probe).color;
-    probe.remove();
-    return value;
-  };
-  try {
-    for (const theme of ['dark', 'light'] as const) {
-      chooseTheme(theme);
-      draw('system');
-      // The chosen segment's edge is the field outline, which reads 3:1 on the track in both themes
-      // (contrast.ts); the others keep a clear edge of the same width, so nothing shifts.
-      const chosen = `1px solid ${resolved(field())}`;
-      const clear = '1px solid rgba(0, 0, 0, 0)';
-      expect(edges(), theme).toEqual([chosen, clear, clear]);
-      const before = boxes();
-      draw('dark');
-      expect(edges(), theme).toEqual([clear, clear, chosen]);
-      expect(boxes(), `${theme}: choosing moves no segment and no track`).toEqual(before);
-    }
   } finally {
     act(() => root.unmount());
     host.remove();

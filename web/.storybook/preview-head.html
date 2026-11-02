@@ -1,8 +1,8 @@
 <script>
-  // The theme a story draws in, set before the preview first paints, as the decorator sets it once a
-  // story renders: dark unless the address asks for light (`globals=theme:light`, which Storybook may
-  // write encoded, `theme%3Alight`, among other globals split by `;`). An unmarked root follows the
-  // device, so without this a light-preferring device would flash paper first.
+  // The theme the preview starts in, set before it first paints: dark unless the address asks for
+  // light (`globals=theme:light`, which Storybook may write encoded, `theme%3Alight`, among other
+  // globals split by `;`). A story's own theme global applies once the decorator renders it. An
+  // unmarked root follows the device, so without this a light-preferring device would flash paper first.
   (function () {
     var globals = '';
     try {
