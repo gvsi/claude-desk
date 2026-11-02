@@ -56,6 +56,11 @@ export interface AboutDocument {
   pullQuote?: string;
   /** The opening of the first section that the page sets in a card with the prediction at a glance (`claimOf`). */
   claim?: BlockSpan;
+  /**
+   * Column widths, in percent of the article's column, for the one table in a section, by the section's anchor. On a
+   * laptop that table keeps those widths; every other table sizes its columns to its words.
+   */
+  columns?: Record<string, readonly number[]>;
   /** The other document: "Also read" beside this one, and the one a relative link in it may name. */
   next: AboutId;
   blocks: Block[];
@@ -66,7 +71,7 @@ interface Source {
   next: AboutId;
   /** The page's named changes to the Markdown, applied before parsing. */
   forThePage: (markdown: string) => string;
-  words: Pick<AboutDocument, 'layout' | 'pullQuote' | 'hero'>;
+  words: Pick<AboutDocument, 'layout' | 'pullQuote' | 'hero' | 'columns'>;
   /** Whether the first section's opening is set as a claim card (`claimOf`). */
   claimCard?: true;
 }
@@ -86,7 +91,8 @@ const SOURCES: Record<AboutId, Source> = {
     file: 'capability-prediction.md',
     next: 'proposal',
     forThePage: (markdown) => markdown,
-    words: { layout: 'column' },
+    // The safety results' model columns need room for their figures and notes (design lane, 2026-11-02).
+    words: { layout: 'column', columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] } },
     claimCard: true,
   },
 };
@@ -106,6 +112,28 @@ function claimOf(blocks: Block[]): BlockSpan {
   return { first: section + 1, last: section + 3 };
 }
 
+/** The tables in the section `id` names: the blocks between its heading and the next. */
+export function tablesIn(blocks: Block[], id: string): Extract<Block, { kind: 'table' }>[] {
+  const start = blocks.findIndex((block) => block.kind === 'heading' && block.id === id);
+  if (start < 0) return [];
+  const end = blocks.findIndex((block, i) => i > start && block.kind === 'heading');
+  return blocks
+    .slice(start + 1, end < 0 ? blocks.length : end)
+    .filter((block): block is Extract<Block, { kind: 'table' }> => block.kind === 'table');
+}
+
+/** Each section's set column widths, checked against its one table: as many widths as columns, adding up to 100. */
+function checkColumns(blocks: Block[], columns: Record<string, readonly number[]> = {}): void {
+  for (const [id, widths] of Object.entries(columns)) {
+    const tables = tablesIn(blocks, id);
+    if (tables.length !== 1) throw new MarkdownError(null, `the column widths for ${id} need one table in that section`);
+    const sum = widths.reduce((total, width) => total + width, 0);
+    if (widths.length !== tables[0]?.head.length || sum !== 100) {
+      throw new MarkdownError(null, `the column widths for ${id} need one width per column, adding up to 100`);
+    }
+  }
+}
+
 /**
  * One document's page from its Markdown, with curly quote marks where the Markdown has straight ones. A
  * `MarkdownError` names the file as well as the line.
@@ -116,6 +144,7 @@ export function readDocument(id: AboutId, markdown: string): AboutDocument {
   const resolve = (target: string) => (target === SOURCES[next].file ? ABOUT_PAGES[next].route : undefined);
   try {
     const blocks = curlQuotes(parseDocument(forThePage(markdown), resolve));
+    checkColumns(blocks, words.columns);
     return { ...ABOUT_PAGES[id], ...words, ...(claimCard ? { claim: claimOf(blocks) } : {}), next, blocks };
   } catch (error) {
     if (error instanceof MarkdownError) throw new MarkdownError(error.line, error.reason, `docs/${file}`);

@@ -85,14 +85,25 @@ interface ArticleBlockProps {
   index: number;
   /** The figure the hero draws, if any. */
   hero?: FigureName;
+  /** Set column widths for a table, by its section's anchor (`AboutDocument.columns`). */
+  columns?: Record<string, readonly number[]>;
   compact: boolean;
+}
+
+/** The anchor of the section block `index` sits in. */
+function sectionOf(blocks: Block[], index: number): string | undefined {
+  for (let i = index; i >= 0; i -= 1) {
+    const block = blocks[i];
+    if (block?.kind === 'heading') return block.id;
+  }
+  return undefined;
 }
 
 /**
  * One block of the document. The `#` title and the byline feed the hero and the details instead; the hero's
  * own figure marker renders nothing; the readiness marker's table renders as the readiness scale.
  */
-function ArticleBlock({ blocks, index, hero, compact }: ArticleBlockProps) {
+function ArticleBlock({ blocks, index, hero, columns, compact }: ArticleBlockProps) {
   const block = blocks[index];
   const previous = blocks[index - 1];
   switch (block?.kind) {
@@ -129,7 +140,7 @@ function ArticleBlock({ blocks, index, hero, compact }: ArticleBlockProps) {
       return previous?.kind === 'figure' && previous.name === 'readiness' ? (
         <ReadinessScale table={block} compact={compact} block={index} />
       ) : (
-        <MeasuresTable table={block} compact={compact} block={index} />
+        <MeasuresTable table={block} compact={compact} block={index} widths={columns?.[sectionOf(blocks, index) ?? '']} />
       );
     case 'figure':
       if (block.name === 'readiness') {
@@ -149,7 +160,7 @@ function ArticleBlock({ blocks, index, hero, compact }: ArticleBlockProps) {
  * as a card: the claim's blocks render inside it, as the article would draw them, and nowhere else.
  */
 function Article({ document, compact }: { document: AboutDocument; compact: boolean }) {
-  const { blocks, hero, pullQuote, claim } = document;
+  const { blocks, hero, pullQuote, claim, columns } = document;
   const headings = blocks.flatMap((block, i) => (block.kind === 'heading' && block.depth === 2 ? [i] : []));
   const quoteAt = pullQuote === undefined ? null : (headings[1] ?? blocks.length);
   const quote = (
@@ -157,7 +168,9 @@ function Article({ document, compact }: { document: AboutDocument; compact: bool
       <p className="cd-type-article-quote">{pullQuote}</p>
     </blockquote>
   );
-  const block = (i: number) => <ArticleBlock key={i} blocks={blocks} index={i} hero={hero} compact={compact} />;
+  const block = (i: number) => (
+    <ArticleBlock key={i} blocks={blocks} index={i} hero={hero} columns={columns} compact={compact} />
+  );
   return (
     <article className={`cd-about-article ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}>
       {blocks.map((_, i) => {

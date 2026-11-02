@@ -779,6 +779,16 @@
   color: var(--text-primary);
 }
 
+/* A table whose section sets its column widths (a colgroup, MeasuresTable's `widths`): those, and no others. */
+.cd-about-measures--set {
+  table-layout: fixed;
+}
+
+.cd-about-measures--set tbody th,
+.cd-about-measures--set td:nth-child(2) {
+  width: auto;
+}
+
 .cd-about-measures-list__items {
   margin: 0;
   border-top: 1px solid var(--line-control);

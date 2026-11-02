@@ -571,6 +571,20 @@ describe('ReaderPage', () => {
         ]);
         expect([...results.querySelectorAll('tbody th[scope="row"]')].map((th) => flat(th.textContent)), where).toEqual(ATTACKS);
         expect([...results.querySelectorAll('tbody tr')].map((row) => row.children.length), where).toEqual(Array(6).fill(4));
+        // Its columns are set, so the model columns have room: 22, 28, 20 and 30% of the column, from a colgroup on a
+        // fixed layout, and each heading reads on one line.
+        expect(getComputedStyle(results).tableLayout, where).toBe('fixed');
+        const cols = [...results.querySelectorAll(':scope > colgroup > col')];
+        expect(cols.map((col) => (col as HTMLElement).style.width), where).toEqual(['22%', '28%', '20%', '30%']);
+        const width = results.getBoundingClientRect().width;
+        const cells = [...results.querySelectorAll('thead th')];
+        expect(cells.map((th) => Math.round((th.getBoundingClientRect().width / width) * 100)), where).toEqual([22, 28, 20, 30]);
+        for (const th of cells) {
+          const range = document.createRange();
+          range.selectNodeContents(th);
+          const lines = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)));
+          expect(lines.size, `${where}: ${flat(th.textContent)} on one line`).toBe(1);
+        }
       } else {
         expect(results.querySelector('table'), where).toBeNull();
         const items = [...results.querySelectorAll('.cd-about-measures-list__item')];
@@ -605,6 +619,18 @@ describe('ReaderPage', () => {
       }
       await screen.unmount();
     }
+  });
+
+  it('only_the_limits_table_sets_its_columns', async () => {
+    // The proposal's measures table keeps sizing its columns to its words: no colgroup, the browser's own layout.
+    const screen = await renderReader('proposal');
+    const tables = [...screen.container.querySelectorAll<HTMLElement>('article table.cd-about-measures')];
+    expect(tables.length).toBeGreaterThan(0);
+    for (const table of tables) {
+      expect(table.querySelector('colgroup')).toBeNull();
+      expect(getComputedStyle(table).tableLayout).toBe('auto');
+    }
+    await screen.unmount();
   });
 
   it('phone_top_bar_keeps_the_name_on_one_line', async () => {

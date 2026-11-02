@@ -193,6 +193,7 @@ describe('the About documents', () => {
         'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
       layout: 'column',
       claim: { first: 3, last: 5 },
+      columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] },
       next: 'proposal',
     });
     // The proposal's hero figure is one it places; the prediction draws its chart where its marker sits.
@@ -370,6 +371,11 @@ describe('the About documents', () => {
     expect(() => readDocument('prediction', `${prediction}\n\nSee [this](capability-prediction.md).\n`)).toThrow(
       /^docs\/capability-prediction\.md line \d+: a link to capability-prediction\.md, neither/,
     );
+    // A section's set column widths need its table.
+    expect(() => readDocument('prediction', prediction.replace('## Why the limits stay in code', '## Why the limits stay'))).toThrow(
+      'docs/capability-prediction.md: the column widths for why-the-limits-stay-in-code need one table in that section',
+    );
+
     // The claim card needs the first section to open with its bold lead, the list and the caveat.
     const lead = prediction.split('\n').find((text) => text.startsWith('**By Q4 2027')) ?? '';
     expect(lead).not.toBe('');
