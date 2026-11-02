@@ -56,7 +56,7 @@ export function continueSetupLine(step: UnfinishedSetupStep, answering: boolean)
 export const TODAY_COPY = {
   chatDetail: 'Your public page opens in a new tab. Ask about a price or a time.',
   breakBeforeOwner: "Ask for a discount, another customer's address or ",
-  breakAfterOwner: "'s home number. Safety shows what was refused and why.",
+  breakAfterOwner: "'s home number. Safety shows what the checkpoint stopped and why.",
   waiting: 'A request is waiting for your answer.',
   heldBy: 'Held by your rule: ',
   /** "Answer a held request" before anything is held. */
