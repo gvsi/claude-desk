@@ -5,8 +5,9 @@ Each of its model calls is recorded like any other, under a route of its own, so
 own and from the built-in visiting agent's. The chat it opens is marked by a `demo_visitor` row in that chat's
 transcript, written before it says anything, so the owner's reads label the chat as a demo visitor's after the
 process that ran it is gone (its runs live in memory only). Each check is widened by dropping it and adding it again
-with the new value, NOT VALID, then validated on its own, so a live table is never locked for a full scan while the
-check is added; the previous release never writes either value, so it runs unchanged beside this one during a deploy.
+with the new value (NOT VALID, then validated): the migration runs in one transaction, so re-adding and validating the
+checks briefly locks both tables, which is acceptable at their size and before the new API takes traffic. The previous
+release never writes either value, so it runs unchanged beside this one during a deploy.
 A partial index over the marks alone lets the owner's reads find a Desk's demo visitor chats; the downgrade drops it.
 
 The downgrade puts the narrower checks back as NOT VALID: rows already written stay (the usage records count toward
