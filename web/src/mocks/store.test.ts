@@ -2087,6 +2087,22 @@ describe('rules and tools', () => {
     expect((await rules()).preset).toBeNull();
   });
 
+  it.each(['ask_first', 'auto'] as const)('preset_%s_card_wins_job_card_id_collision', async (preset) => {
+    const desk = mockStore.world.desks[0]!;
+    const presetCard = presetCards(preset, RIVERA_HOURS)[0]!;
+    const collision: RuleCard = { ...desk.policy.cards.find((card) => card.card_id === 'rv-urgent')!, card_id: presetCard.card_id, mode: 'never' };
+    desk.policy.cards = [...desk.policy.cards.filter((card) => card.card_id !== collision.card_id), collision];
+    const response = await call('draftPreset', { params: { desk_id: deskId }, body: { preset } });
+    expect(response.status).toBe(200);
+    const draft = response.body as RulesDraft;
+    expect(draft.cards).toContainEqual(presetCard);
+    expect(draft.cards).not.toContainEqual(collision);
+    expect(draft.diff?.changed).toContainEqual([collision, presetCard]);
+    expect(new Set(draft.cards.map((card) => card.card_id)).size).toBe(draft.cards.length);
+    expect((await confirm(draft.version)).status).toBe(200);
+    expect((await rules()).preset).toBe(preset);
+  });
+
   it.each(['ask_first', 'auto'] as const)('preset_%s_keeps_the_desks_job_cards', async (preset) => {
     const before = await rules();
     const urgent = before.active.cards.find((card) => card.card_id === 'rv-urgent');

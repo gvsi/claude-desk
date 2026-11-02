@@ -894,6 +894,23 @@ async def test_preset_removes_automatic_money_job_cards(app, browser, fake, kern
 
 
 @pytest.mark.parametrize("preset", ["ask_first", "auto"])
+async def test_preset_card_wins_job_card_id_collision(app, browser, fake, kernel_http, preset):
+    owner = await new_owner(app, browser, fake, kernel_http)
+    desk = fake.desks[owner.desk_id]
+    preset_card = preset_cards(preset, desk.hours)[0]
+    collision = card(preset_card.card_id, "desk.emergency-callback", mode="never")
+    await confirmed(owner, kernel_http, owner.desk_id,
+                    [each for each in owner_cards(fake, owner.desk_id) if each.card_id != collision.card_id]
+                    + [collision], desk.policy_version)
+    draft = await drafted(owner, rules_path(owner, "preset"), {"preset": preset})
+    assert preset_card in draft.cards and collision not in draft.cards
+    assert (collision, preset_card) in draft.diff.changed
+    assert len({each.card_id for each in draft.cards}) == len(draft.cards)
+    assert (await owner.browser.post(rules_path(owner, "confirm"), json={"version": draft.version})).status_code == 200
+    assert (await owner.browser.get(rules_url(owner))).json()["preset"] == preset
+
+
+@pytest.mark.parametrize("preset", ["ask_first", "auto"])
 async def test_preset_keeps_the_desks_job_cards(app, browser, fake, kernel_http, preset):
     owner = await new_owner(app, browser, fake, kernel_http)
     before = owner_cards(fake, owner.desk_id)

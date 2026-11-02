@@ -252,14 +252,16 @@ async def draft_added(owner: OwnerCtx, desk_id: str, add: list[RuleCard]) -> Rul
 
 async def draft_preset(owner: OwnerCtx, desk_id: str, name: PresetName) -> RulesDraft:
     """The preset's cards for the Desk's opening hours (`preset_cards`: "Recommended rules" books weekdays in them) in
-    place of the owner cards, keeping only the current cards for "Your Desk's jobs" unchanged. Cards for one person
-    and "never" cards on other tools go, each listed in the diff. The combined cards follow the normal kernel draft,
-    proof and confirm path on the active version read here."""
+    place of the owner cards, keeping eligible non-money job cards unchanged unless their IDs belong to the preset.
+    Cards for one person and "never" cards on other tools go, each listed in the diff. The combined cards follow
+    the normal kernel draft, proof and confirm path on the active version read here."""
     active = version_from_row(await active_row(owner, desk_id))
     jobs = desk_job_tools(await tool_rows(owner, desk_id, active.cards))
-    kept = [card for card in active.cards if not card.is_default and card.applies_to in jobs]
-    cards = merged(preset_cards(name, await desk_hours(owner, desk_id)), kept)
-    return await draft(owner, desk_id, cards, expected_parent=active.version)
+    preset = preset_cards(name, await desk_hours(owner, desk_id))
+    preset_ids = {card.card_id for card in preset}
+    kept = [card for card in active.cards if not card.is_default and card.applies_to in jobs
+            and card.card_id not in preset_ids]
+    return await draft(owner, desk_id, [*preset, *kept], expected_parent=active.version)
 
 
 async def confirm(owner: OwnerCtx, engine: AsyncEngine, desk_id: str, version: int) -> PolicyVersion:
