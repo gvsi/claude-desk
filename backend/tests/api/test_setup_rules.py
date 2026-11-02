@@ -757,7 +757,7 @@ def owner_line(text: str) -> dict:
 
 
 def claude_line(text: str) -> dict:
-    return {"role": "claude", "text": text, "choices": [], "card": None}
+    return {"role": "claude", "text": text, "choices": [], "card": None, "owner_decided": False}
 
 
 def kernel_writes(fake) -> list[tuple[str, object]]:
