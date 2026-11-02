@@ -52,7 +52,14 @@ function words(item: BriefingItem): ReactNode {
       // Why it was turned down, in the owner's signed words for its cause. With no cause this build
       // has words for, the kernel's reason when there is one, else nothing beside the kind's word.
       const why = causeLabel({ kind: 'refused', cause: item.cause }) ?? item.line;
-      return why ? <span className="cd-briefing-row__line">{why}</span> : null;
+      const tag = item.demo_visitor === true ? <Pill>{DEMO_VISITOR_PILL}</Pill> : null;
+      if (!why) return tag === null ? null : <span className="cd-briefing-row__line">{tag}</span>;
+      return (
+        <span className="cd-briefing-row__line">
+          {why}
+          {tag}
+        </span>
+      );
     }
     case 'booking':
       return (

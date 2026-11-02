@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { userEvent, type Locator } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
+import type { BriefingItem, Today } from '../api/views.ts';
 import { SCRIPT } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -416,6 +417,31 @@ describe('Demo visitor', () => {
     await expect.poll(() => leadRow()?.querySelector('.cd-pill')?.textContent ?? null).toBe('Demo visitor');
     // A real visitor's lead has none.
     expect(document.querySelectorAll('.cd-lead-row .cd-pill')).toHaveLength(1);
+    expectNoHorizontalScroll();
+  });
+
+  it.each(['desktop', 'phone'] as const)('since_last_night_tags_a_demo_visitors_turned_down_request_on_%s', async (viewport: Viewport) => {
+    const read = await mockStore.dispatch('today', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in read || read.status !== 200) throw new Error('the mock reads Today');
+    const today = read.body as Today;
+    const refusal: BriefingItem = {
+      kind: 'turned_down',
+      at: new Date(Date.now() - 10 * 60_000).toISOString(),
+      session_id: 'ses-riley',
+      display_name: 'Riley',
+      ref_id: 'dec-riley-refused',
+      line: 'A visitor asked for 15% off, past the 10% your rules allow.',
+      cause: null,
+      demo_visitor: true,
+    };
+    mockStore.inject({ route: 'today', status: 200, times: 10_000, body: { ...today, briefing: { ...today.briefing, newest: { ...today.briefing.newest, turned_down: refusal } } } });
+    const { screen } = await renderRoute(TODAY, { viewport });
+    const since = screen.getByRole('region', { name: 'Since last night' });
+    const row = since.getByRole('link').filter({ hasText: 'Turned down' });
+    await expect.element(row).toBeVisible();
+    // Its line, then the pill: never taken for a real customer's attempt.
+    const pill = row.element().querySelector('.cd-briefing-row__line .cd-pill');
+    expect(pill?.textContent).toBe('Demo visitor');
     expectNoHorizontalScroll();
   });
 
