@@ -25,3 +25,16 @@ export function describeEffects(effects: readonly Effect[], reversible: boolean)
   if (!effects.some((effect) => CHANGES.has(effect))) return first[1];
   return `${first[1]} ${reversible ? 'Can be undone.' : "Can't be undone."}`;
 }
+
+/**
+ * A tool's effects as a list, in the same words without their stops, for its details (REV-RULES-D:
+ * "Charges money · Can't be undone"): every effect it has, weightiest first, then whether it can be
+ * undone when an effect changes something. Reading alone is "Changes nothing"; beside another effect
+ * it isn't said, since something does change. No effect this build knows reads as a change.
+ */
+export function effectPhrases(effects: readonly Effect[], reversible: boolean): string[] {
+  const known = EFFECT_LINES.filter(([effect]) => effects.includes(effect) && (effect !== 'read' || effects.length === 1));
+  const words = known.length === 0 ? ['Changes something'] : known.map(([, line]) => line.slice(0, -1));
+  const changes = known.length === 0 || effects.some((effect) => CHANGES.has(effect));
+  return changes ? [...words, reversible ? 'Can be undone' : "Can't be undone"] : words;
+}

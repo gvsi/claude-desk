@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { describeEffects } from './describeEffects.ts';
+import { describeEffects, effectPhrases } from './describeEffects.ts';
 
 describe('describeEffects', () => {
   test('money_out_wins', () => {
@@ -26,5 +26,18 @@ describe('describeEffects', () => {
     expect(describeEffects(['private_data', 'send_message'], false)).toBe("Touches private data. Can't be undone.");
     expect(describeEffects(['send_message'], true)).toBe('Sends a message out. Can be undone.');
     expect(describeEffects(['change'], true)).toBe('Changes something. Can be undone.');
+  });
+
+  test('effect_phrases_list_every_effect_then_whether_it_can_be_undone', () => {
+    // REV-RULES-D's tool details: "Charges money · Can't be undone", every effect in the same words.
+    expect(effectPhrases(['charge'], false)).toEqual(['Charges money', "Can't be undone"]);
+    expect(effectPhrases(['private_data', 'pay_out'], false)).toEqual(['Moves money out', 'Touches private data', "Can't be undone"]);
+    expect(effectPhrases(['change'], true)).toEqual(['Changes something', 'Can be undone']);
+    // Reading alone changes nothing; beside another effect it isn't said, since something does change.
+    expect(effectPhrases(['read'], false)).toEqual(['Changes nothing']);
+    expect(effectPhrases(['read', 'send_message'], true)).toEqual(['Sends a message out', 'Can be undone']);
+    expect(effectPhrases(['private_data'], true)).toEqual(['Touches private data']);
+    // No effect this build knows is never read as harmless.
+    expect(effectPhrases([], false)).toEqual(['Changes something', "Can't be undone"]);
   });
 });
