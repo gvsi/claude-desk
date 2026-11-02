@@ -1056,6 +1056,18 @@
           ],
           "default": null,
           "title": "Decision Id"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
         }
       },
       "required": [
@@ -1616,6 +1628,26 @@
           "const": "owner_left",
           "title": "Type",
           "type": "string"
+        },
+        "resuming": {
+          "default": false,
+          "title": "Resuming",
+          "type": "boolean",
+          "x-omitted-when-default": true
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation",
+          "x-omitted-when-default": true
         }
       },
       "required": [
@@ -1759,6 +1791,20 @@
           "const": "turn_end",
           "title": "Type",
           "type": "string"
+        },
+        "generation": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generation",
+          "x-omitted-when-default": true
         }
       },
       "required": [

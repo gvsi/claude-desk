@@ -535,8 +535,9 @@ describe('the scripted Desk', () => {
   });
 
   it('owner_inbox_alerts_carry_their_held_request', async () => {
-    // As the kernel writes them: a hold's alert says the held decision's own reason_plain and names
-    // that decision; every other entry, in the copy as seeded and after a chat, names none.
+    // As the kernel writes them: a hold's alert says the held decision's own reason_plain, names
+    // that decision and is titled with the alert's preview line; every other entry, in the copy as
+    // seeded and after a chat, names none, and a code has no title.
     mockStore.reset('rivera_two_desks');
     await openChat();
     await send('Can I get 50% off if I pay cash?');
@@ -545,17 +546,24 @@ describe('the scripted Desk', () => {
     await drain();
     const read = await call('ownerInbox');
     expect(read.status).toBe(200);
-    const entries = read.body as { entry_id: string; kind: string; to: string; body: string; decision_id?: string | null }[];
+    const entries = read.body as { entry_id: string; kind: string; to: string; body: string; decision_id?: string | null; title?: string | null }[];
     const holds = [...mockStore.world.decisions.values()].map((d) => d.decision).filter((d) => d.outcome === 'hold');
     expect(holds.length).toBeGreaterThanOrEqual(2);
     for (const held of holds) {
       const alert = entries.find((entry) => entry.entry_id === held.inbox?.[0]?.entry_id);
-      expect(alert, held.decision_id).toMatchObject({ to: 'owner', kind: 'alert', body: held.reason_plain, decision_id: held.decision_id });
+      expect(alert, held.decision_id).toMatchObject({
+        to: 'owner',
+        kind: 'alert',
+        body: held.reason_plain,
+        decision_id: held.decision_id,
+        title: 'A request needs your answer',
+      });
     }
     const alertIds = new Set(holds.map((held) => held.inbox?.[0]?.entry_id));
     const others = entries.filter((entry) => !alertIds.has(entry.entry_id));
     expect(others.length).toBeGreaterThan(0);
     for (const entry of others) expect(entry.decision_id, entry.entry_id).toBeNull();
+    for (const entry of others.filter((other) => other.kind === 'verification_code')) expect(entry.title ?? null, entry.entry_id).toBeNull();
   });
 
   it.each(['en', 'es'] as const)('allowed_answer_emits_approved_before_outcome_and_follows_up_%s', async (language) => {
@@ -1222,8 +1230,8 @@ describe('the scripted Desk', () => {
     const [opened, reply] = desk.ledger.slice(-2).map((entry) => entry.event);
     expect(opened).toEqual({ kind: 'desk_data', origin: 'kernel', session_id: session.session_id, ref_id: null, summary: { part: 'handoffs', refs: [card], kind: 'card' } });
     expect(reply).toMatchObject({ kind: 'reply', session_id: session.session_id });
-    expect(mockStore.world.inbox.slice(inbox).map(({ entry, sessionId }) => [entry.to, entry.kind, entry.body, entry.decision_id, sessionId])).toEqual([
-      ['owner', 'alert', 'A visitor is waiting in a conversation the Desk handed to you.', null, null],
+    expect(mockStore.world.inbox.slice(inbox).map(({ entry, sessionId }) => [entry.to, entry.kind, entry.title, entry.body, entry.decision_id, sessionId])).toEqual([
+      ['owner', 'alert', 'A conversation was handed to you', 'A visitor is waiting in a conversation the Desk handed to you.', null, null],
     ]);
 
     // One at a time: the card shown again opens no second handoff while this one is open.
@@ -2646,9 +2654,10 @@ describe('rules and tools', () => {
 
     const people = (await call('people', { params: { desk_id: deskId } })).body as PeopleOut;
     const byId = new Map(people.leads.map((row) => [row.lead_id, row]));
-    // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one.
-    expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true });
-    expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String) });
+    // Only the replayed one says so; a live lead leaves the flag out, as the API does until it has one. Neither
+    // is a demo visitor's.
+    expect(byId.get('lead-recorded')).toMatchObject({ display_name: 'Jordan Pike', replayed: true, demo_visitor: false });
+    expect(byId.get('lead-live')).toEqual({ lead_id: 'lead-live', display_name: 'Sam Ortiz', note: lead.note, created_at: expect.any(String), demo_visitor: false });
   });
 
   it('draft_rules_hold_only_money_rules_to_the_payment_limit', async () => {
@@ -3261,6 +3270,7 @@ describe("Today's windows", () => {
       ref_id: preview?.state.session_id,
       line: null,
       cause: null,
+      demo_visitor: false,
     });
     expect(answered.this_week).toMatchObject({ conversations: 5, stepped_in: 1, handled: 4 });
 

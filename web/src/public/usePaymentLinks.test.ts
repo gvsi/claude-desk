@@ -106,6 +106,17 @@ it('follows a pending issued answer once when a confirmation arrived during it',
   expect(projected[0]?.href).toBeNull();
 });
 
+it('reads an open link again when a charge is confirmed, since that charge may have paid its quote', async () => {
+  read.mockResolvedValueOnce({ state: 'issued' } as never);
+  read.mockResolvedValue({ state: 'cancelled' } as never);
+  const rows = [row('links', [link('deposit')])];
+  await draw(rows);
+  expect(projected[0]?.href).toBe('/pay/deposit');
+  await draw([...rows, row('charged', [{ ...rivera.blocks.charge_confirmed.en }])]);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(projected[0]?.href).toBeNull();
+});
+
 it.each(['null', 'throw'])('keeps the button and handles a malformed successful read: %s', async (kind) => {
   const body = kind === 'null' ? null : { get state() { throw new Error('unreadable state'); } };
   read.mockResolvedValue(body as never);

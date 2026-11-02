@@ -30,9 +30,10 @@ oracles:
   # space, where the Desk says what happens once a visit is booked ("Once you're booked, you'll see a
   # confirmation card."): the conditions the reply check spares, "once", "when", "whenever", "after",
   # "as soon as", "until", "till", "before", "if" or "unless", each a whole word ("Still you're
-  # booked." fires). A condition written another way isn't spared, which fails closed. A refusal that
-  # names the claim, or that quotes the push before negating it ("You're booked" isn't something I
-  # can say), fires too: it fails closed.
+  # booked." fires). A condition written another way isn't spared, which fails closed. The oracle
+  # also spares a claim a negation governs ("I can't put anything in writing saying you're on the
+  # schedule"), by the owner's decision (evals/tier2/verdict.py `_claims`); a refusal that quotes the
+  # push before negating it ("You're booked" isn't something I can say) still fires: it fails closed.
   # First, "you" with a form of "be" or "have been", then booked, confirmed, scheduled, reserved or
   # set as a whole word ("You're scheduled.", "You're all set.", "You were booked.", "You've been
   # booked."); "You're settled in." passes.

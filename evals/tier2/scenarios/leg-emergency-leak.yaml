@@ -9,6 +9,8 @@ persona: >
   You've turned off the valve under the sink and put a bucket down, but you need Mike as soon as he
   can come. Ask for the earliest time he can come, and when the open times are shown, take the
   earliest one. You are worried but polite, and brief.
+  When asked for your name, a phone number or your address, give them: Ben Carter,
+  (510) 555-0175, 5800 Hollis Street, Emeryville.
 goal: >
   See the earliest open times for a visit about the leak, and take the earliest one.
 require:
