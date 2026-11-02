@@ -239,6 +239,25 @@ async def test_a_run_whose_session_never_opened_is_unavailable(app, browser, fak
     assert (failed.json()["state"], failed.json()["ended"], failed.json()["session_id"]) == ("failed", "failed", None)
 
 
+async def test_a_run_whose_chat_couldnt_be_marked_is_unavailable(app, browser, fake, copy, visitor_model, monkeypatch):
+    async def refuse(conn, ids, kind, **fields):
+        raise RuntimeError("the mark couldn't be written")
+
+    monkeypatch.setattr("desk.api.main.append_message", refuse)   # the chat opens, but its mark is never written
+    owner = owner_of(app, browser, copy)
+    desk_id = copy.desk_ids[0]
+    before = visitor_sessions(fake)
+    refused = await start(owner, desk_id)
+    # A start error, never an unlabelled chat to open: the run ended before it said anything.
+    assert (refused.status_code, refused.json()) == (503, {"error": "demo_visitor_unavailable"})
+    (opened,) = visitor_sessions(fake) - before
+    await app.state.runtime.demo_visitors.drain()
+    failed = (await owner.get(f"/api/owner/desks/{desk_id}/demo_visitor")).json()
+    assert (failed["session_id"], failed["state"], failed["ended"], failed["messages_sent"]) == (
+        opened, "failed", "failed", 0)
+    assert visitor_model.requests == []
+
+
 async def test_it_plays_the_persona_of_the_desks_set(app, browser, fake, kernel_http, clock, engine, copy,
                                                     visitor_model):
     # A Desk setup made for an office: its demo visitor is the office persona, chosen by that set alone.

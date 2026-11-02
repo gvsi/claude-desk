@@ -874,7 +874,8 @@ async def start_demo_visitor(desk_id: DeskId, body: DemoVisitorIn, request: Requ
     the copy within the hour answers the run its key started, however it ended, and the same key on another Desk is
     409 `conflict`. Neither counts as a start. A copy starts at most three an hour: past that, 429 `rate_limited` with
     the seconds until another fits (`retry_after`). In production, 503 `demo_budget` once today's model budget is
-    spent. A run whose visitor session never opened is 503 `demo_visitor_unavailable`."""
+    spent. A run whose visitor session never opened, or that failed before it said anything (its chat couldn't be
+    marked), is 503 `demo_visitor_unavailable`."""
     state = runtime(request).started()
     desk = await ctx.ro.one("desks", desk_id=ctx.desk(desk_id))
     if desk is None:
@@ -889,7 +890,10 @@ async def start_demo_visitor(desk_id: DeskId, body: DemoVisitorIn, request: Requ
         raise RateLimited(refused.retry_after) from None
     except KeyReused:
         raise ApiProblem(409, "conflict") from None
-    if run.session_id is None:
+    # A run that failed before it said anything (its chat's mark couldn't be written, or its first step failed) is a
+    # start error, never an empty chat to open: only a run that opened and is going, or ended having chatted, leads
+    # to a conversation.
+    if run.session_id is None or (run.state == "failed" and run.messages_sent == 0):
         raise ApiProblem(503, "demo_visitor_unavailable")
     return DemoVisitorStarted(run_id=run.run_id, desk_id=run.desk_id, session_id=run.session_id)
 
