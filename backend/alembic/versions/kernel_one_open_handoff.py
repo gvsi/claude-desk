@@ -43,14 +43,15 @@ desk_kernel:
 
 **Locks.** `desk.ops.admin` migrates in one transaction, so `CREATE INDEX CONCURRENTLY` isn't available, and the
 consolidation and the index must commit together anyway. The revision first takes `kernel.handoffs` ACCESS EXCLUSIVE,
-which adding the column, switching its forcing and building the index each need: no insert can slip in between the
-consolidation and the index, and no lock is raised midway. Reads of the table, the kernel's and the API's view's,
-wait for the commit, which is short: the table is small and only the crowded sessions' rows change. `kernel.actions`
-is only read (ACCESS SHARE), and `kernel.facts` takes ROW EXCLUSIVE with row locks on the facts it expires. Each lock
-waits at most `LOCK_TIMEOUT`, so behind a long transaction of the live service the migration fails fast, the deploy
-stops and the previous release goes on serving, rather than queueing the service's queries behind the wait. The
-revision sets the caller's lock timeout back at its end, for any revision after it in the transaction. A failure
-anywhere rolls the whole migration back, every row and the table's forcing as they were.
+which adding the column and switching its forcing each need; building the index needs only SHARE, which that lock
+covers. So no insert can slip in between the consolidation and the index, and no lock is raised midway. Reads of the
+table, the kernel's and the API's view's, wait for the commit, which is short: the table is small and only the
+crowded sessions' rows change. `kernel.actions` is only read (ACCESS SHARE), and `kernel.facts` takes ROW EXCLUSIVE
+with row locks on the facts it expires. Each lock waits at most `LOCK_TIMEOUT`, so behind a long transaction of the
+live service the migration fails fast, the deploy stops and the previous release goes on serving, rather than
+queueing the service's queries behind the wait. The revision sets the caller's lock timeout back at its end, for any
+revision after it in the transaction. A failure anywhere rolls the whole migration back, every row and the table's
+forcing as they were.
 
 **Down.** The downgrade drops the index and `superseded_by`, and never reopens a superseded handoff, which could bring
 the duplicates back; the release before this one reads only `open` handoffs as waiting and only `done` ones as called

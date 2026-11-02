@@ -223,8 +223,10 @@ def test_the_consolidation_runs_as_an_owner_bound_by_row_security(scratch, monke
     """On a managed Postgres the admin owns the kernel tables but is neither SUPERUSER nor BYPASSRLS, so under their
     forced row security its own reads see no row. Run as such an owner, which may grant desk_kernel as the admin that
     created it may, the revision still consolidates every copy, takes back the desk_kernel it lent itself, and leaves
-    the table forced and the transaction's role, lock timeout and copy as they were. It all runs in a transaction
-    that is rolled back, the stand-in owner included."""
+    the table forced and the transaction's role, lock timeout and copy as they were. The stand-in is the session's
+    user, not only its role: Postgres checks a switch of role against the session's user, which here would otherwise
+    be the suite's superuser, so only the revision's own grant lets it act as desk_kernel. It all runs in a
+    transaction that is rolled back, the stand-in owner included."""
     module = ScriptDirectory.from_config(alembic_config()).get_revision(REVISION).module
     admin = scratch.conn
     monkeypatch.setattr(module, "_driver", lambda: admin)
@@ -238,16 +240,16 @@ def test_the_consolidation_runs_as_an_owner_bound_by_row_security(scratch, monke
             # what Postgres 16 gives a CREATEROLE admin on the roles it creates: ADMIN, without INHERIT or SET
             admin.execute(f"GRANT desk_kernel TO {MIGRATOR} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE")
             admin.execute(f"ALTER TABLE kernel.handoffs OWNER TO {MIGRATOR}")
-            admin.execute(f"SET LOCAL ROLE {MIGRATOR}")
+            admin.execute(f"SET LOCAL SESSION AUTHORIZATION {MIGRATOR}")
             admin.execute("SET LOCAL lock_timeout = '17s'")
             admin.execute("SELECT set_config('desk.copy_id', 'copy-elsewhere', true)")
-            assert admin.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
-                                 ).fetchone() == (False, False)
+            assert admin.execute("SELECT session_user = current_user, rolsuper, rolbypassrls FROM pg_roles"
+                                 " WHERE rolname = session_user").fetchone() == (True, False, False)
             assert admin.execute("SELECT count(*) FROM kernel.handoffs").fetchone() == (0,)   # it sees no row
             before = settings(admin)
             module.upgrade()
-            assert settings(admin) == before == [MIGRATOR, "17s", "copy-elsewhere"]
-            admin.execute("RESET ROLE")
+            assert settings(admin) == before == ["none", "17s", "copy-elsewhere"]
+            admin.execute("RESET SESSION AUTHORIZATION")
             assert (handoffs_now(admin), facts_now(admin)) == consolidated()
             forced, policies, members = security(admin)
             assert [row[:3] for row in forced] == [row[:3] for row in secured[0]]        # still forced
