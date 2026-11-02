@@ -88,28 +88,26 @@ function pastTheLimit(card: RuleCard, action: NonNullable<Decision['action']>, w
 
 /**
  * The rule that held a request, among the active version's `cards`, as B5 names it. First the card
- * that decided the hold, as the kernel picks it (`decidingCards`) among the active cards behind it
- * (the decision's `card_ids`, on the request's tool); then its sentence:
- * - the owner's Ask me first card whose reason is the item's `held_by`, in its own sentence. When the
- *   active rules no longer hold the hold's cards (a newer version), the most specific ask card of
- *   that reason on the request's tool;
+ * that decided the hold, as the kernel picks it (`decidingCards`) among the cards behind it (the
+ * decision's `card_ids`, on the request's tool); then its sentence:
+ * - the owner's Ask me first card whose reason is the item's `held_by`, in its own sentence;
  * - past an automatic rule's limit (`held_by` null), that rule's hold line (`pastTheLimit`);
  * - otherwise none: a hold only the default ask decided, one an automatic rule held for its hours,
- *   or one whose rule has changed. A less specific card never stands in for the one that decided.
+ *   or one whose rule has changed.
+ * Every card behind the hold must still be in the active rules: with any of them gone (removed in
+ * a newer version), the card that decided can't be known, so none is named, and a card that
+ * survived never stands in for it.
  */
 export function heldRule(item: Pick<NeedsYouItem, 'held_by'> & { decision: Decision }, cards: readonly RuleCard[], words: SentenceWords): NamedRule | null {
   const { decision } = item;
   const action = decision.action;
+  const active = new Set(cards.map((card) => card.card_id));
+  if (decision.card_ids.length === 0 || decision.card_ids.some((cardId) => !active.has(cardId))) return null;
   const behind = cards.filter((card) => decision.card_ids.includes(card.card_id) && (action === null || onTheTool(card, action)));
   const deciding = decidingCards(behind);
   if (item.held_by !== null) {
-    const asks = (pool: readonly RuleCard[]) => pool.filter((card) => card.mode === 'ask' && card.is_default !== true && card.reason === item.held_by);
-    if (behind.length > 0) {
-      const [card] = asks(deciding);
-      return card === undefined ? null : askRule(card, words);
-    }
-    const card = action === null ? null : mostSpecific(asks(cards).filter((ask) => onTheTool(ask, action)));
-    return card === null ? null : askRule(card, words);
+    const [card] = deciding.filter((ask) => ask.mode === 'ask' && ask.is_default !== true && ask.reason === item.held_by);
+    return card === undefined ? null : askRule(card, words);
   }
   if (action === null) return null;
   for (const card of deciding) {

@@ -113,6 +113,9 @@ describe('heldRule picks the card that decided the hold first', () => {
     const danas = card({ card_id: 'rv-dana-link', applies_to: 'native.payment_link', mode: 'auto', who: 'person', person_id: dana.personId, max_amount_cents: 50_000, hours: weekdays });
     const withDana = [...active, danas];
     expect(heldRule({ decision: heldLink(45_000, ['rv-dana-link', 'rv-link']), held_by: null }, withDana, { ...words, cards: withDana, people })).toBeNull();
+    // Dana's rule has since been removed: the card that decided can't be known, so no rule is named,
+    // and the general limit that survived never stands in for it.
+    expect(heldRule({ decision: heldLink(45_000, ['rv-dana-link', 'rv-link']), held_by: null }, active, { ...words, people })).toBeNull();
   });
 
   it('the_most_specific_ask_card_of_that_reason', () => {
@@ -143,18 +146,15 @@ describe('heldRule picks the card that decided the hold first', () => {
     expect(shown(heldRule(held, withAsk, { ...words, cards: withAsk }))).toBe('Claude asks you before sending **payment links** / Payment link · Anyone / ask');
   });
 
-  it('an_ask_card_of_that_reason_only_on_the_requests_tool', () => {
-    // The hold's own cards are gone from the active rules: an ask card with the same words on
-    // another tool is not the rule that held it.
+  it('a_removed_ask_card_is_never_replaced_by_one_of_the_same_words', () => {
+    // The hold's own card is gone from the active rules: an ask card with the same words, on the
+    // request's tool or another, is not the rule that held it, so no rule is named.
     const elsewhere = card({ card_id: 'q-ask', applies_to: 'native.quote', mode: 'ask', who: 'anyone', reason: 'Payments wait for you.' });
-    const withIt = [...active, elsewhere];
-    expect(heldRule({ decision: heldLink(45_000, ['gone']), held_by: 'Payments wait for you.' }, withIt, { ...words, cards: withIt })).toBeNull();
-    // On the request's tool, it is.
     const onIt = card({ card_id: 'l-ask', applies_to: 'native.payment_link', mode: 'ask', who: 'anyone', reason: 'Payments wait for you.' });
-    const withBoth = [...withIt, onIt];
-    expect(read(heldRule({ decision: heldLink(45_000, ['gone']), held_by: 'Payments wait for you.' }, withBoth, { ...words, cards: withBoth })?.parts ?? [])).toBe(
-      'Claude asks you before sending **payment links**',
-    );
+    const withBoth = [...active, elsewhere, onIt];
+    expect(heldRule({ decision: heldLink(45_000, ['gone']), held_by: 'Payments wait for you.' }, withBoth, { ...words, cards: withBoth })).toBeNull();
+    // One of the hold's two cards gone: the one that survived isn't named either.
+    expect(heldRule({ decision: heldLink(45_000, ['gone', 'l-ask']), held_by: 'Payments wait for you.' }, withBoth, { ...words, cards: withBoth })).toBeNull();
   });
 });
 
