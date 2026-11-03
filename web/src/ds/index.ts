@@ -234,7 +234,7 @@ export {
 } from './components/RecordedHistoryLink/RecordedHistoryLink.tsx';
 
 // Owner decisions
-export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
+export { ApprovalCard, type ApprovalCardProps, type ApprovalRule } from './components/ApprovalCard/ApprovalCard.tsx';
 export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/TakeOverBar.tsx';
 
 // Rules and connectors
