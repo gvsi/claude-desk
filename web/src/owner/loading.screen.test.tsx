@@ -788,8 +788,11 @@ function watchTheTickedRow(phone: boolean) {
           expect(Math.abs(real[dimension] - before!.under[i]![dimension]), `${name} ${dimension}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
         }
       });
+      // From 1024 px the concept footer sits in the sidebar, beside the page, so it stays put; on a
+      // narrower screen it closes the page, under the card, and moves with it.
       const footer = landedRect('[data-owner-footer]');
-      expect(Math.abs(footer.top - before!.footer.top - change), "the footer moves by the card's change").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      const footerMoves = document.querySelector('[data-owner-footer]')?.closest('.cd-sidebar') ? 0 : change;
+      expect(Math.abs(footer.top - before!.footer.top - footerMoves), "the footer moves by the card's change, or stays in the sidebar").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     },
   };
 }
