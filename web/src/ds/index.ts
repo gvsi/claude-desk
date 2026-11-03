@@ -71,7 +71,7 @@ export { SectionHeader, type SectionHeaderProps } from './components/SectionHead
 export { Mark, MarkAppIcon, Wordmark, type MarkAppIconProps, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { AUTHOR_NAME, AUTHOR_URL, ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
-export { AppShell, type AppShellProps } from './components/AppShell/AppShell.tsx';
+export { AppShell, AppShellOnly, type AppShellProps, type AppShellOnlyProps } from './components/AppShell/AppShell.tsx';
 export {
   NAV_LABELS,
   Sidebar,
@@ -194,7 +194,7 @@ export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
 export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
-export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
+export { Transcript, type TranscriptProps, type TranscriptVariant } from './components/Transcript/Transcript.tsx';
 export { VisitorMessage, type VisitorMessageProps } from './components/VisitorMessage/VisitorMessage.tsx';
 export { ClaudeMessage, PROSE_LINKS, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
 export { ChatMarkdown, type ChatMarkdownProps } from './components/ChatMarkdown/ChatMarkdown.tsx';

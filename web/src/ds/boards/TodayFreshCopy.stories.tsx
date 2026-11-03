@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
 import { Card } from '../components/Card/Card.tsx';
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { EmptyState } from '../components/EmptyState/EmptyState.tsx';
 import { Greeting } from '../components/Greeting/Greeting.tsx';
@@ -25,7 +26,7 @@ function TodayFreshCopy() {
               <EmptyState title="A quiet night" body="No conversations since you were last here." />
             </Card>
           </section>
-          <ConceptFooter />
+          <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
         </div>
         <LastSevenDays bars={null} />
       </div>

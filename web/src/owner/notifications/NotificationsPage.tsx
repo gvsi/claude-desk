@@ -6,9 +6,9 @@
  * It took the place of the demo bar's Demo inbox sheet, in the 760 px column Customers uses. An entry
  * the owner hadn't seen when the page opened keeps a dot for the visit, and its body in the primary
  * ink; one already seen has its body in the secondary ink. An alert about a held request links to
- * that request's card on its own
- * Desk's Today, the whole row a link with "Open the request" under the body, only while the
- * request still waits for the owner: the
+ * that request's conversation on its own Desk (or its Today card when no conversation can open),
+ * the whole row a link with "Open the request" under the body, only while the request still waits
+ * for the owner: the
  * notifications are the whole copy's, so each such request is read for the Desk it was held on,
  * and so is that Desk's Needs you. The alert links only while its request is still in that Needs
  * you, as read since the page opened by a read that worked. A request answered anywhere, on Today
@@ -26,6 +26,7 @@ import { useNavigate } from 'react-router';
 
 import { pollMs } from '../../app/poll.ts';
 import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
+import type { NeedsYouSession } from '../../api/views.ts';
 import { ApprovalStatus, Button, EmptyState, INBOX_COPY, Notice, PageHeader } from '../../ds/index.ts';
 import { formatClock, formatDate, localDate } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
@@ -190,17 +191,17 @@ export function NotificationsPage() {
     linkedDesks.current = heldDesks;
   });
   const lists = useQueries({ queries: heldDesks.map((id) => ({ ...needsYouQuery(id), staleTime: FRESH_MS })) });
-  const waiting = new Set<string>();
+  const waiting = new Map<string, NeedsYouSession>();
   lists.forEach(({ data, dataUpdatedAt, errorUpdatedAt }, index) => {
     if (errorUpdatedAt > dataUpdatedAt || dataUpdatedAt < openedAt) return;
     for (const item of data ?? []) {
       const id = item.decision?.decision_id;
-      if (id !== undefined && deskOf.get(id) === heldDesks[index]) waiting.add(id);
+      if (id !== undefined && deskOf.get(id) === heldDesks[index]) waiting.set(id, item.session);
     }
   });
   const hrefFor = (decisionId: string | null | undefined): string | undefined => {
     const deskId = decisionId && heldDecisions.has(decisionId) && waiting.has(decisionId) ? deskOf.get(decisionId) : undefined;
-    return decisionId && deskId !== undefined ? requestPath(deskId, decisionId) : undefined;
+    return decisionId && deskId !== undefined ? requestPath(deskId, decisionId, waiting.get(decisionId)) : undefined;
   };
 
   // What the page shows counts as seen, so the sidebar's count of unread ones goes, before the

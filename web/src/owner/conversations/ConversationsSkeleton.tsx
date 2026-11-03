@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
+import { AppShellOnly, CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { HeldRuleShape } from '../approvals/HeldRuleShape.tsx';
@@ -73,8 +73,9 @@ function MeasuredLines({
 }
 
 /**
- * The visitor's message: their bubble at the right, as wide as its words on one line, never wider
- * than the bubble's 85 %, and as tall as they wrap to there, padding included.
+ * The visitor's message: their bubble at the left, as the owner's view draws it, as wide as its
+ * words on one line, never wider than the bubble's 85 %, and as tall as they wrap to there, padding
+ * included.
  */
 function VisitorShape({ words, anchor }: { words: string; anchor?: string }) {
   const box = useRef<HTMLDivElement>(null);
@@ -98,8 +99,9 @@ function VisitorShape({ words, anchor }: { words: string; anchor?: string }) {
 }
 
 /**
- * Claude's handoff card, as `ReplyCard` lays one out: a compact card at most 520 px wide, its
- * label's icon and words, then its headline and its line, each as many lines as its words take.
+ * Claude's handoff card, as `ReplyCard` lays one out in the owner's view: a compact card the width
+ * of the owner's column, its label's icon and words, then its headline and its line, each as many
+ * lines as its words take.
  */
 function HandoffCardShape({ anchor }: { anchor?: string }) {
   return (
@@ -247,10 +249,10 @@ function useOpensAtTheEnd() {
  * Today's "Open the request" opens) draws: its bar, pinned at the top of the pane with its own
  * ground and hairline, with who it is with (their name and the level pill) and the latest line,
  * and no shape for Take over, since a recorded or paused chat has none there (the bar is as tall
- * either way); the transcript's header lines; the visitor's bubble at the right; Claude's handoff
- * card at the left with its two receipt lines; and the held request's card, each part as tall as
- * it lands. The transcript's region opens at its end, as the chat's does, over the room the
- * owner's controls take.
+ * either way); the transcript's header lines; the visitor's bubble at the left; Claude's handoff
+ * card with its two receipt lines in the owner's column at the right (board REV-FLIP); and the held
+ * request's card across the transcript, each part as tall as it lands. The transcript's region
+ * opens at its end, as the chat's does, over the room the owner's controls take.
  */
 export function ConversationSkeleton() {
   const region = useOpensAtTheEnd();
@@ -271,7 +273,7 @@ export function ConversationSkeleton() {
         </div>
       </div>
       <div ref={region} className="cd-conversation__scroll">
-        <div className="cd-transcript">
+        <div className="cd-transcript cd-transcript--owner">
           <div className="cd-transcript-row cd-transcript-header" data-skeleton-anchor="transcript-head">
             <div className="cd-transcript-row__main">
               <MeasuredLines
@@ -391,9 +393,11 @@ export function ConversationsSkeleton({ withHeader, open, recordedHistory = true
           </>
         ) : null}
       </div>
-      <div className="cd-conversations__footer">
-        <ConceptFooter skeleton />
-      </div>
+      <AppShellOnly layout="compact">
+        <div className="cd-conversations__footer" data-skeleton-anchor="owner-footer" data-owner-footer>
+          <ConceptFooter skeleton />
+        </div>
+      </AppShellOnly>
     </div>
   );
 }
