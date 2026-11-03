@@ -16,6 +16,7 @@ import {
   demoVisitorRan,
   doneCaption,
   firstDesk,
+  heldInPreview,
   keepFor,
   listedDesks,
   madeAnotherDesk,
@@ -163,6 +164,46 @@ describe('watch a demo visitor', () => {
 
 describe('try to break it', () => {
   const preview = new Set(['ses-preview']);
+
+  it('a request held in a preview chat counts', () => {
+    const ledger = { entries: [entry(1, { kind: 'decide', session_id: 'ses-preview', summary: { outcome: 'hold' } })] };
+    expect(heldInPreview(ledger, preview)).toBe(true);
+  });
+
+  it("the seed's own held request, in a visitor's chat, doesn't count", () => {
+    const ledger = {
+      entries: [
+        entry(1, { kind: 'decide', session_id: 'ses-visitor-web', summary: { outcome: 'hold' } }),
+        entry(2, { kind: 'decide', session_id: 'ses-demo-visitor', summary: { outcome: 'hold' } }),
+      ],
+    };
+    expect(heldInPreview(ledger, preview)).toBe(false);
+  });
+
+  it('a replayed hold is history, even in a preview chat', () => {
+    const ledger = {
+      entries: [
+        entry(1, {
+          kind: 'decide',
+          session_id: 'ses-preview',
+          summary: { outcome: 'hold', replayed: { at: '2026-10-29T18:00:00.000000Z' } },
+        }),
+      ],
+    };
+    expect(heldInPreview(ledger, preview)).toBe(false);
+  });
+
+  it("another outcome or kind of entry in a preview chat isn't a hold", () => {
+    for (const [kind, outcome] of [['decide', 'allow'], ['decide', 'refuse'], ['reply', 'hold'], ['approval', 'hold']] as const) {
+      const ledger = { entries: [entry(1, { kind, session_id: 'ses-preview', summary: { outcome } })] };
+      expect(heldInPreview(ledger, preview), `${kind}: ${outcome}`).toBe(false);
+    }
+  });
+
+  it("with no preview chat, a hold doesn't count", () => {
+    const ledger = { entries: [entry(1, { kind: 'decide', session_id: 'ses-preview', summary: { outcome: 'hold' } })] };
+    expect(heldInPreview(ledger, new Set())).toBe(false);
+  });
 
   it('an attempt stopped in a preview chat counts', () => {
     const ledger = { entries: [entry(1, { kind: 'session', session_id: 'ses-preview' }), blockedReply(2, 'ses-preview')] };

@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import type { Effect, HoursWindow, RuleCard, ToolName } from '../../../api/contracts.ts';
 import { RIVERA_HOURS, presetCards, weekdayWindows } from '../../../mocks/seed.ts';
 import { groupsOverlap, rulesForTool } from '../ToolRulesCard/toolRules.ts';
-import { OUTCOME_TONE, OUTCOME_WORDS, PRESET_WORDS, outcomePhrase, type RulesPreset } from './outcomeWords.ts';
+import { OUTCOME_GROUP_WORDS, OUTCOME_TONE, OUTCOME_WORDS, PRESET_WORDS, outcomePhrase, type RulesPreset } from './outcomeWords.ts';
 
 /**
  * The presets export: `desk.presets.PRESETS` (plan 01a Task 3) as JSON, generated into
@@ -490,17 +490,15 @@ describe('outcome words', () => {
     ]);
   });
 
-  test('outcome_phrase_with_limit', () => {
-    // An auto card with an amount limit holds anything over it for the owner, through its hold twin.
-    expect(outcomePhrase('auto', '$100')).toBe('Automatic up to $100; over $100, ask me first');
-    // No mode but auto has a limit to show.
-    expect(outcomePhrase('ask', '$100')).toBe('Ask me first');
-    expect(outcomePhrase('never', '$100')).toBe('Never');
-    expect(outcomePhrase('auto')).toBe('Automatic');
-    // A blank limit is no limit.
-    expect(outcomePhrase('auto', ' ')).toBe('Automatic');
+  test('outcome_phrase_is_the_outcome_word_alone', () => {
+    // One word per outcome, wherever a rule's outcome shows: a limit lives in the rule's sentence.
+    expect(outcomePhrase('auto')).toBe('Allow');
+    expect(outcomePhrase('ask')).toBe('Ask me first');
+    expect(outcomePhrase('never')).toBe('Never');
 
-    expect(OUTCOME_WORDS).toEqual({ auto: 'Automatic', ask: 'Ask me first', never: 'Never' });
+    expect(OUTCOME_WORDS).toEqual({ auto: 'Allow', ask: 'Ask me first', never: 'Never' });
+    // The groups take the same three words.
+    expect(OUTCOME_GROUP_WORDS).toEqual(OUTCOME_WORDS);
     expect(OUTCOME_TONE).toEqual({ auto: 'handled', ask: 'held', never: 'refused' });
   });
 });

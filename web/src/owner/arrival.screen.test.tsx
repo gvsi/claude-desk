@@ -22,6 +22,7 @@ import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
 import { readLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
+import { DECISIONS } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -1292,7 +1293,8 @@ describe('OwnerLayout', () => {
       ['people', 'Customers', 'Customers'],
       ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
-      ['rules/all', 'All rules', 'All rules'],
+      // All rules' old address opens Rules, every rule now on one page.
+      ['rules/all', 'Rules', 'Rules'],
       ['safety', 'Safety', 'Safety'],
       ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
@@ -2431,6 +2433,34 @@ describe('Things to try ticks off', () => {
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
     await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
     await expect.element(greetingLink).toHaveFocus();
+  });
+
+  it('a_request_held_in_the_preview_ticks_try_to_break_it', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Try to break it');
+    const doneLine = 'Done. Safety shows what was stopped.';
+
+    // The seed's held request is in a visitor's chat, so it leaves this row unfinished at load.
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(2);
+    await expect.element(rowStep(row, 'Show me ideas', 'Try to break it')).toBeVisible();
+    expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 6 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
+
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
+    mockStore.world.decide(preview, DECISIONS.heldQuote, 'en');
+
+    await expect.element(row.getByText(doneLine, { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('2 of 6 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   });
 
   it('all_six_done', async () => {

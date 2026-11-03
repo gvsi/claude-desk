@@ -179,9 +179,17 @@ export async function expectRecordedLink(link: HTMLElement, href: string): Promi
   expectComputed(link, SPEC.recordedLink);
 }
 
-/** The footer at the window's foot, 20 px up, as the recorded-history boards draw it on a short page. */
+/** Owner columns carry the line under About; other short pages keep it 20 px above the window foot. */
 export async function expectFooterAtFoot(root: HTMLElement): Promise<void> {
   const footer = one(root, '[data-ds="concept-footer"]');
+  const sidebar = footer.closest('.cd-sidebar');
+  if (sidebar) {
+    const about = one(sidebar, '.cd-sidebar__about');
+    const answering = one(sidebar, '.cd-sidebar__footer');
+    await expect(footer.getBoundingClientRect().top).toBeGreaterThanOrEqual(about.getBoundingClientRect().bottom);
+    await expect(footer.getBoundingClientRect().bottom).toBeLessThanOrEqual(answering.getBoundingClientRect().top);
+    return;
+  }
   await expect(Math.round(window.innerHeight - footer.getBoundingClientRect().bottom), 'the footer 20 px over the window foot').toBe(20);
 }
 

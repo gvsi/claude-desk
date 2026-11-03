@@ -11,13 +11,14 @@ import { useLocation, useNavigate, useNavigationType, useParams } from 'react-ro
 import { request } from '../../api/http.ts';
 import type { ConversationSummary } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
-import { Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, SkeletonScreen, TextLink } from '../../ds/index.ts';
+import { AppShellOnly, Button, ConceptFooter, ConversationListItem, EmptyState, Notice, RecordedHistoryLink, SkeletonScreen, TextLink } from '../../ds/index.ts';
 import { conversationDay, formatListTime, type ConversationDay } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { customerLink } from '../customerLink.ts';
 import { followInAppLinks, returnThroughHistory } from '../inAppLinks.ts';
 import { isStartingSampleDesk } from '../knowledge/sampleDesk.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { useRequestRules } from '../rules/useRequestRules.ts';
 import { entriesPath } from '../today/SinceLastNight.tsx';
 import { firstName, useDesks, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
@@ -109,6 +110,9 @@ export function ConversationsPage() {
     if (list.data !== undefined) syncUnreadCount(queryClient, deskId);
   }, [list.data, list.dataUpdatedAt, deskId, queryClient]);
   const needsYou = useNeedsYou(deskId);
+  // The rules a held request's card names, read with the list: a chat with a request held opens
+  // with its rule, and Today, opened next, finds them with Needs you and opens drawn.
+  useRequestRules(deskId);
   // The chats with an open handoff, from Needs you's last good read: a later read that fails leaves
   // them open, and with none yet, the rows keep their usual status.
   const handoffs = new Set((needsYou.data ?? []).flatMap((item) => (item.handoff === null ? [] : [item.handoff.session_id])));
@@ -231,9 +235,11 @@ export function ConversationsPage() {
           </>
         )}
       </div>
-      <footer className="cd-conversations__footer">
-        <ConceptFooter />
-      </footer>
+      <AppShellOnly layout="compact">
+        <footer className="cd-conversations__footer" data-owner-footer>
+          <ConceptFooter />
+        </footer>
+      </AppShellOnly>
     </div>
   );
 }

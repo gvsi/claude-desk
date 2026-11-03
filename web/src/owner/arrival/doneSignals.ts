@@ -110,7 +110,7 @@ export function demoVisitorRan(conversations: readonly ConversationSummary[]): b
 }
 
 /**
- * "Try to break it": an attempt Safety lists as stopped happened in one of the owner's preview
+ * A stopped attempt counts for "Try to break it" when it happened in one of the owner's preview
  * chats. Each attempt is joined to its signed entry (`ledger_seq` is the entry's `seq`), whose
  * session says where it happened, so the seed's own stopped reply, in a visitor's chat, never
  * counts, and neither does a replayed entry or one the record read doesn't hold yet.
@@ -121,6 +121,22 @@ export function stoppedInPreview(attempts: readonly Attempt[], ledger: Pick<Ledg
     const entry = bySeq.get(a.ledger_seq);
     return entry !== undefined && !isReplayed(entry) && entry.event.session_id != null && previews.has(entry.event.session_id);
   });
+}
+
+/**
+ * A held request counts for "Try to break it" when the signed record has a decide entry with
+ * outcome hold in one of the owner's preview chats. The seed's own hold, in a visitor's chat,
+ * never counts, and neither does a replayed entry.
+ */
+export function heldInPreview(ledger: Pick<LedgerPage, 'entries'>, previews: ReadonlySet<string>): boolean {
+  return ledger.entries.some(
+    (entry) =>
+      entry.event.kind === 'decide' &&
+      entry.event.summary.outcome === 'hold' &&
+      !isReplayed(entry) &&
+      entry.event.session_id != null &&
+      previews.has(entry.event.session_id),
+  );
 }
 
 /** The decision a signed entry is about: its `ref_id`, as the kernel sets it for approvals and runs. */

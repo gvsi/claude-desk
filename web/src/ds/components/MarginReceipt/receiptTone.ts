@@ -48,13 +48,14 @@ function isOwnerReasonState(state: DecisionState): state is OwnerReasonState {
 /**
  * The owner's words for the receipt that reports what the kernel decided, which lead its line on
  * owner screens so the line, not only the dot's color, names the state. They are not general
- * outcome words: "Automatic" is true only of an action the rules ran on their own, so a later
- * state has no words here and keeps the kernel's line. A reason state missing here is a compile error.
+ * outcome words: "Allowed" is true only of an action the rules allowed and ran on their own, so a
+ * later state has no words here and keeps the kernel's line. A reason state missing here is a
+ * compile error.
  */
 export const OWNER_STATE_WORDS = {
   held: 'Held for you',
   refused: 'Stopped',
-  executed: 'Automatic',
+  executed: 'Allowed',
   allowed: 'Running',
 } as const satisfies Record<OwnerReasonState, string>;
 

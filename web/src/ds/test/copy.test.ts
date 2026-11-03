@@ -169,6 +169,9 @@ describe('assertCleanCopy', () => {
     expect(check('<p data-ds="concept-footer">Concept prototype by <b>Giovanni</b> Alcantara<span>,</span> not an Anthropic product</p>')).not.toThrow();
     // The author's name as a link reads the same.
     expect(check('<p data-ds="concept-footer">Concept prototype by <a href="https://example.test/">Giovanni Alcantara</a>, not an Anthropic product</p>')).not.toThrow();
+    // The owner's desktop line is in the sidebar, outside a page-bottom footer.
+    expect(check(`<aside><nav aria-label="About this prototype"></nav><p data-ds="concept-footer">${exact}</p><button>Claude acts for you</button></aside>`)).not.toThrow();
+    expect(check('<aside><p data-ds="concept-footer">Concept prototype by Giovanni Alcantara</p></aside>')).toThrow(/concept footer reads/);
   });
 
   it('lists_every_problem_in_one_error', () => {

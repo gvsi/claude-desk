@@ -29,7 +29,7 @@ export interface ToolSummaryView {
    * it). The screen works it out.
    */
   mode: RuleMode;
-  /** That outcome's formatted amount limit, for "Automatic" with one ("$300"). */
+  /** That outcome's formatted amount limit ("$300"). No longer shown: the outcome is its word alone. */
   limit?: string;
   /** Its profile's status: a tool that needs review or is off says so in place of its outcome. */
   status: ToolStatus;
@@ -67,7 +67,7 @@ function PlainLink({ children, ...props }: RulesLinkProps) {
 
 /** A tool's outcome in words and its dot: its rule's outcome while it is on, or why it isn't. */
 function toolOutcome(tool: ToolSummaryView): { tone: StatusTone; words: string } {
-  if (tool.status === 'enabled') return { tone: OUTCOME_TONE[tool.mode], words: outcomePhrase(tool.mode, tool.limit) };
+  if (tool.status === 'enabled') return { tone: OUTCOME_TONE[tool.mode], words: outcomePhrase(tool.mode) };
   if (tool.status === 'disabled') return { tone: 'info', words: 'Off' };
   // A changed definition, or a status this build doesn't know: the owner needs to look.
   return { tone: 'held', words: 'Needs your review' };

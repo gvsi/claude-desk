@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { ApprovalCard } from '../components/ApprovalCard/ApprovalCard.tsx';
 import { chen, rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
+import { fixtureHeldRule } from '../test/heldRule.ts';
 import { Panel, Sheet } from './parts.tsx';
 import { SPEC } from './spec.ts';
 
@@ -20,7 +21,7 @@ function ApprovalAnswers() {
       <Panel label={PANELS.limit} width={588} bare>
         <ApprovalCard
           decision={rivera.decisions.held}
-          heldBy={rivera.ruleCards['rv-quote'].reason}
+          rule={fixtureHeldRule(rivera.decisions.held)}
           context={
             <>
               From the visitor: “<span data-copy="user">How much to clear a clogged drain? Can I get 15% off if I pay cash?</span>”
@@ -31,12 +32,12 @@ function ApprovalAnswers() {
         />
       </Panel>
       <Panel label={PANELS.askCard} width={588} bare>
-        <ApprovalCard decision={chen.heldConsultation} heldBy={chen.ruleCards['cc-consult'].reason} waiting="Web chat, 5 min ago" onAnswer={fn()} />
+        <ApprovalCard decision={chen.heldConsultation} rule={fixtureHeldRule(chen.heldConsultation, chen.ruleCards['cc-consult'].reason, Object.values(chen.ruleCards))} waiting="Web chat, 5 min ago" onAnswer={fn()} />
       </Panel>
       <Panel label={PANELS.verified} width={588} bare>
         <ApprovalCard
           decision={rivera.heldRefund}
-          heldBy={rivera.ruleCards['rv-refund'].reason}
+          rule={fixtureHeldRule(rivera.heldRefund, rivera.ruleCards['rv-refund'].reason)}
           waiting="Web chat, 1 min ago"
           personName={DANA}
           onAnswer={fn()}

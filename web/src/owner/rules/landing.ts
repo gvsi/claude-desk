@@ -32,10 +32,16 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/** Each of `a`'s and `b`'s items once, in their order. */
+function union<T>(a: readonly T[] = [], b: readonly T[] = []): T[] {
+  return [...new Set([...a, ...b])];
+}
+
 /**
  * Hands Rules a change the owner just confirmed on `deskId`. One still waiting on the same Desk
- * lands with it: every row either changed, the payment limit if either changed it, at the later
- * version. One waiting on another Desk is dropped.
+ * lands with it: every tool and card either changed, either's removals and the tools either turned
+ * on, the payment limit if either changed it, at the later version. One waiting on another Desk is
+ * dropped.
  */
 export function land(deskId: string, change: ConfirmedChange): void {
   count += 1;
@@ -43,7 +49,13 @@ export function land(deskId: string, change: ConfirmedChange): void {
   const rows =
     waiting === null
       ? change.rows
-      : { tools: [...new Set([...waiting.rows.tools, ...change.rows.tools])], moneyLimit: waiting.rows.moneyLimit || change.rows.moneyLimit };
+      : {
+          tools: union(waiting.rows.tools, change.rows.tools),
+          moneyLimit: waiting.rows.moneyLimit || change.rows.moneyLimit,
+          ...(waiting.rows.cards === undefined && change.rows.cards === undefined ? {} : { cards: union(waiting.rows.cards, change.rows.cards) }),
+          ...(waiting.rows.fallback === undefined && change.rows.fallback === undefined ? {} : { fallback: waiting.rows.fallback === true || change.rows.fallback === true }),
+          ...(waiting.rows.turnedOn === undefined && change.rows.turnedOn === undefined ? {} : { turnedOn: union(waiting.rows.turnedOn, change.rows.turnedOn) }),
+        };
   current = { id: count, deskId, version: Math.max(change.version, waiting?.version ?? 0), rows };
   notify();
 }

@@ -4,6 +4,7 @@
  * words, held requests answered in place, take-over with the owner's own words, whispers, the
  * typing both ways, and recorded history.
  */
+import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
@@ -21,7 +22,7 @@ import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
-import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.ts';
+import { expectInSequence, expectRevealed, watchReveal, watchRevealing, watchSequence } from '../../test/reveal.ts';
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
@@ -29,7 +30,7 @@ import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, foc
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
-// A phone whose open conversation's pane stays under the single column's 41rem, so the pane scrolls as one.
+// A phone whose open conversation's pane stays under the single column's 46rem, so the pane scrolls as one.
 const SHORT_PHONE = { width: 390, height: 780 };
 const LA = 'America/Los_Angeles';
 const OWNER = rivera.business.ownerName;
@@ -698,7 +699,7 @@ describe('Conversations', () => {
     const chat = named(DANA_LIVE, DANA);
     lengthen(chat);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
     const { screen } = await renderRoute(LIST, { viewport: viewport === 'phone' ? SHORT_PHONE : viewport, pollScale: 100 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
@@ -768,6 +769,57 @@ describe('Conversations', () => {
     await expect.element(card).not.toBeInTheDocument();
     expect(requests('needsYou').length).toBeGreaterThan(reads);
     await expect.element(log(screen).getByText('I can help with that.', { exact: true })).toBeVisible();
+  });
+
+  it('held_card_names_the_rule_that_held_it', async () => {
+    // REV-RULES-B5, as on Today: the held quote went past the list-price quote rule, so its card's
+    // "Your rule" box names that rule, led by Claude, with its tool, who and outcome; the receipt
+    // above it names the state alone, the card's headline giving the reason.
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD));
+    const held = heldCard(screen, SEEDED_REASON);
+    const rule = held.getByRole('group', { name: 'Your rule', exact: true });
+    await expect.element(rule).toBeVisible();
+    expect(rule.element().textContent).toBe('Your ruleClaude asks you before any discountQuote · AnyoneAsk me first');
+    expect(rule.element().querySelector('strong')?.textContent).toBe('any discount');
+    expect(held.element().textContent).not.toContain('Held by your rule');
+    await expect.element(receipt(screen, 'Held for you')).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: true });
+  });
+
+  it('a_failed_rules_read_says_so_over_the_held_card', async () => {
+    // The rules can't be read, so the held card can't name its rule: the chat says the read failed,
+    // with Try again, and the box lands once it reads them.
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), {
+      retryScale: 0,
+      beforeRender: () => mockStore.inject({ route: 'rules', status: 503, times: 2 }),
+    });
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held).toBeVisible();
+    const failed = screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    expect(held.getByRole('group', { name: 'Your rule', exact: true }).elements()).toHaveLength(0);
+    await screen.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(held.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await expect.poll(() => screen.getByRole('alert').elements().length).toBe(0);
+  });
+
+  it('a_failed_refresh_of_read_rules_says_so_over_the_held_card', async () => {
+    // The rules were read, then a later read of them fails: the chat says so, with Try again, over
+    // the card's rule as it was last read.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    onTestFinished(() => mounted.mockRestore());
+    const { screen } = await renderRoute(conversation(SEEDED_HOLD), { retryScale: 0 });
+    const held = heldCard(screen, SEEDED_REASON);
+    await expect.element(held.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    expect(screen.getByRole('alert').elements()).toHaveLength(0);
+
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    await queryClient.refetchQueries({ queryKey: ['rules', RIVERA.deskId, 'requests'] });
+    await expect.element(screen.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(held.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await screen.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => screen.getByRole('alert').elements().length).toBe(0);
   });
 
   it('denied_request_hands_off_with_claudes_summary', async () => {
@@ -1505,14 +1557,16 @@ describe('Conversations', () => {
   });
 
   it('in_a_short_window_focus_in_the_transcript_holds_it', async () => {
-    // A long chat with Dana's refund held at its end, opened at 1440 by 560, where the open
-    // conversation scrolls as one: it opens at its end, and the owner is on the last receipt.
+    // A long chat with Dana's refund held at its end, opened at 1440 by 640, where the open
+    // conversation scrolls as one (under 37.5rem of content) and its end still shows the last held
+    // card's receipt above the card, with its "Your rule" box, and the owner's controls: it opens
+    // at its end, and the owner is on the last receipt.
     const first = mockStore.world.addHeldRefund();
     const chat = named(first.session_id, DANA);
     lengthen(chat);
     mockStore.world.addHeldRefund();
     const { screen, router } = await renderRoute(LIST);
-    await page.viewport(1440, 560);
+    await page.viewport(1440, 640);
     await router.navigate(conversation(first.session_id));
     await expect.poll(() => heldCard(screen, REFUND_REASON).elements().length).toBe(2);
     // The head names Dana once the list has read the chat, which can answer after the chat.
@@ -2113,9 +2167,9 @@ describe('Conversations', () => {
     expect(line.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
     expect(log(screen).getByRole('article', { name: 'Handed to a person', exact: true }).elements()).toHaveLength(0);
     const row = line.element().closest('.cd-transcript-row');
-    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    await expect.element(receipt(screen, `Allowed. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
     expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
-      `${VISITOR_PLAIN.en.reply_checked} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+      `${VISITOR_PLAIN.en.reply_checked} Open the full trace.`, `Allowed. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
     ]);
   });
 
@@ -2138,9 +2192,9 @@ describe('Conversations', () => {
     expect([...row!.querySelectorAll('article')].map((card) => card.getAttribute('aria-label'))).toEqual(['Quote', 'Handed to a person']);
     expect(line.element().querySelector('.cd-status-dot--held')).not.toBeNull();
     await expect.element(screen.getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
-    await expect.element(receipt(screen, `Automatic. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
+    await expect.element(receipt(screen, `Allowed. ${DECISIONS.quote.reasonPlain}`)).toBeVisible();
     expect([...row!.querySelectorAll('.cd-margin-receipt')].map((receipt) => receipt.textContent)).toEqual([
-      `${VISITOR_PLAIN.en.reply_handed_off} Open the full trace.`, `Automatic. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
+      `${VISITOR_PLAIN.en.reply_handed_off} Open the full trace.`, `Allowed. ${DECISIONS.quote.reasonPlain} Open the full trace.`,
     ]);
   });
 
@@ -2156,7 +2210,7 @@ describe('Conversations', () => {
     // The hold, answered so no card is under it, and the quote Claude ran on its own name their
     // state in the owner's words, then say why: the kernel's reason, read once by each decision.
     await expect.element(receipt(screen, `Held for you. ${REFUND_REASON}`)).toBeVisible();
-    await expect.element(receipt(screen, `Automatic. ${quote.reason_plain}`)).toBeVisible();
+    await expect.element(receipt(screen, `Allowed. ${quote.reason_plain}`)).toBeVisible();
     expect(decisionReads(refund.decision_id)).toHaveLength(1);
     expect(decisionReads(quote.decision_id)).toHaveLength(1);
 
@@ -2219,8 +2273,8 @@ describe('Conversations', () => {
 
     // The release's receipt, in the owner's words, sits under the invoice it explains, never under
     // the card that asked for the code, which keeps the receipt of the code it sent.
-    const released = receipt(screen, `Automatic. ${DECISIONS.releaseInvoice.reasonPlain}`);
-    const started = receipt(screen, `Automatic. ${DECISIONS.startVerification.reasonPlain}`);
+    const released = receipt(screen, `Allowed. ${DECISIONS.releaseInvoice.reasonPlain}`);
+    const started = receipt(screen, `Allowed. ${DECISIONS.startVerification.reasonPlain}`);
     await expect.element(released).toBeVisible();
     await expect.element(started).toBeVisible();
     expect(rowOf(invoice)?.contains(released.element())).toBe(true);
@@ -2280,9 +2334,15 @@ describe('Conversations', () => {
     // Dana asks while the owner watches, and Claude's reply comes in as Dana sees it: its words, then
     // its quote card a beat after them, then its two receipts a beat apart.
     const reply = watchReveal();
+    const played = watchSequence();
     priceTurn(chat, 'How much is drain clearing?');
-    expectRevealed(await reply, { cards: [0.12], lines: [0.24, 0.36] });
+    expectRevealed(await reply, { cards: [0.2], lines: [0.4, 0.6] });
     expect(revealed()).toHaveLength(1);
+    // Each part starts once the one before has ended: its words, its card, then each receipt.
+    const row = [...document.querySelectorAll('.cd-claude-message')].at(-1)?.closest('.cd-transcript-row');
+    const lines = [...(row?.querySelectorAll(':scope > .cd-transcript-row__margin > *') ?? [])].map((line) => `line ${line.textContent ?? ''}`);
+    expect(lines).toHaveLength(2);
+    expectInSequence(await played, ['words', 'card 1', ...lines]);
   });
 
   it('a_reply_that_came_while_away_draws_still', async () => {
@@ -2350,7 +2410,7 @@ describe('Conversations', () => {
     // It shows the kernel's short line until the owner's read of its decision answers, then the
     // decision's state and reason: the line the owner reads.
     const shown = () => asked()?.querySelector('.cd-margin-receipt')?.textContent ?? '';
-    await expect.poll(shown).toMatch(/^Automatic\. /);
+    await expect.poll(shown).toMatch(/^Allowed\. /);
     const read = shown();
 
     // The reply comes, and the receipt moves under it, after the reply's own check. The reply is
@@ -2370,7 +2430,7 @@ describe('Conversations', () => {
     expect(waiting.length).toBeGreaterThan(0);
     for (const frame of waiting) expect(frame.lines.map((line) => line.visibility)).toEqual(['hidden', 'visible']);
     expect(frames.find((frame) => !frame.revealing)?.lines).toEqual([
-      { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.24s' },
+      { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.4s' },
       { visibility: 'visible', name: 'none', delay: '0s' },
     ]);
   });
@@ -2679,7 +2739,7 @@ describe('Conversations', () => {
   it('conversations_fit_a_phone', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
-    // A phone short enough that the open conversation's pane is under 41rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
     const { screen, router } = await renderRoute(LIST, { viewport: SHORT_PHONE });
 
     // The list has the page to itself.

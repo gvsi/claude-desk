@@ -4,6 +4,7 @@
  * only once the check passed.
  */
 import { http } from 'msw';
+import { page } from 'vitest/browser';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import type { ProofReport, RuleCard } from '../../api/contracts.ts';
@@ -72,20 +73,12 @@ function rowTexts(screen: { container: HTMLElement }): string[] {
   return [...screen.container.querySelectorAll('[aria-label="Changes"] li')].map((li) => li.textContent?.replace(/\s+/g, ' ').trim() ?? '');
 }
 
-/**
- * The rows of a review that moves Quote's rule to a job titled "Approved by your accountant", gives
- * the job a rule of its own and turns it on, and rewords the shared rule on every tool that changes
- * something, word for word as they read before tool titles were marked as user text.
- */
-const TITLED_JOB_ROWS = [
-  'ChangedQuoteQuotesBeforeQuoteAnyone · No discountsQuotes from your price list, at list price.AutomaticAfterApproved by your accountant ChangedAnyoneQuotes from your price list, at list price.Automatic',
-  'AddedApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Automatic',
-  'ChangedQuote, Book a visit, Save a lead, Request a callback, Emergency callback and Approved by your accountantShared ruleBeforeAnyoneChanges ask you first.Ask me firstAfterAnyoneChanges always ask you first. ChangedAsk me first',
-  'Turned onApproved by your accountantAnyoneAfterAnyoneQuotes from your price list, at list price.Automatic',
-];
+const CHECKED_REVIEW = 'Checked against the always-on rules and your other rules before you confirm.';
 
 /** The check panel's lines, in order. */
 function checkLines(screen: { container: HTMLElement }): string[] {
+  const line = screen.container.querySelector('.cd-change-review__checked');
+  if (line !== null) return [line.textContent ?? ''];
   const panel = screen.container.querySelector('[aria-label="Checked before you confirm"]');
   if (panel === null) throw new Error('no check panel');
   return [...panel.querySelectorAll('li')].map((li) => li.textContent?.trim() ?? '');
@@ -192,6 +185,60 @@ async function confirmAfterTheMinute(screen: Awaited<ReturnType<typeof openDraft
 }
 
 describe('rule draft review', () => {
+  it('changed_new_and_removed_rows_show_one_tag_and_a_sentence_per_side', async () => {
+    const link = rivera.ruleCards['rv-link'];
+    const refund = rivera.ruleCards['rv-refund'];
+    const removed = rivera.ruleCards['rv-book-sat'];
+    const stored = mockStore.world.draftCards(desk(), [
+      ...desk().policy.cards.filter((card) => card.card_id !== removed.card_id),
+      { ...refund, card_id: 'refund-never', mode: 'never' as const },
+    ].map((card) => card.card_id === link.card_id ? { ...card, max_amount_cents: 10_000 } : card));
+    const { screen } = await openDraft(stored.version);
+    const changes = screen.getByRole('region', { name: 'Changes' });
+    await expect.element(changes.getByText('New', { exact: true })).toBeVisible();
+    for (const width of [1440, 390]) {
+      await page.viewport(width, width === 390 ? 844 : 900);
+      const rows = [...changes.element().querySelectorAll('.cd-change-review__row')];
+      expect(rows).toHaveLength(3);
+      expect(rows.map((row) => row.querySelector('.cd-change-review__tag')?.textContent).sort()).toEqual(['Changed', 'New', 'Removed']);
+      // As the Rules page's rule cell: the sentence in primary text, and under it, after the tools
+      // (the review has no tool heading), who it is for and its qualifiers.
+      const lines: Record<string, string> = {
+        'Changed Before': 'Payment link · Anyone · Checked by the reviewer · Over $300, it asks you first',
+        'Changed After': 'Payment link · Anyone · Checked by the reviewer · Over $100, it asks you first',
+        'New After': 'Refund · The customer, once verified',
+        'Removed Before': 'Book a visit · Anyone · Checked by the reviewer',
+      };
+      const seen: string[] = [];
+      for (const row of rows) {
+        expect(row.querySelectorAll('.cd-change-review__tag')).toHaveLength(1);
+        expect(row.querySelectorAll('.cd-change-review__changed, .cd-change-review__title')).toHaveLength(0);
+        const tag = row.querySelector('.cd-change-review__tag')!;
+        for (const side of row.querySelectorAll('[role="group"]')) {
+          const name = `${tag.textContent} ${side.getAttribute('aria-label')}`;
+          seen.push(name);
+          expect(side.querySelectorAll('.cd-rule-sentence')).toHaveLength(1);
+          const sentence = side.querySelector('.cd-rule-sentence__sentence')!;
+          const meta = side.querySelector('.cd-rule-sentence__meta')!;
+          expect(sentence.textContent).toMatch(/^Claude /);
+          expect(getComputedStyle(sentence).color, name).toBe(getComputedStyle(tag).color);
+          expect(getComputedStyle(meta).color, name).not.toBe(getComputedStyle(sentence).color);
+          expect(meta.textContent, name).toBe(lines[name]);
+          expect(side.querySelector('.cd-rule-sentence__outcome')?.textContent).toMatch(/^(Allow|Ask me first|Never)$/);
+        }
+      }
+      expect(seen.sort()).toEqual(Object.keys(lines).sort());
+      const removedRow = rows.find((row) => row.querySelector('.cd-change-review__tag')?.textContent === 'Removed');
+      expect(removedRow?.querySelector('[aria-label="After"]')).toBeNull();
+      expect(removedRow?.querySelector('[aria-label="Before"]')).not.toBeNull();
+      expect(screen.container.querySelector('.cd-change-review')?.scrollWidth).toBeLessThanOrEqual(width);
+      await expectScreenBasics(screen.container, { owner: true });
+    }
+    await expect.element(screen.getByText('Checked against the always-on rules and your other rules before you confirm.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+    await page.viewport(1440, 900);
+  });
+
   it('checked_draft_confirms', async () => {
     // Today hands over an "always" answer's card diff and its draft.
     const draft: RulesDraft = mockStore.world.draft(desk(), [DANA_NEVER_REFUND]);
@@ -203,10 +250,10 @@ describe('rule draft review', () => {
     const changes = screen.getByRole('region', { name: 'Changes' });
     await expect.element(changes.getByText('Refund', { exact: true })).toBeVisible();
     const after = changes.getByRole('group', { name: 'After' });
-    await expect.element(after.getByText(DANA_NEVER_REFUND.reason, { exact: true })).toBeVisible();
-    await expect.element(after.getByText('Dana Whitfield · Verified', { exact: true })).toBeVisible();
+    await expect.element(after.getByText('Claude never sends refunds', { exact: true })).toBeVisible();
+    expect(after.element().querySelector('.cd-rule-sentence__meta')?.textContent).toBe('Refund · Dana Whitfield, verified');
     await expect.element(after.getByText('Never', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Checked against the always-on rules and your other rules.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(CHECKED_REVIEW, { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
     expect(desk().policy.version).toBe(7);
 
@@ -317,19 +364,15 @@ describe('rule draft review', () => {
     const row = screen.getByRole('region', { name: 'Changes' }).getByRole('listitem');
     const before = row.getByRole('group', { name: 'Before' });
     const after = row.getByRole('group', { name: 'After' });
-    // The row's title names the tool. The rule stays on it, so neither side repeats it (N-Conn-18):
-    // a side names its target only when the change moves it.
-    await expect.element(row.getByText('Quote', { exact: true })).toBeVisible();
-    expect(before.getByText('Quote', { exact: true }).elements()).toHaveLength(0);
-    expect(after.getByText('Quote', { exact: true }).elements()).toHaveLength(0);
-    await expect.element(before.getByText('Anyone · Discounts up to 10%', { exact: true })).toBeVisible();
-    await expect.element(after.getByText('Anyone · Discounts up to 50%', { exact: true })).toBeVisible();
-    // The line that changed is tagged in words on the After side, and only that line.
-    const changedLine = after.getByText('Anyone · Discounts up to 50%', { exact: true }).element().closest('p');
-    expect(changedLine?.textContent).toContain('Changed');
-    expect(after.getByText('Changed', { exact: true }).elements()).toHaveLength(1);
+    // Each side names its tool once below the sentence; the one change tag stays outside them.
+    await expect.element(before.getByText('Quote', { exact: true })).toBeVisible();
+    await expect.element(after.getByText('Quote', { exact: true })).toBeVisible();
+    await expect.element(before.getByText('Claude can send quotes from your price list with up to 10% off', { exact: true })).toBeVisible();
+    await expect.element(after.getByText('Claude can send quotes from your price list with up to 50% off', { exact: true })).toBeVisible();
+    expect(row.getByText('Changed', { exact: true }).elements()).toHaveLength(1);
+    expect(after.getByText('Changed', { exact: true }).elements()).toHaveLength(0);
     expect(before.getByText('Changed', { exact: true }).elements()).toHaveLength(0);
-    await expect.element(after.getByText(quote.reason, { exact: true })).toBeVisible();
+    expect(after.element().textContent).not.toContain(quote.reason);
     expect(requests('ruleDraft')).toHaveLength(1);
   });
 
@@ -454,15 +497,14 @@ describe('rule draft review', () => {
     const handedRows = rowTexts(first.screen);
     expect(handedRows.length).toBeGreaterThan(0);
     expect(requests('ruleDraft')).toHaveLength(0);
-    expect(checkLines(first.screen)).toEqual(['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.']);
+    expect(checkLines(first.screen)).toEqual([CHECKED_REVIEW]);
 
     // A reload has no router state: one read of the draft, and the same rows under the plain title.
     const reloaded = await openDraft(stored.version);
     await expect.element(reloaded.screen.getByRole('heading', { level: 1, name: 'Review the change' })).toBeVisible();
     await expect.element(reloaded.screen.getByText(CANCELS_LINKS, { exact: true })).toBeVisible();
     expect(rowTexts(reloaded.screen)).toEqual(handedRows);
-    // The draft doesn't say which preset made it, so a reload shows the check line alone.
-    expect(checkLines(reloaded.screen)).toEqual(['Checked against the always-on rules and your other rules.']);
+    expect(checkLines(reloaded.screen)).toEqual([CHECKED_REVIEW]);
     expect(requests('ruleDraft')).toHaveLength(1);
     await expect.element(reloaded.screen.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
 
@@ -537,11 +579,10 @@ describe('rule draft review', () => {
     await expect.element(newLimit.getByText('New limit: no payment over $100 without asking you.', { exact: true })).toBeVisible();
     await expect.element(newLimit.getByText('Was $500', { exact: true })).toBeVisible();
     const row = lowered.screen.getByRole('region', { name: 'Changes' }).getByRole('listitem');
-    await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Automatic up to $300; over $300, ask me first', { exact: true })).toBeVisible();
-    await expect.element(row.getByRole('group', { name: 'Before' }).getByText(link.reason, { exact: true })).toBeVisible();
-    await expect.element(row.getByRole('group', { name: 'After' }).getByText('Anyone · Up to $100 · Checked by the reviewer', { exact: true })).toBeVisible();
-    // The new reason reads as a change, tagged as the other changed lines are.
-    await expect.element(row.getByRole('group', { name: 'After' }).getByText('Up to $100, your payment limit. Changed', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Allow', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('group', { name: 'Before' }).getByText('Claude can send payment links up to $300', { exact: true })).toBeVisible();
+    await expect.element(row.getByRole('group', { name: 'After' }).getByText('Claude can send payment links up to $100', { exact: true })).toBeVisible();
+    expect(row.getByText('Changed', { exact: true }).elements()).toHaveLength(1);
     const cancels = lowered.screen.getByText(CANCELS_LINKS, { exact: true });
     await expect.element(cancels).toBeVisible();
     expect(before(cancels.element(), lowered.screen.getByRole('button', { name: 'Confirm change' }).element())).toBe(true);
@@ -563,7 +604,7 @@ describe('rule draft review', () => {
       await expect.element(screen.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
       expect(screen.getByText(CANCELS_LINKS, { exact: true }).elements()).toHaveLength(0);
       // The check alone (N-Conn-20): no preset, so nothing about what runs on its own.
-      expect(checkLines(screen)).toEqual(['Checked against the always-on rules and your other rules.']);
+      expect(checkLines(screen)).toEqual([CHECKED_REVIEW]);
       await expectLimitTrail(screen);
     }
     expect(requests('ruleDraft')).toHaveLength(1);
@@ -603,27 +644,28 @@ describe('rule draft review', () => {
     const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' });
     await expect.element(breadcrumb.getByRole('link', { name: 'Rules' })).toHaveAttribute('href', `${DESK}/rules`);
     await expect.element(breadcrumb.getByText('Ask me first', { exact: true })).toHaveAttribute('aria-current', 'page');
-    // Every rule of Turner's own (its urgent job's among them) and the shared rule go to the default
-    // ask, and the starter's cards it keeps make no row.
+    // The starter's kept cards make no row. Removed owner rules show Before alone.
     const changes = screen.getByRole('region', { name: 'Changes' });
     await expect.element(changes).toBeVisible();
     const rows = rowTexts(screen);
     expect(rows).toHaveLength(Object.keys(rivera.ruleCards).length + 2);
-    for (const text of rows) expect(text).toMatch(/^Changed/);
-    for (const text of rows) expect(text).toContain('Not covered by a rule you set, so I ask you.');
-    // The shared rule's row says so under its title, after its connector, and it's the only one.
-    const sharedLine = changes.getByText('Payments · Shared rule', { exact: true });
-    await expect.element(sharedLine).toBeVisible();
-    expect(sharedLine.element().closest('li')?.textContent).toContain('Payment link and Charge within a signed limit');
-    expect(changes.getByText('Shared rule', { exact: true }).elements()).toHaveLength(1);
-    // The check, then what the preset keeps running on its own.
-    expect(checkLines(screen)).toEqual(['Checked against the always-on rules and your other rules.', 'Open times, leads, callbacks and identity checks still run on their own.']);
+    for (const text of rows) expect(text).toMatch(/^RemovedBeforeClaude /);
+    const shared = [...changes.element().querySelectorAll('li')].find((row) => row.textContent?.includes('Payment link and Charge within a signed limit'));
+    expect(shared).toBeDefined();
+    expect(shared?.querySelectorAll('[data-copy="user"]')).toHaveLength(2);
+    expect(shared?.querySelectorAll('.cd-rule-sentence__meta')).toHaveLength(1);
+    expect(changes.getByText('Shared rule', { exact: true }).elements()).toHaveLength(0);
+    expect(checkLines(screen)).toEqual([CHECKED_REVIEW]);
 
     await expectOwnerBoard(screen.container, {
       current: 'Rules',
       tabStops: [screen.getByRole('button', { name: 'Confirm change' }).element() as HTMLElement, screen.getByRole('button', { name: 'Keep my rules' }).element() as HTMLElement],
     });
     await expectScreenBasics(screen.container, { owner: true });
+    await page.viewport(390, 844);
+    expect(rowTexts(screen)).toEqual(rows);
+    await expectScreenBasics(screen.container, { owner: true });
+    await page.viewport(1440, 900);
   });
 
   it('lost_confirm_reads_the_rules_first', async () => {
@@ -759,6 +801,33 @@ describe('rule draft review', () => {
     expect(desk().policy.version).toBe(7);
   });
 
+  it.each([1440, 390])('activation_rows_keep_their_tool_title_and_tag_at_%i', async (width) => {
+    const tools = (await request('rules', { params: { desk_id: RIVERA.deskId } })).tools
+      .filter((tool) => tool.tool === 'native.payment_link' || tool.tool === 'native.charge_mandate');
+    expect(tools).toHaveLength(2);
+    const shared: RuleCard = { ...rivera.sharedChargeCard, who: 'anyone', agent_key_id: null };
+    const draft: RuleDraft = {
+      version: desk().policy.version + 1, before: [shared], after: [shared],
+      proof: null, summary: null, moneyCap: null, preset: null, turnedOn: tools,
+    };
+    const { screen } = await renderRoute('/review', { viewport: { width, height: width === 390 ? 844 : 900 }, routes: [{ path: '/review', element: <RuleDraftReview deskId={RIVERA.deskId} draft={draft} /> }] });
+    const review = screen.getByRole('region', { name: 'Changes' });
+    await expect.element(review).toBeVisible();
+    const rows = [...review.element().querySelectorAll('li')];
+    expect(rows).toHaveLength(2);
+    for (const [index, title] of ['Payment link', 'Charge within a signed limit'].entries()) {
+      const row = rows[index]!;
+      expect(row.querySelector('.cd-change-review__tag')?.textContent).toBe('Turned on');
+      const heading = row.querySelector('.cd-change-review__title');
+      expect(heading?.textContent).toBe(title);
+      expectUserText(heading!, title);
+      // The governing rule's $20 limit is a qualifier on the line, as on the Rules page.
+      expect(row.querySelector('.cd-rule-sentence__meta')?.textContent).toBe(`${title} · Anyone · Over $20, it asks you first`);
+      expect(row.querySelectorAll('.cd-rule-sentence__meta [data-copy="user"]')).toHaveLength(1);
+    }
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+  });
+
   it('tool_titles_in_the_review_are_user_text', async () => {
     // A business can name a job anything in setup, so its title is untrusted text, never the app's sentence.
     const title = 'Approved by your accountant';
@@ -785,13 +854,14 @@ describe('rule draft review', () => {
     const { screen } = await renderRoute('/review', { routes: [{ path: '/review', element }] });
     const review = screen.getByRole('region', { name: 'Changes' });
     await expect.element(review).toBeVisible();
-    // In every row's title, every target line and every meta line, the title is its own user-text element.
-    expect(expectUserText(review.element(), title)).toBe(4);
+    // Each sentence's meta names its tools once, marked as user text. The shared rule has both sides.
+    expect(expectUserText(review.element(), title)).toBe(6);
     // Turner's own job and the catalog's tools are named the same way.
     expectUserText(review.element(), 'Emergency callback');
     expectUserText(review.element(), 'Book a visit');
-    // The rows read word for word as they did.
-    expect(rowTexts(screen)).toEqual(TITLED_JOB_ROWS);
+    expect(review.element().querySelectorAll('.cd-change-review__title')).toHaveLength(1);
+    expect(review.element().querySelectorAll('.cd-change-review__changed')).toHaveLength(0);
+    expect(review.element().querySelectorAll('.cd-rule-sentence')).toHaveLength(6);
     // Shown on its own, with no page around it: its copy is clean and plain.
     assertCleanCopy(screen.container);
     assertNoJargon(screen.container);

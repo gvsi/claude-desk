@@ -12,7 +12,7 @@
 
 - An `article` named "Held for you: {reason_plain}", its first words from `OWNER_STATE_WORDS.held`, the same words a held receipt leads with.
 - The status line: the dot from `receiptTone` and "Waiting for your answer" while held, with `waiting` at the right ("Web chat, 2 min ago"). A demo visitor's request (`demoVisitor`) has a `Pill` "Demo visitor" 8 px after `waiting`, on its line, so it's never taken for a real customer's.
-- `reason_plain` in serif (`.cd-type-summary`), `context` in `.cd-type-meta`, then "Held by your rule: {heldBy}".
+- `reason_plain` in serif (`.cd-type-summary`), `context` in `.cd-type-meta`, then the rule that held it, as REV-RULES-B5 draws it: a box on `line-card` with the control radius and `space-12` inside, `space-12` under what was asked and `space-12` over the answers. "Your rule" sits in secondary `.cd-type-caption`, `space-6` over the rule's `RuleSentence` (its sentence, the tools and who, and its outcome). The box is a group named by its label.
 - A `role="group"` "Your answer" with two controls, Allow then Deny, built from the answers in `decision.answers` and only those. `allow_once` and `allow_person` are Allow's; `deny_once` and `deny_always` are Deny's. Allow is `secondary`, Deny `danger` (the soft red fill). Answers show only while `state` is `held`; with no answers there is no group, and a side with no answers has no control.
 - A side with one answer is a plain main button with that answer's full words: "Allow this time" or "Deny this time" (and, though the kernel never offers them alone, "Allow only for {name}, always" or "Deny always").
 - A side with two answers is a menu button: "Allow" or "Deny" and a chevron (`Button`'s `menuOpen`). Its menu offers the one-time answer, then the one that also saves a rule, each over a quieter line in `caption`:
@@ -84,7 +84,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 ## What the consumer provides
 
 - `decision` as the kernel returned it. The card never decides which answers apply: `state` and `answers` do.
-- `heldBy`: `NeedsYouItem.held_by`, the reason on the ask card that held it, shown as the owner's words. A hold past an automatic rule's limit has none, since `reason_plain` already quotes that rule, and neither does one only the default ask decided, since no rule of the owner's did, so the line is left out.
+- `rule`: the rule that held it, as the screen words it (`heldRule` in `owner/rules/requestRule.ts`): the owner's Ask me first card whose reason is `NeedsYouItem.held_by`, or past an automatic rule's limit that rule's hold line ("Claude asks you before **any discount**", Quote · Anyone), with its outcome. The design system words none of it. Leave it out when no rule of the owner's held it (only the default ask did, or its rule has since changed): there is no box then.
 - `context`: "From the visitor: “{from_the_visitor}”", with the visitor's words in a `data-copy="user"` span. The visitor's own words only, never AI-written text such as a triage summary: a visitor could steer one to sway the answer, so it is never in an approval card.
 - `waiting`: where and when it was held, formatted by the screen.
 - `demoVisitor` when the request came from a demo visitor's chat (`NeedsYouSession.demo_visitor`).
@@ -98,7 +98,7 @@ After an answer or an event, the final line takes the place of "Waiting for your
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `decision` | `Decision` | Required. |
-| `heldBy` | `string` | The rule that held it. |
+| `rule` | `ApprovalRule` | The rule that held it: `RuleSentence`'s `parts`, `meta` and `outcome`. |
 | `context` | `ReactNode` | One line of context. |
 | `waiting` | `string` | Required. |
 | `demoVisitor` | `boolean` | The "Demo visitor" pill after `waiting`. |

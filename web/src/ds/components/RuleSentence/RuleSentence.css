@@ -1,0 +1,83 @@
+/* RuleSentence: the sentence in secondary body type with its key values in primary at the
+   interface font's medium weight and tabular figures, so amounts line up; the meta line under it
+   (the tools as user text, then who); and the outcome at the right. It lays out by its own width:
+   under 480 px (a phone) the outcome sits on its own line under the meta line, as C3 draws it. */
+
+.cd-rule-sentence {
+  container: cd-rule-sentence / inline-size;
+  min-width: 0;
+}
+
+/* A side of a change: a 2 px line at its left, refused for the rule as it was, handled for the rule as it will be. */
+.cd-rule-sentence--before,
+.cd-rule-sentence--after {
+  padding-left: var(--space-12);
+  border-left: 2px solid var(--line-hairline);
+}
+
+.cd-rule-sentence--before {
+  border-left-color: var(--status-refused);
+}
+
+.cd-rule-sentence--after {
+  border-left-color: var(--status-handled);
+}
+
+.cd-rule-sentence__layout {
+  display: flex;
+  align-items: baseline;
+  column-gap: var(--space-12);
+  row-gap: var(--space-4);
+  min-width: 0;
+}
+
+.cd-rule-sentence__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cd-rule-sentence__sentence {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.cd-rule-sentence__key {
+  color: var(--text-primary);
+  font-weight: 520;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A tool's own title inside the sentence: its own words, isolated for text direction. */
+.cd-rule-sentence__user {
+  unicode-bidi: isolate;
+}
+
+.cd-rule-sentence__meta {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The screen's own words for a group of tools ("Every tool"), drawn as a tool's title is. */
+.cd-rule-sentence__group {
+  color: var(--text-primary);
+  font-weight: 520;
+}
+
+.cd-rule-sentence__outcome {
+  flex: 0 0 auto;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+@container cd-rule-sentence (max-width: 479.98px) {
+  .cd-rule-sentence__layout {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .cd-rule-sentence__text {
+    width: 100%;
+  }
+}

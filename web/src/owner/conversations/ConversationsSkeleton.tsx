@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
+import { AppShellOnly, CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
+import { HeldRuleShape } from '../approvals/HeldRuleShape.tsx';
 import { publicLink } from '../customerLink.ts';
 import { TRANSCRIPT_NOTE } from './copy.ts';
 
@@ -126,9 +127,10 @@ function HandoffCardShape({ anchor }: { anchor?: string }) {
 }
 
 /**
- * The held request's card, as `ApprovalCard` lays one out: its status line, the kernel's reason, the
- * visitor's words and the rule that held it beside its icon, each as many lines as its words take,
- * then Allow and Deny at the answers' own heights (`cd-conversation-skeleton__answer`).
+ * The held request's card, as `ApprovalCard` lays one out: its status line, the kernel's reason and
+ * the visitor's words, each as many lines as its words take, the "Your rule" box that names the rule
+ * that held it (`HeldRuleShape`), then Allow and Deny at the answers' own heights
+ * (`cd-conversation-skeleton__answer`).
  */
 function HeldCardShape({ anchor }: { anchor?: string }) {
   const answers = useRef<HTMLDivElement>(null);
@@ -143,6 +145,7 @@ function HeldCardShape({ anchor }: { anchor?: string }) {
         </div>
         <MeasuredLines parts={[HELD_CHAT.reason]} className="cd-type-summary" text="summary" fallback={2} boxClassName="cd-approval-card__reason" />
         <MeasuredLines parts={[HELD_CHAT.context]} className="cd-type-meta" text="meta" boxClassName="cd-approval-card__context" />
+        <HeldRuleShape />
         <div className="cd-approval-card__answers">
           <div ref={answers} className="cd-approval-card__row">
             <Skeleton
@@ -388,9 +391,11 @@ export function ConversationsSkeleton({ withHeader, open, recordedHistory = true
           </>
         ) : null}
       </div>
-      <div className="cd-conversations__footer">
-        <ConceptFooter skeleton />
-      </div>
+      <AppShellOnly layout="compact">
+        <div className="cd-conversations__footer" data-skeleton-anchor="owner-footer" data-owner-footer>
+          <ConceptFooter skeleton />
+        </div>
+      </AppShellOnly>
     </div>
   );
 }

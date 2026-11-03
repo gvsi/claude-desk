@@ -26,9 +26,9 @@ export function RouteError({ visitor = false }: RouteErrorProps) {
   // shows, the whole document is too, as the page would have made it.
   const language = visitor && !outsideTheCopy ? browserLanguage() : 'en';
   useDocumentLanguage(language);
-  if (outsideTheCopy) return <NotFound />;
+  if (outsideTheCopy) return <NotFound visitor={visitor} />;
   return (
-    <StandalonePage labelledBy={titleId} lang={visitor ? language : undefined}>
+    <StandalonePage labelledBy={titleId} lang={visitor ? language : undefined} homeHref={visitor ? undefined : '/'}>
       <h1 id={titleId} className="cd-sr-only">
         Claude Desk
       </h1>

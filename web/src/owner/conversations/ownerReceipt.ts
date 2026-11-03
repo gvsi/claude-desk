@@ -7,7 +7,7 @@
  * after it ran, so it usually reads `executed`. When that first receipt's state is one of the
  * design system's `OWNER_REASON_STATES`, it carries the decision's `reason_plain`, read once by its
  * `decision_id`, as `MarginReceipt`'s `reason`: the receipt then reads "{state's words}. {reason}"
- * ("Automatic. …"), or "Held for you" alone with the request's card right under it. Until that
+ * ("Allowed. …"), or "Held for you" alone with the request's card right under it. Until that
  * read answers, or if it fails, it carries no reason and shows the event's `visitor_plain`.
  *
  * An execution refusal uses the transcript item's `owner_plain`, verbatim, when present; it falls

@@ -129,7 +129,7 @@ export const WithWordmark: Story = {
     await expect(badge).toHaveAttribute('data-ds', 'preview-badge');
     expectComputed(badge, { textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.66px', height: '20px' });
     await expect(badge.getBoundingClientRect().left - name.getBoundingClientRect().right).toBe(8);
-    await expect(canvasElement.querySelector('.cd-wordmark')?.textContent).toBe('Claude DeskPreview');
+    await expect(canvasElement.querySelector('.cd-wordmark')?.textContent).toBe('Claude Desk Preview');
   },
 };
 
