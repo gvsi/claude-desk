@@ -237,7 +237,7 @@ async function expectSetupCardLands(width: number, height: number, opening: Setu
   expect(layer.querySelector('.cd-things'), "the skeleton draws Today's Things to try").not.toBeNull();
   const shape = layer.querySelector('.cd-today__band > .cd-continue-setup')!;
   expect(shape.previousElementSibling?.classList.contains('cd-today__greeting'), 'the shape is first under the greeting').toBe(true);
-  expect(shape.nextElementSibling?.classList.contains('cd-how'), 'How your Desk works comes under it').toBe(true);
+  expect(shape.nextElementSibling?.classList.contains('cd-things'), 'Things to try comes under it').toBe(true);
   expect(shape.textContent, 'the shape draws no words').toBe('');
   expect(landedElement('.cd-continue-setup'), 'no landed card while the reads are out').toBeNull();
   expect(sawNotLive()).toBe(false);
@@ -320,7 +320,7 @@ it.each([
 
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
-  const tops = watchTop(() => document.querySelector(`${FRAME_LAYER} .cd-how`) ?? landedElement('.cd-how'));
+  const tops = watchTop(() => document.querySelector(`${FRAME_LAYER} .cd-things`) ?? landedElement('.cd-things'));
   const { screen } = await renderRoute(today, { viewport: { width, height } });
   await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
   await document.fonts.ready;
@@ -340,8 +340,8 @@ it.each([
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   await nextFrames();
   expect(Math.abs(card.element().getBoundingClientRect().top - shapeTop), "the card lands at its shape's top").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
-  const howTops = tops();
-  expect(Math.max(...howTops) - Math.min(...howTops), 'How your Desk works never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  const thingsTops = tops();
+  expect(Math.max(...thingsTops) - Math.min(...thingsTops), 'Things to try never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });
 
 it('a_desk_no_longer_in_the_copy_is_forgotten_once_the_desks_are_read', async () => {
@@ -414,16 +414,26 @@ it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
+it('today_skeleton_places_the_outcome_shape_under_the_greeting_without_a_band', async () => {
+  const held = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
+  onTestFinished(held.release);
+  await renderRoute(TODAY);
+  await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+  const skeleton = document.querySelector('.cd-today--skeleton')!;
+  expect(skeleton).not.toBeNull();
+  expect(skeleton.querySelector('.cd-how, [data-skeleton-anchor="how-card"]')).toBeNull();
+  const line = skeleton.querySelector('.cd-greeting__text > [data-skeleton-anchor="today-line"]');
+  expect(line).not.toBeNull();
+  expect(line!.textContent).toBe('');
+  expect(line!.querySelector('.cd-skeleton')).not.toBeNull();
+});
+
 const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'owner-footer', page: '[data-owner-footer]', size: true },
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
   { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
-  // How your Desk works: its title, its card (the steps and the Today line), and the first and last step's tiles.
-  { name: 'how-title', page: '.cd-how .cd-section-header__heading' },
-  { name: 'how-card', page: '.cd-how > .cd-card', size: true },
-  { name: 'how-tile-0', page: '.cd-how__step:first-child .cd-how__tile', size: true },
-  { name: 'how-tile-2', page: '.cd-how__step:last-child .cd-how__tile', size: true },
+  { name: 'today-line', page: '.cd-greeting__text > .cd-how__today', size: true },
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-progress', page: '.cd-things__progress', size: true },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },

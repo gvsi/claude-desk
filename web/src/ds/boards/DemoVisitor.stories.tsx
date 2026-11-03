@@ -303,7 +303,7 @@ const meta = {
     canvasNote: [
       IN_REVIEW,
       'REV-DEMO entry A, Today › Things to try (#artboard-cdae4f209f2e): "Watch a demo visitor" second of six cards, three across from 1280 px.',
-      'Only the band\'s Things to try is drawn; the greeting, How your Desk works, Needs you and the rest of Today are as the Today boards draw them.',
+      'Only the band\'s Things to try is drawn; the greeting and its Today line, Needs you and the rest of Today are as the Today boards draw them.',
       SINCE_THE_CHOICES,
     ].join(' '),
   },

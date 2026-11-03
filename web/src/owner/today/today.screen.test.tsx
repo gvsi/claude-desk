@@ -2576,8 +2576,8 @@ describe('Today', () => {
     const column = await focusMarkDoneAtTheFoot(screen, live.element());
     const before = { column: column.scrollTop, window: window.scrollY };
     // The page's own line: Today's loading shapes, while they fade out, draw one of their own.
-    const howToday = region(screen, 'How your Desk works').element();
-    const todayLine = () => howToday.querySelector('.cd-how__today')!.getBoundingClientRect().height;
+    const greeting = document.querySelector('.cd-today:not(.cd-today--skeleton) .cd-greeting')!;
+    const todayLine = () => greeting.querySelector('.cd-how__today')!.getBoundingClientRect().height;
     const lineBefore = todayLine();
 
     await userEvent.keyboard('{Enter}');
@@ -3292,12 +3292,10 @@ describe("Today's top band", () => {
     // The greeting has 16 px over it on a laptop, inside the page's own padding.
     expectComputed(band.querySelector('.cd-today__greeting')!, { paddingTop: '16px' });
 
-    // How your Desk works 32 px under the header, then Things to try 32 px under it, in the band:
+    // Things to try sits 32 px under the greeting and its outcome line, in the band:
     // six equal cards, three across in two rows, 16 px apart, across the band, each row's next steps on one line.
     expect(band.contains(things.element())).toBe(true);
-    const how = region(screen, 'How your Desk works').element();
-    expect(box(how).top - box(header).bottom).toBeCloseTo(32, 0);
-    expect(box(things.element()).top - box(how).bottom).toBeCloseTo(32, 0);
+    expect(box(things.element()).top - box(header).bottom).toBeCloseTo(32, 0);
     const cards = things.getByRole('listitem').elements();
     expect(cards).toHaveLength(6);
     const rects = cards.map(box);
@@ -3376,7 +3374,7 @@ describe("Today's top band", () => {
     await expect.element(screen.getByText('One person is talking to your Desk right now.')).toBeVisible();
     await skeletonGone();
 
-    // Title, presence line, link pill, then "Chat as a customer", down the page from one left edge.
+    // Title, presence, outcomes, link pill, then "Chat as a customer", from one left edge.
     const title = box(screen.getByRole('heading', { level: 1 }).element());
     const presence = box(document.querySelector('.cd-greeting__presence')!);
     const pill = box(document.querySelector('.cd-greeting__link')!);
@@ -3384,7 +3382,8 @@ describe("Today's top band", () => {
     const header = page.elementLocator(document.querySelector('.cd-greeting')!);
     const chat = box(header.getByRole('link', { name: 'Chat as a customer', exact: true }).element());
     expect(presence.top).toBeGreaterThanOrEqual(title.bottom);
-    expect(pill.top - presence.bottom).toBeCloseTo(16, 0);
+    const outcomes = box(header.element().querySelector('.cd-how__today')!);
+    expect(pill.top - outcomes.bottom).toBeCloseTo(16, 0);
     expect(chat.top).toBeGreaterThanOrEqual(pill.bottom);
     for (const each of [presence, pill, chat]) expect(each.left).toBeCloseTo(title.left, 0);
     // No extra room over the greeting on a phone.
@@ -3405,7 +3404,7 @@ describe("Today's top band", () => {
     await expect.element(chatRow).toHaveAttribute('target', '_blank');
     // A press anywhere on the row is the row's: its words, not just its chevron.
     const answerRow = things.getByRole('button', { name: 'Answer a held request', exact: true });
-    // The row is under How your Desk works on a phone: bring it into sight to press it.
+    // The row is under the greeting on a phone: bring it into sight to press it.
     answerRow.element().scrollIntoView({ block: 'center' });
     const answerTitle = box(things.getByRole('heading', { level: 3, name: 'Answer a held request' }).element());
     expect(document.elementFromPoint(answerTitle.left + 4, answerTitle.top + answerTitle.height / 2)).toBe(answerRow.element());
@@ -3478,84 +3477,29 @@ describe("Today's top band", () => {
   });
 });
 
-describe("Today's How your Desk works", () => {
-  /** Each step's three lines, in order, as its list item reads them. */
-  const stepLines = (section: Locator) =>
-    section.getByRole('listitem').elements().map((item) => [...item.querySelectorAll('p')].map((p) => p.textContent));
-
-  it('how_your_desk_works_explains_the_three_steps_under_the_greeting', async () => {
-    const { screen } = await renderRoute(TODAY);
-    const how = region(screen, 'How your Desk works');
-    await expect.element(how).toBeVisible();
+describe("Today's outcomes under the greeting", () => {
+  it.each([1512, 390])('today_outcomes_follow_the_presence_without_a_how_it_works_band at %s', async (width) => {
+    const { screen } = await renderRoute(TODAY, { viewport: { width, height: 900 } });
+    await expect.element(screen.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
     await skeletonGone();
-    await expect.element(how.getByRole('heading', { level: 2, name: 'How your Desk works', exact: true })).toBeVisible();
-    // Three numbered steps, the second naming the business as the Desk knows it.
-    expect(how.getByRole('list').elements()).toHaveLength(1);
-    expect(stepLines(how)).toEqual([
-      ['Step 1', 'Someone asks', 'A customer on your page, or their AI agent'],
-      ['Step 2', 'Claude answers', "As Turner Plumbing, and says it's an AI"],
-      ['Step 3', 'Your rules decide', 'Bookings, quotes, payments and documents are checked first'],
-    ]);
-    // Each step's 32 px tile holds its icon: people, conversations, rules.
-    const tiles = how.getByRole('listitem').elements().map((item) => item.querySelector('.cd-how__tile'));
-    for (const tile of tiles) {
-      if (!tile) throw new Error('each step has its icon tile');
-      expectComputed(tile, { width: '32px', height: '32px' });
-      expect(tile.getAttribute('aria-hidden')).toBe('true');
-      expectComputed(tile.querySelector('svg')!, { width: '20px', height: '20px' });
-    }
-
-    // In the band, under the greeting and above Things to try, 32 px from each.
-    const band = document.querySelector('.cd-today__band')!;
+    expect(screen.getByRole('heading', { name: 'How your Desk works', exact: true }).elements()).toHaveLength(0);
     const greeting = document.querySelector('.cd-greeting')!;
-    const things = region(screen, 'Things to try').element();
-    expect(band.contains(how.element())).toBe(true);
-    expect(greeting.compareDocumentPosition(how.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(how.element().compareDocumentPosition(things) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(box(how.element()).top - box(greeting).bottom).toBeCloseTo(32, 0);
-    expect(box(things).top - box(how.element()).bottom).toBeCloseTo(32, 0);
+    const presence = greeting.querySelector('.cd-greeting__presence')!;
+    const line = greeting.querySelector('.cd-greeting__text > .cd-how__today')!;
+    expect(line).not.toBeNull();
+    expect(presence.nextElementSibling).toBe(line);
+    expect(box(line).top - box(presence).bottom).toBeCloseTo(12, 0);
+    expect(box(line).left).toBeCloseTo(box(greeting).left, 0);
+    const actions = greeting.querySelector('.cd-greeting__actions')!;
+    if (width === 390) expect(box(actions).top - box(line).bottom).toBeCloseTo(16, 0);
+    else expect(box(actions).left).toBeGreaterThan(box(line).right);
+    expectNoHorizontalScroll();
+    expect(line.textContent).toBe('Today, Claude handled 2 on its own held 1 for you');
+    expect(box(region(screen, 'Things to try').element()).top - box(greeting).bottom).toBeCloseTo(32, 0);
     await expectScreenBasics(screen.container, { owner: true });
   });
 
-  it.each([
-    { viewport: { width: 1440, height: 900 }, wide: true },
-    { viewport: { width: 1000, height: 900 }, wide: true },
-    { viewport: { width: 999, height: 900 }, wide: false },
-    { viewport: 'phone' as const, wide: false },
-  ])('how_your_desk_works_steps_sit_side_by_side_from_1000_px at $viewport', async ({ viewport, wide }) => {
-    const { screen } = await renderRoute(TODAY, { viewport });
-    const how = region(screen, 'How your Desk works');
-    await expect.element(how.getByText('Your rules decide', { exact: true })).toBeVisible();
-    const title = box(how.getByRole('heading', { level: 2 }).element());
-    const card = how.element().querySelector(':scope > .cd-card')!;
-    expect(box(card).top - title.bottom).toBeCloseTo(12, 0);
-    expectComputed(card, { paddingTop: '20px', paddingLeft: '20px' });
-    const steps = how.getByRole('listitem').elements();
-    const rects = steps.map(box);
-    if (wide) {
-      // Three columns in one row, 20 px apart, the second and third each after a hairline with 20 px
-      // inside it.
-      for (const rect of rects) expect(rect.top).toBeCloseTo(rects[0]!.top, 0);
-      for (let i = 1; i < 3; i += 1) expect(rects[i]!.left - rects[i - 1]!.right).toBeCloseTo(20, 0);
-      expectComputed(steps[0]!, { borderLeftWidth: '0px', paddingLeft: '0px' });
-      for (const step of steps.slice(1)) expectComputed(step, { borderLeftWidth: '1px', borderLeftStyle: 'solid', paddingLeft: '20px' });
-    } else {
-      // Stacked, 12 px apart, from one left edge, with no hairlines between them.
-      for (const rect of rects) expect(rect.left).toBeCloseTo(rects[0]!.left, 0);
-      for (let i = 1; i < 3; i += 1) expect(rects[i]!.top - rects[i - 1]!.bottom).toBeCloseTo(12, 0);
-      for (const step of steps) expectComputed(step, { borderLeftWidth: '0px', paddingLeft: '0px' });
-    }
-    // Each step's tile, then its words 12 px to the right of it.
-    for (const step of steps) {
-      const tile = box(step.querySelector('.cd-how__tile')!);
-      const words = box(step.querySelector('p')!);
-      expect(words.left - tile.right).toBeCloseTo(12, 0);
-      expect(tile.top).toBeCloseTo(box(step).top, 0);
-    }
-    expectNoHorizontalScroll();
-  });
-
-  it('how_your_desk_works_counts_only_held_requests_like_safety', async () => {
+  it('today_line_counts_only_held_requests_like_safety', async () => {
     openCallback();
     openCallback('ses-visitor-web');
     const items = await needsYouRead();
@@ -3570,7 +3514,7 @@ describe("Today's How your Desk works", () => {
     mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [newer, ...items] });
     await injectToday((t) => ({ ...t, needs_you_count: 4 }));
     const { screen, router } = await renderRoute(TODAY);
-    const how = region(screen, 'How your Desk works');
+    const how = screen.getByRole('main');
     const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
     await expect.element(held).toBeVisible();
     expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
@@ -3581,12 +3525,12 @@ describe("Today's How your Desk works", () => {
     await expect.element(screen.getByRole('link', { name: '2 held for you', exact: true })).toBeVisible();
   });
 
-  it('how_your_desk_works_counts_handled_and_refused_from_the_briefing', async () => {
+  it('today_line_counts_handled_and_refused_from_the_briefing', async () => {
     // Handled is the night's answers and bookings; turned down, the requests refused. Held comes
     // from Needs you's requests, even when Today's aggregate differs. Each links to where it is.
     await injectToday((t) => ({ ...t, needs_you_count: 4, briefing: { ...t.briefing, answers: 3, bookings: 2, turned_down: 1 } }));
     const { screen } = await renderRoute(TODAY);
-    const how = region(screen, 'How your Desk works');
+    const how = screen.getByRole('main');
     const line = () => how.element().querySelector<HTMLElement>('.cd-how__today');
     await vi.waitFor(() => expect(line()).not.toBeNull());
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
@@ -3604,10 +3548,9 @@ describe("Today's How your Desk works", () => {
       `/app/${RIVERA.deskId}/today#request-${seededHold().decision_id}`,
       `/app/${RIVERA.deskId}/safety`,
     ]);
-    // Under a hairline, 16 px under the steps with 12 px inside it, in the secondary ink; each
-    // outcome's words a link in the same ink, underlined, its count in the primary ink.
-    expectComputed(line()!, { borderTopWidth: '1px', borderTopStyle: 'solid', paddingTop: '12px', marginTop: '16px', columnGap: '16px', rowGap: '8px' });
-    expect(box(line()!).top - box(how.getByRole('list').element()).bottom).toBeCloseTo(16, 0);
+    // The line has no band or hairline; each outcome stays underlined in the secondary ink,
+    // with its count in the primary ink.
+    expectComputed(line()!, { borderTopWidth: '0px', paddingTop: '0px', marginTop: '6px', columnGap: '16px', rowGap: '8px' });
     const link = links[0]!;
     expectComputed(link, { textDecorationLine: 'underline', textUnderlineOffset: '3px' });
     expect(getComputedStyle(link).color).toBe(getComputedStyle(line()!).color);
@@ -3621,14 +3564,14 @@ describe("Today's How your Desk works", () => {
     await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
   });
 
-  it('how_your_desk_works_omits_held_when_only_callbacks_wait', async () => {
+  it('today_line_omits_held_when_only_callbacks_wait', async () => {
     openCallback();
     openCallback('ses-visitor-web');
     const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
     mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
     await injectToday((t) => ({ ...t, needs_you_count: 2 }));
     const { screen, router } = await renderRoute(TODAY);
-    const how = region(screen, 'How your Desk works');
+    const how = screen.getByRole('main');
     await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
     expect(how.element().querySelector('.cd-how__today')?.textContent).toBe('Today, Claude handled 2 on its own');
     expect(how.element().querySelector('.cd-how__outcome .cd-status-dot--held')).toBeNull();
@@ -3638,27 +3581,26 @@ describe("Today's How your Desk works", () => {
     expect(screen.getByRole('link', { name: /held for you/ }).elements()).toHaveLength(0);
   });
 
-  it('how_your_desk_works_draws_no_quiet_line_when_a_callback_waits', async () => {
+  it('today_line_draws_no_quiet_line_when_a_callback_waits', async () => {
     openCallback();
     const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
     mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
     await injectToday((t) => ({ ...t, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
     const { screen } = await renderRoute(TODAY);
     await expect.element(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
-    expect(region(screen, 'How your Desk works').element().querySelector('.cd-how__today')).toBeNull();
+    expect(screen.getByRole('main').element().querySelector('.cd-how__today')).toBeNull();
   });
 
-  it('how_your_desk_works_says_a_quiet_day_and_waits_for_the_answers', async () => {
+  it('today_line_says_a_quiet_day_and_waits_for_the_answers', async () => {
     // A quiet day: one quiet line in place of the outcomes, with no dots or links.
     mockStore.reset('rivera_quiet');
     await injectToday((t) => ({ ...t, needs_you_count: 0, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
     const quiet = await renderRoute(TODAY);
-    const how = region(quiet.screen, 'How your Desk works');
+    const how = quiet.screen.getByRole('main');
     await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')?.textContent).toBe("Today, Claude hasn't been asked anything yet."));
     expect(how.element().querySelector('.cd-how__today a, .cd-how__today .cd-status-dot')).toBeNull();
 
-    // A server that doesn't send the answers yet shows no line rather than a count that says less;
-    // the steps still show.
+    // A server that doesn't send the answers yet shows no line rather than a count that says less.
     await cleanup();
     mockStore.reset('rivera');
     await injectToday((t) => {
@@ -3667,25 +3609,23 @@ describe("Today's How your Desk works", () => {
       return { ...t, briefing };
     });
     const older = await renderRoute(TODAY);
-    const steps = region(older.screen, 'How your Desk works');
+    const steps = older.screen.getByRole('main');
     await expect.element(region(older.screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
-    expect(steps.getByRole('listitem').elements()).toHaveLength(3);
     expect(steps.element().querySelector('.cd-how__today')).toBeNull();
   });
 
-  it('how_your_desk_works_draws_no_line_when_today_cannot_be_read', async () => {
+  it('today_line_draws_no_line_when_today_cannot_be_read', async () => {
     mockStore.inject({ route: 'today', status: 503, times: 10_000 });
     const { screen } = await renderRoute(TODAY, { retryScale: 0 });
     await expect.element(region(screen, 'Since last night').getByRole('button', { name: 'Try again' })).toBeVisible();
-    const how = region(screen, 'How your Desk works');
-    expect(how.getByRole('listitem').elements()).toHaveLength(3);
+    const how = screen.getByRole('main');
     expect(how.element().querySelector('.cd-how__today')).toBeNull();
   });
 
-  it('how_your_desk_works_keeps_counts_hidden_until_the_reconnected_read_succeeds', async () => {
+  it('today_line_keeps_counts_hidden_until_the_reconnected_read_succeeds', async () => {
     const mounted = vi.spyOn(QueryClient.prototype, 'mount');
     const { screen } = await renderRoute(TODAY, { pollScale: 100 });
-    const how = region(screen, 'How your Desk works');
+    const how = screen.getByRole('main');
     await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
     const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
     const read = holdReads(needsYouPath);
@@ -3713,10 +3653,10 @@ describe("Today's How your Desk works", () => {
     await refresh;
   });
 
-  it('how_your_desk_works_hides_and_recovers_counts_after_a_needs_you_refresh_fails', async () => {
+  it('today_line_hides_and_recovers_counts_after_a_needs_you_refresh_fails', async () => {
     const mounted = vi.spyOn(QueryClient.prototype, 'mount');
     const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-    const how = region(screen, 'How your Desk works');
+    const how = screen.getByRole('main');
     await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
     const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
     mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
@@ -3732,16 +3672,15 @@ describe("Today's How your Desk works", () => {
     await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
   });
 
-  it('how_your_desk_works_hides_kept_counts_when_a_refresh_fails', async () => {
+  it('today_line_hides_kept_counts_when_a_refresh_fails', async () => {
     const mounted = vi.spyOn(QueryClient.prototype, 'mount');
     const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-    const how = region(screen, 'How your Desk works');
+    const how = screen.getByRole('main');
     await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
     const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
     mockStore.inject({ route: 'today', status: 503, times: 10_000 });
     await queryClient.refetchQueries({ queryKey: todayKey(RIVERA.deskId) });
     await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
-    expect(how.getByRole('listitem').elements()).toHaveLength(3);
   });
 });
 
