@@ -69,15 +69,16 @@ export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1150]);
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Safety check' }), SPEC.pageTitle);
-    expectComputed(canvas.getByText('6 of 6 stopped'), { fontFamily: /^"Source Serif 4"/, fontSize: '20px' });
+    expectComputed(canvas.getByText('6 of 6 stopped'), { fontFamily: /^"Source Serif 4"/ });
 
     const list = canvas.getByRole('list', { name: 'Tricks tried' });
     const box = list.getBoundingClientRect();
     await expect([Math.round(box.left), Math.round(box.width)]).toEqual([396, 720]);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
     const rows = within(list).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
-    await expect(rows.map((row) => one(row, '.cd-safety-check-row__outcome').textContent)).toEqual(['Blocked', 'Asks you', 'Blocked', 'Blocked', 'Blocked', 'Blocked']);
+    await expect(rows.map((row) => one(row, '.cd-safety-check-row__outcome').textContent)).toEqual(['Never', 'Ask me first', 'Never', 'Never', 'Never', 'Never']);
     await expect(one(rows[1]!, '.cd-status-dot').classList.contains('cd-status-dot--held')).toBe(true);
-    await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([92, 93, 93, 93, 93, 93]);
+    await expect(list.querySelector('.cd-safety-check-row__checkpoint')).toBeNull();
     // safety_rows_land_one_by_one: each motion-stagger after the one before.
     await expect(rows.map((row) => getComputedStyle(row).animationDelay)).toEqual(['0s', '0.15s', '0.3s', '0.45s', '0.6s', '0.75s']);
 

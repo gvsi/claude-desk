@@ -56,3 +56,7 @@ A title that wraps balances its lines (`text-wrap: balance`), as `PageHeader`'s 
 | `onCancel` | `() => void` | Required. |
 | `pending` | `boolean` | The screen is drafting the change. |
 | `error` | `string` | The screen's message; "Turn it on" works again. |
+
+## Setup rule boxes
+
+Setup passes `startingRules` (`RuleSentenceProps[]`), each read from its card as Rules reads it (`ruleSentence`, `ruleMeta`). There are no effect badges: a tool’s effects show only in its Details, on Rules. The shared box is labelled “The rules that will cover them”, or “The rule that will cover it” for a job, and renders one sentence per rule, a rule that covers several of the tools listed once. Outcomes are read-only in this box; the existing editable review remains available when `startingRules` is omitted. `moneyHint` adds the signed payment note after the box. The disconnected app shows neither rules nor the note until its definitions exist.

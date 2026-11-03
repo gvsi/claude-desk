@@ -141,8 +141,13 @@ interface StepLoad {
 }
 
 const TOOL_ROW = (card: number, row: number) => `.cd-setup-tools > .cd-card:nth-child(${card}) .cd-setup-tools__row:nth-child(${row})`;
-/** A rule's row in the draft: the groups follow the payment limit's card, which is the first child. */
-const GROUP_ROW = (child: number, row: number) => `.cd-outcome-groups > :nth-child(${child}) .cd-outcome-groups__row:nth-child(${row})`;
+/** A card of the draft's "Tool by tool", from 1: the cards Rules draws, one per connector. */
+const TOOL_CARD = (card: number) => `.cd-rules__tool-cards > .cd-card:nth-child(${card})`;
+/**
+ * A fresh copy's draft, tool by tool: Quotes, Bookings, Leads and callbacks, Verification, and Other
+ * tools for its money rules, which cover no tool that is on yet; `rules-card-1` and on after the first.
+ */
+const toolCards: Part[] = Array.from({ length: 5 }, (_, i) => ({ name: i === 0 ? 'rules-first-card' : `rules-card-${i}`, page: TOOL_CARD(i + 1) }));
 /** A situation's or a trick's row in its card. */
 const RESULT_ROW = (row: number) => `.cd-setup-step__rows > li:nth-child(${row})`;
 const MAIN_BUTTON_PART: Part = { name: 'main-button', page: MAIN_BUTTON };
@@ -193,25 +198,18 @@ const STEPS: Readonly<Record<Step, StepLoad>> = {
   rules: {
     status: 'Drafting your rules',
     hold: (state) => holdPosts(path('setupRules', state)),
+    // "Across your Desk" and the section headers are the app's own words, so they land in place.
     anchors: [
-      { name: 'rules-money-limit', page: '.cd-outcome-groups > .cd-card:first-child', size: true },
-      // The first rule's words come with the draft: its height is an estimate, checked below.
-      { name: 'rules-auto-row-0', page: GROUP_ROW(2, 1), dimensions: ['width'] },
+      { name: 'rules-across-header', page: '.cd-rules__section:has(> .cd-card) > .cd-section-header', size: true },
+      { name: 'rules-across', page: '.cd-rules__section > .cd-card', size: true },
+      { name: 'rules-tools-header', page: '.cd-rules__section:has(> .cd-rules__tool-cards) > .cd-section-header', size: true },
+      // The first card's rules come with the draft: its height is an estimate, checked below.
+      { name: 'rules-first-card', page: TOOL_CARD(1), dimensions: ['width'] },
     ],
     stays: [TITLE],
-    estimated: [
-      ...Array.from({ length: 11 }, (_, i) => ({ name: `rules-auto-row-${i}`, page: GROUP_ROW(2, i + 1) })),
-      ...Array.from({ length: 2 }, (_, i) => ({ name: `rules-ask-row-${i}`, page: GROUP_ROW(3, i + 1) })),
-      { name: 'rules-never-row-0', page: GROUP_ROW(4, 1) },
-      // Known words, but in boxes sized by their own words, so their lines are estimates too.
-      { name: 'rules-always-on', page: '.cd-card:has(> .cd-always-on)' },
-      { name: 'rules-checks', page: '.cd-setup-rules__checks' },
-    ],
-    // The last row in view: the first that asks at 1440, the ninth Claude does on its own at 390.
-    moved: (viewport) => [
-      viewport === 'desktop' ? { name: 'rules-ask-row-0', page: GROUP_ROW(3, 1) } : { name: 'rules-auto-row-8', page: GROUP_ROW(2, 9) },
-      MAIN_BUTTON_PART,
-    ],
+    estimated: [...toolCards, { name: 'rules-checks', page: '.cd-setup-rules__checks' }],
+    // The last card in view, Bookings, and the main button.
+    moved: () => [toolCards[1]!, MAIN_BUTTON_PART],
   },
   situations: {
     status: 'Trying real situations on your draft rules',
@@ -957,5 +955,5 @@ it('draft_lands_when_the_people_read_fails', async () => {
   expect(mockStore.requests.filter((r) => r.key === 'people')).toHaveLength(2);
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(document.querySelector('[aria-busy]')).toBeNull();
-  expect(screen.getByRole('heading', { level: 2, name: 'Allow' }).elements()).toHaveLength(1);
+  expect(screen.getByRole('heading', { level: 2, name: 'Across your Desk' }).elements()).toHaveLength(1);
 });

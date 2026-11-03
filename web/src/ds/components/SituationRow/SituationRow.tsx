@@ -2,6 +2,8 @@ import type { CSSProperties } from 'react';
 
 import type { Outcome } from '../../../api/contracts.ts';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
+import { RuleSentence, type SentencePart } from '../RuleSentence/RuleSentence.tsx';
+import { OUTCOME_WORDS as RULE_OUTCOMES } from '../OutcomeMenu/outcomeWords.ts';
 
 import './SituationRow.css';
 
@@ -14,17 +16,10 @@ const OUTCOME_TONES = {
 
 /** Each outcome in the owner's words. A missing outcome is a compile error. */
 const OUTCOME_WORDS = {
-  allow: 'Does it',
-  hold: 'Asks you',
-  refuse: 'Never',
+  allow: RULE_OUTCOMES.auto,
+  hold: RULE_OUTCOMES.ask,
+  refuse: RULE_OUTCOMES.never,
 } as const satisfies Record<Outcome, string>;
-
-/**
- * A situation Claude handles only when its second look agrees. The kernel reports a planned one as
- * a hold that depends on review (`allow_if_reviewed`), so these words and the handled dot follow
- * `dependsOnReview`, whatever the outcome, as N-R2-Setup-09-Situations draws it.
- */
-const SECOND_LOOK = 'Does it if Claude’s second look agrees';
 
 export interface SituationRowProps {
   /** The situation, as the check describes it: "A visitor asks for 10% off if they pay cash". */
@@ -33,10 +28,12 @@ export interface SituationRowProps {
   who: string;
   /** What the draft rules do in it: the probe's `outcome`. */
   outcome: Outcome;
-  /** The probe's `depends_on_review`: Claude does it only if its second look agrees. It sets the words and the dot, whatever `outcome` says. */
+  /** A reviewer-dependent hold belongs to an Allow rule. Reviewer details live in the rule's disclosure. */
   dependsOnReview: boolean;
   /** The kernel's `reason_plain`, as written. */
   reason: string;
+  /** The covering rule's sentence, when setup can map the probe to one. Otherwise keep its reason. */
+  sentence?: readonly SentencePart[];
   /** False when the outcome isn't the one the setup interview planned: "Not what we planned". */
   matches: boolean;
   /** The row's place in the list, from 0: a live row lands `motion-stagger` after the one before it. */
@@ -57,9 +54,10 @@ export interface SituationRowProps {
  * rows land one by one, `motion-stagger` apart, and appear at once under reduced motion. The row is
  * drawn with hairlines only between rows; put each in a list item.
  */
-export function SituationRow({ title, who, outcome, dependsOnReview, reason, matches, index = 0, live = false }: SituationRowProps) {
-  const words = dependsOnReview ? SECOND_LOOK : OUTCOME_WORDS[outcome];
-  const tone = dependsOnReview ? 'handled' : OUTCOME_TONES[outcome];
+export function SituationRow({ title, who, outcome, dependsOnReview, reason, sentence, matches, index = 0, live = false }: SituationRowProps) {
+  const ruleOutcome = dependsOnReview ? 'allow' : outcome;
+  const words = OUTCOME_WORDS[ruleOutcome];
+  const tone = OUTCOME_TONES[ruleOutcome];
   const style = { '--cd-situation-row-index': Math.max(0, Math.floor(index)) } as CSSProperties;
   return (
     <div className={live ? 'cd-situation-row cd-situation-row--live' : 'cd-situation-row'} style={style}>
@@ -74,7 +72,8 @@ export function SituationRow({ title, who, outcome, dependsOnReview, reason, mat
             <StatusDot tone={tone} />
             <span>{words}</span>
           </p>
-          <p className="cd-situation-row__reason cd-type-meta">{reason}</p>
+          {sentence === undefined ? <p className="cd-situation-row__reason cd-type-meta">{reason}</p> :
+            <div className="cd-situation-row__reason"><RuleSentence parts={sentence} /></div>}
         </div>
       </div>
     </div>

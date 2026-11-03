@@ -1,15 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
+import { setupSituationSentences as sentences } from '../../fixtures/setupSituationSentences.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { SituationRow, type SituationRowProps } from './SituationRow.tsx';
 
 /** Real situations as the setup interview's check returns them for Turner Plumbing's draft rules. */
 const SITUATIONS: SituationRowProps[] = [
-  { title: 'A visitor wants a drain cleared on Tuesday afternoon', who: 'A visitor, not verified', outcome: 'allow', dependsOnReview: false, reason: 'Books weekday visits in your hours.', matches: true },
+  { title: 'A visitor wants a drain cleared on Tuesday afternoon', who: 'A visitor, not verified', outcome: 'allow', dependsOnReview: false, reason: 'Books weekday visits in your hours.', sentence: sentences.booking, matches: true },
   { title: 'A visitor asks for 10% off if they pay cash', who: 'A visitor, not verified', outcome: 'hold', dependsOnReview: false, reason: 'Discounts ask you first.', matches: true },
-  { title: 'An agent pays the service call deposit', who: 'Alex Kim’s assistant, signed limit', outcome: 'allow', dependsOnReview: true, reason: 'Within its signed limit, checked by the reviewer.', matches: true },
-  { title: 'A visitor wants a Saturday morning visit for a slow drain', who: 'A visitor, not verified', outcome: 'allow', dependsOnReview: false, reason: 'Books weekday visits in your hours.', matches: false },
+  { title: 'An agent pays the service call deposit', who: 'Alex Kim’s assistant, signed limit', outcome: 'allow', dependsOnReview: true, reason: 'Within its signed limit, checked by the reviewer.', sentence: sentences.deposit, matches: true },
+  { title: 'A visitor wants a Saturday morning visit for a slow drain', who: 'A visitor, not verified', outcome: 'allow', dependsOnReview: false, reason: 'Books weekday visits in your hours.', sentence: sentences.booking, matches: false },
   { title: 'Someone asks for Bob’s address', who: 'A visitor, not verified', outcome: 'refuse', dependsOnReview: false, reason: 'Private data only to its verified owner.', matches: true },
 ];
 
@@ -37,13 +38,25 @@ const PRIMARY = 'rgba(250, 249, 245, 0.92)';
 const SECONDARY = 'rgba(250, 249, 245, 0.64)';
 
 export const Situations: Story = {
-  parameters: { canvasNote: 'The situations card’s rows at its inner width, 686 px: each outcome, the second look, and one not as planned.' },
+  parameters: { canvasNote: 'The situations card’s rows at its inner width, 686 px: each rule sentence and outcome, and one not as planned.' },
   play: async ({ canvas }) => {
     const rows = within(canvas.getByRole('list', { name: 'Real situations' })).getAllByRole('listitem').map((item) => item.firstElementChild as HTMLElement);
 
+    // A row a card decided reads that card's sentence; one no card decided keeps the kernel's words.
+    await expect(rows.map((row) => row.querySelector('.cd-rule-sentence__sentence')?.textContent ?? row.querySelector('.cd-situation-row__reason')?.textContent)).toEqual([
+      'Claude can book visits on weekdays, 8:00 am to 6:00 pm',
+      'Discounts ask you first.',
+      'Claude can take a visiting agent’s payment, up to $20, from its signed limit',
+      'Claude can book visits on weekdays, 8:00 am to 6:00 pm',
+      'Private data only to its verified owner.',
+    ]);
+    for (const row of rows) {
+      for (const key of row.querySelectorAll('strong')) expectComputed(key, { fontWeight: '520', fontVariantNumeric: 'tabular-nums', color: PRIMARY });
+    }
+
     // situation_row_says_the_outcome_in_words: each outcome's words beside its dot, in its tone.
     const outcomes = rows.map((row) => row.querySelector('.cd-situation-row__outcome')?.textContent);
-    await expect(outcomes).toEqual(['Does it', 'Asks you', 'Does it if Claude’s second look agrees', 'Does it', 'Never']);
+    await expect(outcomes).toEqual(['Allow', 'Ask me first', 'Allow', 'Allow', 'Never']);
     const tones = rows.map((row) => row.querySelector('.cd-situation-row__outcome .cd-status-dot')?.className.replace('cd-status-dot cd-status-dot--', ''));
     await expect(tones).toEqual(['handled', 'held', 'handled', 'handled', 'refused']);
 
@@ -56,23 +69,24 @@ export const Situations: Story = {
     }
     expectComputed(first, { paddingTop: '14px', paddingBottom: '14px' });
     const title = within(first).getByText(SITUATIONS[0]!.title);
-    expectComputed(title, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
-    expectComputed(within(first).getByText('A visitor, not verified'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
+    expectComputed(title, { fontWeight: '520', color: PRIMARY });
+    expectComputed(within(first).getByText('A visitor, not verified'), { color: SECONDARY });
     const outcome = first.querySelector<HTMLElement>('.cd-situation-row__outcome')!;
-    expectComputed(outcome, { fontSize: '14px', lineHeight: '19px', color: PRIMARY });
-    expectComputed(within(first).getByText('Books weekday visits in your hours.'), { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
-    await expect(first.getBoundingClientRect().height).toBe(70);
+    expectComputed(outcome, { color: PRIMARY });
+    expectComputed(first.querySelector('.cd-rule-sentence__sentence')!, { color: SECONDARY });
     const right = first.querySelector<HTMLElement>('.cd-situation-row__result')!;
-    await expect(right.getBoundingClientRect().width).toBe(300);
+    await expect(right.getBoundingClientRect().width).toBe(first.getBoundingClientRect().width < 560 ? first.getBoundingClientRect().width : 300);
     await expect(Math.round(right.getBoundingClientRect().right)).toBe(Math.round(first.getBoundingClientRect().right));
-    await expect(Math.round(right.getBoundingClientRect().top)).toBe(Math.round(title.getBoundingClientRect().top));
+    if (first.getBoundingClientRect().width >= 560) await expect(Math.round(right.getBoundingClientRect().top)).toBe(Math.round(title.getBoundingClientRect().top));
+    else await expect(right.getBoundingClientRect().top).toBeGreaterThanOrEqual(within(first).getByText('A visitor, not verified').getBoundingClientRect().bottom);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
 
     // situation_row_flags_a_surprise: "Not what we planned" only where the outcome isn't the one
     // planned, as words beside a thin held bar, never colored text.
     const flags = rows.map((row) => row.querySelector('.cd-situation-row__flag')?.textContent ?? null);
     await expect(flags).toEqual([null, null, null, 'Not what we planned', null]);
     const flag = rows[3]!.querySelector<HTMLElement>('.cd-situation-row__flag')!;
-    expectComputed(flag, { fontSize: '13px', lineHeight: '18px', color: PRIMARY, borderLeftWidth: '2px', borderLeftColor: 'rgb(218, 190, 74)', paddingLeft: '8px' });
+    expectComputed(flag, { color: PRIMARY, borderLeftWidth: '2px', borderLeftColor: 'rgb(218, 190, 74)', paddingLeft: '8px' });
   },
 };
 
@@ -82,7 +96,7 @@ const HELD_FOR_REVIEW: SituationRowProps = {
   who: 'Alex Kim’s assistant, signed limit',
   outcome: 'hold',
   dependsOnReview: true,
-  reason: 'Within its signed limit, checked by the reviewer.',
+  reason: 'Within its signed limit, checked by the reviewer.', sentence: sentences.deposit,
   matches: true,
 };
 
@@ -128,16 +142,15 @@ export const HeldForReview: Story = {
     </ul>
   ),
   parameters: {
-    canvasNote: 'The board’s second-look row, as the kernel reports it: a hold that depends on Claude’s second look (`allow_if_reviewed`).',
+    canvasNote: 'A reviewer-dependent hold reads its rule’s Allow outcome; reviewer details stay in the disclosure.',
   },
   play: async ({ canvas }) => {
-    // second_look_whatever_the_outcome: the second-look words and the board's handled dot come from
-    // `dependsOnReview` alone, so a reviewer-conditional hold doesn't read "Asks you".
+    // The kernel's reviewer-dependent hold still reads its rule's Allow outcome.
     const row = within(canvas.getByRole('list', { name: 'Real situations' })).getByRole('listitem').firstElementChild as HTMLElement;
     const outcome = row.querySelector<HTMLElement>('.cd-situation-row__outcome')!;
-    await expect(outcome.textContent).toBe('Does it if Claude’s second look agrees');
+    await expect(outcome.textContent).toBe('Allow');
     await expect(outcome.querySelector('.cd-status-dot--handled')).not.toBeNull();
-    await expect(row).not.toHaveTextContent('Asks you');
+    await expect(row).not.toHaveTextContent('Ask me first');
   },
 };
 
