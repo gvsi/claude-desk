@@ -5,6 +5,7 @@
  * from this reader, throws a `MarkdownError` naming its line, so a document the page can't show as written
  * fails its tests instead of reaching the page.
  */
+import { slug } from './anchors.ts';
 import { minutesToRead, wordCount } from './readTime.ts';
 
 /** Text inside a block. */
@@ -87,11 +88,6 @@ const OUTSIDE: [RegExp, string][] = [
 
 function outside(line: string): string | undefined {
   return OUTSIDE.find(([pattern]) => pattern.test(line))?.[1];
-}
-
-/** A heading's anchor: lower case, apostrophes dropped, everything else but letters and digits a hyphen. */
-function slug(text: string): string {
-  return text.toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'section';
 }
 
 /** Reads one block's text, `source` holding its lines joined by newlines and starting on line `firstLine`. */

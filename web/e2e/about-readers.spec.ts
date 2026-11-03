@@ -314,6 +314,48 @@ test('back_from_a_contents_link_returns_to_the_readers_place', async ({ page }) 
   }
 });
 
+test('vision_contents_links_move_to_their_section_and_back_returns', async ({ page }) => {
+  // The Vision article lists its sections under "On this page" as the reading pages do: beside the article at a
+  // laptop's width, folded at the top on a phone. Part way down, the reader follows "What stays the same": the page
+  // moves there and the address names it. Back returns to where they were, and Forward to the section.
+  const atSection = () =>
+    page.evaluate(() => {
+      const section = document.getElementById('what-stays-the-same');
+      if (!section) return false;
+      return Math.abs(section.getBoundingClientRect().top - parseFloat(getComputedStyle(section).scrollMarginTop)) <= 1;
+    });
+  for (const [size, viewport] of Object.entries(VIEWPORTS)) {
+    await page.setViewportSize(viewport);
+    await page.goto('/about/vision');
+    await expect(title(page, 'A front desk that never closes'), size).toBeVisible(FIRST_DRAW);
+    await expect.poll(() => page.evaluate(() => document.fonts.status), `${size}: the type has loaded`).toBe('loaded');
+    await scrollWindow(page, 1800);
+    const before = await settledScrollY(page);
+
+    const contents = page.getByRole('navigation', { name: 'On this page' });
+    if (size === 'phone') {
+      // Folded into one row, which opens. Opening it at the top of the article brings it into view.
+      await contents.getByText('On this page', { exact: false }).click();
+    }
+    const link = contents.getByRole('link', { name: 'What stays the same', exact: true });
+    await expect(link, size).toBeVisible();
+    const from = size === 'phone' ? await settledScrollY(page) : before;
+    // Clicked where it is: Playwright's own click may scroll the pinned list's link into view first.
+    await link.evaluate((el: HTMLElement) => el.click());
+    await page.waitForURL('**/about/vision#what-stays-the-same');
+    await expect.poll(atSection, `${size}: followed`).toBe(true);
+    await expect(page.locator('#what-stays-the-same'), `${size}: focus on the section`).toBeFocused();
+    if (size === 'desktop') await expect(link).toHaveAttribute('aria-current', 'location');
+
+    await page.goBack();
+    await page.waitForURL((url) => url.pathname === '/about/vision' && url.hash === '');
+    await expectBackAt(page, from, `${size}: back`);
+    await page.goForward();
+    await page.waitForURL('**/about/vision#what-stays-the-same');
+    await expect.poll(atSection, `${size}: forward`).toBe(true);
+  }
+});
+
 test('back_before_the_type_loads_keeps_the_readers_place', async ({ page }) => {
   // The reading type's font files are held back, so the type is still loading when the reader follows "Why the limits stay in code"
   // and presses Back. Once it loads, the window stays where Back put it rather than going back to the section.

@@ -8,14 +8,18 @@
  * cover band under the headline peeks at the same four screens and is decoration only, as are their tops on the
  * picture cards that end the article, each a link to its idea's vision page. As one of the About set, it carries
  * the set's top bar (`AboutBar`), the same as the reading pages', and "Read next" at its end. The page is static:
- * its words come from `text.ts`, nothing on it moves, and it makes no request.
+ * its words come from `text.ts` and it makes no request. Like the reading pages, it lists its sections under "On this
+ * page" (`Contents.tsx`): beside the article at a laptop's width, pinned and marking the section being read, and
+ * folded into one row above the article's first words on a phone.
  */
 import { Fragment, useContext, useId, useLayoutEffect, useRef } from 'react';
 import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
 import { ConceptFooter, Icon } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { AboutBar } from '../AboutBar.tsx';
+import { AboutBar, useAboutNarrow } from '../AboutBar.tsx';
+import { slug } from '../anchors.ts';
+import { FoldedContents, SideContents, type ContentsSection } from '../Contents.tsx';
 import { readNext } from '../links.ts';
 import { useNoIndex } from '../useNoIndex.ts';
 import { usePagePlace } from '../usePagePlace.ts';
@@ -185,11 +189,25 @@ function ArticleFigure({ figure }: { figure: Figure }) {
   );
 }
 
-/** A section's text: its heading, then its paragraphs and the pull quote where it falls. */
+/** The anchor of the picture cards' section, which a vision page's way back names too (`VISION_BACK_HREF`). */
+const CARDS_ANCHOR = 'vision-pages';
+
+/** The article's sections, as "On this page" lists them: each section by its heading, then the picture cards. */
+const CONTENTS: ContentsSection[] = [
+  ...SECTIONS.map(({ heading }) => ({ id: slug(heading), text: heading })),
+  { id: CARDS_ANCHOR, text: PICTURE_CARDS.heading },
+];
+
+/**
+ * A section's text: its heading, then its paragraphs and the pull quote where it falls. The heading carries the
+ * section's anchor, and takes focus from the contents list's link to it, not by Tab.
+ */
 function SectionText({ heading, passages }: Pick<Section, 'heading' | 'passages'>) {
   return (
     <div className="va-body">
-      <h2 className="va-h2">{heading}</h2>
+      <h2 className="va-h2" id={slug(heading)} tabIndex={-1}>
+        {heading}
+      </h2>
       {passages.map((passage) =>
         typeof passage === 'string' ? (
           <p key={passage} className="va-p">
@@ -217,7 +235,7 @@ function PictureCards() {
   const navigationType = useNavigationType();
   useLayoutEffect(() => {
     const href = navigationType === 'POP' ? openedVisionCard(navigator, key)
-      : hash === '#vision-pages' ? state?.visionCard : undefined;
+      : hash === `#${CARDS_ANCHOR}` ? state?.visionCard : undefined;
     forgetVisionCardFocus(navigator, key);
     const opener = Array.from(cardsRef.current?.querySelectorAll<HTMLAnchorElement>('a.va-card') ?? []).find((link) => link.getAttribute('href') === href);
     // The article restores its scroll separately; focus must leave that place alone.
@@ -225,7 +243,8 @@ function PictureCards() {
   }, [navigator, key, hash, state, navigationType]);
   const { heading, lead, cards } = PICTURE_CARDS;
   return (
-    <section ref={cardsRef} id="vision-pages" className="va-body va-cards" aria-labelledby={headingId}>
+    // Focusable from the contents list's link to it, as a section heading is.
+    <section ref={cardsRef} id={CARDS_ANCHOR} className="va-body va-cards" aria-labelledby={headingId} tabIndex={-1}>
       <h2 className="va-h2" id={headingId}>
         {heading}
       </h2>
@@ -276,6 +295,7 @@ export function VisionArticle() {
   useDocumentTitle(inApp(ARTICLE.kicker));
   useNoIndex();
   usePagePlace('vision');
+  const compact = useAboutNarrow();
 
   // The About set's paper, with the app's tokens pointed at it for the set's top bar, which the reading pages share;
   // the article's own rules draw in the palette itself.
@@ -301,20 +321,32 @@ export function VisionArticle() {
               ))}
             </div>
           </div>
-          <div className="va-body va-body--intro">
-            {ARTICLE.intro.map((paragraph) => (
-              <p key={paragraph} className="va-p">
-                {paragraph}
-              </p>
+          {/* From the article's first words to its end: the contents list, then the reading. */}
+          <div className={`va-reading${compact ? '' : ' va-reading--side'}`}>
+            {compact ? (
+              <div className="va-body va-fold">
+                <FoldedContents sections={CONTENTS} />
+              </div>
+            ) : (
+              <div className="va-side">
+                <SideContents sections={CONTENTS} />
+              </div>
+            )}
+            <div className="va-body va-body--intro">
+              {ARTICLE.intro.map((paragraph) => (
+                <p key={paragraph} className="va-p">
+                  {paragraph}
+                </p>
+              ))}
+            </div>
+            {SECTIONS.map(({ heading, passages, figure }) => (
+              <Fragment key={heading}>
+                <SectionText heading={heading} passages={passages} />
+                {figure ? <ArticleFigure figure={figure} /> : null}
+              </Fragment>
             ))}
+            <PictureCards />
           </div>
-          {SECTIONS.map(({ heading, passages, figure }) => (
-            <Fragment key={heading}>
-              <SectionText heading={heading} passages={passages} />
-              {figure ? <ArticleFigure figure={figure} /> : null}
-            </Fragment>
-          ))}
-          <PictureCards />
         </article>
       </main>
       <footer className="va-end">

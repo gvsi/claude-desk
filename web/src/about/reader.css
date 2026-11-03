@@ -942,76 +942,6 @@
   padding-top: calc(var(--space-40) * 2);
 }
 
-.cd-about-page .cd-about-side-label {
-  margin: 0 0 var(--space-14);
-  font-weight: 520;
-  color: var(--text-secondary);
-}
-
-.cd-about-contents {
-  position: sticky;
-  top: calc(var(--about-top) + var(--space-24));
-  align-self: start;
-  width: var(--size-article-side);
-}
-
-.cd-about-contents__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-bottom: 1px solid var(--line-hairline);
-}
-
-.cd-about-contents__list li {
-  border-top: 1px solid var(--line-hairline);
-}
-
-.cd-about-contents__link {
-  display: flex;
-  gap: var(--space-14);
-  /* Give the inset edge room beside the numbers without moving the contents at rest. */
-  padding: var(--space-10) var(--space-8);
-  margin-inline: calc(-1 * var(--space-8));
-  color: var(--text-primary);
-  text-decoration: none;
-}
-
-/* Beside the article, the list marks the section being read (ReaderPage's SideContents): its words in
-   text-primary, the others' in text-secondary, and a 2 px bar in text-primary beside its words, in the gutter.
-   The bar is one element, moved to the current row; it slides there in motion-base, and moves at once under
-   reduced motion. The folded list on a phone marks nothing. */
-.cd-about-contents--side .cd-about-contents__link {
-  color: var(--text-secondary);
-}
-
-.cd-about-contents--side .cd-about-contents__link[aria-current='location'] {
-  color: var(--text-primary);
-}
-
-.cd-about-contents .cd-about-contents__link:hover {
-  color: var(--accent-blue);
-}
-
-.cd-about-contents__bar {
-  position: absolute;
-  top: 0;
-  left: calc(var(--space-12) * -1);
-  width: var(--space-2);
-  border-radius: var(--radius-full);
-  background: var(--text-primary);
-  transition:
-    transform var(--motion-base) var(--motion-ease-emphasis),
-    height var(--motion-base) var(--motion-ease-emphasis);
-}
-
-.cd-about-page .cd-about-contents__number {
-  flex: none;
-  width: var(--space-20);
-  font-family: var(--font-mono);
-  line-height: var(--space-20);
-  color: var(--text-secondary);
-}
-
 .cd-about-meta {
   align-self: start;
   justify-self: end;
@@ -1215,7 +1145,8 @@
   border-color: var(--line-control-hover);
 }
 
-.cd-about-page .cd-about-next__label {
+/* Over the side label's own margin (contents.css), whichever stylesheet loads first. */
+.cd-about-page .cd-about-next .cd-about-next__label {
   margin: 0;
 }
 
@@ -1289,47 +1220,6 @@
   display: block;
   max-width: calc(var(--size-article-measure) + 2 * var(--about-gutter));
   padding-top: calc(var(--space-40));
-}
-
-.cd-about-contents--compact {
-  position: static;
-  width: auto;
-  border-top: 1px solid var(--line-hairline);
-  border-bottom: 1px solid var(--line-hairline);
-}
-
-.cd-about-page .cd-about-contents__row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-10);
-  min-height: calc(var(--space-24) * 2);
-  font-weight: 520;
-  color: var(--text-primary);
-  list-style: none;
-  cursor: pointer;
-}
-
-.cd-about-contents__row::-webkit-details-marker {
-  display: none;
-}
-
-.cd-about-contents__count {
-  margin-left: auto;
-  font-weight: 400;
-  color: var(--text-secondary);
-}
-
-.cd-about-contents__chevron {
-  flex: none;
-  color: var(--text-secondary);
-}
-
-.cd-about-contents__fold[open] .cd-about-contents__chevron {
-  transform: rotate(180deg);
-}
-
-.cd-about-contents--compact .cd-about-contents__list {
-  border-bottom: 0;
 }
 
 .cd-about-page--compact .cd-about-article {
