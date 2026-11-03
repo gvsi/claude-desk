@@ -105,7 +105,7 @@ const turnBackOnRefund: ChangeRowView[] = [
 
 const BOOK_REASON = 'Books a visit in your open times.';
 
-/** Book a visit moved from Ask me first to Automatic: only the outcome changed. */
+/** Book a visit moved from Ask me first to Allow: only the outcome changed. */
 const bookAutomatically: ChangeRowView[] = [
   {
     key: 'rv-book',
@@ -236,7 +236,7 @@ export const OutcomeChanged: Story = {
     const after = canvas.getByRole('group', { name: 'After' });
     // changed_outcome_is_strong: the after side's outcome is in weight 520 and says "Changed"; the
     // before side's, and the lines that didn't change, stay at their own weight.
-    expectComputed(within(after).getByText('Automatic'), { fontWeight: '520' });
+    expectComputed(within(after).getByText('Allow'), { fontWeight: '520' });
     expectComputed(within(before).getByText('Ask me first'), { fontWeight: '380' });
     expectComputed(within(after).getByText(BOOK_REASON, { exact: false }), { fontWeight: '380' });
     await expect(within(after).getAllByText('Changed')).toHaveLength(1);
@@ -261,7 +261,7 @@ export const AddAndRemove: Story = {
     // A removed row shows the rule it removes.
     await expect(removed).toHaveTextContent(saturday.reason);
     await expect(removed).toHaveTextContent('Anyone · Saturdays, 9:00 am to 1:00 pm · Checked by the reviewer');
-    await expect(within(removed as HTMLElement).getByText('Automatic')).toBeVisible();
+    await expect(within(removed as HTMLElement).getByText('Allow')).toBeVisible();
   },
 };
 
@@ -466,8 +466,8 @@ export const WidenScope: Story = {
     // Only the target changed: the words, reason and outcome aren't tagged, and nothing on the before side is.
     await expect(within(after).getAllByText('Changed')).toHaveLength(1);
     await expect(within(before).queryByText('Changed')).toBeNull();
-    await expect(before).toHaveTextContent('Automatic up to $300; over $300, ask me first');
-    await expect(after).toHaveTextContent('Automatic up to $300; over $300, ask me first');
+    await expect(before).toHaveTextContent('Allow');
+    await expect(after).toHaveTextContent('Allow');
   },
 };
 
@@ -595,9 +595,8 @@ export const NarrowMaxLimit: Story = {
   play: async ({ canvas, canvasElement }) => {
     const width = window.innerWidth;
     await expect(width).toBe(320);
-    // Every limit phrase wraps on its line, and nothing scrolls sideways.
-    const phrases = canvas.getAllByText('Automatic up to $10,000; over $10,000, ask me first');
-    await expect(phrases).toHaveLength(2);
+    // Each side's outcome is its word alone, and nothing scrolls sideways.
+    await expect(canvas.getAllByText('Allow').length).toBeGreaterThan(0);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
@@ -645,7 +644,7 @@ export const AskMeFirst: Story = {
     for (const row of rows) {
       await expect(within(row).getByRole('group', { name: 'After' })).toHaveTextContent('Not covered by a rule you set, so I ask you.');
     }
-    // preset_review_tags_only_new_outcomes: Quote's outcome turns from Automatic to Ask me first,
+    // preset_review_tags_only_new_outcomes: Quote's outcome turns from Allow to Ask me first,
     // so "Changed" sits beside it; Refund already asks, so its outcome has none.
     const quote = afterSide(rows, 0);
     const quoteOutcome = quote.querySelector<HTMLElement>('.cd-change-review__side-outcome');
@@ -658,7 +657,7 @@ export const AskMeFirst: Story = {
     await expect(within(refund).queryByText('Changed')).toBeNull();
     // An auto rule with an amount limit reads its limit before it goes.
     await expect(within(rows[5] as HTMLElement).getByRole('group', { name: 'Before' })).toHaveTextContent(
-      'Automatic up to $300; over $300, ask me first',
+      'Allow',
     );
     // A built-in connector is named alone; a mock one is never named without "Mock".
     await expect(rows[0]?.querySelector('.cd-change-review__meta')).toHaveTextContent(/^Quotes$/);
@@ -676,7 +675,7 @@ export const AskMeFirst: Story = {
     // personal_rules_are_listed: a rule for one person goes too, and its row names her.
     const personal = rows[3] as HTMLElement;
     await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Dana Whitfield');
-    await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Automatic');
+    await expect(within(personal).getByRole('group', { name: 'Before' })).toHaveTextContent('Allow');
     await expect(afterSide(rows, 3)).toHaveTextContent('Ask me first');
     await expect(tags(personal)).toEqual(['Changed']);
     // cancel_line_only_when_asked: a preset can cancel open payment links, so the screen asks for
@@ -728,7 +727,7 @@ export const PersonalRuleReplaced: Story = {
     const before = within(row as HTMLElement).getByRole('group', { name: 'Before' });
     await expect(before).toHaveTextContent('Dana Whitfield, verified · Up to $50');
     await expect(before).toHaveTextContent(DANA_REASON);
-    await expect(within(before).getByText('Automatic up to $50; over $50, ask me first')).toBeVisible();
+    await expect(within(before).getByText('Allow')).toBeVisible();
     expectComputed(before, { borderLeftColor: 'rgb(220, 130, 144)' });
     await expect(tags(row?.parentElement as HTMLElement)).toEqual(['Removed']);
   },
@@ -768,11 +767,11 @@ export const RecommendedRules: Story = {
     for (const item of [saturday, dana] as HTMLElement[]) await expect(side(item, 'Before')).not.toHaveTextContent('Weekdays, 8:00 am to 6:00 pm');
     // uncovered_scopes_ask: no card of the preset covers Saturday mornings, Dana's any-time rule or
     // seeing charges, so each falls to the default ask, its new outcome tagged; none of them reads
-    // "Automatic" after.
+    // "Allow" after.
     for (const item of [saturday, dana, charges] as HTMLElement[]) {
       await expect(side(item, 'After')).toHaveTextContent(DEFAULT_ASK);
       await expect(outcome(item)).toHaveTextContent('Ask me firstChanged');
-      await expect(side(item, 'After')).not.toHaveTextContent('Automatic');
+      await expect(side(item, 'After')).not.toHaveTextContent('Allow');
     }
     await expect(side(dana as HTMLElement, 'Before')).toHaveTextContent('Dana Whitfield');
     // replaced_rules_show_the_preset_rule: payment links and signed-limit charges go to the

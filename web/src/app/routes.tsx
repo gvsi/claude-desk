@@ -11,7 +11,6 @@ import { NotificationsPage } from '../owner/notifications/NotificationsPage.tsx'
 import { OwnerLayout } from '../owner/OwnerLayout.tsx';
 import { PeoplePage } from '../owner/people/PeoplePage.tsx';
 import { PersonDetail } from '../owner/people/PersonDetail.tsx';
-import { HouseRules } from '../owner/rules/HouseRules.tsx';
 import { RuleDraftPage } from '../owner/rules/RuleDraftReview.tsx';
 import { RulesPage } from '../owner/rules/RulesPage.tsx';
 import { SafetyPage } from '../owner/safety/SafetyPage.tsx';
@@ -98,9 +97,10 @@ export const routes: RouteObject[] = [
       { path: 'people', element: <PeoplePage /> },
       { path: 'people/:personId', element: <PersonDetail /> },
       { path: 'share', element: <SharePage /> },
-      // The Desk's outcomes by connector, with Ask Claude, the presets and the payment limit, and every rule.
+      // The Desk's rules, tool by tool, with Ask Claude, the presets and the payment limit.
       { path: 'rules', element: <RulesPage /> },
-      { path: 'rules/all', element: <HouseRules /> },
+      // Every rule is on Rules now: old links to All rules open it, without leaving All rules in history.
+      { path: 'rules/all', element: <Navigate to="../rules" replace /> },
       // A card draft's review, from router state or read again by its version after a reload.
       { path: 'rules/drafts/:version', element: <RuleDraftPage /> },
       // Settings opens on its first section. A path under it that names no section (Integrations,

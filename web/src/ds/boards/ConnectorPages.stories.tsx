@@ -122,7 +122,7 @@ export const Payments: Story = {
       await expect(sharedLine).toBeVisible();
       await expectSharedTitles(rows[0] as HTMLElement);
     }
-    await expect(within(link).getByRole('button', { name: /^Automatic up to \$300; over \$300, ask me first\. Change the outcome of: / })).toBeVisible();
+    await expect(within(link).getByRole('button', { name: `Allow. Change the outcome of: ${rivera.ruleCards['rv-link'].reason}` })).toBeVisible();
     // The turn-off panel: its heading, its line and the button that asks first.
     const off = canvas.getByRole('button', { name: 'Turn off Payments' });
     expectComputed(off, SPEC.secondaryMain);
@@ -338,7 +338,7 @@ export const Quote: Story = {
     await expect(within(page.main).queryByText(/Definition/)).toBeNull();
     await expect(within(page.main).getByText('Built in')).toBeVisible();
     const [menu] = expectOutcomeMenus(page.main);
-    await expect(menu).toHaveAccessibleName('Automatic. Change the outcome of: Quotes from your price list, at list price.');
+    await expect(menu).toHaveAccessibleName('Allow. Change the outcome of: Quotes from your price list, at list price.');
     const rows = within(page.main).getAllByRole('link', { name: /asked/ });
     await expect(rows).toHaveLength(rivera.recentRequests.quote.length);
     await expectTabOrder(

@@ -957,5 +957,5 @@ it('draft_lands_when_the_people_read_fails', async () => {
   expect(mockStore.requests.filter((r) => r.key === 'people')).toHaveLength(2);
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   expect(document.querySelector('[aria-busy]')).toBeNull();
-  expect(screen.getByRole('heading', { level: 2, name: 'Does on its own' }).elements()).toHaveLength(1);
+  expect(screen.getByRole('heading', { level: 2, name: 'Allow' }).elements()).toHaveLength(1);
 });

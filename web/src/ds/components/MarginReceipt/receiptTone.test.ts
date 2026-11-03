@@ -17,7 +17,7 @@ import { OWNER_REASON_STATES, OWNER_STATE_WORDS, receiptFromEvent, receiptLine, 
 const EXPECTED_WORDS: Record<OwnerReasonState, string> = {
   held: 'Held for you',
   refused: 'Stopped',
-  executed: 'Automatic',
+  executed: 'Allowed',
   allowed: 'Running',
 };
 
@@ -87,7 +87,7 @@ describe('receiptLine', () => {
 
   it('reason_on_a_later_state_keeps_plain', () => {
     // reason_plain is written once, at decide time, so it explains only the receipt that reports
-    // what the kernel decided. On any later state ("Automatic" for a hold the owner later allowed)
+    // what the kernel decided. On any later state ("Allowed" for a hold the owner later allowed)
     // it would say something false, so the line stays the kernel's.
     const later = ['approved', 'denied', 'expired', 'cancelled', 'failed', 'unknown', 'refused_at_execution'] as const;
     expect([...later, 'held', 'refused', 'executed', 'allowed'].sort()).toEqual([...DECISION_STATES].sort());

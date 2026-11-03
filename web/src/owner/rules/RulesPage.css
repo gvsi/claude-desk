@@ -1,8 +1,9 @@
-/* RulesPage (N-Conn-17-Presets, N-Conn-22-Phone-Presets): the header with "See all rules" before
-   "Start from a preset" at the right of the title's line, 4 px under its top; the owner composer
-   20 px under it and its suggestions 10 px under the box; the Desk's connectors 20 px under them;
-   then the always-on rules. On a phone the parts are 16 px apart, the composer is drawn alone (no helper, no
-   suggestions), and both header actions share a line under the title. */
+/* RulesPage (REV-RULES-D, A): the header with "Start from a preset" at the right of the title's
+   line, 4 px under its top; the owner composer 20 px under it and its suggestions 10 px under the
+   box; then "Across your Desk" and "Tool by tool", 32 px apart, each a section header 12 px over its
+   cards. On a phone the parts are 16 px apart, the composer is drawn alone (no helper, no
+   suggestions), and the preset menu takes its own line under the title. The rule rows' own styles
+   are in HouseRules.css. */
 
 .cd-rules {
   display: flex;
@@ -14,16 +15,6 @@
 .cd-rules__header .cd-page-header__actions {
   gap: var(--space-16);
   padding-top: var(--space-4);
-}
-
-.cd-rules__header .cd-page-header__actions > .cd-type-control {
-  flex: 0 0 auto;
-}
-
-.cd-rules__header .cd-text-link {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--size-control-main);
 }
 
 /* The title and subtitle ask for a third of a reading measure beside the actions, so
@@ -61,22 +52,40 @@
   min-width: 0;
 }
 
-.cd-rules__suggestion-text,
-.cd-rules__all {
+.cd-rules__suggestion-text {
   margin: 0;
   overflow-wrap: anywhere;
 }
 
-/* Always on, then "Open Safety" 12 px under its rules, where every attempt is shown. */
-.cd-rules__always-on {
-  display: flex;
-  flex-direction: column;
+/* Each section: its header 12 px over its cards; the next section 32 px under it. */
+.cd-rules__section {
   min-width: 0;
 }
 
-.cd-rules__safety {
-  margin: var(--space-12) 0 0;
+.cd-rules__section + .cd-rules__section {
+  margin-top: var(--space-12);
+}
+
+.cd-rules__section > .cd-section-header {
+  margin-bottom: var(--space-12);
+}
+
+.cd-rules__tool-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  min-width: 0;
+}
+
+.cd-rules__version {
+  margin: var(--space-16) 0 0;
+  color: var(--text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* The payment limit's field, under its sentence while it is open. */
+.cd-rules__cap-field:not(:empty) {
+  margin-top: var(--space-12);
 }
 
 @media (max-width: 639.98px) {
@@ -114,19 +123,6 @@
   flex: none;
   min-width: 0;
 }
-.cd-rules-skeleton__rule {
-  flex: 1;
-  min-width: 0;
-}
-.cd-rules-skeleton__summary {
-  max-width: min(280px, 100%);
-}
-/* On a phone's card the summary takes the row's width, as the landed one does there. */
-@container cd-connector-section (max-width: 639.98px) {
-  .cd-rules-skeleton__summary {
-    max-width: 100%;
-  }
-}
 .cd-rules__header .cd-preset-menu > .cd-rules-skeleton__control {
   flex: 1;
 }
@@ -142,4 +138,43 @@
 
 .cd-rules-skeleton__suffix {
   display: inline-block;
+}
+
+/* Details' place in the shapes: the button's word as content, so it is the button's width with no text of its own. */
+.cd-rules-skeleton__details::before {
+  content: 'Details';
+}
+
+/* The body's shapes, at the page's own gaps. */
+.cd-rules-skeleton__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+  min-width: 0;
+}
+
+@media (max-width: 639.98px) {
+  .cd-rules-skeleton__body {
+    gap: var(--space-16);
+  }
+}
+
+/* A control's or label's shape: its words drawn unseen from their attribute, the shape over them at their size. */
+.cd-rules-skeleton__words-box {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.cd-rules-skeleton__words {
+  visibility: hidden;
+}
+
+.cd-rules-skeleton__words::after {
+  content: attr(data-words);
+}
+
+.cd-rules-skeleton__over {
+  position: absolute;
+  inset: 0;
 }

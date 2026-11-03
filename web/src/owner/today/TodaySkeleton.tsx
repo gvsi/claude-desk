@@ -5,6 +5,7 @@ import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { givenOwnerName } from '../../public/brand.ts';
+import { HeldRuleShape } from '../approvals/HeldRuleShape.tsx';
 import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
@@ -34,7 +35,8 @@ const DETAILS = [
   TODAY_COPY.chatDetail,
   DEMO_VISITOR_THING.detail,
   TODAY_COPY.breakDetail,
-  // The seed's hold went past an automatic rule's limit, so no rule is named (`owner_reads._held_by`).
+  // The seed's hold went past an automatic rule's limit, so Things to try names no rule
+  // (`owner_reads._held_by`); its card's "Your rule" box names that rule (`HeldRuleShape`).
   TODAY_COPY.waiting,
   TODAY_COPY.createDetail,
 ] as const;
@@ -368,7 +370,8 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
       <div className="cd-section-header__title">
         <Skeleton shape="line" text="section" width={135} anchor={anchor} />
       </div>
-      {caption ? <Skeleton shape="line" text="caption" width={145} /> : null}
+      {/* The caption is in meta type (`SectionHeader`), and on a phone it drops under the title, where its line height counts. */}
+      {caption ? <Skeleton shape="line" text="meta" width={145} /> : null}
     </div>
   );
 }
@@ -451,6 +454,7 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
             <ApprovalTop />
             <TextLines words={rivera.decisions.held.reason_plain} text="summary" className="cd-approval-card__reason" lastWidth="var(--cd-today-approval-last-width)" />
             <TextLines words={`From the visitor: “${rivera.conversations.visitor.turns.find((turn) => turn.kind === 'visitor')?.text ?? ''}”`} className="cd-approval-card__context" />
+            <HeldRuleShape />
             <div className="cd-approval-card__answers">
               <ApprovalAnswers />
             </div>

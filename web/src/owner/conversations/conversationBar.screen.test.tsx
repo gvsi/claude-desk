@@ -19,7 +19,7 @@ import { mockStore } from '../../mocks/store.ts';
 import type { SessionRecord } from '../../mocks/world.ts';
 import { holdReads } from '../../test/holdReads.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, nextFrames, tokenColor } from '../../test/screen.ts';
+import { conversationAtTop, expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, nextFrames, tokenColor } from '../../test/screen.ts';
 import { SKELETON_TOLERANCE_PX } from '../../test/skeleton.ts';
 import { DEMO_VISITOR_NOTE, DEMO_VISITOR_PILL, TRANSCRIPT_NOTE } from './copy.ts';
 import { CHANGED_WHILE_ACTING } from './useTakeOver.ts';
@@ -287,6 +287,7 @@ describe('the open conversation bar', () => {
     expect(rect(bar).bottom - 1 - rect(latest).bottom).toBeCloseTo(8, 0);
     expect(Math.min(rect(name).top, rect(takeOver).top) - rect(bar).top).toBeCloseTo(8, 0);
     expectNoHorizontalScroll();
+    await conversationAtTop();
     await expectScreenBasics(screen.container, { owner: true });
   });
 
@@ -494,21 +495,25 @@ describe('the open conversation bar', () => {
   });
 
   // After Take over, the seeded held request's card fits whole in the transcript's own region, or
-  // the open conversation scrolls as one under its bar: never a region too short for the card.
+  // the open conversation scrolls as one under its bar: never a region too short for the card. The
+  // card names its rule in a "Your rule" box, so the column scrolls as one up to a taller window.
   it.each([
     [320, 920, true],
-    [320, 940, true],
-    [320, 1000, false],
+    [320, 1040, true],
+    [320, 1160, false],
     [390, 780, true],
-    [390, 860, true],
     [390, 890, true],
-    [390, 920, false],
+    [390, 990, false],
     [430, 858, true],
-    [430, 890, false],
-    [1024, 700, true],
-    [1024, 740, false],
+    [430, 980, false],
+    [1024, 740, true],
+    [1024, 830, false],
+    // The desktop's concept footer lives in the sidebar, so at 1280 x 700 the pane is tall enough for
+    // the transcript's own region; a little shorter, it still scrolls as one.
+    [1280, 660, true],
+    [1280, 700, false],
     [1440, 650, true],
-    [1440, 740, false],
+    [1440, 760, false],
     [1440, 900, false],
   ] as const)('a_held_card_fits_after_take_over_at_%sx%s', async (width, height, wholeColumn) => {
     const { screen } = await renderRoute(conversation(SEEDED_HOLD), { viewport: { width, height } });
@@ -517,6 +522,8 @@ describe('the open conversation bar', () => {
     await screen.getByRole('button', { name: 'Take over' }).click();
     await expect.element(screen.getByRole('textbox', { name: 'Write to them' })).toBeVisible();
     await expect.poll(() => document.querySelector('.cd-conversation-pane .cd-skeleton-screen__layer')).toBeNull();
+    // Take over's own scroll to the owner's controls comes once it settles, so it lands before the card is scrolled to.
+    await expect.poll(() => landed('.cd-take-over').getAttribute('aria-busy')).toBeNull();
     const region = card.element().closest<HTMLElement>('.cd-conversation__scroll')!;
     const pane = region.closest<HTMLElement>('.cd-conversations__open')!;
     // Exactly one region moves the conversation. If the transcript has its own box, a whole held
@@ -602,6 +609,7 @@ describe("a demo visitor's chat in the bar", () => {
       expect(rect(latest).top).toBeGreaterThanOrEqual(rect(demo).bottom);
     }
     expectNoHorizontalScroll();
+    await conversationAtTop();
     await expectScreenBasics(screen.container, { owner: true });
   });
 

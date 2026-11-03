@@ -432,8 +432,28 @@ afterEach(() => {
 });
 
 describe('Today', () => {
+  it('request_opens_the_conversation_and_back_restores_todays_scroll', async () => {
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const things = region(screen, 'Things to try');
+    const link = things.getByRole('link', { name: 'Open the request', exact: true });
+    const path = `${DESK}/conversations/${held.session_id}`;
+    await expect.element(link).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
+    const column = document.querySelector('main')!;
+    column.scrollTop = 150;
+    await nextFrames();
+    const top = column.scrollTop;
+    expect(top).toBeGreaterThan(0);
+    await link.click();
+    expect(router.state.location.pathname).toBe(path);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(things).toBeVisible();
+    await vi.waitFor(() => expect(column.scrollTop).toBe(top));
+  });
+
   it('sections_show_in_order', async () => {
-    const { screen } = await renderRoute(TODAY);
+    const { screen, router } = await renderRoute(TODAY);
     const needs = region(screen, 'Needs you');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(region(screen, 'Live now')).toBeVisible();
@@ -446,8 +466,8 @@ describe('Today', () => {
       .filter((text) => ['Needs you', 'Live now', 'Since last night'].includes(text ?? ''));
     expect(order).toEqual(['Needs you', 'Live now', 'Since last night']);
 
-    // One held request, with what was asked. It went past an automatic rule's limit, so there is
-    // no "Held by your rule" line. The mock keeps the fixture's headline, which doesn't quote it.
+    // One held request, with what was asked. It went past an automatic rule's limit: its "Your
+    // rule" box names that rule (held_card_shows_the_rule_that_held_it), never "Held by your rule".
     await expect.element(needs.getByRole('img', { name: '1 needs you' })).toBeVisible();
     const card = heldCard(screen, SEEDED_REASON);
     expect(card.element().textContent).not.toContain('Held by your rule');
@@ -457,10 +477,13 @@ describe('Today', () => {
     expect(answers.elements().some((b) => b.hasAttribute('aria-haspopup'))).toBe(false);
     await expectScreenBasics(screen.container, { owner: true });
 
-    // "Open the request" brings that card into focus.
+    // "Open the request" opens the conversation with that card visible.
     const things = region(screen, 'Things to try');
-    await things.getByRole('button', { name: 'Open the request' }).click();
-    expect(focusIsOn(card.element())).toBe(true);
+    await things.getByRole('link', { name: 'Open the request' }).click();
+    await expect.element(card).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seededHold().session_id}`);
+    await router.navigate(-1);
+    await expect.element(needs).toBeVisible();
 
     // A newer hold the API lists first still comes after the oldest one, here and in Things to try.
     const [seeded] = await heldItems();
@@ -480,8 +503,9 @@ describe('Today', () => {
       .element(things.getByText('A request is waiting for your answer.', { exact: true }))
       .toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
-    await things.getByRole('button', { name: 'Open the request' }).click();
-    expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+    await things.getByRole('link', { name: 'Open the request' }).click();
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seededHold().session_id}`);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('held_row_quotes_its_rule_after_a_colon_with_one_full_stop', async () => {
@@ -500,6 +524,51 @@ describe('Today', () => {
     const plain = region(none, 'Things to try').getByText('A request is waiting for your answer.', { exact: true });
     await expect.element(plain).toBeVisible();
     expect(plain.element().querySelector('[data-copy="user"]')).toBeNull();
+  });
+
+  it('held_card_shows_the_rule_that_held_it', async () => {
+    // REV-RULES-B5: each held card names the rule that held it in a "Your rule" box: its sentence
+    // led by Claude, the tools and who, and its outcome. Past an automatic rule's limit it is that
+    // rule's hold line, for that rule's own people; an Ask me first card is its own sentence; with
+    // no rule of the owner's behind it, there is no box.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision?.action) throw new Error('the seed holds a request');
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    const LINK = 'A visitor asked for a payment link for $450.00.';
+    const GONE = 'A visitor asked to book Sunday at 10:00 pm.';
+    const link: NeedsYouItem = {
+      ...seeded,
+      held_by: null,
+      held_at: ago(3),
+      decision: {
+        ...seeded.decision,
+        decision_id: 'dec-held-link',
+        reason_plain: LINK,
+        card_ids: ['rv-link'],
+        action: { ...seeded.decision.action, tool: 'native.payment_link', effects: ['charge'], list_cents: null, discount_bp: null, amount_cents: 45_000 },
+      },
+    };
+    const refund: NeedsYouItem = { ...seeded, held_by: rivera.ruleCards['rv-refund'].reason, held_at: ago(2), decision: { ...rivera.heldRefund, session_id: seeded.decision.session_id } };
+    // An ask card the active rules no longer have.
+    const gone: NeedsYouItem = { ...seeded, held_by: 'Bookings wait for your answer.', held_at: ago(1), decision: { ...seeded.decision, decision_id: 'dec-held-gone', reason_plain: GONE } };
+    const { screen } = await renderRoute(TODAY, {
+      seed: 'rivera',
+      beforeRender: () => mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [seeded, link, refund, gone] }),
+    });
+    const ruleOf = (reason: string) => heldCard(screen, reason).getByRole('group', { name: 'Your rule', exact: true });
+    await expect.element(ruleOf(SEEDED_REASON)).toBeVisible();
+    // B5's held quote: 15% off went past the list-price quote rule.
+    expect(ruleOf(SEEDED_REASON).element().textContent).toBe('Your ruleClaude asks you before any discountQuote · AnyoneAsk me first');
+    expect([...ruleOf(SEEDED_REASON).element().querySelectorAll('strong')].map((key) => key.textContent)).toEqual(['any discount']);
+    expect(ruleOf(LINK).element().textContent).toBe('Your ruleClaude asks you before payment links over $300Payment link · AnyoneAsk me first');
+    expect(ruleOf(REFUND_REASON).element().textContent).toBe('Your ruleClaude asks you before any refundRefund · The customer, once verifiedAsk me first');
+    await expect.element(heldCard(screen, GONE)).toBeVisible();
+    expect(heldCard(screen, GONE).element().textContent).not.toContain('Your rule');
+    // The tools are the owner's words; the outcome is the rule's, with its dot.
+    expect(ruleOf(LINK).element().querySelector('.cd-user-name')?.textContent).toBe('Payment link');
+    expect(ruleOf(LINK).element().querySelector('.cd-rule-sentence__outcome .cd-status-dot--held')).not.toBeNull();
+    expect(screen.container.textContent).not.toContain('Held by your rule');
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
@@ -587,6 +656,69 @@ describe('Today', () => {
     await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
+    await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
+  });
+
+  it('a_failed_rules_read_says_so_over_the_held_card', async () => {
+    // The rules can't be read, so the held card can't name the rule that held it: Needs you says
+    // the read failed, with Try again, rather than leaving the box out as if no rule had held it.
+    // Try again reads them, and the box lands on the card.
+    const { screen } = await renderRoute(TODAY, {
+      seed: 'rivera',
+      retryScale: 0,
+      beforeRender: () => mockStore.inject({ route: 'rules', status: 503, times: 2 }),
+    });
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    const failed = needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    expect(card.getByRole('group', { name: 'Your rule', exact: true }).elements()).toHaveLength(0);
+    await needs.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await expect.poll(() => needs.getByRole('alert').elements().length).toBe(0);
+  });
+
+  it('a_failed_refresh_of_read_rules_says_so_over_the_held_card', async () => {
+    // The rules were read, then a later read of them fails: Needs you says so, with Try again, over
+    // the card's rule as it was last read, so an earlier read never passes for current.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    onTestFinished(() => mounted.mockRestore());
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera', retryScale: 0 });
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    expect(needs.getByRole('alert').elements()).toHaveLength(0);
+
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    await queryClient.refetchQueries({ queryKey: ['rules', RIVERA.deskId, 'requests'] });
+    await expect.element(needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await needs.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => needs.getByRole('alert').elements().length).toBe(0);
+  });
+
+  it('reload_waits_for_the_rules_a_held_card_names', async () => {
+    // A held card names the rule that held it, so with a request held, a reload's loading page
+    // stays until the rules are read too: Today then opens with the card's "Your rule" box drawn,
+    // rather than the box growing in and pushing Live now down.
+    await cleanup();
+    const pages = watchPages();
+    const rules = holdReads(ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId));
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(rules.held()).toBe(1));
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(0);
+    // Time for Today to be drawn, had it opened without the rules.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expectLoadingPage();
+
+    rules.release();
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    expect(card.getByRole('group', { name: 'Your rule', exact: true }).element().textContent).toBe(
+      'Your ruleClaude asks you before any discountQuote · AnyoneAsk me first',
+    );
     await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
   });
 
@@ -2033,7 +2165,7 @@ describe('Today', () => {
       .poll(() => visitor?.events.some(({ ev }) => ev.type === 'resolved' && ev.decision_id === decisionId), { timeout: 2_000 })
       .toBe(true);
     // Nothing is held now, so Things to try no longer offers to open it: its row stays, ticked off.
-    await expect.element(screen.getByRole('button', { name: 'Open the request' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('link', { name: 'Open the request' })).not.toBeInTheDocument();
     const things = region(screen, 'Things to try');
     await expect.element(things.getByText("Done. Your answer went to the visitor's chat.", { exact: true })).toBeVisible();
     await expect.element(things.getByRole('heading', { level: 3, name: 'Answer a held request' })).toBeVisible();
@@ -3158,7 +3290,7 @@ describe("Today's top band", () => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = region(screen, 'Things to try');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    await expect.element(things.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(things.getByRole('link', { name: 'Open the request' })).toBeVisible();
     await skeletonGone();
     const band = document.querySelector('.cd-today__band');
     const main = document.querySelector('.cd-today__main');
@@ -3300,7 +3432,7 @@ describe("Today's top band", () => {
     await expect.element(chatRow).toHaveAttribute('href', customerLink(RIVERA.slug, RIVERA.deskId));
     await expect.element(chatRow).toHaveAttribute('target', '_blank');
     // A press anywhere on the row is the row's: its words, not just its chevron.
-    const answerRow = things.getByRole('button', { name: 'Answer a held request', exact: true });
+    const answerRow = things.getByRole('link', { name: 'Answer a held request', exact: true });
     // The row is under How your Desk works on a phone: bring it into sight to press it.
     answerRow.element().scrollIntoView({ block: 'center' });
     const answerTitle = box(things.getByRole('heading', { level: 3, name: 'Answer a held request' }).element());
@@ -3316,7 +3448,10 @@ describe("Today's top band", () => {
     const ringBox = { top: rows[2]!.getBoundingClientRect().top, bottom: rows[2]!.getBoundingClientRect().bottom };
     expect(ringBox.bottom - ringBox.top).toBeGreaterThan(box(answerRow.element()).height);
     await answerRow.click();
-    expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seededHold().session_id}`);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(things).toBeVisible();
 
     // "Try to break it" opens its ideas under the row, and says so.
     const breakRow = things.getByRole('button', { name: 'Try to break it', exact: true });
@@ -3468,9 +3603,10 @@ describe("Today's How your Desk works", () => {
     const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
     await expect.element(held).toBeVisible();
     expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
-    await expect.element(held).toHaveAttribute('href', `${TODAY}#request-${seeded.decision.decision_id}`);
+    await expect.element(held).toHaveAttribute('href', `${DESK}/conversations/${seeded.decision.session_id}#request-${encodeURIComponent(seeded.decision.decision_id)}`);
     await held.click();
-    await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seeded.decision.session_id}`);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await router.navigate(`${DESK}/safety`);
     await expect.element(screen.getByRole('link', { name: '2 held for you', exact: true })).toBeVisible();
   });
@@ -3495,7 +3631,7 @@ describe("Today's How your Desk works", () => {
     expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 1 for you', 'turned down 1 request']);
     expect(links.map((a) => a?.getAttribute('href'))).toEqual([
       `/app/${RIVERA.deskId}/conversations`,
-      `/app/${RIVERA.deskId}/today#request-${seededHold().decision_id}`,
+      `/app/${RIVERA.deskId}/conversations/${seededHold().session_id}#request-${encodeURIComponent(seededHold().decision_id)}`,
       `/app/${RIVERA.deskId}/safety`,
     ]);
     // Under a hairline, 16 px under the steps with 12 px inside it, in the secondary ink; each
@@ -3510,9 +3646,9 @@ describe("Today's How your Desk works", () => {
     expectComputed(count, { fontWeight: '600', fontVariantNumeric: 'tabular-nums' });
     expect(getComputedStyle(count).color).not.toBe(getComputedStyle(line()!).color);
 
-    // "held 1 for you" brings the oldest held request into focus in Needs you.
+    // "held 1 for you" opens the oldest held request in its conversation.
     await how.getByRole('link', { name: 'held 1 for you', exact: true }).click();
-    await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('how_your_desk_works_omits_held_when_only_callbacks_wait', async () => {
@@ -4318,55 +4454,36 @@ describe('Notifications from Today', () => {
     expect(links.elements()).toHaveLength(1);
     const link = links.first();
     expect(link.element().textContent).toContain(alert.body);
-    expect(link.element().getAttribute('href')).toBe(requestLink(held.decision_id));
+    expect(link.element().getAttribute('href')).toBe(`${DESK}/conversations/${held.session_id}#request-${encodeURIComponent(held.decision_id)}`);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Following it leaves the page and lands on the held request's card, in view.
     const closedReads = closedInboxReads(notificationsHeading(screen));
     await link.click();
     await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe(TODAY);
-    expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
-    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${held.session_id}`);
+    await expect.element(card).toBeVisible();
     expectInView(card.element());
-    // Focus stays there, and the page, left, reads no more, a whole poll on.
+    // The page, left, reads no more, a whole poll on.
     await aPollPasses();
-    expect(focusIsOn(card.element())).toBe(true);
     expect(closedReads()).toBe(0);
   });
 
   it('inbox_alert_links_to_its_own_desk', async () => {
-    // The notifications are the whole copy's. On Emergencies, Main line's hold alert links to Main
-    // line's Today, as the held decision itself says, and following it lands on that card.
     const { screen, router } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
     const held = seededHold();
     await expect.element(notificationsRow(screen)).toBeVisible();
-    // Nothing is read about the alert's request until the page opens.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(requests('decision')).toEqual([]);
-
     const page = await openNotifications(screen);
     const link = requestRows(page);
-    await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
+    const path = `${DESK}/conversations/${held.session_id}`;
+    await expect.element(link).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
     expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
-
-    const todayRead = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
     await link.click();
     await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe(TODAY);
-    const card = heldCard(screen, SEEDED_REASON);
-    // The page read Main line's Needs you, but not its Today. Hold that read so this always
-    // exercises the loading state after navigation, even when the mock answers quickly.
-    await expect.poll(todayRead.held).toBeGreaterThan(0);
-    expectTodayOpening();
-    expect(card.elements()).toHaveLength(0);
-    todayRead.release();
-    // Wait for Today's own reads to land before checking its card and focus. Looking up a
-    // missing card with element() on every retry serializes the page while it is still loading.
-    await expect.poll(() => document.querySelector('.cd-today-opening [aria-busy="true"]'), { timeout: 5_000 }).toBeNull();
-    await expect.element(card).toBeInTheDocument();
-    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
-    expectInView(card.element());
+    expect(router.state.location.pathname).toBe(path);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('inbox_alert_links_only_once_its_request_is_read', async () => {

@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { rivera } from '../../fixtures/index.ts';
 import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { fixtureHeldRule } from '../../test/heldRule.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { Greeting } from '../Greeting/Greeting.tsx';
 import { ReviewerBar } from '../ReviewerBar/ReviewerBar.tsx';
@@ -101,7 +102,7 @@ const today = (
       <div style={{ maxWidth: 'var(--size-reading)' }}>
         <ApprovalCard
           decision={rivera.decisions.held}
-          heldBy={rivera.ruleCards['rv-quote'].reason}
+          rule={fixtureHeldRule(rivera.decisions.held)}
           waiting="Web chat, 2 min ago"
           onAnswer={fn()}
         />
@@ -114,6 +115,8 @@ const meta = {
   title: 'Layout/AppShell',
   component: AppShell,
   args: {
+    todayHref: hrefs.today,
+    linkComponent: RouterLink,
     business: rivera.business.name,
     sidebar,
     banner: <ReviewerBar ownerName={rivera.business.ownerName} onStartOver={fn()} />,
@@ -504,7 +507,7 @@ export const Skeleton: Story = {
         />
       </div>
       <div data-shaped-frame aria-hidden="true" ref={(element) => element?.setAttribute('inert', '')}>
-        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
+        <AppShell todayHref={hrefs.today} skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
           <div />
         </AppShell>
       </div>

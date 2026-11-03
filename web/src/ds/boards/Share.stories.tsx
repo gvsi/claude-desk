@@ -5,6 +5,7 @@ import '../../owner/share/ShareKit.css';
 
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { ConnectorIcon } from '../components/ConnectorIcon/ConnectorIcon.tsx';
 import { CopyList } from '../components/CopyList/CopyList.tsx';
@@ -93,7 +94,7 @@ function Share() {
             </section>
           </div>
         </div>
-        <ConceptFooter />
+        <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
       </div>
     </RiveraFrame>
   );

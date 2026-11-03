@@ -32,6 +32,7 @@ function DocsSidebar() {
         onAnsweringChange={fn()}
         owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
         about={ABOUT}
+        conceptFooter
       />
     </aside>
   );
@@ -72,7 +73,9 @@ export const Board: Story = {
     const group = about.closest('.cd-sidebar__about') as HTMLElement;
     expectComputed(within(about).getByText('About this prototype'), { fontSize: '13px', lineHeight: '18px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
     expectComputed(group, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '14px' });
-    await expect(Math.round(foot.getBoundingClientRect().top - group.getBoundingClientRect().bottom)).toBe(4);
+    const concept = one(column, '.cd-sidebar__concept-footer');
+    await expect(Math.round(concept.getBoundingClientRect().top - group.getBoundingClientRect().bottom)).toBe(4);
+    await expect(Math.round(foot.getBoundingClientRect().top - concept.getBoundingClientRect().bottom)).toBe(4);
 
     // Its rows: nav rows like the main ones, the document icon, the open document current.
     const links = within(about).getAllByRole('link');
@@ -111,6 +114,7 @@ export const Board: Story = {
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
       ...links,
+      within(column).getByRole('link', { name: 'Giovanni Alcantara' }),
       within(column).getByRole('switch', { name: 'Claude acts for you' }),
     ]);
   },

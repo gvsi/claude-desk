@@ -13,7 +13,7 @@ Drawn on the setup board N-R2-Setup-08-Rules, signed on 2026-10-30.
 
 - Cards 20 px apart, each padded 16 px.
 - `moneyLimit`, when given, first, in a card of its own: the limit holds over every rule below it. Pass `MoneyLimit` with `prominent`, which sets its line in weight 520, as the setup board draws it, and no `onEdit`, so the line stands alone; on the Rules page it keeps the body weight and its "Change".
-- A card per outcome that has rules, in order: "Does on its own", "Asks you", "Never does" (`OUTCOME_GROUP_WORDS`). Each is a `section` named by its `h2`: the outcome's 6 px dot in its `OUTCOME_TONE` (handled, held, refused), 8 px from its name in `.cd-type-control`, on a 20 px line 10 px over the first row's hairline. A group with no rules is left out.
+- A card per outcome that has rules, in order: "Allow", "Ask me first", "Never" (`OUTCOME_GROUP_WORDS`). Each is a `section` named by its `h2`: the outcome's 6 px dot in its `OUTCOME_TONE` (handled, held, refused), 8 px from its name in `.cd-type-control`, on a 20 px line 10 px over the first row's hairline. A group with no rules is left out.
 - A row per rule, under a hairline, 10 px over and under a 20 px line: what Claude does in `.cd-type-body`, `text-primary`, at the left, and who it's for in `.cd-type-meta`, `text-secondary`, at the right, at most half the row. A long rule wraps beside it.
 - The rows are read only, and so is the payment limit's line. During setup, the payment limit changes by restarting setup (owner ruling, 2026-10-30); after the Desk is live, rules and the limit change on the Rules page.
 

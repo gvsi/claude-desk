@@ -1,30 +1,193 @@
-/* HouseRules: the trail over the page's title, then each connector's name over a card per tool,
-   12 px apart, the connectors 32 px apart, and the always-on rules at the end, in the content
-   column. On a phone the parts are 24 px apart. */
-
-.cd-house-rules {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-32);
-  min-width: 0;
-}
-
-.cd-house-rules__header {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-16);
-  min-width: 0;
-}
+/* Rules, tool by tool (REV-RULES-D, A): one card per connector, its tools as h3s with their lines and
+   Details, and under each tool its rules, indented under a left rule. Every rule row's styles live
+   here, the "Across your Desk" card's and the money band's too, so a restyle is one change. */
 
 .cd-house-rules__connector {
   display: flex;
   flex-direction: column;
-  gap: var(--space-12);
   min-width: 0;
 }
 
-@media (max-width: 639.98px) {
-  .cd-house-rules {
-    gap: var(--space-24);
-  }
+.cd-house-rules__connector-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+  padding: var(--space-14) var(--space-16);
+}
+
+.cd-house-rules__identity,
+.cd-house-rules__tool-text,
+.cd-house-rules__rule-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.cd-house-rules__identity > .cd-connector-name {
+  display: flex;
+}
+
+.cd-house-rules__jobs-name {
+  display: block;
+  color: var(--text-primary);
+}
+
+.cd-house-rules__identity-line,
+.cd-house-rules__tool-description,
+.cd-house-rules__shared {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The money band at the top of Payments and Stripe: the payment limit and "never moves money", on the card's fill. */
+.cd-house-rules__money {
+  padding: var(--space-4) var(--space-16) var(--space-8);
+  border-top: 1px solid var(--line-hairline);
+  background: var(--fill-card);
+}
+
+.cd-house-rules__tool {
+  padding: var(--space-16);
+  border-top: 1px solid var(--line-hairline);
+  min-width: 0;
+}
+
+.cd-house-rules__tool-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+}
+
+.cd-house-rules__tool-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-8);
+  row-gap: var(--space-4);
+  min-width: 0;
+}
+
+.cd-house-rules__tool-heading {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
+.cd-house-rules__tool-name {
+  min-width: 0;
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.cd-house-rules__tool-status {
+  color: var(--text-secondary);
+}
+
+/* A tool's rules, indented under a left rule; the band's sit flush. */
+.cd-house-rules__rules {
+  margin: var(--space-6) 0 0;
+  padding: 0 0 0 var(--space-16);
+  border-left: 1px solid var(--line-card);
+  list-style: none;
+}
+
+/* Rules that cover no tool on the page sit under no tool's title: no space above them. */
+.cd-house-rules__rules--loose {
+  margin-top: 0;
+}
+
+.cd-house-rules__rules--band,
+.cd-house-rules__rules--card {
+  margin: 0;
+  padding: 0;
+  border-left: 0;
+}
+
+/* "Across your Desk": its rows inset in their card, each lit edge to edge. */
+.cd-house-rules__rules--card > .cd-house-rules__rule {
+  padding: var(--space-12) var(--space-16);
+}
+
+.cd-house-rules__rules--card > .cd-house-rules__rule > .cd-landed-glow {
+  inset-inline: 0;
+  border-radius: 0;
+}
+
+/* The rule cell: its sentence in primary text, its value at 520; a hairline between rules. */
+.cd-house-rules__rule {
+  position: relative;
+  isolation: isolate;
+  padding: var(--space-10) 0;
+  min-width: 0;
+}
+
+.cd-house-rules__rule + .cd-house-rules__rule {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-house-rules__rule .cd-rule-sentence__sentence {
+  color: var(--text-primary);
+}
+
+/* The line under it: who it is for and its qualifiers, never the tools. */
+.cd-house-rules__rule-line {
+  margin: var(--space-2) 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* The sentence at the left; "Updated", its own control, its dot and its Details at the right. Its panel opens under it, in the li. */
+.cd-house-rules__rule-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-12);
+}
+
+.cd-house-rules__rule-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex: none;
+  min-height: 1lh;
+}
+
+/* Details is 25 px tall, over a target's least of 24; it centres on the first line of its row's
+   words, which stay where they were. */
+.cd-house-rules__rule-actions > .cd-advanced-details__toggle,
+.cd-house-rules__tool-header > .cd-advanced-details__toggle {
+  margin-block: calc(-1 * var(--space-2));
+}
+
+/* Details' empty place, on a row without Details ("Anything not listed here"), keeps the button's
+   whole box 2 px under the row's top, as the board draws every Details, so the row is as tall as
+   the place and its dot sits at the place's middle. */
+.cd-house-rules__rule-actions:has(> .cd-advanced-details__slot) {
+  padding-top: var(--space-2);
+}
+
+.cd-house-rules__rule-actions > .cd-advanced-details__slot {
+  margin-block: 0;
+}
+
+/* An always-on rule's lock and "Always on", flush right where Details ends: no dot, no Details. */
+.cd-house-rules__always-on {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.cd-house-rules__rule > .cd-landed-glow {
+  inset-inline: calc(-1 * var(--space-8));
+  border-radius: var(--radius-control);
+}
+
+.cd-house-rules__rule--reference {
+  padding: var(--space-6) 0;
+}
+
+.cd-house-rules__rule--reference .cd-rule-sentence__sentence {
+  font: inherit;
 }

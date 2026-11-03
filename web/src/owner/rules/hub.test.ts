@@ -69,7 +69,7 @@ describe('the Rules hub', () => {
     // A charge can't be taken back: the kernel's payment link and signed-limit profiles say so.
     const rules = view();
     expect(hubTool(rules, 'native.payment_link').description).toBe("Makes a one-time link for a quote. Charges money. Can't be undone.");
-    expect(hubTool(rules, 'native.charge_mandate').description).toBe("Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.");
+    expect(hubTool(rules, 'native.charge_mandate').description).toBe("Lets a visiting agent pay from its owner’s signed limit. Charges money. Can't be undone.");
   });
 
   it('uses a business description followed by its effects', () => {
@@ -548,7 +548,16 @@ describe('the rows a confirmed change lands on', () => {
   it('a_tool_rule_lands_on_its_tool_alone', () => {
     // "Stop quoting on weekends": the quote rule moves to weekdays.
     const weekdays = { ...rivera.ruleCards['rv-quote'], hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } } satisfies RuleCard;
-    expect(rowsChangedBy(drafted([weekdays]), view().tools)).toEqual({ tools: ['native.quote'], moneyLimit: false });
+    expect(rowsChangedBy(drafted([weekdays]), view().tools)).toMatchObject({ tools: ['native.quote'], moneyLimit: false });
+  });
+
+  it('a_change_names_the_cards_it_changed_and_whether_it_removed_one', () => {
+    // The weekday quote rule changes its card, by its id; nothing is removed or turned on.
+    const weekdays = { ...rivera.ruleCards['rv-quote'], hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '00:00:00', end: '00:00:00' } } satisfies RuleCard;
+    expect(rowsChangedBy(drafted([weekdays]), view().tools)).toEqual({ tools: ['native.quote'], moneyLimit: false, cards: ['rv-quote'], fallback: false, turnedOn: [] });
+    // Saturday's booking rule removed: no card is left to mark, so the change lands on what asks by default.
+    const withoutSaturday = mockStore.world.draftCards(desk(), desk().policy.cards.filter((c) => c.card_id !== 'rv-book-sat'));
+    expect(rowsChangedBy(draftFromDiff(withoutSaturday, desk().policy), view().tools)).toEqual({ tools: ['native.book'], moneyLimit: false, cards: [], fallback: true, turnedOn: [] });
   });
 
   it('a_preset_lands_on_every_tool_whose_rules_it_changes', () => {
@@ -580,7 +589,7 @@ describe('the rows a confirmed change lands on', () => {
     });
     const draft = draftFromDiff(mockStore.world.draftCards(desk(), cards), desk().policy);
     expect(titlesOf(draft)).toEqual(new Set(['Refund']));
-    expect(rowsChangedBy(draft, view().tools)).toEqual({ tools: ['payments.create_refund'], moneyLimit: false });
+    expect(rowsChangedBy(draft, view().tools)).toMatchObject({ tools: ['payments.create_refund'], moneyLimit: false });
   });
 
   it('a_preset_lands_on_exactly_the_tools_its_review_lists', () => {
@@ -599,13 +608,13 @@ describe('the rows a confirmed change lands on', () => {
 
   it('a_new_limit_lands_on_its_line_and_the_rules_it_lowers', () => {
     // Raised to $5,000, no rule changes: the limit's line alone.
-    expect(rowsChangedBy(drafted([], { cap: 500_000 }), view().tools)).toEqual({ tools: [], moneyLimit: true });
+    expect(rowsChangedBy(drafted([], { cap: 500_000 }), view().tools)).toMatchObject({ tools: [], moneyLimit: true });
     // Lowered to $100 with Payment link's $300 brought down with it: the line, and Payment link.
     const lowered = mockStore.world.draftCards(
       desk(),
       desk().policy.cards.map((c) => (c.card_id === 'rv-link' ? { ...c, max_amount_cents: 10_000 } : c)),
       { cap: 10_000 },
     );
-    expect(rowsChangedBy(draftFromDiff(lowered, desk().policy), view().tools)).toEqual({ tools: ['native.payment_link'], moneyLimit: true });
+    expect(rowsChangedBy(draftFromDiff(lowered, desk().policy), view().tools)).toMatchObject({ tools: ['native.payment_link'], moneyLimit: true });
   });
 });

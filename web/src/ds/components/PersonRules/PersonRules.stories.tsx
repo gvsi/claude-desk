@@ -49,7 +49,7 @@ export const DanaWhitfield: Story = {
     expectComputed(title, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
     expectComputed(reason, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)', marginTop: '2px' });
     expectComputed(words, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
-    await expect(within(book).getByText('Automatic')).toBeVisible();
+    await expect(within(book).getByText('Allow')).toBeVisible();
     await expect(book.querySelector('.cd-status-dot--handled')).not.toBeNull();
     await expect(words.getBoundingClientRect().left).toBeGreaterThan(reason.getBoundingClientRect().right);
 
@@ -112,8 +112,8 @@ export const NarrowPhoneWithALimit: Story = {
   play: async ({ canvas, canvasElement }) => {
     const width = window.innerWidth;
     await expect(width).toBe(320);
-    // narrow_phone_limit_fits: the outcome's long phrase wraps inside the row, and nothing scrolls sideways.
-    await expect(canvas.getByText('Automatic up to $10,000; over $10,000, ask me first')).toBeVisible();
+    // narrow_phone_limit_fits: the outcome fits inside the row, and nothing scrolls sideways.
+    await expect(canvas.getByText('Allow')).toBeVisible();
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width + 0.5);
     await expect(tooWide).toEqual([]);

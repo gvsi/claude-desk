@@ -9,6 +9,7 @@
  * it. It loads nothing but the bar: no document, so any About page can draw it.
  */
 import { useSyncExternalStore } from 'react';
+import { Link } from 'react-router';
 
 import { Mark, Wordmark } from '../ds/index.ts';
 import { AboutSwitch } from './AboutSwitch.tsx';
@@ -45,11 +46,12 @@ export function useAboutNarrow(): boolean {
  * bell is on the page's paper, so it keeps the drawing's dark ink.
  */
 function Brand({ compact }: { compact: boolean }) {
+  const preview = !compact;
   return (
-    <span className="cd-about-brand">
+    <Link to="/" className="cd-about-brand" aria-label={`Claude Desk${preview ? ' Preview' : ''}, home`}>
       <Mark size={compact ? 32 : 36} ground="light" />
-      <Wordmark preview={!compact} />
-    </span>
+      <Wordmark preview={preview} />
+    </Link>
   );
 }
 

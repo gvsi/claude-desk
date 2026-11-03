@@ -22,7 +22,7 @@ import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
-import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
+import { conversationAtTop, expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { DESKS_KEY, needsYouKey, todayKey } from './useDesks.ts';
@@ -415,7 +415,7 @@ it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_
 });
 
 const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
-  { name: 'owner-footer', page: '.cd-owner-layout__footer', size: true },
+  { name: 'owner-footer', page: '[data-owner-footer]', size: true },
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
   { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
@@ -471,11 +471,11 @@ it.each([320, 620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s',
   await expectSkeletonLoad({
     status: 'Opening your Desk',
     anchors,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => { await router.navigate(TODAY); },
     release: () => {
       before = anchors.map(({ name }) => document.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
-      footer = landedRect('.cd-owner-layout__footer');
+      footer = landedRect('[data-owner-footer]');
       reads.forEach((read) => read.release());
     },
   });
@@ -486,7 +486,7 @@ it.each([320, 620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s',
     }
   }
   for (const edge of ['top', 'bottom'] as const) {
-    expect(Math.abs(footer![edge] - landedRect('.cd-owner-layout__footer')[edge]), `footer ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    expect(Math.abs(footer![edge] - landedRect('[data-owner-footer]')[edge]), `footer ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
   }
   expect(gaps()).toBe(0);
   expectNoHorizontalScroll();
@@ -627,11 +627,14 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   });
   lines('.cd-things__vision .cd-skeleton-line', '.cd-things__vision', ['75%']);
   for (const child of [1, 2, 3]) lines(`.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header .cd-skeleton-line--section`, `.cd-today__main > .cd-today__section:nth-child(${child}) .cd-section-header__title`, [135]);
-  lines('[data-skeleton-anchor="held-card"] .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
+  lines('[data-skeleton-anchor="held-card"] .cd-today-skeleton__approval-top .cd-skeleton-line--caption', '.cd-today-skeleton__approval-top', ['80%']);
   lines('.cd-approval-card__reason .cd-skeleton-line', '.cd-approval-card__reason', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%']);
   lines('.cd-approval-card__context .cd-skeleton-line', '.cd-approval-card__context', ['100%', '75%']);
-  // The seed's hold went past an automatic rule's limit, so its card names no rule.
-  expect(today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__held-by')).toBeNull();
+  // The seed's hold went past an automatic rule's limit: its card names that rule in its "Your rule"
+  // box (REV-RULES-B5), its label, sentence, line and outcome drawn as shapes.
+  const ruleBox = today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__rule');
+  expect(ruleBox, 'the held card draws its rule box').not.toBeNull();
+  expect(ruleBox!.querySelectorAll('.cd-skeleton').length).toBeGreaterThanOrEqual(4);
   lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%', '100%', '75%']);
   lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', viewport === 'phone' ? ['75%'] : ['100%', '75%']);
   for (const child of [1, 2]) {
@@ -734,7 +737,7 @@ function watchTheTickedRow(phone: boolean) {
     return {
       card: boundsFromRect(card?.getBoundingClientRect() ?? shape('things-card')),
       under: under.map(({ name, page }) => boundsFromRect(landedElement(page)?.getBoundingClientRect() ?? shape(name))),
-      footer: boundsFromRect(landedRect('.cd-owner-layout__footer')),
+      footer: boundsFromRect(landedRect('[data-owner-footer]')),
     };
   };
   const changes: ReturnType<typeof snapshot>[] = [];
@@ -757,7 +760,7 @@ function watchTheTickedRow(phone: boolean) {
   onTestFinished(stop);
   return {
     record: () => {
-      before = { card: shape('things-card'), under: under.map(({ name }) => shape(name)), footer: landedRect('.cd-owner-layout__footer') };
+      before = { card: shape('things-card'), under: under.map(({ name }) => shape(name)), footer: landedRect('[data-owner-footer]') };
       sample();
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state'] });
       frame = requestAnimationFrame(sampleFrame);
@@ -785,8 +788,11 @@ function watchTheTickedRow(phone: boolean) {
           expect(Math.abs(real[dimension] - before!.under[i]![dimension]), `${name} ${dimension}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
         }
       });
-      const footer = landedRect('.cd-owner-layout__footer');
-      expect(Math.abs(footer.top - before!.footer.top - change), "the footer moves by the card's change").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      // From 1024 px the concept footer sits in the sidebar, beside the page, so it stays put; on a
+      // narrower screen it closes the page, under the card, and moves with it.
+      const footer = landedRect('[data-owner-footer]');
+      const footerMoves = document.querySelector('[data-owner-footer]')?.closest('.cd-sidebar') ? 0 : change;
+      expect(Math.abs(footer.top - before!.footer.top - footerMoves), "the footer moves by the card's change, or stays in the sidebar").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     },
   };
 }
@@ -1181,8 +1187,9 @@ it('other_page_reload_draws_the_frame_alone', async () => {
     open: async () => {
       await renderRoute(`/app/${RIVERA.deskId}/share`, { pollScale: 100 });
       await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout')?.children).toHaveLength(1);
-      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout > footer')).not.toBeNull();
+      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout')?.children).toHaveLength(0);
+      expect(document.querySelector('.cd-skeleton-screen__layer .cd-sidebar__concept-footer [data-ds="concept-footer"]')).not.toBeNull();
+      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout > footer')).toBeNull();
       expect(document.querySelector('.cd-skeleton-screen__layer .cd-today')).toBeNull();
     },
     release: desks.release,
@@ -1315,7 +1322,7 @@ it.each(['desktop', 'phone'] as const)('customers_load_in_place at %s', async (v
   await expectSkeletonLoad({
     status: 'Loading your customers',
     anchors: CUSTOMERS_ANCHORS,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Customers/ }).click();
       else await router.navigate(PEOPLE);
@@ -1332,7 +1339,7 @@ it('customers_still_under_reduced_motion', async () => {
   await expectSkeletonStill({
     status: 'Loading your customers',
     anchors: CUSTOMERS_ANCHORS,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Customers/ }).click();
     },
@@ -1428,7 +1435,7 @@ it.each(['desktop', 'phone'] as const)('customers_reload_hands_off at %s', async
     status: 'Loading your customers',
     continues: true,
     anchors: CUSTOMERS_ANCHORS,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       desks.release();
       await expect.element(screen.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
@@ -1701,7 +1708,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await expectSkeletonLoad({
     status: 'Reading your conversations',
     anchors: LIST_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Conversations/ }).click();
       else await router.navigate(CONVERSATIONS);
@@ -1719,7 +1726,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
       else await router.navigate(`${CONVERSATIONS}/${SEEDED_HOLD}`);
@@ -1731,6 +1738,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await inView.expectStill();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -1818,7 +1826,7 @@ it('conversation_waits_for_needs_you', async () => {
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors: PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open,
     release: held.release,
   });
@@ -1833,7 +1841,7 @@ it('conversation_waits_for_the_list_that_names_it', async () => {
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors: PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open,
     release: held.release,
   });
@@ -1865,7 +1873,7 @@ it('conversations_still_under_reduced_motion', async () => {
   await expectSkeletonStill({
     status: 'Reading your conversations',
     anchors: LIST_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Conversations/ }).click();
     },
@@ -1875,7 +1883,7 @@ it('conversations_still_under_reduced_motion', async () => {
   await expectSkeletonStill({
     status: 'Opening the conversation',
     anchors: PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
     },
@@ -1903,7 +1911,7 @@ it('conversation_reload_hands_off at 390', async () => {
     status: 'Opening the conversation',
     continues: true,
     anchors: PHONE_PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       desks.release();
       await expect.element(screen.getByRole('link', { name: 'All conversations' })).toBeVisible();
@@ -1916,6 +1924,7 @@ it('conversation_reload_hands_off at 390', async () => {
   expect(gaps()).toBe(0);
   expect(headings(), 'one top heading through the reload, the hand-off and the landing').toEqual([1]);
   expectNoHorizontalScroll();
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -1927,9 +1936,10 @@ it('conversations_reload_hands_off at 1440', async () => {
   const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
   await nextFrames();
-  // The full-page skeleton draws the list's title, its rows down the column and the page's own footer.
+  // The full-page skeleton draws the list and the concept line in the desktop sidebar.
   expect(document.querySelector(`${FULL_LAYER} .cd-conversations__title .cd-skeleton-line--page-title`)).not.toBeNull();
-  expect(document.querySelector(`${FULL_LAYER} .cd-conversations__footer .cd-concept-footer`)).not.toBeNull();
+  expect(document.querySelector(`${FULL_LAYER} .cd-sidebar__concept-footer .cd-concept-footer`)).not.toBeNull();
+  expect(document.querySelector(`${FULL_LAYER} .cd-conversations__footer`)).toBeNull();
   expect(document.querySelector(`${FULL_LAYER} .cd-owner-layout__footer`)).toBeNull();
   const names = LIST_ANCHORS.map(({ name }) => name);
   const before = fullPageShapes(names);
@@ -1937,7 +1947,7 @@ it('conversations_reload_hands_off at 1440', async () => {
     status: 'Reading your conversations',
     continues: true,
     anchors: LIST_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       desks.release();
       await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
@@ -1992,6 +2002,7 @@ it.each(['desktop', 'phone'] as const)('opening_a_conversation_keeps_one_heading
   await nextFrames();
   // Waiting, shown, fading and landed: one top heading each time, never none and never two.
   expect(headings()).toEqual([1]);
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -2030,26 +2041,20 @@ const APPROVED_REFUND_SUGGESTION: Suggestion = {
   card: { ...rivera.ruleCards['rv-refund'], card_id: 'card-dana-refunds', mode: 'auto', who: 'person', person_id: rivera.people.dana.personId, max_amount_cents: 5_000 },
 };
 
+/**
+ * Rules' shapes and the page they hand off to: "Across your Desk"'s header and card, "Tool by tool"'s
+ * header, its first card's top, and the version line under the tools, so every card between them
+ * has the page's height too.
+ */
 const RULES_ANCHORS: readonly SkeletonAnchor[] = [
-  { name: 'rules-jobs-title', page: '.cd-business-jobs__title', size: true },
-  { name: 'rules-job', page: '.cd-business-jobs > .cd-card', size: true },
-  ...[
-    ['rules-job-name', '.cd-tool-rules__tool-name'],
-    ['rules-job-description', '.cd-tool-rules__tool-description'],
-    ['rules-job-reason', '.cd-rule-row__reason'],
-    ['rules-job-words', '.cd-rule-row__words'],
-    ['rules-job-outcome', '.cd-outcome'],
-    ['rules-job-fallback', '.cd-tool-rules__fallback-line'],
-  ].map(([name, selector]) => ({ name: name!, page: `.cd-business-jobs ${selector}`, size: true })),
-  ...rivera.connectors.sections.flatMap(({ tools }, i) => [
-    { name: `rules-connector-${i}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__header`, dimensions: ['bottom', 'height'] as const },
-    ...tools.map((_, j) => ({ name: `rules-tool-${i}-${j}`, page: `.cd-connector-list__items > :nth-child(${i + 1}) .cd-connector-section__tool:nth-child(${j + 1})`, size: true, dimensions: ['bottom'] as const })),
-  ]),
-  { name: 'rules-all', page: '.cd-rules__all', dimensions: ['bottom', 'height'] },
-  { name: 'rules-always', page: '.cd-always-on .cd-section-header__heading', dimensions: ['bottom', 'height'] },
+  { name: 'rules-across-header', page: '.cd-rules__section:has(> .cd-card) > .cd-section-header', size: true },
+  { name: 'rules-across', page: '.cd-rules__section > .cd-card', size: true },
+  { name: 'rules-tools-header', page: '.cd-rules__section:has(> .cd-rules__tool-cards) > .cd-section-header', size: true },
+  { name: 'rules-first-card', page: '.cd-rules__tool-cards > .cd-card' },
+  { name: 'rules-version', page: '.cd-rules__version', size: true },
 ];
 
-it('rules_outcome_shapes_remeasure_when_fonts_become_ready', async () => {
+it('rules_shapes_remeasure_when_fonts_become_ready', async () => {
   let ready!: (fonts: FontFaceSet) => void;
   const pending = new Promise<FontFaceSet>((resolve) => { ready = resolve; });
   const fonts = vi.spyOn(document.fonts, 'ready', 'get').mockReturnValue(pending);
@@ -2059,18 +2064,19 @@ it('rules_outcome_shapes_remeasure_when_fonts_become_ready', async () => {
   const root = createRoot(host);
   onTestFinished(() => { root.unmount(); host.remove(); ready(document.fonts); });
   flushSync(() => root.render(<RulesSkeleton withHeader={false} />));
-  const outcome = host.querySelector<HTMLElement>('.cd-connector-section__tool-outcome')!;
-  const shape = outcome.querySelector<HTMLElement>('.cd-skeleton')!;
-  const before = Number.parseFloat(shape.style.width);
+  // The log rule's sentence, its lines measured with every other shape's.
+  const shape = host.querySelector<HTMLElement>('[data-shape-id="across:log:sentence"]')!;
+  const lines = () => shape.querySelectorAll('.cd-skeleton').length;
+  const before = lines();
   expect(before).toBeGreaterThan(0);
   // A changed font metric becomes available with fonts.ready, without a loadingdone event.
   host.className = 'cd-test-rules-fonts';
   const style = document.createElement('style');
-  style.textContent = '.cd-test-rules-fonts .cd-connector-section__tool-outcome { font-size: 24px; }';
+  style.textContent = '.cd-test-rules-fonts .cd-rule-sentence__sentence { font-size: 48px; }';
   document.head.append(style);
   onTestFinished(() => style.remove());
   ready(document.fonts);
-  await vi.waitFor(() => expect(Number.parseFloat(shape.style.width)).toBeGreaterThan(before));
+  await vi.waitFor(() => expect(lines()).toBeGreaterThan(before));
 });
 
 it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async (viewport) => {
@@ -2081,22 +2087,21 @@ it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async 
   const headings = watchTopHeadings();
   await expectSkeletonLoad({
     status: 'Reading your rules', anchors: RULES_ANCHORS,
-    stays: ['.cd-rules__header', '.cd-rules__ask', '.cd-owner-layout__footer'],
+    stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
       await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
       expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
       if (typeof viewport === 'number') {
         await nextFrames();
-        const rows = document.querySelectorAll('.cd-rules__region .cd-skeleton-screen__layer .cd-connector-section__tool');
-        expect(rows.length).toBeGreaterThan(0);
+        // In the narrowest column, every rule's words end before its dot, "Change" or "Always on".
+        const rows = document.querySelectorAll('.cd-rules__region .cd-skeleton-screen__layer .cd-house-rules__rule-row');
+        expect(rows.length).toBeGreaterThan(20);
         for (const row of rows) {
-          const summary = row.querySelector('.cd-connector-section__tool-summary')!;
-          const outcome = row.querySelector('.cd-connector-section__tool-outcome')!;
-          expect(summary.getBoundingClientRect().right, row.getAttribute('data-skeleton-anchor')!).toBeLessThanOrEqual(outcome.getBoundingClientRect().left);
+          const words = row.querySelector('.cd-house-rules__rule-text')!;
+          const end = row.querySelector('.cd-house-rules__rule-actions')!;
+          expect(words.getBoundingClientRect().right).toBeLessThanOrEqual(end.getBoundingClientRect().left);
         }
-        const paymentSummary = document.querySelector('[data-skeleton-anchor="rules-tool-5-0"] .cd-connector-section__tool-summary')!;
-        expect(paymentSummary.querySelectorAll('.cd-skeleton')).toHaveLength(2);
       }
     }, release: read.release,
   });
@@ -2149,7 +2154,7 @@ it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (view
   await expectSkeletonLoad({
     status: 'Reading what was stopped',
     anchors: SAFETY_ANCHORS,
-    stays: ['.cd-safety > .cd-page-header', '.cd-owner-layout__footer'],
+    stays: ['.cd-safety > .cd-page-header', '[data-owner-footer]'],
     open: async () => { await router.navigate(SAFETY); }, release: ledger.release,
   });
   await landing.expectStill();
@@ -2159,7 +2164,7 @@ it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (view
 });
 
 it.each([
-  { label: 'rules', path: RULES, read: RULES_READ, region: '.cd-rules__region', status: 'Reading your rules', anchors: RULES_ANCHORS, until: '.cd-rules__all' },
+  { label: 'rules', path: RULES, read: RULES_READ, region: '.cd-rules__region', status: 'Reading your rules', anchors: RULES_ANCHORS, until: '.cd-rules__version' },
   { label: 'safety', path: SAFETY, read: LEDGER_READ, region: '.cd-safety__region', status: 'Reading what was stopped', anchors: SAFETY_ANCHORS, until: '.cd-attempt-row' },
 ].flatMap(item => (['desktop', 'phone'] as const).map(viewport => ({ ...item, viewport }))))('$label reload hands off without a gap at $viewport', async ({ path, read, region, status, anchors, until, viewport }) => {
   if (path === SAFETY) await withFreshRecord();
@@ -2180,7 +2185,7 @@ it.each([
       desks.release();
       await vi.waitFor(() => expect(document.querySelector(`${region} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
       expectSameShapes(region, names, before);
-      const realFooter = landedElement('.cd-owner-layout__footer')!.getBoundingClientRect();
+      const realFooter = landedElement('[data-owner-footer]')!.getBoundingClientRect();
       for (const edge of ['top', 'bottom', 'left', 'width', 'height'] as const) {
         expect(Math.abs(footer![edge] - realFooter[edge]), `footer ${edge} across the hand-off`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
       }
@@ -2366,8 +2371,8 @@ it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', 
 it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', async () => {
   await expectPausedPageRead({
     path: RULES, queryKey: ['rules', RIVERA.deskId], readPath: RULES_READ,
-    region: '.cd-rules__region', landed: '.cd-connector-list',
-    prime: RULES, primeLanded: '.cd-connector-list', error: '.cd-rules > [role="alert"]',
+    region: '.cd-rules__region', landed: '.cd-rules__tool-cards',
+    prime: RULES, primeLanded: '.cd-rules__tool-cards', error: '.cd-rules > [role="alert"]',
   });
 });
 
@@ -2583,7 +2588,7 @@ it('safety_entries_reload_keeps_its_existing_loader', async () => {
 
 it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i', async (width) => {
   const { screen } = await renderRoute(RULES, { viewport: { width, height: width === 390 ? 844 : 900 }, pollScale: 100 });
-  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   if (width >= 1280) {
     await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Why was this quote held?');
@@ -2603,7 +2608,6 @@ it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i
   await nextFrames();
   const parts = [
     ['rules-title', '.cd-rules__header h1'],
-    ['rules-header-all', '.cd-rules__header .cd-text-link'],
     ['rules-preset', '.cd-rules__header .cd-preset-menu > .cd-button'],
     ['rules-composer', '.cd-rules__ask .cd-composer__box'],
   ] as const;
@@ -2634,20 +2638,20 @@ it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s
   const tops = watchTop(() => {
     const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
     return layer && layer.getAttribute('data-state') !== 'leaving'
-      ? layer.querySelector('[data-skeleton-anchor="rules-connector-0"]')
-      : landedElement('.cd-connector-section__header');
+      ? layer.querySelector('[data-skeleton-anchor="rules-across"]')
+      : landedElement('.cd-rules__section > .cd-card');
   });
   read.release();
   await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
-  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const card = landedElement('.cd-rules__suggestions > .cd-card')!.getBoundingClientRect();
   const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
   expect(tops()).toHaveLength(2);
   expect(tops()[1]! - tops()[0]!, 'one downward move, explained by the returned card').toBe(Math.round(card.height + gap));
-  const landed = landedElement('.cd-connector-section__header')!.getBoundingClientRect();
+  const landed = landedElement('.cd-rules__section > .cd-card')!.getBoundingClientRect();
   for (let frame = 0; frame < 10; frame += 1) await nextFrames();
-  expect(landedElement('.cd-connector-section__header')!.getBoundingClientRect().top).toBe(landed.top);
+  expect(landedElement('.cd-rules__section > .cd-card')!.getBoundingClientRect().top).toBe(landed.top);
   expect(tops()).toHaveLength(2);
 });
 
@@ -2656,11 +2660,11 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
   const { router } = await openToday();
   await expectSkeletonLoad({
     status: 'Reading your rules', anchors: RULES_ANCHORS,
-    stays: ['.cd-rules__header', '.cd-rules__ask', '.cd-owner-layout__footer'],
+    stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
       await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
-      expect(landedElement('.cd-connector-list')).toBeNull();
+      expect(landedElement('.cd-rules__tool-cards')).toBeNull();
     },
     release: held.release,
   });
@@ -2668,7 +2672,7 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
 
 it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', async (viewport) => {
   // Decision 15: a fresh Turner copy has an Emergency callback. A Desk without jobs, such as
-  // Acme, loses that section once when its reads settle; its connectors then stay in place.
+  // Acme, loses that card once when its reads settle; its connectors then stay in place.
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   desk.summary.business_name = 'Acme Accounting';
   desk.tools = desk.tools.filter((row) => row.source !== 'business');
@@ -2679,22 +2683,23 @@ it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', as
   const read = holdReads(RULES_READ);
   await router.navigate(RULES);
   await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-  const jobs = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-business-jobs')!;
+  const jobs = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer [data-skeleton-anchor="rules-first-card"]')!;
   expect(jobs.textContent).toBe('');
   const height = jobs.getBoundingClientRect().height;
-  const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
+  const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__tool-cards')!).rowGap);
+  // The Quotes card: second in the shapes, after the jobs' card; first on Acme's page.
   const tops = watchTop(() => {
     const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
     return layer && layer.getAttribute('data-state') !== 'leaving'
-      ? layer.querySelector('[data-skeleton-anchor="rules-connector-0"]')
-      : landedElement('.cd-connector-section__header');
+      ? layer.querySelector('.cd-rules__tool-cards > :nth-child(2)')
+      : landedElement('section.cd-card[aria-label="Quotes"]');
   });
   read.release();
-  await expect.element(screen.getByRole('list', { name: 'Connectors' })).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
-  expect(landedElement('.cd-business-jobs')).toBeNull();
+  expect(landedElement('section.cd-card[aria-label="Your Desk’s jobs"]')).toBeNull();
   expect(tops()).toHaveLength(2);
-  expect(tops()[1]! - tops()[0]!, 'one upward move, explained by the absent jobs section').toBe(-Math.round(height + gap));
+  expect(tops()[1]! - tops()[0]!, 'one upward move, explained by the absent jobs card').toBe(-Math.round(height + gap));
   for (let frame = 0; frame < 10; frame += 1) await nextFrames();
   expect(tops()).toHaveLength(2);
   expectNoHorizontalScroll();

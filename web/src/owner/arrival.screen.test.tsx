@@ -22,6 +22,7 @@ import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
 import { readLocal } from '../lib/storage.ts';
 import { worker } from '../mocks/browser.ts';
 import { copyOut } from '../mocks/readModels.ts';
+import { DECISIONS } from '../mocks/script.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -1292,7 +1293,8 @@ describe('OwnerLayout', () => {
       ['people', 'Customers', 'Customers'],
       ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
-      ['rules/all', 'All rules', 'All rules'],
+      // All rules' old address opens Rules, every rule now on one page.
+      ['rules/all', 'Rules', 'Rules'],
       ['safety', 'Safety', 'Safety'],
       ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],
@@ -1597,7 +1599,7 @@ describe('OwnerLayout', () => {
     holdReads(ROUTES.ownerInbox.path);
     await notificationsRow(screen, 1).click();
     const page = screen.getByRole('main');
-    await expect.element(page.getByRole('link', { name: /Open the request/ })).toHaveAttribute('href', `${fresh}#request-${encodeURIComponent(newHold)}`);
+    await expect.element(page.getByRole('link', { name: /Open the request/ })).toHaveAttribute('href', `/app/${mockStore.world.ids.deskId}/conversations/${mockStore.world.decisions.get(newHold)!.decision.session_id}#request-${encodeURIComponent(newHold)}`);
     expect(page.getByText(leftBehind).elements()).toHaveLength(0);
   });
 
@@ -1738,7 +1740,7 @@ describe('Today', () => {
     await expect
       .element(held.getByText('A request is waiting for your answer.', { exact: true }))
       .toBeVisible();
-    await expect.element(held.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(held.getByRole('link', { name: 'Open the request' })).toBeVisible();
     expect(held.element().querySelector('.cd-status-dot--held')).not.toBeNull();
   });
 
@@ -1786,7 +1788,7 @@ describe('Today', () => {
   it('today_has_no_jargon', async () => {
     const { screen } = await renderRoute(TODAY);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(screen.getByRole('link', { name: 'Open the request' })).toBeVisible();
     // The right column sits beside the page at this width.
     const aside = document.querySelector('.cd-today-aside');
     const main = document.querySelector('.cd-today__main');
@@ -1833,6 +1835,24 @@ describe('Today', () => {
 });
 
 describe('Things to try ticks off', () => {
+  it.each(['desktop', 'phone'] as const)('answering_in_the_conversation_ticks_the_held_request_%s', async (viewport) => {
+    const { screen, router } = await renderRoute(TODAY, { viewport });
+    const step = rowStep(thingRow(screen, 'Answer a held request'), 'Open the request', 'Answer a held request');
+    await expect.element(step).toBeVisible();
+    const href = step.element().getAttribute('href');
+    expect(href).toMatch(/\/conversations\//);
+    await step.click();
+    expect(router.state.location.pathname + router.state.location.hash).toBe(href);
+    await expect.element(heldCard(screen)).toBeVisible();
+    await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
+    await expect.element(heldCard(screen).getByText("You allowed this. It's done.", { exact: true })).toBeVisible();
+    await router.navigate(-1);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    expect(row.getByRole('link').elements()).toHaveLength(0);
+  });
+
   it('fresh_copy_has_nothing_done', async () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);
@@ -1870,7 +1890,7 @@ describe('Things to try ticks off', () => {
 
   it('the_check_draws_from_its_short_arm', async () => {
     const { screen } = await renderRoute(TODAY);
-    await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(thingRow(screen, 'Answer a held request').getByRole('link', { name: 'Open the request' })).toBeVisible();
     const things = thingsToTry(screen).element();
     // The check's path as it starts to draw, caught in the commit that ticks the row.
     const drawing = new Promise<SVGPathElement>((resolve) => {
@@ -2074,7 +2094,7 @@ describe('Things to try ticks off', () => {
     await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo' }).click();
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
     // The new copy's list has nothing done, and its held request waits.
-    await expect.element(thingRow(screen, 'Answer a held request').getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(thingRow(screen, 'Answer a held request').getByRole('link', { name: 'Open the request' })).toBeVisible();
     await expect.element(thingsToTry(screen).getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
     expect(thingsToTry(screen).getByText('Done', { exact: true }).elements()).toHaveLength(0);
   });
@@ -2369,7 +2389,7 @@ describe('Things to try ticks off', () => {
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
     await expect.element(thingsToTry(screen).getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Open the request' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('link', { name: 'Open the request' }).elements()).toHaveLength(0);
     // Done before this view, so its check is drawn still: nothing in the list animated.
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(2);
     expect(animated()).toEqual([]);
@@ -2420,6 +2440,34 @@ describe('Things to try ticks off', () => {
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
     await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
     await expect.element(greetingLink).toHaveFocus();
+  });
+
+  it('a_request_held_in_the_preview_ticks_try_to_break_it', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const things = thingsToTry(screen);
+    const row = thingRow(screen, 'Try to break it');
+    const doneLine = 'Done. Safety shows what was stopped.';
+
+    // The seed's held request is in a visitor's chat, so it leaves this row unfinished at load.
+    await expect.element(heldCard(screen)).toBeVisible();
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(2);
+    await expect.element(rowStep(row, 'Show me ideas', 'Try to break it')).toBeVisible();
+    expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(things.getByText(ABOUT_TEN_MINUTES, { exact: true })).toBeVisible();
+
+    await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
+    await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(row.getByText(doneLine, { exact: true }).elements()).toHaveLength(0);
+
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    if (!preview?.ownerPreview) throw new Error('the owner has a preview chat');
+    mockStore.world.decide(preview, DECISIONS.heldQuote, 'en');
+
+    await expect.element(row.getByText(doneLine, { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('2 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   });
 
   it('all_five_done', async () => {
@@ -2776,7 +2824,8 @@ function thingsToTry(screen: RenderResult) {
  * named by its `title`.
  */
 function rowStep(row: Locator, label: string, title: string): Locator {
-  return window.innerWidth < 640 ? row.getByRole('button', { name: title, exact: true }) : row.getByRole('button', { name: label, exact: true });
+  const role = title === 'Answer a held request' ? 'link' : 'button';
+  return window.innerWidth < 640 ? row.getByRole(role, { name: title, exact: true }) : row.getByRole(role, { name: label, exact: true });
 }
 
 /** From 640 px the cards of a row share its height, so a card that ticks or settles moves nothing under the list. */

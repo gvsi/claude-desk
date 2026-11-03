@@ -59,7 +59,7 @@ type Story = StoryObj<typeof meta>;
 export const PaymentLinkOnPayments: Story = {
   parameters: {
     canvasNote:
-      "The shared rule is the demo agent's charges up to $20, automatic, read as \"Automatic up to $20; over $20, ask me first\"; the board's example is illustrative. A rule for one agent outranks the tool's own rule, so it comes first.",
+      "The shared rule is the demo agent's charges up to $20, automatic, read as \"Allow\"; the board's example is illustrative. A rule for one agent outranks the tool's own rule, so it comes first.",
   },
   play: async ({ args, canvas, canvasElement }) => {
     // list_semantics_kept: a list drawn without markers says role="list", so Safari keeps it a list.
@@ -78,9 +78,9 @@ export const PaymentLinkOnPayments: Story = {
     await expect(rows).toHaveLength(2);
     await expect(rows[0]).toHaveTextContent(`Shared rule. ${rivera.sharedChargeAppliesTo}`);
     await expectSharedTitles(rows[0] as HTMLElement);
-    await expect(rows[0]).toHaveTextContent('Automatic up to $20; over $20, ask me first');
+    await expect(rows[0]).toHaveTextContent('Allow');
     await expect(rows[1]).toHaveTextContent(rivera.ruleCards['rv-link'].reason);
-    await expect(rows[1]).toHaveTextContent('Automatic up to $300; over $300, ask me first');
+    await expect(rows[1]).toHaveTextContent('Allow');
     // fallback_and_add_a_rule
     await expect(canvas.getByText('Anything else here: ask me.')).toBeVisible();
     const add = canvas.getByRole('button', { name: 'Add a rule' });

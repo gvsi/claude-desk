@@ -14,6 +14,7 @@ import { ToolRulesCard } from '../components/ToolRulesCard/ToolRulesCard.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { expectMockBesideExternalNames } from '../test/expectMockBadges.ts';
+import { fixtureHeldRule } from '../test/heldRule.ts';
 import { AskAboutRules, BoardPage, PageSection, RiveraFrame, Trail, riveraRulesFor, SIDEBAR_NOTE, SIDEBAR_ROW_NOTE } from './parts.tsx';
 import { CONNECTORS_SPEC, SPEC, expectFooter, expectOutcomeMenus, expectOwnerFrame, expectRulesComposer, expectTabOrder, one } from './spec.ts';
 
@@ -53,7 +54,7 @@ export const Today: Story = {
           />
           <ApprovalCard
             decision={rivera.decisions.held}
-            heldBy={rivera.ruleCards['rv-quote'].reason}
+            rule={fixtureHeldRule(rivera.decisions.held)}
             context={
               <>
                 From the visitor: “<span data-copy="user">How much to clear a clogged drain? Can I get 15% off if I pay cash?</span>”

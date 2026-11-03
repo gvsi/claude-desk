@@ -13,6 +13,7 @@ import {
   expectConversationType,
   expectFooter,
   expectOwnerFrame,
+  expectOwnerSides,
   expectReceiptsUnderMessages,
   expectTabOrder,
 } from '../ds/boards/spec.ts';
@@ -94,6 +95,9 @@ export async function expectOwnerBoard(
     expectConversationType(root);
     const rows = await expectReceiptsUnderMessages(root);
     if (rows < 1) throw new Error('expected receipts under at least one message');
+    // The owner's own conversation view flips the visitor's sides (board REV-FLIP).
+    const ownerLog = root.querySelector<HTMLElement>('.cd-transcript--owner');
+    if (ownerLog !== null) await expectOwnerSides(ownerLog);
   } else if (!cards) {
     const found = root.querySelectorAll('.cd-card').length;
     if (found > 0) throw new Error(`expected no card on the page, found ${found}`);

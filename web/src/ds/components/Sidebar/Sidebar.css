@@ -24,6 +24,8 @@
   align-items: center;
   gap: var(--space-10);
   padding: var(--space-2) var(--space-8) var(--space-12);
+  color: inherit;
+  text-decoration: none;
 }
 
 .cd-sidebar__skeleton-wordmark {
@@ -142,6 +144,13 @@
   flex-direction: column;
   gap: var(--space-2);
   margin-top: var(--space-8);
+}
+
+.cd-sidebar__concept-footer {
+  flex: none;
+  min-width: 0;
+  padding: var(--space-8) var(--space-8);
+  overflow-wrap: anywhere;
 }
 
 .cd-sidebar__row {
