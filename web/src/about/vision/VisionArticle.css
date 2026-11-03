@@ -20,8 +20,10 @@
   --va-card-shadow: 0 1px 2px rgba(28, 27, 25, 0.06);
   --va-control-edge: rgba(28, 27, 25, 0.14);
   --va-tab-line: rgba(28, 27, 25, 0.1);
-  /* The businesses' own header colors, and what sits on them. */
+  /* The businesses' own header colors, one each, and what sits on them: the Permit Center's navy, Lumen Labs' plum
+     and Turner Plumbing’s teal. Each holds white words at over 9:1. */
   --va-city: #16324d;
+  --va-lumen: #4a2c52;
   --va-rivera: #1f4e4a;
   --va-on-field: #ffffff;
   --va-on-field-tile: rgba(255, 255, 255, 0.16);
@@ -51,11 +53,21 @@
   box-shadow: inset 0 0 0 1px var(--va-ink-2);
 }
 
-/* What keyboard focus scrolls to stops clear of the top bar, whose height is on the root (AboutBar.css). */
+/* What keyboard focus scrolls to stops clear of the top bar, whose height is on the root (AboutBar.css), and so does
+   a section the contents list or an address moves to. */
 .vision-article main a,
+.vision-article main summary,
+.vision-article .va-h2,
 .vision-article .va-cards,
 .vision-article .va-end a {
   scroll-margin-top: calc(var(--about-top) + 24px);
+}
+
+/* Focus lands on a section when the contents list's link to it is followed; it is not a control, so it draws nothing. */
+.vision-article .va-h2:focus,
+.vision-article .va-cards:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 /* The headline block: the meta line, the headline, the dek and the note under it. */
@@ -65,6 +77,10 @@
   margin: 0 auto;
   padding: 88px 40px 40px;
   text-align: center;
+}
+
+.vision-article .va-hero > .cd-mark-app-icon {
+  margin: 0 auto calc(var(--space-18) * 2);
 }
 
 .vision-article .va-meta {
@@ -145,6 +161,34 @@
 
 .vision-article .va-trio .va-phone:nth-child(2n) {
   margin-top: 36px;
+}
+
+/* "On this page" (Contents.tsx, contents.css), from the article's first words to its end. At a laptop's width it
+   is the reading pages' side list, in their place: the side column at the left gutter, level with the first words
+   and pinned below the top bar while the article scrolls. The column stays centred on the page; where the window is
+   too narrow for the figures to clear the list, the reading moves right just enough that they do, 40 px clear. On
+   a phone (below the About set's breakpoint) it is the folded row, on the article's column. */
+
+.vision-article .va-reading--side {
+  position: relative;
+  padding-left: max(0px, calc(2 * (var(--about-bar-gutter) + var(--size-article-side)) + 760px - 100%));
+}
+
+.vision-article .va-side {
+  position: absolute;
+  top: 72px;
+  bottom: 0;
+  left: max(var(--about-bar-gutter), calc((100% - var(--size-article-measure) - 4 * var(--size-article-side)) / 2));
+  width: var(--size-article-side);
+}
+
+.vision-article .va-fold {
+  padding-top: 48px;
+  padding-bottom: 0;
+}
+
+.vision-article .va-fold + .va-body--intro {
+  padding-top: 40px;
 }
 
 /* The article's text: a serif column, its section headings in the interface face. */
@@ -444,6 +488,10 @@
   background: var(--va-city);
 }
 
+.vision-article .ph-head--lumen {
+  background: var(--va-lumen);
+}
+
 .vision-article .ph-head--rivera {
   background: var(--va-rivera);
 }
@@ -683,6 +731,10 @@
     text-align: left;
   }
 
+  .vision-article .va-hero > .cd-mark-app-icon {
+    margin: 0 0 var(--space-28);
+  }
+
   .vision-article .va-meta {
     justify-content: flex-start;
     margin-bottom: 20px;
@@ -710,6 +762,14 @@
 
   .vision-article .va-body--intro {
     padding: 48px 16px 0;
+  }
+
+  .vision-article .va-fold {
+    padding-top: 12px;
+  }
+
+  .vision-article .va-fold + .va-body--intro {
+    padding-top: 32px;
   }
 
   .vision-article .va-p {

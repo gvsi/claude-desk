@@ -214,9 +214,10 @@ describe('ReaderPage with motion', () => {
     const contents = document.querySelector('nav[aria-label="On this page"]') as HTMLElement;
     const bar = () => contents.querySelector<HTMLElement>('[data-contents-bar]');
 
-    // When the first section becomes current, the bar shows on its row at once, without sliding from the top.
-    await jumpTo(placeOf('capability'));
-    await expect.poll(marked).toEqual(['#capability']);
+    // When a section first becomes current, the bar shows on its row at once, without sliding from the top. (The
+    // first section, "Capability", is one paragraph under the claim card, too short to be marked by itself.)
+    await jumpTo(placeOf('why-it-matters'));
+    await expect.poll(marked).toEqual(['#why-it-matters']);
     expect(bar(), 'the bar is drawn').not.toBeNull();
     expect(bar()?.getAnimations(), 'the bar shows without sliding').toEqual([]);
 
@@ -235,18 +236,18 @@ describe('ReaderPage with motion', () => {
     const slides = eachFrame(() => bar()?.getAnimations().map((animation) => (animation as CSSTransition).transitionProperty) ?? []);
     onTestFinished(slides.stop);
 
-    followLink('how-its-measured');
-    const heading = headingOf('how-its-measured');
+    followLink('why-its-coming');
+    const heading = headingOf('why-its-coming');
     await expect.poll(() => Math.abs(heading.getBoundingClientRect().top - 88), { timeout: 1000 }).toBeLessThanOrEqual(1);
     // Past the scroll's end: the page has looked again, and nothing moves.
     await new Promise((resolve) => setTimeout(resolve, 300));
     slides.stop();
     watch.disconnect();
-    expect(marks, 'the sections marked on the way').toEqual(['#how-its-measured']);
-    expect(marked()).toEqual(['#how-its-measured']);
+    expect(marks, 'the sections marked on the way').toEqual(['#why-its-coming']);
+    expect(marked()).toEqual(['#why-its-coming']);
     expect(places, 'the bar moved once').toHaveLength(1);
     // To the row's words.
-    const words = linkTo('how-its-measured').querySelector('span:last-child')?.getBoundingClientRect() as DOMRect;
+    const words = linkTo('why-its-coming').querySelector('span:last-child')?.getBoundingClientRect() as DOMRect;
     expect(Math.abs((bar()?.getBoundingClientRect().top ?? 0) - words.top)).toBeLessThanOrEqual(0.5);
     // It slid there: a transition of its place, in motion-base on the emphasis ease.
     expect(slides.frames.some((properties) => properties.includes('transform')), 'the bar slid').toBe(true);
@@ -310,8 +311,8 @@ describe('ReaderPage with motion', () => {
     // The rest of a scroll just before the click arrives as the glide starts: the mark stays on the section
     // followed, rather than going back to where the window still is.
     const screen = await renderReader('prediction');
-    await jumpTo(placeOf('capability'));
-    await expect.poll(marked).toEqual(['#capability']);
+    await jumpTo(placeOf('why-it-matters'));
+    await expect.poll(marked).toEqual(['#why-it-matters']);
     const marks: string[] = [];
     const watch = new MutationObserver((records) => {
       for (const record of records) {

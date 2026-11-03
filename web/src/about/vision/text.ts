@@ -25,7 +25,7 @@ export interface ChatScreen {
   /** What the screen shows, read in place of it. */
   label: string;
   /** The header's color. */
-  field: 'city' | 'rivera';
+  field: 'city' | 'lumen' | 'rivera';
   /** The header's initials, beside the name written out. */
   monogram: string;
   name: string;
@@ -83,7 +83,7 @@ export const CITY: ChatScreen = {
 export const WORK: ChatScreen = {
   kind: 'chat',
   label: 'A colleague’s phone: Sam Patel’s Desk holds half an hour on Sam’s calendar in a card and asks Sam before sharing the Q4 budget.',
-  field: 'rivera',
+  field: 'lumen',
   monogram: 'S',
   name: 'Sam Patel’s Desk',
   sub: 'Lumen Labs · Jordan Lee is asking',

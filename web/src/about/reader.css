@@ -859,7 +859,7 @@
   scroll-margin-top: calc(var(--about-top) + var(--space-24));
 }
 
-/* The hero: the Claude Desk app icon, "About this prototype" 36 px under it, the title, the summary
+/* The hero: the Claude Desk app icon, the meta line 36 px under it, the title, the summary
    and the lead figure, centered (N-Docs-Hero-Proposal). */
 
 .cd-about-hero {
@@ -873,6 +873,20 @@
 .cd-about-hero__kicker {
   margin: calc(var(--space-18) * 2) 0 0;
   color: var(--text-secondary);
+}
+
+/* The meta line, as the Vision article's: the document's kind in the ink and a heavier weight, then its date and
+   reading time, spaced apart on one line, centred in the hero. */
+.cd-about-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-6) var(--space-18);
+}
+
+.cd-about-page .cd-about-hero__meta strong {
+  font-weight: 560;
+  color: var(--text-primary);
 }
 
 .cd-about-page .cd-about-hero__title {
@@ -895,36 +909,15 @@
   margin-top: calc(var(--space-24) * 3);
 }
 
-/* The capability prediction's opening (ReaderPage's `column` layout): no app icon and no lead figure, and
-   "About this prototype", the title and the summary left-aligned on the article's edge. On a laptop they open the
-   article's column, level with the contents list and the details, 80 px under the top bar: 14 px from the kicker
-   to the title, 20 px to the summary and 40 px to the first section. On a phone they keep the hero's place above
-   the folded contents. */
-
-.cd-about-hero--column {
-  align-items: flex-start;
+/* The prediction's hero figure is its claim card, in the article's type: its words left-aligned, as the article's. */
+.cd-about-hero__figure > .cd-about-claim {
   text-align: left;
 }
 
-.cd-about-column > .cd-about-hero--column {
-  display: block;
-  padding: 0;
-}
-
-.cd-about-column > .cd-about-hero--column .cd-about-hero__kicker {
-  margin: 0;
-}
-
-.cd-about-page .cd-about-column > .cd-about-hero--column .cd-about-hero__title {
-  max-width: none;
-  margin-top: var(--space-14);
-  text-wrap: pretty;
-}
-
-.cd-about-column > .cd-about-hero--column .cd-about-hero__summary {
-  max-width: none;
-  margin: var(--space-20) 0 var(--space-40);
-  text-wrap: pretty;
+/* In the hero's wide card the lead, the list and the caveat keep a reading measure, about 70 characters to a line;
+   the prediction at a glance under them keeps the card's width. On a phone the card is narrower than that anyway. */
+.cd-about-claim > :is(p, ul) {
+  max-width: 66ch;
 }
 
 /* The body: the contents list, the article and its details. The side columns grow with the window, so the
@@ -939,80 +932,6 @@
   max-width: calc(var(--size-article-measure) + 4 * var(--size-article-side) + 2 * var(--about-gutter));
   margin: 0 auto;
   padding: var(--about-step) var(--about-gutter) 0;
-}
-
-.cd-about-page--column:not(.cd-about-page--compact) .cd-about-body {
-  padding-top: calc(var(--space-40) * 2);
-}
-
-.cd-about-page .cd-about-side-label {
-  margin: 0 0 var(--space-14);
-  font-weight: 520;
-  color: var(--text-secondary);
-}
-
-.cd-about-contents {
-  position: sticky;
-  top: calc(var(--about-top) + var(--space-24));
-  align-self: start;
-  width: var(--size-article-side);
-}
-
-.cd-about-contents__list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-bottom: 1px solid var(--line-hairline);
-}
-
-.cd-about-contents__list li {
-  border-top: 1px solid var(--line-hairline);
-}
-
-.cd-about-contents__link {
-  display: flex;
-  gap: var(--space-14);
-  /* Give the inset edge room beside the numbers without moving the contents at rest. */
-  padding: var(--space-10) var(--space-8);
-  margin-inline: calc(-1 * var(--space-8));
-  color: var(--text-primary);
-  text-decoration: none;
-}
-
-/* Beside the article, the list marks the section being read (ReaderPage's SideContents): its words in
-   text-primary, the others' in text-secondary, and a 2 px bar in text-primary beside its words, in the gutter.
-   The bar is one element, moved to the current row; it slides there in motion-base, and moves at once under
-   reduced motion. The folded list on a phone marks nothing. */
-.cd-about-contents--side .cd-about-contents__link {
-  color: var(--text-secondary);
-}
-
-.cd-about-contents--side .cd-about-contents__link[aria-current='location'] {
-  color: var(--text-primary);
-}
-
-.cd-about-contents .cd-about-contents__link:hover {
-  color: var(--accent-blue);
-}
-
-.cd-about-contents__bar {
-  position: absolute;
-  top: 0;
-  left: calc(var(--space-12) * -1);
-  width: var(--space-2);
-  border-radius: var(--radius-full);
-  background: var(--text-primary);
-  transition:
-    transform var(--motion-base) var(--motion-ease-emphasis),
-    height var(--motion-base) var(--motion-ease-emphasis);
-}
-
-.cd-about-page .cd-about-contents__number {
-  flex: none;
-  width: var(--space-20);
-  font-family: var(--font-mono);
-  line-height: var(--space-20);
-  color: var(--text-secondary);
 }
 
 .cd-about-meta {
@@ -1101,13 +1020,17 @@
 /* The prediction's claim, as a card at the top of its first section (ClaimCard): the bold lead, the reader's
    bulleted list tightened (8 px under the lead, 4 px between items, 16 px over the caveat), the caveat, then the
    prediction at a glance, a label column and a value column between hairlines. */
-.cd-about-article .cd-about-claim {
-  margin: var(--space-4) 0 var(--space-32);
+.cd-about-page .cd-about-claim {
   padding: var(--space-28) var(--space-32) var(--space-20);
 }
 
-.cd-about-article .cd-about-claim--compact {
+.cd-about-page .cd-about-claim--compact {
   padding: var(--space-20);
+}
+
+/* Bold in the claim is the article's 640. */
+.cd-about-claim strong {
+  font-weight: 640;
 }
 
 .cd-about-claim > p {
@@ -1218,7 +1141,8 @@
   border-color: var(--line-control-hover);
 }
 
-.cd-about-page .cd-about-next__label {
+/* Over the side label's own margin (contents.css), whichever stylesheet loads first. */
+.cd-about-page .cd-about-next .cd-about-next__label {
   margin: 0;
 }
 
@@ -1292,47 +1216,6 @@
   display: block;
   max-width: calc(var(--size-article-measure) + 2 * var(--about-gutter));
   padding-top: calc(var(--space-40));
-}
-
-.cd-about-contents--compact {
-  position: static;
-  width: auto;
-  border-top: 1px solid var(--line-hairline);
-  border-bottom: 1px solid var(--line-hairline);
-}
-
-.cd-about-page .cd-about-contents__row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-10);
-  min-height: calc(var(--space-24) * 2);
-  font-weight: 520;
-  color: var(--text-primary);
-  list-style: none;
-  cursor: pointer;
-}
-
-.cd-about-contents__row::-webkit-details-marker {
-  display: none;
-}
-
-.cd-about-contents__count {
-  margin-left: auto;
-  font-weight: 400;
-  color: var(--text-secondary);
-}
-
-.cd-about-contents__chevron {
-  flex: none;
-  color: var(--text-secondary);
-}
-
-.cd-about-contents__fold[open] .cd-about-contents__chevron {
-  transform: rotate(180deg);
-}
-
-.cd-about-contents--compact .cd-about-contents__list {
-  border-bottom: 0;
 }
 
 .cd-about-page--compact .cd-about-article {

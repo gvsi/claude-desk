@@ -18,7 +18,7 @@ import { FONT_SHEET_URL, loadWebFonts } from '../ds/test/fonts.ts';
 import { writeLocal } from '../lib/storage.ts';
 import { placeholderTexts } from '../test/about.ts';
 import { AXE_TAGS, assertNoJargon, tokenColor } from '../test/screen.ts';
-import { ABOUT_DOCUMENTS, documentText } from './documents.ts';
+import { ABOUT_DOCUMENTS, documentText, type Block } from './documents.ts';
 import type { AboutId } from './links.ts';
 import { ReaderPage } from './ReaderPage.tsx';
 
@@ -32,6 +32,8 @@ const PAGES = {
     route: '/about/proposal',
     title: 'Product proposal',
     summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
+    // The meta line above the title, as the Vision article's: the kind, the date and the reading time.
+    meta: ['Proposal', 'November 2, 2026', '2026-11-02', '8 min read'],
     sections: [
       'The product',
       'Who it’s for and the problem',
@@ -47,6 +49,7 @@ const PAGES = {
     title: 'Capability prediction',
     summary:
       'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
+    meta: ['Prediction', 'November 2, 2026', '2026-11-02', '9 min read'],
     sections: ['Capability', 'Why it matters', 'How it’s measured', 'Why it’s coming', 'Why the limits stay in code', 'Readiness'],
   },
 } as const;
@@ -90,10 +93,10 @@ afterEach(async () => {
   await page.viewport(DESKTOP.width, DESKTOP.height);
 });
 
-/** The design system's chat icon, as its paths draw it, to tell it apart from any other icon. */
-const CHAT_ICON = (() => {
+/** The design system's app window icon, as its paths draw it, to tell it apart from any other icon. */
+const APP_ICON = (() => {
   const holder = document.createElement('div');
-  holder.innerHTML = renderToStaticMarkup(<Icon name="conversations" />);
+  holder.innerHTML = renderToStaticMarkup(<Icon name="app-window" />);
   return holder.querySelector('svg')?.innerHTML;
 })();
 
@@ -230,9 +233,26 @@ describe('ReaderPage', () => {
         const hero = screen.container.querySelector('[data-hero]');
         expect(flat(hero?.querySelector('[data-summary]')?.textContent), where).toBe(expected.summary);
         expect(
-          flat((hero as HTMLElement | null)?.innerText).startsWith(`About this prototype ${expected.title} ${expected.summary}`),
+          flat((hero as HTMLElement | null)?.innerText).startsWith(`${expected.meta[0]} ${expected.meta[1]} ${expected.meta[3]} ${expected.title} ${expected.summary}`),
           where,
         ).toBe(true);
+        // The meta line opens the page, as on the Vision article: the kind in the ink and its weight, then the date,
+        // a time a machine can read, and the reading time, in the secondary ink, spaced apart on one line.
+        const meta = hero?.querySelector<HTMLElement>('[data-meta]');
+        if (!meta) throw new Error(`${where}: no meta line`);
+        expect(hero?.textContent?.includes('About this prototype'), where).toBe(false);
+        expect([...meta.children].map((part) => flat(part.textContent)), where).toEqual([expected.meta[0], expected.meta[1], expected.meta[3]]);
+        const [kind, date, time] = [...meta.children] as HTMLElement[];
+        expect(kind?.localName, where).toBe('strong');
+        expect(getComputedStyle(kind as Element).color, where).toBe(tokenColor('--text-primary', meta));
+        expect(Number(getComputedStyle(kind as Element).fontWeight), where).toBeGreaterThan(Number(getComputedStyle(date as Element).fontWeight));
+        expect(date?.localName, where).toBe('time');
+        expect(date?.getAttribute('datetime'), where).toBe(expected.meta[2]);
+        for (const part of [date, time]) expect(getComputedStyle(part as Element).color, where).toBe(tokenColor('--text-secondary', meta));
+        const [k, d, t] = [kind, date, time].map((part) => (part as Element).getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
+        expect([k.top, d.top], where).toEqual([t.top, t.top]);
+        expect(d.left - k.right, where).toBeGreaterThanOrEqual(12);
+        expect(t.left - d.right, where).toBeGreaterThanOrEqual(12);
 
         // Every section in the contents list, in the document's order, each link named by its section and
         // numbered on the page (the list itself numbers them for a screen reader).
@@ -363,14 +383,14 @@ describe('ReaderPage', () => {
 
   it('article_opens_with_the_app_icon', async () => {
     // The mark on its white tile is the proposal's app icon (owner, 2026-10-30): a clay field with
-    // corners a quarter of its size and the tiled bell at two thirds of it, centred above "About
-    // this prototype" and the title. 120 px on the desktop layout, 88 px on the phone's. The prediction
-    // opens without it, in its reading column (prediction_opens_in_the_reading_column).
+    // corners a quarter of its size and the tiled bell at two thirds of it, centred above the meta
+    // line and the title. 120 px on the desktop layout, 88 px on the phone's. The prediction opens
+    // with it too (owner, 2026-11-02).
     for (const [size, field, radius, bell, gap, top] of [
       [DESKTOP, 120, '30px', '80', 36, '88px'],
       [PHONE, 88, '22px', '58', 28, '36px'],
     ] as const) {
-      for (const id of ['proposal'] as const) {
+      for (const id of ['proposal', 'prediction'] as const) {
         const where = `${id} at ${size.width}`;
         const screen = await renderReader(id, { size });
         const hero = screen.container.querySelector<HTMLElement>('[data-hero]');
@@ -405,55 +425,63 @@ describe('ReaderPage', () => {
     }
   });
 
-  it('prediction_opens_in_the_reading_column', async () => {
-    // The prediction's own opening (owner, 2026-11-02): no app icon and no centred hero. On a laptop, "About this
-    // prototype", the title and the summary open the article's column, left-aligned on the article's edge, level
-    // with the contents list and the details, 80 px under the top bar; 14 px from the kicker to the title, 20 px to
-    // the summary and 40 px to the first section. On a phone they keep their place above the folded contents,
-    // left-aligned on the article's edge with the byline. The proposal keeps its centred hero.
+  it('prediction_opens_with_the_proposals_hero', async () => {
+    // The prediction opens as the proposal does (owner, 2026-11-02): the meta line, the title and the summary
+    // centred above the body under the proposal's app icon, then its hero figure at the proposal's hero width, which
+    // is the claim card. The body under it, the contents list, the article and the details, is laid out the
+    // same; the article opens with "Capability" and the paragraph after the claim.
     for (const size of [DESKTOP, PHONE]) {
-      const where = `prediction at ${size.width}`;
-      const screen = await renderReader('prediction', { size });
-      const root = screen.container;
-      expect(root.querySelector('.cd-mark-app-icon'), where).toBeNull();
-      const hero = root.querySelector<HTMLElement>('[data-hero]');
-      if (!hero) throw new Error(`${where}: no opening`);
-      const kicker = hero.querySelector('.cd-about-hero__kicker') as Element;
-      const title = hero.querySelector('h1') as Element;
-      const summary = hero.querySelector('[data-summary]') as Element;
-      const article = root.querySelector('article') as Element;
-      const first = article.querySelector('h2') as Element;
-      const box = (el: Element) => el.getBoundingClientRect();
-      expect(getComputedStyle(hero).textAlign, where).toBe('left');
-      const edges = [kicker, title, summary, first, ...(size === PHONE ? [hero.querySelector('[data-byline]') as Element] : [])];
-      for (const el of edges) expect(Math.abs(box(el).left - box(article).left), `${where}: ${el.localName} on the article's edge`).toBeLessThanOrEqual(0.5);
-
-      if (size === DESKTOP) {
-        const column = root.querySelector('.cd-about-column');
-        expect(hero.parentElement, where).toBe(column);
-        expect(column?.firstElementChild, where).toBe(hero);
-        expect(hero.nextElementSibling, where).toBe(article);
+      const opening = async (id: AboutId) => {
+        const screen = await renderReader(id, { size });
+        const root = screen.container;
+        const hero = root.querySelector<HTMLElement>('[data-hero]') as HTMLElement;
+        const box = (selector: string) => {
+          const el = hero.querySelector(selector) as Element;
+          const r = el.getBoundingClientRect();
+          return { middle: Math.round(r.left + r.width / 2), left: Math.round(r.left), width: Math.round(r.width) };
+        };
         const body = root.querySelector('.cd-about-body') as Element;
-        expect(getComputedStyle(body).paddingTop, where).toBe('80px');
-        const contents = root.querySelector('nav[aria-label="On this page"]') as Element;
-        const details = root.querySelector('aside[aria-label="About this document"]') as Element;
-        expect(box(contents).top, `${where}: the contents list level with the kicker`).toBe(box(hero).top);
-        expect(box(details).top, `${where}: the details level with the kicker`).toBe(box(hero).top);
-        expect(box(kicker).top, where).toBe(box(hero).top);
-        expect(box(title).top - box(kicker).bottom, where).toBe(14);
-        expect(box(summary).top - box(title).bottom, where).toBe(20);
-        expect(box(first).top - box(summary).bottom, where).toBe(40);
-      } else {
-        expect(hero.closest('.cd-about-body'), where).toBeNull();
-        const contents = root.querySelector('nav[aria-label="On this page"]') as Element;
-        expect(hero.compareDocumentPosition(contents) & Node.DOCUMENT_POSITION_FOLLOWING, where).toBeTruthy();
-      }
-      await screen.unmount();
+        const placed = {
+          inBody: hero.closest('.cd-about-body') !== null,
+          align: getComputedStyle(hero).textAlign,
+          meta: box('[data-meta]').middle,
+          title: box('h1').middle,
+          summary: box('[data-summary]').middle,
+          figure: { left: box('.cd-about-hero__figure').left, width: box('.cd-about-hero__figure').width },
+          figureBelowSummary:
+            hero.querySelector('.cd-about-hero__figure')!.getBoundingClientRect().top - hero.querySelector('[data-summary]')!.getBoundingClientRect().bottom,
+          body: getComputedStyle(body).paddingTop,
+        };
+        return { screen, root, hero, placed };
+      };
+      const proposal = await opening('proposal');
+      await proposal.screen.unmount();
+      const prediction = await opening('prediction');
+      const where = `prediction at ${size.width}`;
+      const { root, hero } = prediction;
+      expect(prediction.placed, where).toEqual(
+        size === PHONE ? { ...proposal.placed, figureBelowSummary: prediction.placed.figureBelowSummary } : proposal.placed,
+      );
+      expect(prediction.placed.inBody, where).toBe(false);
+      expect(hero.querySelector('.cd-mark-app-icon'), where).not.toBeNull();
+      // Its hero figure is the claim card, and only that.
+      const figure = hero.querySelector('.cd-about-hero__figure') as Element;
+      expect([...figure.children].map((child) => child.hasAttribute('data-claim')), where).toEqual([true]);
+      // The article opens with "Capability", then the paragraph after the claim.
+      const article = root.querySelector('article') as Element;
+      expect(article.querySelector('[data-claim]'), where).toBeNull();
+      expect(article.firstElementChild?.id, where).toBe('capability');
+      expect(flat(article.firstElementChild?.nextElementSibling?.textContent), where).toMatch(/^On its own means over a whole conversation/);
+      // The side list and the details beside the article on a laptop; the folded list and the byline on a phone.
+      expect(root.querySelector('nav[aria-label="On this page"]'), where).not.toBeNull();
+      if (size === DESKTOP) expect(root.querySelector('aside[aria-label="About this document"]'), where).not.toBeNull();
+      else expect(hero.querySelector('[data-byline]'), where).not.toBeNull();
+      await prediction.screen.unmount();
     }
   });
 
   it('prediction_claim_reads_as_a_card', async () => {
-    // The claim opens "Capability" as a card on the page's paper (owner, 2026-11-02), drawn from the document's own
+    // The claim is the page's hero figure, a card on the page's paper (owner, 2026-11-02), drawn from the document's own
     // words: the bold lead, the three things the model will do as the reader's bulleted list, tightened (8 px under
     // the lead, 4 px apart, 16 px over the caveat), then the caveat, whose payoff alone is bold. Bold is the reader's
     // 640. Under them, the prediction at a glance in five rows: a label column and a value column between hairlines.
@@ -482,10 +510,13 @@ describe('ReaderPage', () => {
       const cards = [...root.querySelectorAll<HTMLElement>('[data-claim]')];
       expect(cards, where).toHaveLength(1);
       const card = cards[0] as HTMLElement;
-      // Right under the section's heading, inside the article, on a figure's card.
-      expect(card.parentElement?.localName, where).toBe('article');
-      expect(card.previousElementSibling?.id, where).toBe('capability');
-      expect(flat(card.nextElementSibling?.textContent), where).toMatch(/^On its own means over a whole conversation/);
+      // The hero's figure, under the summary, on a figure's card, its words left-aligned in the article's type.
+      expect(card.parentElement?.classList.contains('cd-about-hero__figure'), where).toBe(true);
+      expect(card.closest('[data-hero]'), where).not.toBeNull();
+      expect(getComputedStyle(card).textAlign, where).toBe('left');
+      expect(getComputedStyle(card.querySelector('p') as Element).fontFamily, where).toBe(
+        getComputedStyle(root.querySelector('article > p') as Element).fontFamily,
+      );
       expect(card.classList.contains('cd-about-frame'), where).toBe(true);
       expect(getComputedStyle(card).backgroundColor, where).toBe(tokenColor('--bg-panel', card));
 
@@ -510,6 +541,16 @@ describe('ReaderPage', () => {
       expect(bold(caveat).map((strong) => flat(strong.textContent)), where).toEqual(['enforced in code, outside the model']);
       expect(caveat?.querySelector('em, i, b'), where).toBeNull();
       for (const strong of [...bold(lead), ...bold(caveat)]) expect(getComputedStyle(strong).fontWeight, where).toBe('640');
+      // In the hero's wide card, the lead, the list and the caveat keep a reading measure: no wider than 75
+      // characters of their own type.
+      for (const block of [lead, list, caveat]) {
+        const measure = document.createElement('span');
+        measure.style.cssText = 'display: inline-block; width: 75ch';
+        block?.append(measure);
+        const most = measure.getBoundingClientRect().width;
+        measure.remove();
+        expect(box(block).width, `${where}: ${block?.localName} ${flat(block?.textContent).slice(0, 30)}`).toBeLessThanOrEqual(most);
+      }
 
       // At a glance: five rows, each a label and its value under a hairline, the longer values wrapping in their own
       // column inside the card; the benchmark links to its board.
@@ -636,7 +677,13 @@ describe('ReaderPage', () => {
   it('phone_top_bar_keeps_the_name_on_one_line', async () => {
     // The phone bar follows the signed phone top bar: the bell beside "Claude Desk" and no Preview
     // badge, the name on one line (the wordmark's 22 px line) and nothing past the window's width,
-    // down to a 320 px phone. The desktop bar keeps the badge.
+    // down to a 320 px phone. The desktop bar keeps the badge. Measured in the interface's web font, as the page
+    // ships; the sheet goes again after, so the other tests keep measuring as before.
+    onTestFinished(() => {
+      const want = new URL(FONT_SHEET_URL).href;
+      for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
+    });
+    await loadWebFonts();
     const phones = [PHONE, { width: 375, height: 812 }, { width: 360, height: 800 }, { width: 320, height: 640 }];
     for (const size of phones) {
       const where = `at ${size.width}`;
@@ -648,12 +695,22 @@ describe('ReaderPage', () => {
       expect(name?.getBoundingClientRect().height, where).toBe(22);
       expect(bar?.querySelector('.cd-pill'), where).toBeNull();
       expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
-      // The brand keeps the bar's 16 px side, and the link its words on one line. Below 360 px the
-      // link drops its chat icon, so the 32 px bell and the name still fit.
+      // The brand keeps the bar's 16 px side, and the link, the bar's primary button, its words on one line,
+      // clear of the brand. Below 360 px the link drops its icon and the three sit closer, so the 32 px bell and
+      // the name fit with room to spare, at a larger type scale too.
       expect(bar?.querySelector('.cd-about-brand')?.getBoundingClientRect().right, where).toBeLessThanOrEqual(size.width - 16);
+      // Room to spare: the three need at least 4 px less than the bar has, so a font's metrics can't tip them over.
+      const parts = [...(bar?.children ?? [])].map((part) => part.getBoundingClientRect().width);
+      const gaps = parseFloat(getComputedStyle(bar as Element).columnGap) * (parts.length - 1);
+      expect(parts.reduce((sum, width) => sum + width, 0) + gaps, where).toBeLessThanOrEqual(size.width - 32 - 4);
       const link = bar?.querySelector<HTMLElement>('.cd-about-try');
       expect(link?.textContent, where).toBe('Try Desk prototype');
       expect(link?.getBoundingClientRect().height, where).toBe(32);
+      expect(link?.classList.contains('cd-button--primary'), where).toBe(true);
+      expect(link?.getBoundingClientRect().left, where).toBeGreaterThanOrEqual(16);
+      expect((link?.getBoundingClientRect().right ?? Infinity) + 6, where).toBeLessThanOrEqual(
+        bar?.querySelector('.cd-about-brand')?.getBoundingClientRect().left ?? 0,
+      );
       const icon = link?.querySelector('.cd-about-try__icon');
       expect(icon ? getComputedStyle(icon).display : null, where).toBe(size.width < 360 ? 'none' : 'block');
       await screen.unmount();
@@ -772,10 +829,14 @@ describe('ReaderPage', () => {
 
   it('article_shows_every_block_in_order', async () => {
     for (const id of IDS) {
-      const { blocks, pullQuote } = ABOUT_DOCUMENTS[id];
-      const expected = documentText(blocks).map(apostrophes);
+      const { blocks, pullQuote, claim } = ABOUT_DOCUMENTS[id];
+      // In the page's order: the prediction's claim is its hero figure, above the article, and the rest in the
+      // document's order.
+      const inClaim = (b: number) => claim !== undefined && b >= claim.first && b <= claim.last;
+      const order = [...blocks.keys()].sort((a, b) => Number(inClaim(b)) - Number(inClaim(a)));
+      const expected = order.flatMap((b) => documentText([blocks[b] as Block])).map(apostrophes);
       // Each piece's key is its block's place in the document and its place in the block.
-      const keys = blocks.flatMap((block, b) => documentText([block]).map((_, i) => `${b}.${i}`));
+      const keys = order.flatMap((b) => documentText([blocks[b] as Block]).map((_, i) => `${b}.${i}`));
       // Header cells the page shows again as labels: the readiness scale's "Watch for", and on a phone each list's
       // headings from its third column on (the proposal's "Prototype", the prediction's fits' "Reaches 80%" and its
       // results' two models).
@@ -801,10 +862,14 @@ describe('ReaderPage', () => {
         expect(article, where).not.toBeNull();
         expect(article?.querySelectorAll('.cd-about-chart'), where).toHaveLength(id === 'prediction' ? 1 : 0);
         const unmarked: string[] = [];
-        const walker = document.createTreeWalker(article ?? document.body, NodeFilter.SHOW_TEXT);
-        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          if ((node.textContent ?? '').trim() === '' || node.parentElement?.closest('[data-doc-text], .cd-about-chart')) continue;
-          unmarked.push((node.textContent ?? '').trim());
+        // The claim card, the prediction's hero figure, before the article.
+        for (const part of [screen.container.querySelector('[data-hero] [data-claim]'), article]) {
+          if (!part) continue;
+          const walker = document.createTreeWalker(part, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if ((node.textContent ?? '').trim() === '' || node.parentElement?.closest('[data-doc-text], .cd-about-chart')) continue;
+            unmarked.push((node.textContent ?? '').trim());
+          }
         }
         const steps = ['Lagging', 'Early', 'Gated', 'Near'];
         const glance = [
@@ -1453,8 +1518,10 @@ describe('ReaderPage', () => {
         const meta =
           size === PHONE ? root.querySelector('[data-hero] [data-byline]') : root.querySelector('aside[aria-label="About this document"] dd');
         const footer = root.querySelector('[data-ds="concept-footer"]');
+        // On a phone the line under the summary is the author alone: the meta line above the title has the date and
+        // the reading time.
         for (const [part, words] of [
-          [meta, /^Giovanni Alcantara(?: · |$)/],
+          [meta, /^Giovanni Alcantara$/],
           [footer, /^Concept prototype by Giovanni Alcantara, not an Anthropic product$/],
         ] as const) {
           expect(flat(part?.textContent), where).toMatch(words);
@@ -1481,12 +1548,19 @@ describe('ReaderPage', () => {
         document.title = 'Today · Claude Desk';
         const screen = await renderReader(id, { size, lastDesk });
         expect(document.title, where).toBe(`${PAGES[id].title} · Claude Desk`);
-        // The invitation into the prototype, in the top bar, the same words at every width, never naming the
-        // business, with the chat icon: to this browser's Desk when it has opened one.
+        // One link into the prototype, in the top bar, the same words at every width, never naming the
+        // business, with the app window icon: to this browser's Desk when it has opened one. It is the page's
+        // primary button: the design system's primary fill and words, in the paper's ink and on its paper.
         const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true }).elements();
         expect(back[0]?.closest('header'), where).not.toBeNull();
         expect(back.map(readText), where).toEqual(['Try Desk prototype']);
-        expect(back[0]?.querySelector('svg')?.innerHTML, where).toBe(CHAT_ICON);
+        expect(back[0]?.querySelector('svg')?.innerHTML, where).toBe(APP_ICON);
+        const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
+        const button = getComputedStyle(back[0] as Element);
+        expect(back[0]?.classList.contains('cd-button--primary'), where).toBe(true);
+        expect([button.backgroundColor, button.color], where).toEqual([tokenColor('--text-primary', root), tokenColor('--bg-app', root)]);
+        expect(button.borderTopLeftRadius, where).toBe(getComputedStyle(root).getPropertyValue('--radius-control').trim());
+        expect(button.textDecorationLine, where).toBe('none');
         expect(back[0]?.getAttribute('href'), where).toBe(to);
         await userEvent.click(back[0] as HTMLElement);
         await expect.poll(() => at.path).toBe(to);
@@ -1586,10 +1660,17 @@ describe('ReaderPage', () => {
     const tryIt = screen.container.querySelector('.cd-about-try') as HTMLElement;
     const pill = screen.container.querySelector('nav[aria-label="About this prototype"] a') as HTMLElement;
     const item = screen.container.querySelector('.cd-about-contents__link') as HTMLElement;
-    for (const [name, el] of [['Try Desk prototype', tryIt], ['a page pill', pill], ['a contents item', item]] as const) {
+    for (const [name, el] of [['a page pill', pill], ['a contents item', item]] as const) {
       await keyboardFocus(el);
       expect.soft([getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow], name).toEqual(['none', edge]);
     }
+    // The way into the prototype is the page's primary button, whose ink fill would hide that edge: as the design
+    // system's primary, its edge is 2 px of the page's own paper.
+    await keyboardFocus(tryIt);
+    expect([getComputedStyle(tryIt).outlineStyle, getComputedStyle(tryIt).boxShadow]).toEqual([
+      'none',
+      `${tokenColor('--bg-app', root)} 0px 0px 0px 2px inset`,
+    ]);
     // A contents item reaches 8 px past its words on each side, so its edge clears the number, while the words
     // stay level with the list's own edge.
     const list = (item.closest('ol') as HTMLElement).getBoundingClientRect();
