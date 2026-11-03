@@ -234,7 +234,7 @@ def test_the_case_file_holds_every_group():
         "drafts": 20, "offers": 7, "unlisted_offers": 7, "offer_plus_promise": 7, "past_tense_claims": 5,
         "follow_up": 7, "self_labelled": 2, "plain_promises": 4, "price_waivers": 4, "handoff_backing": 9,
         "human_claims": 3, "short_prose": 4, "business_policies": 10, "status_lines": 6, "voice_examples": 4,
-        "request_receipts": 44, "approved_names": 22}
+        "request_receipts": 47, "approved_names": 22}
     expected = {group: Counter(c.expected for c in cases if c.group == group) for group in {c.group for c in cases}}
     assert expected == {
         "drafts": {"pass": 10, "flag": 6, "code": 4}, "offers": {"pass": 7}, "unlisted_offers": {"flag": 7},
@@ -242,7 +242,7 @@ def test_the_case_file_holds_every_group():
         "self_labelled": {"flag": 2}, "plain_promises": {"flag": 4}, "price_waivers": {"flag": 4},
         "handoff_backing": {"flag": 7, "pass": 2}, "human_claims": {"flag_ai": 3},
         "short_prose": {"flag": 2, "pass": 2}, "business_policies": {"pass": 10}, "status_lines": {"pass": 6},
-        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 18, "flag": 26},
+        "voice_examples": {"pass": 4}, "request_receipts": {"pass": 20, "flag": 27},
         "approved_names": {"pass": 8, "flag": 14}}
     assert {c.group for c in cases if c.language == "es"} == {c.group for c in cases} - {"voice_examples"}
     # The voice examples quote the English system prompt; its two policy examples carry their cards.
@@ -326,7 +326,8 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
     """The session's request receipts reach the check after the reply's cards, each as the kernel's receipt
     label, what was asked for and a decision's status line in the case's language
     (`render.receipt_check_text`), so each case holds the receipt it leans on as the kernel would send it, and
-    its other cards with their kinds' labels. Any status a held request can reach may be on one."""
+    its other cards with their kinds' labels. Any status a held request can reach may be on one. A case
+    without a receipt is the control of one with it: the same prose and other cards, which nothing then backs."""
     from desk.kernel_service import render as kernel_render
     from desk.kernel_service.render import receipt_check_text
 
@@ -342,8 +343,15 @@ def test_request_receipt_cases_read_each_receipt_as_the_kernel_shows_it():
                 line = kernel_render.executed_status(asked, language, owner="Mike Turner")
                 receipts[receipt_check_text(asked, line, language, approved_by="Mike Turner")] = language
     for case_ in cases.values():
-        assert [receipts[card] for card in case_.cards if card in receipts] == [case_.language], case_.id
-        assert all(card in receipts or card.startswith(("Booking confirmed card: ", "Quote card: "))
+        leaned_on = [receipts[card] for card in case_.cards if card in receipts]
+        if not leaned_on:                   # a control: its twin with the receipt, last, beside the same cards
+            assert case_.expected == "flag", case_.id
+            assert [c.cards[:-1] for c in cases.values() if (c.prose, c.language) == (case_.prose, case_.language)
+                    and c.cards[-1:] and c.cards[-1] in receipts] == [case_.cards], case_.id
+        else:
+            assert leaned_on == [case_.language], case_.id
+        assert all(card in receipts
+                   or card.startswith(("Booking confirmed card: ", "Quote card: ", "Open times card: "))
                    for card in case_.cards), case_.id
         assert not code_blocked(case_), case_.id
     # the held status line alone backs saying the request waits for approval, in each language
