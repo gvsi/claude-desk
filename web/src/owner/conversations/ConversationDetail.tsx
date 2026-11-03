@@ -287,7 +287,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   }, [loading, chat.data]);
   // A request address takes its landing after useEndInView's initial end-of-chat scroll and the
   // ordinary phone/handoff arrival. Card refs exist once the loaded transcript has committed.
-  // Spend each history arrival once, so polling never takes focus back after she moves on.
+  // Spend each history arrival once, so polling never takes focus back after the owner moves on.
   const requestArrival = useRef<string | null>(null);
   const { cardFor } = answeredFocus;
   useEffect(() => {
