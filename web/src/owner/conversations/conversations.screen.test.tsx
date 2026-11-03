@@ -58,6 +58,10 @@ const AWAY = (name: string) => `${name} isn't in the chat now. Claude will use y
 /** The line under the take-over box: what was its placeholder before it gave an example. */
 const TAKE_OVER_HELPER = 'They see your words exactly as you write them.';
 
+/** A visitor's message long enough to wrap at every width, so her bubble takes its whole cap. */
+const LONG_VISITOR_MESSAGE =
+  "The water heater is still dripping from the valve at the bottom, there's a small puddle under it now, and the pilot light went out twice this morning. Should I turn the water off before you come, or leave it on?";
+
 /** A held card's slot in the conversation: the card and what follows it there. */
 function slotOf(card: Element): Element {
   const slot = card.closest('.cd-conversation__held');
@@ -576,71 +580,90 @@ describe('Conversations', () => {
     await expectScreenBasics(screen.container, { owner: true });
   });
 
-  it.each([[1440, 900], [1800, 1009], [390, 844]])('open_conversation_centres_its_reading_column_at_%sx%s', async (width, height) => {
+  // One set of edges at every width (the open conversation spans its pane): the bar, the transcript
+  // and the owner's controls share the pane's content edges, inside its gutters, rather than a
+  // centred column that sits mid-pane in a wide window. The bar's name starts at the left edge and
+  // Take over ends at the right; the Desk's column sits flush with that right edge and the whisper
+  // box ends under it; the visitor's bubbles start at the left edge, no wider than the Desk's column.
+  it.each([[1800, 1009], [1512, 982], [1440, 900], [390, 844]])('open_conversation_spans_its_pane_at_%sx%s', async (width, height) => {
+    mockStore.world.visitorText(session(DANA_LIVE), LONG_VISITOR_MESSAGE);
     const { screen } = await renderRoute(conversation(DANA_LIVE), { viewport: { width, height } });
     const whisperBox = screen.getByRole('textbox', { name: 'Whisper to Claude' });
     await expect.element(whisperBox).toBeVisible();
     const chat = log(screen);
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
-    await expect.element(chat.getByText(first ?? '', { exact: true })).toBeVisible();
+    await expect.element(chat.getByText(LONG_VISITOR_MESSAGE, { exact: true })).toBeInTheDocument();
     await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
     const pane = document.querySelector<HTMLElement>('.cd-conversations__open');
     if (!pane) throw new Error('the conversation opens in its pane');
     const style = getComputedStyle(pane);
     const paneRect = pane.getBoundingClientRect();
-    const columnWidth = Math.min(768, paneRect.width - 2 * Number.parseFloat(style.paddingLeft));
-    const inner = {
-      left: paneRect.left + (paneRect.width - columnWidth) / 2,
-      right: paneRect.right - (paneRect.width - columnWidth) / 2,
-    };
-    const fills = (el: Element, name: string) => {
+    const edges = { left: paneRect.left + Number.parseFloat(style.paddingLeft), right: paneRect.right - Number.parseFloat(style.paddingRight) };
+    const at = (x: number, edge: number, name: string) => expect(Math.abs(x - edge), name).toBeLessThanOrEqual(1);
+    const spans = (el: Element, name: string) => {
       const rect = el.getBoundingClientRect();
-      expect(Math.abs(rect.width - columnWidth), `${name} width`).toBeLessThanOrEqual(1);
-      expect(Math.abs(rect.left - inner.left), `${name} left`).toBeLessThanOrEqual(1);
-      expect(Math.abs(rect.right - inner.right), `${name} right`).toBeLessThanOrEqual(1);
-      expect(Math.abs((rect.left - paneRect.left) - (paneRect.right - rect.right)), `${name} centred`).toBeLessThanOrEqual(1);
+      at(rect.left, edges.left, `${name} starts at the pane's left content edge`);
+      at(rect.right, edges.right, `${name} ends at the pane's right content edge`);
     };
     const transcript = chat.element();
-    for (const selector of ['.cd-transcript-row', '.cd-conversation__controls']) {
-      fills(document.querySelector(selector)!, selector);
-    }
-    // The bar runs across the whole pane, outside the column.
+    spans(transcript, 'the transcript');
+    spans(document.querySelector('.cd-conversation__controls')!, "the owner's controls");
+    const composer = whisperBox.element().closest('.cd-composer')!;
+    spans(composer, 'the whisper box');
+    // Not messages, so across the transcript: the date and section captions.
+    spans(transcript.querySelector('.cd-transcript-header')!, 'the transcript header');
+
+    // The bar runs across the whole pane, its name at the left content edge and Take over at the right.
     const bar = document.querySelector('.cd-conversation__bar')!.getBoundingClientRect();
-    expect(Math.abs(bar.left - paneRect.left), 'bar left').toBeLessThanOrEqual(1);
-    expect(Math.abs(bar.width - pane.clientWidth), 'bar width').toBeLessThanOrEqual(1);
-    fills(transcript, 'transcript');
-    fills(whisperBox.element().closest('.cd-composer') ?? whisperBox.element(), 'whisper box');
+    at(bar.left, paneRect.left, 'bar left');
+    at(bar.width, pane.clientWidth, 'bar width');
+    at(document.querySelector('.cd-conversation__name')!.getBoundingClientRect().left, edges.left, "the bar's name starts at the left edge");
+    const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
+    at(takeOver.right, edges.right, 'Take over ends at the right edge');
     const scroll = transcriptRegion(screen).getBoundingClientRect();
-    expect(Math.abs(scroll.right - paneRect.right), 'scroll bar stays at the pane edge').toBeLessThanOrEqual(1);
-    expect(inner.left - scroll.left, 'focus rings have side clearance').toBeGreaterThanOrEqual(16);
-    // Her bubble starts at the transcript's left edge (board REV-FLIP), at most 85% of its width.
-    const bubble = chat.getByText(first ?? '', { exact: true }).element().getBoundingClientRect();
-    expect(Math.abs(bubble.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
-    expect(bubble.width).toBeLessThanOrEqual(transcript.getBoundingClientRect().width * 0.85 + 1);
-    // Claude's words sit in the owner's column at the transcript's right edge, min(520 px, 88%) of
-    // it, from the column's left, so their lines stay well inside the reading measure.
+    at(scroll.right, paneRect.right, 'scroll bar stays at the pane edge');
+    expect(edges.left - scroll.left, 'focus rings have side clearance').toBeGreaterThanOrEqual(16);
+
+    // The Desk's column (board REV-FLIP), min(520 px, 88%) of the transcript, flush with its right
+    // edge, and the whisper box ends under it. Claude's words start at the column's left and stay
+    // well inside the reading measure.
     const column = Math.min(520, transcript.getBoundingClientRect().width * 0.88);
+    const ours = [...transcript.querySelectorAll('.cd-transcript-row:has(> .cd-transcript-row__main > .cd-claude-message) > .cd-transcript-row__main')];
+    expect(ours.length).toBeGreaterThan(0);
+    for (const part of ours) {
+      const rect = part.getBoundingClientRect();
+      at(rect.width, column, "the Desk's column is min(520 px, 88%) wide");
+      at(rect.right, edges.right, "the Desk's column ends at the transcript's right edge");
+      at(composer.getBoundingClientRect().right, rect.right, "the whisper box ends under the Desk's column");
+    }
     const prose = [...transcript.querySelectorAll<HTMLElement>('.cd-claude-message__prose')];
     expect(prose.length).toBeGreaterThan(0);
     if (width >= 1024) expect(prose.some((p) => p.getBoundingClientRect().width > column - 1), 'a reply long enough to fill the column').toBe(true);
     for (const p of prose) {
       expect(p.getBoundingClientRect().width).toBeLessThanOrEqual(column + 1);
-      expect(Math.abs(p.getBoundingClientRect().left - (transcript.getBoundingClientRect().right - column))).toBeLessThanOrEqual(1);
+      at(p.getBoundingClientRect().left, edges.right - column, "Claude's words start at the column's left");
     }
-    // Take over sits at the bar's right, inside the pane's gutter; the note about whispers stays at
-    // the foot, at the column's left, with nothing beside or under it.
-    const takeOver = screen.getByRole('button', { name: 'Take over' }).element().getBoundingClientRect();
-    expect(Math.abs(bar.right - Number.parseFloat(style.paddingRight) - takeOver.right)).toBeLessThanOrEqual(1);
+
+    // Her bubbles start at the left edge, at most the Desk's column wide: her long message fills it.
+    for (const words of [first ?? '', LONG_VISITOR_MESSAGE]) {
+      const bubble = chat.getByText(words, { exact: true }).element().getBoundingClientRect();
+      at(bubble.left, edges.left, "her bubble starts at the transcript's left edge");
+      expect(bubble.width, "her bubble is no wider than the Desk's column").toBeLessThanOrEqual(column + 1);
+    }
+    at(chat.getByText(LONG_VISITOR_MESSAGE, { exact: true }).element().getBoundingClientRect().width, column, 'her long message takes the whole cap');
+
+    // The note about whispers stays at the foot, at the left edge, with nothing beside or under it.
     const note = document.querySelector('.cd-conversation__controls .cd-take-over__lead')!.getBoundingClientRect();
-    expect(Math.abs(note.left - transcript.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    at(note.left, edges.left, 'the note about whispers starts at the left edge');
     expect(document.querySelector('.cd-conversation__controls .cd-take-over__action')).toBeNull();
     expectNoHorizontalScroll();
   });
 
   // Board REV-FLIP: the owner's conversation flips the visitor's sides, so each side reads its own
   // words on the right. The visitor on the left; Claude, the owner's whisper and the owner's own
-  // message in one column at the right; a held request's card across the transcript.
-  it.each([[1440, 900], [390, 844]])('the_visitor_sits_left_and_our_side_in_one_column_at_the_right_at_%sx%s', async (width, height) => {
+  // message in one column at the right; a held request's card across the transcript, also in a
+  // wide window, where the transcript spans the pane.
+  it.each([[1800, 1009], [1440, 900], [390, 844]])('the_visitor_sits_left_and_our_side_in_one_column_at_the_right_at_%sx%s', async (width, height) => {
     const chat = session(SEEDED_HOLD);
     const whispered = 'Offer Thursday morning too';
     const said = "Hi, it's Mike. I'll bring the part for the water heater.";
@@ -662,10 +685,10 @@ describe('Conversations', () => {
       return { message: message.getBoundingClientRect(), row };
     };
 
-    // The visitor's bubble starts at the transcript's left edge, no wider than 85% of it.
+    // The visitor's bubble starts at the transcript's left edge, no wider than the Desk's column.
     const bubble = element.querySelector('.cd-visitor-message__bubble')!.getBoundingClientRect();
     expect(Math.abs(bubble.left - box.left), "the visitor's bubble starts at the left edge").toBeLessThanOrEqual(1);
-    expect(bubble.width).toBeLessThanOrEqual(box.width * 0.85 + 1);
+    expect(bubble.width).toBeLessThanOrEqual(column + 1);
 
     // Claude's reply, the whisper and the owner's own message each sit in the one column, flush right
     // and left-aligned inside it, with their receipts in the same column.
@@ -700,13 +723,16 @@ describe('Conversations', () => {
     expect(Math.abs(held.width - box.width), 'the held card is the transcript\'s width').toBeLessThanOrEqual(1);
     expectNoHorizontalScroll();
 
-    // A receipt in the column still opens the full trace.
+    // A receipt in the column still opens the full trace, which isn't a message either: across the transcript.
     receipts[0]!.scrollIntoView({ block: 'center' });
     await userEvent.click(receipts[0]!);
     await expect.element(screen.getByRole('region', { name: /^Full trace of entry \d+$/ })).toBeVisible();
+    const trace = element.querySelector(':scope > .cd-conversation__trace')!.getBoundingClientRect();
+    expect(Math.abs(trace.left - box.left), 'the full trace starts at the left edge').toBeLessThanOrEqual(1);
+    expect(Math.abs(trace.width - box.width), "the full trace is the transcript's width").toBeLessThanOrEqual(1);
   });
 
-  it.each([[1440, 900], [390, 844]])('a_visiting_agent_takes_the_visitors_side_at_%sx%s', async (width, height) => {
+  it.each([[1800, 1009], [1440, 900], [390, 844]])('a_visiting_agent_takes_the_visitors_side_at_%sx%s', async (width, height) => {
     // An agent is the visitor's side: its signed requests start at the left, Claude's replies sit in
     // the owner's column at the right.
     const { screen } = await renderRoute(conversation('ses-alex-agent'), { viewport: { width, height } });

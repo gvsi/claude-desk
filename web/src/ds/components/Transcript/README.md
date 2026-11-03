@@ -22,7 +22,8 @@
 
 Only the owner app's conversation view uses it (board REV-FLIP). It flips the sides of the visitor's own chat, so each side reads its own words on the right. The public chat, setup's preview and every other log keep the default, where the visitor's words are on the right and Claude's on the left.
 
-- The other side is on the left. A visitor's bubble (the same `fill-bubble` and 85% cap), a visiting agent's request and the visitor's typing bubble start at the log's left edge. What is attached under them starts where they start.
+- The other side is on the left. A visitor's bubble (the same `fill-bubble`), a visiting agent's request and the visitor's typing bubble start at the log's left edge. What is attached under them starts where they start.
+- The other side mirrors the Desk's column: a visitor's bubble, the translation under it, an agent's request and what is attached under them are at most `min(520px, 88%)` of the log wide, rather than the default 85%, so in a wide log they never reach far past its middle.
 - The Desk's side is on the right. A row holding Claude's reply (`ClaudeMessage`), the owner's whisper (`Whisper`) or the owner's own message (`PersonMessage`) takes one column `min(520px, 88%)` of the log wide, flush with its right edge. On a phone's 358 px log that is about 315 px. Its receipts and notes take the same column and each still opens the full trace.
 - Everything in the column starts at its left edge, so prose, cards and receipts share one edge. A reply's cards (`ReplyCard`) fill the column.
 - Anything in the log that isn't a message keeps the log's full width, such as a held request's answer card or a full trace. So do the header's captions.

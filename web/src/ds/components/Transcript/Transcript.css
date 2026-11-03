@@ -12,12 +12,20 @@
 /* The owner's variant (board REV-FLIP), only in the owner app's conversation view: the sides flip
    from the visitor's own chat, so each side reads its own words on the right.
 
-   The other side on the left: a visitor's bubble (the same fill-bubble and 85% cap), a visiting
-   agent's request, and a visitor's typing bubble start at the log's left edge, and what is attached
-   under them starts where they start, no wider than a bubble can be. */
+   The other side on the left: a visitor's bubble (the same fill-bubble), a visiting agent's
+   request, and a visitor's typing bubble start at the log's left edge, and what is attached under
+   them starts where they start, no wider than a bubble can be. A bubble, a request, the translation
+   under a bubble and what is attached take at most the Desk's column's width, min(520px, 88%) of
+   the log, mirrored at the left, rather than 85% of it, which in a wide window would reach past the
+   middle of the log. */
 .cd-transcript--owner .cd-visitor-message,
 .cd-transcript--owner .cd-agent-message {
   align-items: flex-start;
+}
+
+.cd-transcript--owner :is(.cd-visitor-message__bubble, .cd-visitor-message__translation, .cd-agent-message__bubble),
+.cd-transcript--owner .cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin {
+  max-width: min(520px, 88%);
 }
 
 .cd-transcript--owner .cd-agent-message__who,
