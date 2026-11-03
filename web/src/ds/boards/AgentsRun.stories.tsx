@@ -75,7 +75,7 @@ const meta = {
       'Signed on 2026-10-30.',
       'The built-in agent’s run inside the “Send an agent” card, which holds cards (Card’s holdsCards), so the Desk’s reply cards sit in it: each signed request an AgentMessage built by the page, each answer a ClaudeMessage from the Desk’s blocks with its read-only receipt, then “The agent finished.”.',
       'The cards, the column and the run’s order are the web app’s page layout (plan 04); the receipts are the kernel’s lines as the board writes them.',
-      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 19 px where the renders draw an earlier 17 px line, and the title above it is larger too, so everything under it sits lower than the render.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -89,9 +89,9 @@ export const Board: Story = {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1150]);
     await expectAgentsDisclosure(canvasElement);
     const box = (el: Element) => el.getBoundingClientRect();
-    // The card holds the run: 226 px down (the render's 225, under the 1 px taller disclosure), 681 px tall.
+    // The card holds the run: 230 px down (the render's 225, under the larger title and disclosure), 704 px tall.
     const send = canvas.getByRole('region', { name: 'Send an agent' });
-    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([226, 681]);
+    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([230, 704]);
     const run = within(send).getByRole('log', { name: 'Agent run' });
     expectConversationType(run);
     await expect(await expectReceiptsUnderMessages(run)).toBe(2);
@@ -99,13 +99,13 @@ export const Board: Story = {
     // Each signed request on the right, ending 640 px into the run; each reply card 520 px from its left.
     const requests = [...run.querySelectorAll('.cd-agent-message__bubble')];
     await expect(requests.map((request) => [Math.round(box(request).top), Math.round(box(request).right)])).toEqual([
-      [317, 1033],
-      [613, 1033],
+      [323, 1033],
+      [629, 1033],
     ]);
     const cards = [...run.querySelectorAll<HTMLElement>('.cd-card')];
     await expect(cards.map((card) => [Math.round(box(card).left), Math.round(box(card).top), Math.round(box(card).width), Math.round(box(card).height)])).toEqual([
-      [393, 423, 520, 127],
-      [393, 719, 520, 115],
+      [393, 434, 520, 131],
+      [393, 740, 520, 119],
     ]);
     for (const card of cards) expectComputed(card, { backgroundColor: SPEC.card.backgroundColor, borderTopColor: SPEC.card.borderTopColor });
     // The signed board draws each request as the page's title and its count; the page now quotes

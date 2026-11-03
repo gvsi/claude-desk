@@ -80,9 +80,10 @@ export const Board: Story = {
       'Does it',
       'Never',
     ]);
-    // One line each side: 68 px first, then 69 px with the hairline. (The flagged row grows by its line; its long
-    // title can wrap where the fonts load late, so only the others are measured.)
-    await expect(rows.filter((_, index) => index !== 4).map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([68, 69, 69, 69, 69]);
+    // One line each side: 70 px first, then 71 px with the hairline; a long reason may take a second
+    // line, as the third row's does (88 px). (The flagged row grows by its line; its long title can
+    // wrap where the fonts load late, so only the others are measured.)
+    await expect(rows.filter((_, index) => index !== 4).map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([70, 71, 88, 71, 71]);
     await expect(Math.round(one(rows[0]!, '.cd-situation-row__result').getBoundingClientRect().left)).toBe(799);
     await expect(rows.filter((row) => row.querySelector('.cd-situation-row__flag'))).toEqual([rows[4]]);
 

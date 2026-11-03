@@ -131,17 +131,17 @@ export const Board: Story = {
     const words = canvas.getByRole('list', { name: 'Ready-made words' });
     const cardBox = card.getBoundingClientRect();
     const wordsBox = words.getBoundingClientRect();
-    // Everything under the link card sits 1 px higher than the board, which draws that card 1 px taller.
-    await expect([Math.round(cardBox.left), Math.round(cardBox.top), Math.round(cardBox.width), Math.round(cardBox.height)]).toEqual([408, 233, 300, 306]);
+    // Everything under the link card sits lower than the board draws it, by the larger type's lines.
+    await expect([Math.round(cardBox.left), Math.round(cardBox.top), Math.round(cardBox.width), Math.round(cardBox.height)]).toEqual([408, 237, 300, 310]);
     await expect([Math.round(wordsBox.left), Math.round(wordsBox.width)]).toEqual([740, 628]);
-    await expect(Math.round(wordsBox.top)).toBe(261);
+    await expect(Math.round(wordsBox.top)).toBe(266);
     await expect(within(words).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual(
       WORDS.map((block) => `Copy ${block.title}`),
     );
     // The link card's buttons at its right, Copy link the page's one primary.
     const link = canvas.getByRole('region', { name: 'Your link' });
     expectComputed(within(link).getByRole('button', { name: 'Copy link' }), SPEC.primary);
-    await expect(Math.round(link.getBoundingClientRect().height)).toBe(105);
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(106);
     const channels = canvas.getByRole('region', { name: 'More channels' });
     const channelHeading = within(channels).getByRole('heading', { level: 2, name: 'More channels' });
     const channelCard = one(channels, '.cd-card');

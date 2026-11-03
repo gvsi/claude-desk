@@ -63,7 +63,7 @@ export const WhatIKnowNow: Story = {
     }
     await expect(hidden.querySelector('[data-copy="user"]')).toBeNull();
 
-    // The board's look: a card of rows, each padded 12 px 16 px and 64 px tall, a hairline between
+    // The board's look: a card of rows, each padded 12 px 16 px and 66 px tall, a hairline between
     // them, the title in body type at 520 over the line in meta type, 2 px apart.
     const card = list.parentElement as HTMLElement;
     expectComputed(card, {
@@ -74,14 +74,14 @@ export const WhatIKnowNow: Story = {
       paddingTop: '0px',
     });
     await expect(Math.round(card.getBoundingClientRect().top - heading.getBoundingClientRect().bottom)).toBe(8);
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(196);
+    await expect(Math.round(card.getBoundingClientRect().height)).toBe(202);
     for (const [index, row] of rows.entries()) {
       expectComputed(row, { paddingTop: '12px', paddingRight: '16px', paddingBottom: '12px', paddingLeft: '16px' });
       expectComputed(row, index === 0 ? { borderTopWidth: '0px' } : { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
       const title = row.querySelector('.cd-knowledge-list__title') as HTMLElement;
       const detail = row.querySelector('.cd-knowledge-list__detail') as HTMLElement;
-      expectComputed(title, { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
-      expectComputed(detail, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+      expectComputed(title, { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
+      expectComputed(detail, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
       await expect(Math.round(detail.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(2);
       // Who can see it is a pill at the row's right, centered on it.
       const pill = row.querySelector('.cd-pill') as HTMLElement;
@@ -90,7 +90,7 @@ export const WhatIKnowNow: Story = {
       await expect(Math.round(rowBox.right - pillBox.right)).toBe(16);
       await expect(Math.round(pillBox.top + pillBox.height / 2)).toBe(Math.round(rowBox.top + rowBox.height / 2));
     }
-    await expect(Math.round(website.getBoundingClientRect().height)).toBe(64);
+    await expect(Math.round(website.getBoundingClientRect().height)).toBe(66);
   },
 };
 
@@ -171,9 +171,9 @@ export const NoDate: Story = {
     const pillBox = pill.getBoundingClientRect();
     // No empty child or leftover gap: the words box is exactly the one title line.
     await expect(words.children).toHaveLength(1);
-    await expect(words.getBoundingClientRect().height).toBe(20);
-    await expect(rowBox.height).toBe(44);
-    await expect(dated.getBoundingClientRect().height).toBe(65);
+    await expect(words.getBoundingClientRect().height).toBe(21);
+    await expect(rowBox.height).toBe(45);
+    await expect(dated.getBoundingClientRect().height).toBe(67);
     await expect(titleBox.top - rowBox.top).toBe(12);
     await expect(rowBox.bottom - titleBox.bottom).toBe(12);
     await expect(titleBox.left - rowBox.left).toBe(16);

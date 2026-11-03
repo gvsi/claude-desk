@@ -8,12 +8,12 @@
 }
 
 /* A suggestion is a sentence, so a long one wraps inside a narrow line instead of overflowing it.
-   One line still makes the 28 px chip: a 16 px line, a 1 px border and 5 px above and below. */
+   One line still makes the 28 px chip: a 17 px line, a 1 px border and 4.5 px above and below. */
 .cd-suggestion-chips > .cd-chip {
   max-width: 100%;
   height: auto;
   min-height: var(--space-28);
-  padding-block: 5px;
+  padding-block: 4.5px;
   white-space: normal;
   text-align: start;
   overflow-wrap: anywhere;

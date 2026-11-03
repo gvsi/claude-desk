@@ -84,7 +84,7 @@ export const Reading: Story = {
     expectComputed(limit, { paddingTop: '0px', paddingBottom: '0px', borderTopWidth: '0px' });
     await expect(group.getBoundingClientRect().height).toBe(57);
     const words = canvas.getByText(line);
-    expectComputed(words, { fontSize: '14px', lineHeight: '20px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(words, { fontSize: '15px', lineHeight: '21px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' });
     const change = canvas.getByRole('button', { name: 'Change' });
     // change_is_described_by_its_limit: "Change" says which limit it changes.
     await expect(change).toHaveAccessibleDescription(line);
@@ -114,9 +114,9 @@ export const Editing: Story = {
   parameters: { canvas: 'N-Conn-19b-Ceiling-Edit' },
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // The field, named by its default label, with the screen's hint, 360 px wide at most; 12 px
-    // above it and 16 px under the buttons, 163 px under the hairline in all, as the board draws it.
+    // above it and 16 px under the buttons, 165 px under the hairline in all, as the board draws it.
     const group = slot(canvasElement);
-    await expect(group.getBoundingClientRect().height).toBe(163);
+    await expect(group.getBoundingClientRect().height).toBe(165);
     await expect(group.getBoundingClientRect().bottom - canvas.getByRole('button', { name: 'Review change' }).getBoundingClientRect().bottom).toBe(16);
     const field = canvas.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' });
     await expect(field).toHaveValue('1000');
@@ -183,7 +183,7 @@ export const Prominent: Story = {
   },
   play: async ({ canvas }) => {
     // prominent_line_leads: the line at 520 in the primary ink.
-    expectComputed(canvas.getByText(line), { fontWeight: '520', fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(canvas.getByText(line), { fontWeight: '520', fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     // read_only_limit_has_no_change: with no `onEdit`, the limit is only read, and nothing is there to press.
     await expect(canvas.queryAllByRole('button')).toEqual([]);
     await expect(canvas.queryByRole('textbox')).toBeNull();

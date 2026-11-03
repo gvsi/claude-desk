@@ -207,7 +207,7 @@ function DeskGate({ deskId }: { deskId: string }) {
   // are read (a reload), the shape this browser last saw for the Desk stands in, so the loading page
   // draws the card from its first frame instead of dropping everything under it when the Desks arrive.
   const [remembered] = useState(() => rememberedSetup(deskId));
-  const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk);
+  const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk, shown.business);
   // Each settled read of the Desks rewrites the record: their unfinished Desks only.
   const settledDesks = desks.data !== undefined && !desks.isFetching ? desks.data : null;
   useEffect(() => {

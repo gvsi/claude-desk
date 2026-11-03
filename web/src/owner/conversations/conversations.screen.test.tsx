@@ -25,7 +25,7 @@ import { expectInSequence, expectRevealed, watchReveal, watchRevealing, watchSeq
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
+import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, nextFrames, tokenColor } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -375,10 +375,10 @@ describe('Conversations', () => {
     expect(preview!.dataset.copy).toBe('user');
     expect(getComputedStyle(preview!).whiteSpace).toBe('nowrap');
     expect(getComputedStyle(preview!).textOverflow).toBe('ellipsis');
-    expect(getComputedStyle(preview!).fontSize).toBe('13px');
+    expect(getComputedStyle(preview!).fontSize).toBe('14px');
     expect(getComputedStyle(preview!).color).toBe(tokenColor('--text-secondary'));
     expect(preview!.scrollWidth).toBeGreaterThan(preview!.clientWidth);
-    expect(preview!.getBoundingClientRect().height).toBe(18);
+    expect(preview!.getBoundingClientRect().height).toBe(19);
     const status = links[0]!.querySelector('.cd-conversation-item__status')!;
     expect(status.textContent).toContain('Needs you');
     expect(status.textContent).toContain('Recorded');
@@ -398,7 +398,7 @@ describe('Conversations', () => {
       const day = group.querySelector<HTMLElement>('.cd-conversations__day')!;
       const style = getComputedStyle(day);
       const rule = getComputedStyle(day, '::after');
-      expect(style.fontSize).toBe('12px');
+      expect(style.fontSize).toBe('13px');
       expect(style.fontWeight).toBe('520');
       expect(style.color).toBe(tokenColor('--text-tertiary'));
       expect(style.gap).toBe('8px');
@@ -465,12 +465,12 @@ describe('Conversations', () => {
       expect(line.dataset.copy).toBeUndefined();
       expect(line.className).toBe(visitor.className);
       const style = getComputedStyle(line);
-      expect(style.fontSize).toBe('13px');
+      expect(style.fontSize).toBe('14px');
       expect(style.fontStyle).toBe('normal');
       expect(style.color).toBe(tokenColor('--text-secondary'));
       expect(style.whiteSpace).toBe('nowrap');
       expect(style.textOverflow).toBe('ellipsis');
-      expect(line.getBoundingClientRect().height).toBe(18);
+      expect(line.getBoundingClientRect().height).toBe(19);
       expect(line.getBoundingClientRect().left).toBe(visitor.getBoundingClientRect().left);
       const status = row(id).querySelector('.cd-conversation-item__status')!;
       expect(status.textContent).toContain('Agent');
@@ -1051,6 +1051,10 @@ describe('Conversations', () => {
     // The booked card and its checks stay under their message.
     await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
     await expect.element(log(screen).getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).last()).toBeVisible();
+    // Opened at the chat's end, a phone can rest a receipt half under the pinned bar, where axe counts
+    // only its visible sliver as the button; check the screen with the log at its top, every line whole.
+    scrollerOf(log(screen).element()).scrollTop = 0;
+    await nextFrames();
     await expectScreenBasics(screen.container, { owner: true });
     expectNoHorizontalScroll();
 

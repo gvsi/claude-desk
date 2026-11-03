@@ -64,17 +64,17 @@ export const Tricks: Story = {
     const attempt = first.querySelector<HTMLElement>('[data-copy="user"]')!;
     await expect(attempt.textContent).toBe(TRICKS[0]!.attempt);
     await expect(attempt.parentElement!.textContent).toBe(`“${TRICKS[0]!.attempt}”`);
-    expectComputed(attempt.parentElement!, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
-    expectComputed(within(first).getByText('Posing as you'), { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
+    expectComputed(attempt.parentElement!, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
+    expectComputed(within(first).getByText('Posing as you'), { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
     const checkpoint = first.querySelector<HTMLElement>('.cd-safety-check-row__checkpoint')!;
-    expectComputed(checkpoint, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+    expectComputed(checkpoint, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
     await expect(Math.round(checkpoint.getBoundingClientRect().top - attempt.parentElement!.getBoundingClientRect().bottom)).toBe(4);
     for (const [index, row] of rows.entries()) {
       expectComputed(row, { borderTopWidth: index === 0 ? '0px' : '1px' });
       if (index > 0) expectComputed(row, { borderTopColor: 'rgba(250, 249, 245, 0.12)' });
     }
     expectComputed(first, { paddingTop: '14px', paddingBottom: '14px' });
-    await expect(first.getBoundingClientRect().height).toBe(89);
+    await expect(first.getBoundingClientRect().height).toBe(92);
 
     // safety_rows_drawn_still: rows not live (results read again, as a reload reads them) are
     // there at once, their dots whole.

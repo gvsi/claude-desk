@@ -53,7 +53,7 @@ const meta = {
       "Signed on 2026-10-30; the four tasks in two rows by kind are built against the board's update in review, sign-off pending.",
       'Sending the built-in agent: its signed spending limit is SignedLimitPanel, with the page’s words for the seed’s mandate ($20 a charge, $100 in all, for one hour), on the card’s own fill as the board nests it; four tasks use two SuggestionChips rows, tasks without money first and payment tasks second, 8 px apart, each wrapping independently.',
       'The column, the cards and the demo key’s button are page layout the web app (plan 04) owns, composed as on the agents page’s other boards.',
-      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 19 px where the renders draw an earlier 17 px line, and the title above it is larger too, so everything under it sits lower than the render.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -68,14 +68,15 @@ export const Board: Story = {
     await expectAgentsDisclosure(canvasElement);
     const send = canvas.getByRole('region', { name: 'Send an agent' });
     const demoKey = canvas.getByRole('region', { name: 'Try it with a demo key' });
-    // The two cards, 16 px apart; the send card adds a second 28 px chip row and an 8 px gap.
+    // The two cards, 16 px apart: the demo key's line takes two lines, and the send card adds a second
+    // 28 px chip row and an 8 px gap.
     const box = (el: HTMLElement) => el.getBoundingClientRect();
-    await expect([Math.round(box(demoKey).top), Math.round(box(demoKey).height)]).toEqual([226, 124]);
-    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([366, 221]);
+    await expect([Math.round(box(demoKey).top), Math.round(box(demoKey).height)]).toEqual([230, 145]);
+    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([391, 225]);
 
-    // The limit inside the card: 726 px by 63, 10 px under the card's line, on the card's fill.
+    // The limit inside the card: 726 px by 65, 10 px under the card's line, on the card's fill.
     const limit = within(send).getByRole('region', { name: 'Signed limit' });
-    await expect([Math.round(box(limit).left), Math.round(box(limit).top), Math.round(box(limit).width), Math.round(box(limit).height)]).toEqual([393, 433, 726, 63]);
+    await expect([Math.round(box(limit).left), Math.round(box(limit).top), Math.round(box(limit).width), Math.round(box(limit).height)]).toEqual([393, 460, 726, 65]);
     expectComputed(limit, { backgroundColor: 'rgba(250, 249, 245, 0.03)', borderTopColor: 'rgba(250, 249, 245, 0.14)' });
     await expect([...limit.querySelectorAll('dd')].map((value) => value.textContent)).toEqual(['$20', '$100', 'One hour']);
     const source = within(limit).getByText('Signed limit from Alex Kim’s demo wallet');
@@ -91,7 +92,7 @@ export const Board: Story = {
       return buttons;
     });
     for (const [index, chip] of chips.entries()) {
-      await expect([Math.round(box(chip).top), Math.round(box(chip).height)]).toEqual([index < 2 ? 506 : 542, 28]);
+      await expect([Math.round(box(chip).top), Math.round(box(chip).height)]).toEqual([index < 2 ? 535 : 571, 28]);
     }
     await expect(box(rows[1]!).top - box(rows[0]!).bottom).toBe(8);
 

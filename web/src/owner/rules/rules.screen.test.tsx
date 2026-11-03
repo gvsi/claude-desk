@@ -291,7 +291,7 @@ describe('rules page', () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     await page.viewport(1512, 982);
-    expect(header.getBoundingClientRect().height).toBe(56);
+    expect(header.getBoundingClientRect().height).toBe(59);
     expect(preset.getBoundingClientRect().left - all.getBoundingClientRect().right).toBe(16);
     expectNoHorizontalScroll();
   });

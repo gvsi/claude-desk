@@ -399,3 +399,9 @@
 .cd-safety-skeleton__suffix {
   display: inline-block;
 }
+
+/* The room a row's label gives its status dot and the 8 px after it, as its words are measured. */
+.cd-safety-skeleton__dot-room {
+  display: inline-block;
+  width: calc(var(--size-dot) + var(--space-8));
+}

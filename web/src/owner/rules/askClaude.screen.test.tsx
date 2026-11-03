@@ -75,7 +75,7 @@ describe('ask claude', () => {
 
   it('the_page_under_the_header_has_no_vertical_jump', async () => {
     // Beside the panel at 1440 px, the header's subtitle takes a second line, so everything under
-    // the header sits 20 px lower; closing, it goes back up. That move is a glide too: on the first
+    // the header sits 21 px lower; closing, it goes back up. That move is a glide too: on the first
     // frame of the open and of the close, the first group is where it was.
     await cdp().send('Animation.enable');
     onTestFinished(async () => {
@@ -99,7 +99,7 @@ describe('ask claude', () => {
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
     await settled(screen.container);
     const opened = top();
-    expect(opened - closed).toBeCloseTo(20, 0);
+    expect(opened - closed).toBeCloseTo(21, 0);
 
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
     await panel.getByRole('button', { name: 'Close' }).click();
@@ -153,7 +153,7 @@ describe('ask claude', () => {
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
     await expect.element(panel).toBeVisible();
-    expect(header.getBoundingClientRect().height - lines, "the subtitle's second line").toBe(20);
+    expect(header.getBoundingClientRect().height - lines, "the subtitle's second line").toBe(21);
     expect(onScreen(), 'the rows stay where they are on screen').toBe(seen);
     expect(jumps(closed), 'opening').toEqual([]);
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });

@@ -74,15 +74,15 @@ export const Board: Story = {
     expectComputed(title, SPEC.pageTitle);
 
     // The two cards 20 px under the header, 720 px wide in the column, 20 px apart. (The header's
-    // subtitle sits 4 px under its title, PageHeader's gap, where the board draws 6 px, so the
-    // cards sit 2 px higher than the render: at 201 px and 675 px, not 203 and 677.)
+    // subtitle sits 4 px under its title, PageHeader's gap, where the board draws 6 px, and the
+    // larger type sets every line taller than the render: at 205 px and 692 px, not 203 and 677.)
     const builtIn = canvas.getByRole('region', { name: 'Built in' });
     const yours = canvas.getByRole('region', { name: 'Connect your own' });
     const header = title.closest('header')!;
     const top = builtIn.getBoundingClientRect();
     await expect(Math.round(top.top - header.getBoundingClientRect().bottom)).toBe(20);
-    await expect([Math.round(top.left), Math.round(top.top), Math.round(top.width), Math.round(top.height)]).toEqual([396, 201, 720, 454]);
-    await expect(Math.round(yours.getBoundingClientRect().top)).toBe(675);
+    await expect([Math.round(top.left), Math.round(top.top), Math.round(top.width), Math.round(top.height)]).toEqual([396, 205, 720, 467]);
+    await expect(Math.round(yours.getBoundingClientRect().top)).toBe(692);
     expectComputed(builtIn, { ...SPEC.card, paddingTop: '16px', paddingLeft: '16px' });
 
     // Where each connector stands, or its button; no row is a link, and the footer's author name is the page's one link.

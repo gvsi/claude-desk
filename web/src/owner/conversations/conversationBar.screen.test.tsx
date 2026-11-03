@@ -248,8 +248,8 @@ describe('the open conversation bar', () => {
     expect(rect(bar).right - rect(takeOver).right).toBe(gutter);
 
     // The name in section type, Latest in meta type and secondary ink, the dot in tertiary ink.
-    expect(getComputedStyle(name).fontSize).toBe('15px');
-    expect([getComputedStyle(latest).fontSize, getComputedStyle(latest).color]).toEqual(['13px', tokenColor('--text-secondary')]);
+    expect(getComputedStyle(name).fontSize).toBe('16px');
+    expect([getComputedStyle(latest).fontSize, getComputedStyle(latest).color]).toEqual(['14px', tokenColor('--text-secondary')]);
     expect(getComputedStyle(dot).color).toBe(tokenColor('--text-tertiary'));
     expectCutShort(latest);
     expect(takeOver.classList.contains('cd-button--secondary')).toBe(true);
@@ -305,7 +305,7 @@ describe('the open conversation bar', () => {
     expect(quiet.scrollWidth).toBeLessThanOrEqual(quiet.clientWidth);
     if (width < 1024) {
       expectCutShort(latest);
-      expect(rect(bar).height).toBe(69);
+      expect(rect(bar).height).toBe(70);
       expect(rect(quiet).top).toBeGreaterThanOrEqual(rect(name).bottom);
       expect(Math.abs(middle(quiet) - middle(latest))).toBeLessThanOrEqual(1);
       const dot = bar.querySelector<HTMLElement>('.cd-conversation__dot')!;
@@ -496,10 +496,15 @@ describe('the open conversation bar', () => {
   // After Take over, the seeded held request's card fits whole in the transcript's own region, or
   // the open conversation scrolls as one under its bar: never a region too short for the card.
   it.each([
+    [320, 920, true],
+    [320, 940, true],
+    [320, 1000, false],
     [390, 780, true],
-    [390, 860, false],
-    [390, 890, false],
-    [430, 858, false],
+    [390, 860, true],
+    [390, 890, true],
+    [390, 920, false],
+    [430, 858, true],
+    [430, 890, false],
     [1024, 700, true],
     [1024, 740, false],
     [1440, 650, true],
@@ -585,14 +590,14 @@ describe("a demo visitor's chat in the bar", () => {
     const takeOver = screen.getByRole('button', { name: 'Take over' }).element();
     expect(bar.contains(takeOver)).toBe(true);
     expect(rect(takeOver).left).toBeGreaterThanOrEqual(rect(demo).right);
-    // The bar keeps its shape: one line of 56 px on a laptop, Latest after the pills; two of 69 on a phone, Latest under them.
+    // The bar keeps its shape: one line of 56 px on a laptop, Latest after the pills; two of 70 on a phone, Latest under them.
     const latest = bar.querySelector<HTMLElement>('.cd-conversation__latest')!;
     expectCutShort(latest);
     if (width >= 1024) {
       expect(rect(bar).height).toBe(56);
       expect(rect(latest).left).toBeGreaterThanOrEqual(rect(demo).right);
     } else {
-      expect(rect(bar).height).toBe(69);
+      expect(rect(bar).height).toBe(70);
       expect(Math.abs(middle(takeOver) - middle(name))).toBeLessThanOrEqual(1);
       expect(rect(latest).top).toBeGreaterThanOrEqual(rect(demo).bottom);
     }
@@ -624,7 +629,7 @@ describe("a demo visitor's chat in the bar", () => {
     const header = log.querySelector('.cd-transcript-header')!;
     expect(rect(box).top - rect(bar).bottom).toBeCloseTo(16, 0);
     expect(rect(header).top - rect(box).bottom).toBeCloseTo(16, 0);
-    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 70);
     expectNoHorizontalScroll();
     expectNoWindowScroll();
   });
@@ -639,7 +644,7 @@ describe("a demo visitor's chat in the bar", () => {
     expect(bar.querySelector('button')).toBeNull();
     expect(document.querySelector('.cd-conversation__controls')).toBeNull();
     expect([...bar.querySelectorAll('.cd-pill')].map((pill) => pill.textContent)).toEqual(['Public', DEMO_VISITOR_PILL]);
-    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 70);
     expectNoHorizontalScroll();
   });
 
@@ -657,7 +662,7 @@ describe("a demo visitor's chat in the bar", () => {
     expect(landed('.cd-conversation__controls').contains(handBack.element())).toBe(true);
     expect(bar.querySelector('button')).toBeNull();
     expect(screen.getByRole('textbox', { name: 'Write to them' }).elements()).toHaveLength(0);
-    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 70);
     expectNoHorizontalScroll();
   });
 
@@ -677,7 +682,7 @@ describe("a demo visitor's chat in the bar", () => {
     expect(rect(resume.element()).width).toBeCloseTo(rect(controls.querySelector('.cd-take-over__buttons')!).width, 0);
     expect(screen.getByRole('button', { name: 'Take over' }).elements()).toHaveLength(0);
     expect(bar.querySelector('button')).toBeNull();
-    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 69);
+    expect(rect(bar).height).toBe(width >= 1024 ? 56 : 70);
     expectNoHorizontalScroll();
   });
 

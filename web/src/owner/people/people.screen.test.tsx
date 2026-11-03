@@ -340,7 +340,7 @@ describe('customers', () => {
     }
     const rows = [...main.querySelectorAll<HTMLElement>('.cd-people__rows > li')];
     expect(rows).toHaveLength(5);
-    expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([51]));
+    expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([53]));
 
     // The frame with Customers current and no card on the page. Tab, once past the sidebar, stops at
     // each person's row (a link to their page), then the recorded-history link, and nowhere else: a
@@ -852,7 +852,7 @@ describe('share', () => {
     const link = screen.getByRole('region', { name: 'Your link' });
     const shown = link.getByText(displayLink(url), { exact: true });
     await expect.element(shown).toBeVisible();
-    expectComputed(shown.element() as HTMLElement, { fontSize: '15px', fontWeight: '520' });
+    expectComputed(shown.element() as HTMLElement, { fontSize: '16px', fontWeight: '520' });
     expect(link.element().querySelector('[data-copy="code"]')).toBeNull();
     expectComputed(link.getByRole('button', { name: 'Copy link' }).element() as HTMLElement, SPEC.primary);
     const open = link.getByRole('link', { name: /^Open/ });
