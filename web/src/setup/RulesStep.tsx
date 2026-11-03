@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useId, useRef, useState, type ReactNode } from 'react';
 
 import { ApiError, ownerErrorCopy, request } from '../api/http.ts';
+import type { HoursWindow } from '../api/contracts.ts';
 import type { PeopleOut, RulesDraft, SetupState, SetupStep, ToolRow } from '../api/views.ts';
 import {
   Button,
@@ -39,6 +40,7 @@ export interface RulesStepProps {
   state: SetupState;
   /** The business's name, once known. */
   business: string;
+  hours?: readonly HoursWindow[];
   /** The interview moved on. */
   onNext: (step: SetupStep) => void;
   reread: () => Promise<SetupState | null>;
@@ -59,10 +61,10 @@ const CHECK_TONES: Readonly<Record<CheckStatus['status'], StatusTone>> = { check
  * "Change", no links). Payments and Stripe open with the payment limit and "never moves money"; a
  * job that moves money ends its list with them, as on Rules. Then the check's lines.
  */
-function DraftRules({ draft, people, tools, check }: { draft: RulesDraft; people: PeopleOut | null | undefined; tools: readonly ToolRow[]; check: CheckStatus }) {
+function DraftRules({ draft, people, tools, check, hours }: { draft: RulesDraft; people: PeopleOut | null | undefined; tools: readonly ToolRow[]; check: CheckStatus; hours: readonly HoursWindow[] }) {
   const acrossId = useId();
   const toolsId = useId();
-  const view: ToolsView = { tools: [...tools], active: { cards: draft.cards } };
+  const view: ToolsView = { tools: [...tools], active: { cards: draft.cards }, hours };
   const cap = capOf(draft);
   const none = toolGroups(view, people ?? null).length === 0;
   // The limit leads each card whose tools move money, read only: no "Change" in setup (owner ruling, 2026-10-30).
@@ -111,7 +113,7 @@ function DraftRules({ draft, people, tools, check }: { draft: RulesDraft; people
  * draft on situations from the owner's answers, which land one by one as they arrive; "Looks right"
  * opens the public lines review before the safety check.
  */
-export function RulesStep({ state, business, onNext, reread, live }: RulesStepProps) {
+export function RulesStep({ state, business, hours = [], onNext, reread, live }: RulesStepProps) {
   const id = state.interview_id;
   const exit = `/app/${encodeURIComponent(state.desk_id)}/today`;
   const [view, setView] = useState<'rules' | 'situations' | 'public_lines'>(state.step === 'situations' ? 'situations' : 'rules');
@@ -237,7 +239,7 @@ export function RulesStep({ state, business, onNext, reread, live }: RulesStepPr
       <>
         {/* Only a check that couldn't run says so; one that failed says what didn't pass, in its lines below. */}
         {check.status === 'unavailable' ? <Notice tone="info">{copy.cantCheck}</Notice> : null}
-        <DraftRules draft={draft.data} people={people.data} tools={tools.data.tools} check={check} />
+        <DraftRules draft={draft.data} people={people.data} tools={tools.data.tools} check={check} hours={hours} />
         {check.status === 'checked' ? (
           <div className="cd-setup-step__actions">
             <Button variant="primary" size="main" onClick={() => setView('situations')}>

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useLayoutEffect, useRef } from 'react';
 
-import { MONEY_EFFECTS, type RuleCard } from '../api/contracts.ts';
+import { MONEY_EFFECTS, type HoursWindow, type RuleCard } from '../api/contracts.ts';
 import { ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessToolDef, SetupMessage, SetupState, ToolRow } from '../api/views.ts';
 import {
@@ -35,6 +35,7 @@ export interface ToolsStepProps {
   state: SetupState;
   /** The business's name, once known. */
   business: string;
+  hours?: readonly HoursWindow[];
   /** "Continue": on to the rules. */
   onContinue: () => void;
 }
@@ -174,7 +175,7 @@ function setupRows(rows: readonly ToolRow[], connectable: boolean, onChoose: (ke
  * "Continue" goes on to the rules. The calls behind each press, in their order, are
  * `useConnectorFlow`'s (`connectorFlow.ts`).
  */
-export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
+export function ToolsStep({ state, business, hours = [], onContinue }: ToolsStepProps) {
   const id = state.interview_id;
   const deskId = state.desk_id;
   const tools = useQuery({ queryKey: ['setupTools', id] as const, queryFn: () => request('setupTools', { params: { id } }), refetchOnWindowFocus: false });
@@ -328,7 +329,7 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
     list = <EmptyState title={copy.empty} body={copy.emptyBody} />;
   } else {
     const jobRows: SetupJobRow[] = jobs.flatMap((row) => {
-      const line = businessLine(row.business);
+      const line = businessLine(row.business, hours);
       const glyph = businessGlyph(row.business.config);
       if (line === null || glyph === null) return [];
       const title = toolDisplayName(row.tool, businessTools([row])) ?? 'A connected tool';

@@ -499,7 +499,7 @@ interface SituationWords {
 const SALON_WORDS: SituationWords = {
   // Open Tuesday to Saturday, as its description says.
   bookingDays: ['tue', 'wed', 'thu', 'fri', 'sat'],
-  bookings: 'Books appointments Tuesday to Saturday in your hours.',
+  bookings: 'Books appointments on Tuesday to Saturday, 8:00 am to 6:00 pm.',
   weekday: 'A visitor wants a cut on Tuesday afternoon',
   discount: 'A visitor asks for 10% off a cut and color',
   agentPays: 'the color appointment deposit',
@@ -512,7 +512,7 @@ const SALON_WORDS: SituationWords = {
 /** Turner Plumbing's words: the situations as the mock always told them. */
 const PLUMBER_WORDS: SituationWords = {
   bookingDays: WEEKDAYS,
-  bookings: 'Books weekday visits in your hours.',
+  bookings: 'Books weekday visits on weekdays, 8:00 am to 6:00 pm.',
   weekday: 'A visitor wants a drain cleared on Tuesday afternoon',
   discount: 'A visitor asks for 10% off if they pay cash',
   agentPays: 'the service call deposit',
@@ -525,7 +525,7 @@ const PLUMBER_WORDS: SituationWords = {
 /** Words for a business none of the starters describes: nothing in them names a kind of work. */
 const ANY_BUSINESS_WORDS: SituationWords = {
   bookingDays: WEEKDAYS,
-  bookings: 'Books weekday times in your hours.',
+  bookings: 'Books weekday times on weekdays, 8:00 am to 6:00 pm.',
   weekday: 'A visitor wants to book a time on Tuesday afternoon',
   discount: 'A visitor asks for 10% off if they pay cash',
   agentPays: 'the deposit',
@@ -551,7 +551,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
     [CPA_FIRM, /\b(?:contab|contador|impuestos)/i],
     {
       bookingDays: WEEKDAYS,
-      bookings: 'Books weekday consults in your hours.',
+      bookings: 'Books weekday consults on weekdays, 8:00 am to 6:00 pm.',
       weekday: 'A visitor wants a free consult on Tuesday afternoon',
       discount: 'A visitor asks for 10% off their tax return',
       agentPays: 'the retainer',
@@ -568,7 +568,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
     [/\b(?:apartments?|tenants?|landlords?|departamentos?|inquilinos?)\b/i],
     {
       bookingDays: WEEKDAYS,
-      bookings: 'Books weekday viewings in your hours.',
+      bookings: 'Books weekday viewings on weekdays, 8:00 am to 6:00 pm.',
       weekday: 'A visitor wants a viewing on Tuesday afternoon',
       discount: "A visitor asks for 10% off the first month's rent",
       agentPays: 'the application fee',
@@ -803,7 +803,7 @@ function consultantProposals(): ProposalCard[] {
     {
       job: 'schedule', title: 'Book a free intro call', autonomy: 'auto', who: 'New clients',
       why: 'New clients pick a time for their free consult without emailing back and forth.',
-      how: 'New clients pick a time within your opening hours and book a 20-minute call.',
+      how: 'New clients pick a time on weekdays, 9:00 am to 6:00 pm and book a 20-minute call.',
       can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
     },
     {
@@ -1205,8 +1205,8 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       if (changed) {
         updated.job.title = updated.job.autonomy === 'ask' ? 'Request a free intro call' : 'Book a free intro call';
         updated.job.how = updated.job.autonomy === 'ask'
-          ? `New clients ask for a time within your opening hours, and you approve each ${booking.minutes}-minute call.`
-          : `New clients pick a time within your opening hours and book a ${booking.minutes}-minute call.`;
+          ? `New clients ask for a time on weekdays, 9:00 am to 6:00 pm, and you approve each ${booking.minutes}-minute call.`
+          : `New clients pick a time on weekdays, 9:00 am to 6:00 pm and book a ${booking.minutes}-minute call.`;
       }
     }
     if (changed) {

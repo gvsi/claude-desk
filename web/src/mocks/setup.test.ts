@@ -226,7 +226,7 @@ describe('setup consultant run and decisions', () => {
       expect.objectContaining({
         tool: 'desk.book-a-free-intro-call', status: 'needs_review', review_reason: 'new',
         business: {
-          title: 'Book a free intro call', description: 'New clients pick a time within your opening hours and book a 20-minute call.',
+          title: 'Book a free intro call', description: 'New clients pick a time on weekdays, 9:00 am to 6:00 pm and book a 20-minute call.',
           config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
         },
       }),
@@ -1188,11 +1188,11 @@ describe("the real situations, in the business's own words", () => {
     rows.map(({ situation, result, matches }) => [situation.who, situation.expected, result.outcome, result.reason_plain, result.card_ids, result.depends_on_review, matches]);
   /** Turner Plumbing's situations, as they always were. */
   const RIVERA_OUTCOMES = [
-    ['public', 'allow', 'allow', 'Books weekday visits in your hours.', ['card-2'], false, true],
+    ['public', 'allow', 'allow', 'Books weekday visits on weekdays, 8:00 am to 6:00 pm.', ['card-2'], false, true],
     ['public', 'hold', 'hold', 'Discounts ask you first.', [], false, true],
     ['agent', 'allow_if_reviewed', 'hold', 'Within its signed limit, checked by the reviewer.', ['card-7'], true, true],
     ['verified', 'allow', 'allow', 'Sends customers their own documents.', ['card-4'], false, true],
-    ['after_hours', 'hold', 'allow', 'Books weekday visits in your hours.', ['card-2'], false, false],
+    ['after_hours', 'hold', 'allow', 'Books weekday visits on weekdays, 8:00 am to 6:00 pm.', ['card-2'], false, false],
     ['public', 'refuse', 'refuse', 'Private data only to its verified owner.', [], false, true],
   ];
   const cardOf = (draft: RulesDraft, id: string) => draft.cards.find((card) => card.card_id === id);
@@ -1226,7 +1226,7 @@ describe("the real situations, in the business's own words", () => {
       reason: 'Agents pay the color appointment deposit within their signed limit, checked by the reviewer.',
       // Open Tuesday to Saturday, so a Saturday visitor isn't after hours.
       days: ['tue', 'wed', 'thu', 'fri', 'sat'],
-      bookings: 'Books appointments Tuesday to Saturday in your hours.',
+      bookings: 'Books appointments on Tuesday to Saturday, 8:00 am to 6:00 pm.',
       saturday: 'public',
     },
     {
@@ -1242,7 +1242,7 @@ describe("the real situations, in the business's own words", () => {
       ],
       reason: 'Agents pay the service call deposit within their signed limit, checked by the reviewer.',
       days: WEEKDAYS,
-      bookings: 'Books weekday visits in your hours.',
+      bookings: 'Books weekday visits on weekdays, 8:00 am to 6:00 pm.',
       saturday: 'after_hours',
     },
     {
@@ -1257,7 +1257,7 @@ describe("the real situations, in the business's own words", () => {
       ],
       reason: 'Agents pay the application fee within their signed limit, checked by the reviewer.',
       days: WEEKDAYS,
-      bookings: 'Books weekday viewings in your hours.',
+      bookings: 'Books weekday viewings on weekdays, 8:00 am to 6:00 pm.',
       saturday: 'after_hours',
     },
     {
@@ -1272,7 +1272,7 @@ describe("the real situations, in the business's own words", () => {
       ],
       reason: 'Agents pay the retainer within their signed limit, checked by the reviewer.',
       days: WEEKDAYS,
-      bookings: 'Books weekday consults in your hours.',
+      bookings: 'Books weekday consults on weekdays, 8:00 am to 6:00 pm.',
       saturday: 'after_hours',
     },
   ];
@@ -1341,7 +1341,7 @@ describe("the real situations, in the business's own words", () => {
       expect(probed(rows), description).toEqual(probed(rivera.rows));
       expectOwnBookings(rows, draft, {
         days: WEEKDAYS,
-        bookings: 'Books weekday times in your hours.',
+        bookings: 'Books weekday times on weekdays, 8:00 am to 6:00 pm.',
         saturday: 'after_hours',
         reason: 'Agents pay the deposit within their signed limit, checked by the reviewer.',
       }, description);
@@ -1419,7 +1419,7 @@ describe("the real situations, in the business's own words", () => {
     // Rules step shows: the client's return asks, as planned. Every other row is as it was.
     const { rows, draft } = await triedOn(START_EXAMPLES.en.examples[3]?.description ?? '');
     expect(cardOf(draft, 'card-4')).toMatchObject({ applies_to: 'native.release_document', mode: 'ask', reason: 'Documents ask you first.' });
-    const bookings = 'Books weekday consults in your hours.';
+    const bookings = 'Books weekday consults on weekdays, 8:00 am to 6:00 pm.';
     expect(outcomes(rows)).toEqual([
       ['public', 'allow', 'allow', bookings, ['card-2'], false, true],
       ['public', 'hold', 'hold', 'Discounts ask you first.', [], false, true],

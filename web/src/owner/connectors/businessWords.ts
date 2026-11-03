@@ -1,6 +1,7 @@
 import type { BusinessToolDef } from '../../api/views.ts';
+import type { HoursWindow } from '../../api/contracts.ts';
 import type { RuleMode } from '../../ds/index.ts';
-import { formatCents } from '../../lib/format.ts';
+import { formatCents, hoursParts, listWords } from '../../lib/format.ts';
 
 /** The signed words for the Desk's own jobs, shared by setup and Rules. */
 export const BUSINESS_WORDS = {
@@ -59,13 +60,21 @@ function isBusinessConfig(config: unknown): config is BusinessToolDef['config'] 
     && boundedText(config.appointment_type, 60) && integerInRange(config.minutes, 15, 60);
 }
 
-export function businessLine(def: BusinessToolDef): string | null {
+export function businessLine(def: BusinessToolDef, hours: readonly HoursWindow[] = []): string | null {
   if (!isBusinessDef(def)) return null;
-  return configLine(def.config);
+  return configLine(def.config, hours);
 }
 
-function configLine(config: BusinessToolDef['config']): string | null {
-  if (config.block === 'typed_booking') return `${config.appointment_type}, ${config.minutes} minutes, in your opening hours`;
+function configLine(config: BusinessToolDef['config'], hours: readonly HoursWindow[]): string | null {
+  if (config.block === 'typed_booking') {
+    // Match hoursRuns' days and preposition; only stored windows contribute words.
+    const when = listWords(hours.map((window) => {
+      const { days, times } = hoursParts(window);
+      const lowered = /^(Weekdays|Weekends|Every day)\b/.test(days) ? `${days.charAt(0).toLowerCase()}${days.slice(1)}` : days;
+      return `${lowered.startsWith('every day') ? '' : 'on '}${lowered}, ${times}`;
+    }));
+    return `${config.appointment_type}, ${config.minutes} minutes${when ? `, ${when}` : ''}`;
+  }
   if (config.block === 'intake') return `${config.questions.length} ${config.questions.length === 1 ? 'question' : 'questions'} before a booking`;
   if (config.block === 'purpose_payment') return `${config.purpose}, ${formatCents(config.amount_cents)}`;
   if (config.block === 'urgent') return `Urgent: ${config.urgent_when}`;
@@ -73,9 +82,9 @@ function configLine(config: BusinessToolDef['config']): string | null {
 }
 
 /** Rules spells out an intake's questions; other jobs keep the shared configuration line. */
-export function businessRulesDescription(def: BusinessToolDef | null | undefined): string | null {
+export function businessRulesDescription(def: BusinessToolDef | null | undefined, hours: readonly HoursWindow[] = []): string | null {
   if (!record(def) || !isBusinessConfig(def.config)) return null;
-  return def.config.block === 'intake' ? `${BUSINESS_WORDS.asks}: ${def.config.questions.join(' ')}` : configLine(def.config);
+  return def.config.block === 'intake' ? `${BUSINESS_WORDS.asks}: ${def.config.questions.join(' ')}` : configLine(def.config, hours);
 }
 
 export function businessRows(def: BusinessToolDef, mode: RuleMode): BusinessSetupRow[] {

@@ -30,6 +30,7 @@ async function interviewAtTools() {
   seedBusinessTools(desk);
   // The signed Chen setup lists its two jobs and Verification, with Stripe still to connect.
   desk.summary.business_name = 'Chen & Co. CPA';
+  desk.summary.hours = [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }];
   desk.tools = desk.tools.filter((row) => row.source === 'business' || row.tool === 'native.start_verification');
   return { state, desk };
 }
@@ -235,7 +236,7 @@ it.each([1440, 1512, 390])('at %i px, reviews and turns on exactly one job at it
   const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
   await expect.element(jobs).toBeVisible();
   expect([...jobs.element().querySelectorAll('.cd-connector-summary__name')].map((el) => el.textContent)).toEqual(['Book a free intro call', 'New client intake']);
-  await expect.element(jobs.getByText('Free intro call, 20 minutes, in your opening hours')).toBeVisible();
+  await expect.element(jobs.getByText('Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', { exact: true })).toBeVisible();
   await expect.element(jobs.getByText('3 questions before a booking')).toBeVisible();
   await expect.element(jobs.getByText('On', { exact: true })).toBeVisible();
   await expectScreenBasics(screen.container, { owner: true });
