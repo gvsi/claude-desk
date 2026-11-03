@@ -79,7 +79,7 @@ export interface SidebarProps {
   current: NavKey;
   /** Where each row goes. Without `connectors` or `notifications`, that row isn't drawn and the rows close up. */
   hrefs: SidebarHrefs;
-  /** The business's word for the people it serves, the third row: "Customers", "Clients". */
+  /** The business's word for the people it serves, the row under Notifications: "Customers", "Clients". */
   peopleLabel: string;
   /**
    * Counts on Conversations, Safety and Notifications only; `attention` adds a held dot beside
@@ -121,11 +121,11 @@ export const NAV_LABELS = {
 const NAV_ROWS = [
   { key: 'today', icon: 'today', label: NAV_LABELS.today },
   { key: 'conversations', icon: 'conversations', label: NAV_LABELS.conversations },
-  { key: 'people', icon: 'people', label: null },
   { key: 'rules', icon: 'rules', label: NAV_LABELS.rules },
   { key: 'connectors', icon: 'connectors', label: NAV_LABELS.connectors },
   { key: 'safety', icon: 'safety', label: NAV_LABELS.safety },
   { key: 'notifications', icon: 'bell', label: NAV_LABELS.notifications },
+  { key: 'people', icon: 'people', label: null },
   { key: 'profile', icon: 'store', label: NAV_LABELS.profile },
   { key: 'share', icon: 'share', label: NAV_LABELS.share },
   { key: 'knowledge', icon: 'knowledge', label: NAV_LABELS.knowledge },
