@@ -92,22 +92,22 @@ export const Board: Story = {
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(within(nav).queryAllByRole('link', { current: 'page' })).toEqual([]);
 
-    // Connectors is fifth, after Rules, and Knowledge sits just above Settings.
+    // Connectors is fourth, after Rules, and Knowledge sits just above Settings.
     const pages = within(nav).getAllByRole('link');
     await expect(pages.map((page) => page.querySelector('.cd-sidebar__label')?.textContent)).toEqual([
       'Today',
       'Conversations',
-      'Customers',
       'Rules',
       'Connectors',
       'Safety',
+      'Customers',
       'Profile',
       'Share',
       'Knowledge',
       'Settings',
     ]);
-    const connectors = pages[4] as HTMLElement;
-    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(270);
+    const connectors = pages[3] as HTMLElement;
+    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(232);
 
     // focus_order_is_logical: the business, the main nav, the about links, then Claude acts for you.
     await expectTabOrder(userEvent, [
