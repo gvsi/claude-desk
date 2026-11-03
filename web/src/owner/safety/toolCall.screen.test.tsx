@@ -111,17 +111,45 @@ it('shows an unreviewed allowing rule without claiming a reviewer checked it', a
   expect(rule.element().querySelector('.cd-rule-sentence__meta')?.textContent).toBe('Book a visit · Anyone');
 });
 
-it('shows You allowed it for an owner approval with no automatic card', async () => {
+it("shows You allowed it when the loaded record has the owner's approval of the decision", async () => {
   const ledger = record();
-  ledger.entries[0]!.event.summary = { decision_id: 'dec-tool', tool: 'native.book', outcome: 'approve', card_ids: [] };
+  // As the kernel records it: the decision held, then an approval entry for the same decision.
+  ledger.entries[0]!.event.summary = { decision_id: 'dec-tool', tool: 'native.book', outcome: 'hold', card_ids: ['rv-book-wk'] };
+  ledger.entries.splice(1, 0, entry(20, 'approval', { decision_id: 'dec-tool', action_id: 'act-tool', answer: 'approve', state: 'approved' }));
+  ledger.entries[2] = { ...ledger.entries[2]!, seq: 21 };
   injectLedger(ledger);
   const { screen } = await renderRoute(SAFETY);
-  await screen.getByRole('button', { name: /^Entry 20,/ }).click();
-  const approval = screen.getByRole('group', { name: 'You allowed it', exact: true });
-  await expect.element(approval).toBeVisible();
-  await expect.element(approval.getByText('Allow', { exact: true })).toBeVisible();
-  expect(approval.element().querySelector('.cd-rule-sentence')).toBeNull();
+  await screen.getByRole('button', { name: /^Entry 21,/ }).click();
+  const section = screen.getByRole('group', { name: 'Tool call', exact: true });
+  await expect.element(section).toBeVisible();
+  // One line, a handled dot and "You allowed it" in primary body type: no label over it and no lone Allow.
+  const approval = section.element().querySelector<HTMLElement>('.cd-tool-call__approved');
+  expect(approval?.textContent).toBe('You allowed it');
+  expect(approval?.classList.contains('cd-type-body')).toBe(true);
+  expect(approval?.querySelector('.cd-status-dot')).not.toBeNull();
+  const probe = document.createElement('span');
+  probe.style.color = 'var(--text-primary)';
+  section.element().append(probe);
+  expect(getComputedStyle(approval!).color).toBe(getComputedStyle(probe).color);
+  probe.remove();
+  expect(section.getByText('Allow', { exact: true }).elements()).toHaveLength(0);
+  expect(section.element().querySelector('.cd-rule-sentence')).toBeNull();
+  expect(section.element().querySelector('.cd-attempt__label + .cd-tool-call__approved')).toBeNull();
   expect(screen.getByText('The rule that allowed it', { exact: true }).elements()).toHaveLength(0);
+});
+
+it('draws the allowing rule sentence in primary ink, as the turned-down rule box does', async () => {
+  injectLedger(record());
+  const { screen } = await renderRoute(SAFETY);
+  await screen.getByRole('button', { name: /^Entry 20,/ }).click();
+  const rule = screen.getByRole('group', { name: 'The rule that allowed it', exact: true });
+  await expect.element(rule).toBeVisible();
+  const sentence = rule.element().querySelector<HTMLElement>('.cd-rule-sentence__sentence')!;
+  const probe = document.createElement('span');
+  probe.style.color = 'var(--text-primary)';
+  rule.element().append(probe);
+  expect(getComputedStyle(sentence).color).toBe(getComputedStyle(probe).color);
+  probe.remove();
 });
 
 it.each(['missing', 'different tool', 'not automatic'] as const)('leaves out the rule box when the recorded card is %s', async (why) => {
@@ -181,4 +209,17 @@ it('the mock record includes paired business and reviewed tool calls', async () 
   expect(calls.every(({ decision }) => decision !== undefined)).toBe(true);
   expect(calls.some(({ decision }) => decision?.event.summary.tool === 'desk.emergency-callback')).toBe(true);
   expect(calls.some(({ decision }) => decision?.event.summary.reviewed === true)).toBe(true);
+});
+
+it('leaves out the rule box when the decision ran under another rules version', async () => {
+  const ledger = record();
+  // The card keeps its ID across versions, so a newer version's sentence must not explain an older call.
+  ledger.entries[1]!.event.summary.policy_version = 6;
+  injectLedger(ledger);
+  const { screen } = await renderRoute(SAFETY);
+  await screen.getByRole('button', { name: /^Entry 20,/ }).click();
+  const section = screen.getByRole('group', { name: 'Tool call', exact: true });
+  await expect.element(section).toBeVisible();
+  expect(section.element().querySelector('.cd-tool-call__rule')).toBeNull();
+  expect(screen.getByText('The rule that allowed it', { exact: true }).elements()).toHaveLength(0);
 });

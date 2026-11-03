@@ -9,6 +9,10 @@ export interface ToolCall {
   mono: boolean;
   source: string;
   decision: LedgerEntry;
+  /** The owner approved this decision: an `approval` entry for it in the loaded page reads `approved`. */
+  approved: boolean;
+  /** The rules version the decision ran under, from its own summary or else the execution's; null when neither says. */
+  policyVersion: number | null;
 }
 
 /** Both summaries carry the decision ID; older entries name it only in their reference. */
@@ -29,5 +33,10 @@ export function toolCallFor(entry: LedgerEntry, entries: readonly LedgerEntry[],
   const source = tool.startsWith('desk.') ? "Your Desk's jobs"
     : connector !== null ? `${connector.view.name}${connector.view.source.kind === 'built_in' ? ' · Built in' : ''}`
       : isCatalogTool(tool) && tool.startsWith('native.') ? 'Built in' : 'Connected tool';
-  return { tool, name: name ?? tool, mono: name === null, source, decision };
+  // An owner's approval is its own ledger entry, joined by the same decision (the decide entry stays `hold`).
+  const approved = entries.some((candidate) => candidate.event.kind === 'approval' && decisionId(candidate) === id
+    && candidate.event.summary.state === 'approved');
+  const version = [decision.event.summary.policy_version, entry.event.summary.policy_version]
+    .find((value): value is number => typeof value === 'number');
+  return { tool, name: name ?? tool, mono: name === null, source, decision, approved, policyVersion: version ?? null };
 }

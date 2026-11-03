@@ -24,7 +24,7 @@ const page: LedgerPage = {
     } } },
   ],
 };
-const rules = { cards: Object.values(rivera.ruleCards), words: { business: NO_BUSINESS_TOOLS } };
+const rules = { cards: Object.values(rivera.ruleCards), version: 7, words: { business: NO_BUSINESS_TOOLS } };
 /** Where an entry came from, as the screen words it: the kernel's own entries, and the chat's reports. */
 const ORIGIN = { kernel: 'Recorded by your Desk', api: 'Reported by the chat, not verified by your Desk' } as const;
 /** The booking execution, with its allowing decision in the same page. */

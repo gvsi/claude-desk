@@ -29,3 +29,14 @@
 .cd-tool-call .cd-rule-sentence__meta {
   margin-top: var(--space-2);
 }
+
+/* The allowing rule reads as the turned-down request's rule box draws one: its sentence in primary text. */
+.cd-tool-call .cd-rule-sentence__sentence {
+  color: var(--text-primary);
+}
+
+/* An owner's approval is one line in primary body text, with its handled dot. */
+.cd-tool-call__approved {
+  margin: var(--space-12) 0 0;
+  color: var(--text-primary);
+}

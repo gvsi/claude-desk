@@ -23,9 +23,13 @@ export function ToolCallSection({ call, entry, rules }: { call: ToolCall; entry:
   const ruleLabelId = useId();
   const summary = call.decision.event.summary;
   const ids = Array.isArray(summary.card_ids) ? summary.card_ids : [];
-  const card = rules?.cards.find((candidate) => ids.includes(candidate.card_id) && candidate.applies_to === call.tool && candidate.mode === 'auto');
+  const approved = call.approved;
+  // Only the version the decision ran under explains it: an edited card keeps its ID, so a newer
+  // version's sentence (a lowered limit, say) never stands in for the rule that allowed this call.
+  const sameVersion = rules !== null && rules.version != null && call.policyVersion === rules.version;
+  const card = approved || !sameVersion ? undefined : rules?.cards.find((candidate) => ids.includes(candidate.card_id)
+    && candidate.applies_to === call.tool && candidate.mode === 'auto');
   const namedRule = card !== undefined && rules !== null;
-  const approved = summary.outcome === 'approve' && card === undefined;
   const meta = card !== undefined && rules !== null ? ruleMeta(card, rules.words) : null;
   if (meta !== null && summary.reviewed === true) meta.who += ' · Checked by the reviewer';
   const state = entry.event.summary.state;
@@ -48,13 +52,14 @@ export function ToolCallSection({ call, entry, rules }: { call: ToolCall; entry:
           <dd className="cd-full-trace__value cd-type-body"><StatusLabel tone={outcome.tone}>{outcome.text}</StatusLabel></dd>
         </div>
       </dl>
-      {(namedRule || approved) ? (
+      {namedRule && meta !== null ? (
         <div className="cd-tool-call__rule" role="group" aria-labelledby={ruleLabelId}>
-          <p id={ruleLabelId} className="cd-attempt__label cd-type-caption">{approved ? 'You allowed it' : 'The rule that allowed it'}</p>
-          {card !== undefined && rules !== null && meta !== null ? (
-            <RuleSentence parts={ruleSentence(card, rules.words)} meta={meta} outcome="auto" />
-          ) : <p className="cd-type-meta"><StatusLabel tone="handled">Allow</StatusLabel></p>}
+          <p id={ruleLabelId} className="cd-attempt__label cd-type-caption">The rule that allowed it</p>
+          <RuleSentence parts={ruleSentence(card!, rules!.words)} meta={meta} outcome="auto" />
         </div>
+      ) : approved ? (
+        // The owner's own yes, said once: a handled dot and the words, with no rule outcome beside them.
+        <p className="cd-tool-call__approved cd-type-body"><StatusLabel tone="handled">You allowed it</StatusLabel></p>
       ) : null}
     </div>
   );
