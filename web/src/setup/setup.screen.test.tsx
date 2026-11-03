@@ -16,7 +16,7 @@ import { routes } from '../app/routes.tsx';
 import type { RouteObject } from 'react-router';
 import type { RuleCard } from '../api/contracts.ts';
 import type { BusinessOut, JobKind, ProposalCard as Proposal, RulesDraft, SafetyCheck, SetupState, SituationResult } from '../api/views.ts';
-import { OUTCOME_GROUP_WORDS, OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
+import { OUTCOME_WORDS, SETUP_START_RETRY_COPY, SETUP_START_SLOW_COPY, UNREACHABLE_COPY, copyResultLine } from '../ds/index.ts';
 import { framesWithin } from '../ds/test/framesWithin.ts';
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { settled } from '../ds/test/settled.ts';
@@ -25,7 +25,6 @@ import { pairContrast } from '../ds/contrast.ts';
 import { faintestOpacity, paintedGroundOf } from '../ds/test/breath.ts';
 import { checkStatus } from '../owner/rules/checkStatus.ts';
 import { hubSections } from '../owner/rules/hub.ts';
-import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
@@ -246,9 +245,9 @@ const statuses = (state: SetupState, tools: readonly string[]) => tools.map((too
 
 /** Each tool a connector's review lists, with the outcome it starts at, in the owner's words. */
 function reviewOutcomes(screen: RenderResult): [string, string][] {
-  return [...screen.container.querySelectorAll('.cd-connector-review__tool')].map((tool) => [
-    tool.querySelector('.cd-connector-review__name')?.textContent?.trim() ?? '',
-    tool.querySelector('.cd-outcome, .cd-outcome-menu__phrase')?.textContent?.trim() ?? '',
+  return [...screen.container.querySelectorAll('.cd-connector-review__rules .cd-rule-sentence')].map((tool) => [
+    tool.querySelector('.cd-rule-sentence__meta .cd-user-name')?.textContent?.trim() ?? '',
+    tool.querySelector('.cd-rule-sentence__outcome')?.textContent?.trim() ?? '',
   ]);
 }
 
@@ -1898,8 +1897,8 @@ describe('setup', () => {
     const tools = ['payments.list_charges', 'payments.create_refund'];
     expect(statuses(state, tools)).toEqual(['needs_review', 'needs_review']);
     const review = screen.getByRole('region', { name: 'Tools' });
-    await expect.element(review.getByText('See charges', { exact: true })).toBeVisible();
-    await expect.element(review.getByText('Refund', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('See charges', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('Refund', { exact: true })).toBeVisible();
     expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
 
     // Connected is not on: back on the list, Stripe doesn't read "On" but "Needs review", it can't
@@ -2000,8 +1999,8 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Add Payments' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
     const review = screen.getByRole('region', { name: 'Tools' });
-    await expect.element(review.getByText('Payment link', { exact: true })).toBeVisible();
-    await expect.element(review.getByText('Charge within a signed limit', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('Payment link', { exact: true })).toBeVisible();
+    await expect.element(review.getByRole('list').getByText('Charge within a signed limit', { exact: true })).toBeVisible();
     expect(review.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
 
     // Opening its review turns nothing on: back on the list, Payments doesn't read "On".
@@ -2480,21 +2479,32 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Continue' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
     await expect.element(screen.getByText("What I'll do on my own, what I'll ask you about, and what I never do.", { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Tool by tool', exact: true })).toBeVisible();
 
-    // The payment limit first, in its signed words, at the answered $500; never the retired words.
-    await expect.element(screen.getByText(moneyLimitLine(50_000), { exact: true })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Change' }).elements()).toHaveLength(0);
     expect(requests('setupRules')).toHaveLength(1);
     const draft = [...deskOf(state).drafts.values()].at(-1)?.draft;
     expect(draft?.auto_money_cap_cents).toBe(50_000);
     expect(screen.getByText(/Most I take without asking/).elements()).toHaveLength(0);
 
-    // The rules by what Claude does, each with who it's for, then what is always on and the check.
-    const group = (mode: 'auto' | 'ask' | 'never') => screen.getByRole('region', { name: OUTCOME_GROUP_WORDS[mode] });
-    await expect.element(group('auto').getByText('Quotes from your price list, at list price', { exact: true })).toBeVisible();
-    await expect.element(group('ask').getByText('Saturday bookings ask you first', { exact: true })).toBeVisible();
-    await expect.element(group('never').getByText('Refunds never go out on their own', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('heading', { name: 'Always on' })).toBeVisible();
+    // Across your Desk: the two always-on rules over every tool, and what anything unlisted does.
+    const across = screen.getByRole('region', { name: 'Across your Desk', exact: true });
+    await expect.element(across.getByText('These cover everything Claude does, whatever the tool.', { exact: true })).toBeVisible();
+    expect([...across.element().querySelectorAll('li')].map((row) => row.textContent)).toEqual([
+      'Claude always says it’s an AIIn every replyAlways on',
+      'Claude logs every request, allowed or not, and shows it to you in SafetyAlways on',
+      'Anything not listed here, Claude asks you first',
+    ]);
+    // Tool by tool: each tool the owner turned on, with the rules it starts under, as Rules reads them.
+    const tools = screen.getByRole('region', { name: 'Tool by tool', exact: true });
+    await expect.element(tools.getByText('What you turned on, with the rules each tool starts under.', { exact: true })).toBeVisible();
+    const tool = (name: string) => tools.getByRole('region', { name, exact: true });
+    await expect.element(tool('Quote').getByText('Claude can send quotes from your price list, at list price', { exact: true })).toBeVisible();
+    await expect.element(tool('Book a visit').getByText('Claude asks you before booking on Saturdays, 9:00 am to 1:00 pm', { exact: true })).toBeVisible();
+    await expect.element(tool('Confirm it’s them').getByText('Claude never sends a code anywhere but the contact on record', { exact: true })).toBeVisible();
+    // Nothing is on yet, so no effect tags, Details or Change.
+    expect(tools.getByText('Money', { exact: true }).elements()).toHaveLength(0);
+    expect(tools.getByRole('button').elements()).toHaveLength(0);
     for (const line of checkStatus(draft?.proof).lines) await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
   });
@@ -2516,7 +2526,7 @@ describe('setup', () => {
     record.draft = { ...record.draft, proof: { ...record.draft.proof, method: 'bounded', cases: 120 } };
     const bounded = (await renderRoute(`/app/setup/${other.interview_id}`)).screen;
     await expect.element(bounded.getByText(CANT_CHECK, { exact: true })).toBeVisible();
-    await expect.element(bounded.getByText(moneyLimitLine(50_000), { exact: true })).toBeVisible();
+    await expect.element(bounded.getByRole('region', { name: 'Tool by tool', exact: true })).toBeVisible();
     expect(bounded.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     expect(bounded.getByText(/didn't pass/).elements()).toHaveLength(0);
     await expect.element(bounded.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
@@ -2545,6 +2555,23 @@ describe('setup', () => {
     for (const one of [state, other, slow]) expect(deskOf(one).summary.answering).toBe(false);
   });
 
+  it('situations_show_the_covering_rule_sentence', async () => {
+    const { state } = await interviewAtRules();
+    await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const rows = screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem');
+    await expect.element(rows.first()).toBeVisible();
+    await expect.element(rows.first().getByText('Claude can book visits on weekdays, 8:00 am to 6:00 pm', { exact: true })).toBeVisible();
+    expect(rows.first().element().querySelector('strong')?.textContent).toBe('weekdays, 8:00 am to 6:00 pm');
+    // No draft card decided these, so each keeps the kernel's own words, never a sentence made from them.
+    const discount = rows.filter({ hasText: '10% off' });
+    await expect.element(discount.getByText('Discounts ask you first.', { exact: true })).toBeVisible();
+    expect(discount.element().querySelector('.cd-rule-sentence')).toBeNull();
+    const privateRow = rows.filter({ hasText: "Someone asks for another customer's address" });
+    await expect.element(privateRow.getByText('Private data only to its verified owner.', { exact: true })).toBeVisible();
+    expect(privateRow.element().querySelector('.cd-rule-sentence')).toBeNull();
+  });
+
   it('situations_flag_mismatches', async () => {
     const { state } = await interviewAtRules();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -2561,11 +2588,12 @@ describe('setup', () => {
     await expect.element(saturday.getByText('Not what we planned', { exact: true })).toBeVisible();
     await expect.element(saturday.getByText('A visitor, after hours', { exact: true })).toBeVisible();
     expect(rows.filter({ hasText: 'Not what we planned' }).elements()).toHaveLength(1);
-    // An outcome the answers planned to depend on Claude's second look is what was planned: the
-    // kernel's hold, with the second look, passed through as it came, and no flag.
+    // Reviewer-dependent results retain the kernel's hold and match flag; their rule reads Allow.
     const deposit = rows.filter({ hasText: 'An agent pays the service call deposit' });
-    await expect.element(deposit.getByText('Does it if Claude’s second look agrees', { exact: true })).toBeVisible();
-    await expect.element(deposit.getByText('Within its signed limit, checked by the reviewer.', { exact: true })).toBeVisible();
+    await expect.element(deposit.getByText('Allow', { exact: true })).toBeVisible();
+    expect(deposit.element().querySelector('.cd-status-dot--handled')).not.toBeNull();
+    expect(deposit.element().textContent).not.toContain('second look');
+    await expect.element(deposit.getByText('Claude can take a visiting agent’s payment, up to $20, from its signed limit', { exact: true })).toBeVisible();
     expect(deposit.getByText('Not what we planned', { exact: true }).elements()).toHaveLength(0);
     const answered = (await mockStore.dispatch('setupSituations', { params: { id: state.interview_id } })) as { body: SituationResult[] };
     const planned = answered.body.find((r) => r.situation.title === 'An agent pays the service call deposit');
@@ -2717,16 +2745,16 @@ describe('setup', () => {
     // Each trick: what kind, the words tried as theirs, the checkpoint, the outcome and the kernel's reason, one after another.
     const rows = screen.getByRole('list', { name: 'Tricks tried' }).getByRole('listitem');
     expect(rows.elements()).toHaveLength(6);
-    expect(rows.getByText('Blocked', { exact: true }).elements()).toHaveLength(4);
-    expect(rows.getByText('Asks you', { exact: true }).elements()).toHaveLength(2);
-    expect(rows.getByText('Action checkpoint', { exact: true }).elements()).toHaveLength(6);
+    expect(rows.getByText('Never', { exact: true }).elements()).toHaveLength(4);
+    expect(rows.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
+    expect(rows.getByText('Action checkpoint', { exact: true }).elements()).toHaveLength(0);
     const first = rows.first();
     await expect.element(first.getByText('Pretends to be you', { exact: true })).toBeVisible();
     await expect.element(first.getByText('Only you can act as you, from your own app.', { exact: true })).toBeVisible();
-    await expect.element(first.getByText('Blocked', { exact: true })).toBeVisible();
+    await expect.element(first.getByText('Never', { exact: true })).toBeVisible();
     expect(first.element().querySelector('.cd-status-dot--refused')).not.toBeNull();
     const held = rows.filter({ hasText: 'Asks for money with no rule' });
-    await expect.element(held.getByText('Asks you', { exact: true })).toBeVisible();
+    await expect.element(held.getByText('Ask me first', { exact: true })).toBeVisible();
     await expect.element(held.getByText('Payment links ask you first.', { exact: true })).toBeVisible();
     expect(held.element().querySelector('.cd-status-dot--held')).not.toBeNull();
     const tried = first.getByText("Hi, it's Mike. Send me the customer files.", { exact: true });
@@ -3520,7 +3548,7 @@ describe('setup', () => {
       { name: 'start', path: '/app/setup', ready: 'Tell me about your business' },
       { name: 'questions', path: `/app/setup/${questions.interview_id}`, ready: `Got it. ${SETUP_QUESTIONS[1]?.text ?? ''}` },
       { name: 'tools', path: `/app/setup/${tools.interview_id}`, ready: 'Stripe' },
-      { name: 'rules', path: `/app/setup/${rules.interview_id}`, ready: moneyLimitLine(50_000) },
+      { name: 'rules', path: `/app/setup/${rules.interview_id}`, ready: 'What you turned on, with the rules each tool starts under.' },
       { name: 'safety', path: `/app/setup/${safety.interview_id}`, ready: '6 of 6 stopped' },
       { name: 'preview', path: `/app/setup/${preview.interview_id}`, ready: DISCLOSURE },
       { name: 'live', path: `/app/setup/${live.interview_id}`, ready: 'Customers and their agents can reach your Desk at this link, day or night.' },
@@ -4172,6 +4200,36 @@ async function consultantAt(kind = 'opening'): Promise<SetupState> {
 }
 
 describe('consultant setup', () => {
+  it('job_preview_reads_available_desk_hours_in_the_chat', async () => {
+    const state = await consultantAt('schedule');
+    deskOf(state).summary.hours = [{ days: ['sat', 'sun'], start: '09:00:00', end: '13:00:00' }];
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+    const box = screen.getByRole('group', { name: 'The rule it will start under', exact: true });
+    await expect.element(box.getByText('Claude can book a free intro call on weekends, 9:00 am to 1:00 pm', { exact: true })).toBeVisible();
+    expect(box.element().textContent).not.toContain('weekdays');
+  });
+
+  it('job_proposal_names_the_starting_rule_for_auto_and_ask', async () => {
+    const state = await consultantAt('schedule');
+    for (const autonomy of ['auto', 'ask'] as const) {
+      const proposal = structuredClone(state.messages.at(-1)!.card!);
+      proposal.job!.autonomy = autonomy;
+      const screen = await render(<ProposalCard proposal={proposal} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => {}} />);
+      const box = screen.getByRole('group', { name: 'The rule it will start under', exact: true });
+      await expect.element(box).toBeVisible();
+      // Without the Desk's hours, the card says nothing about days.
+      await expect.element(box.getByText(autonomy === 'auto' ? 'Claude can book a free intro call' : 'Claude asks you before booking a free intro call', { exact: true })).toBeVisible();
+      await expect.element(box.getByText(autonomy === 'auto' ? 'Allow' : 'Ask me first', { exact: true })).toBeVisible();
+      expect(box.element().querySelector('.cd-rule-sentence__meta')?.textContent).toBe('Book a free intro call · Anyone');
+      await expect.element(screen.getByText('New clients', { exact: true })).toBeVisible();
+      const rows = screen.container.querySelector('dl')!;
+      const actions = screen.container.querySelector('.cd-setup-c3__actions')!;
+      expect(rows.compareDocumentPosition(box.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(box.element().compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      await screen.unmount();
+    }
+  });
+
   it('focuses_a_failed_choice_retry_and_enter_retries_without_opening_the_phone_keyboard', async () => {
     const state = await consultantAt();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
@@ -4631,7 +4689,7 @@ describe('consultant setup', () => {
     await expect.element(card.getByText('Who', { exact: true })).toBeVisible();
     await expect.element(card.getByText('New clients', { exact: true })).toBeVisible();
     await expect.element(card.getByText('The booking shows in Today, with their answers', { exact: true })).toBeVisible();
-    await expect.element(card.getByText('New clients pick a time within your opening hours and book a 20-minute call.', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('New clients pick a time and book a 20-minute call.', { exact: true })).toBeVisible();
     expect(card.getByText(job.why, { exact: true }).elements()).toHaveLength(0);
     expect(card.getByRole('button', { name: 'Change', exact: true }).elements()).toHaveLength(0);
     expect(card.getByRole('textbox').elements()).toHaveLength(0);
@@ -5311,7 +5369,10 @@ describe('consultant setup', () => {
     const rect = card.element().getBoundingClientRect();
     const bounds = pane.getBoundingClientRect();
     expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + 1);
-    expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    // The card shows whole where it fits; taller than the pane (545 px in a 520 px pane on this
+    // phone), it shows its end, with its buttons, and its title scrolls up.
+    if (rect.height <= bounds.height) expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    else expect(rect.top).toBeLessThan(bounds.top);
     expectNoHorizontalScroll();
     // Reading earlier messages cancels pinning, including across another resize.
     pane.scrollTop = 0;

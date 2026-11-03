@@ -52,12 +52,12 @@ export const Tricks: Story = {
 
     // The outcome in words beside its dot, independently of whether the trick was stopped.
     const outcomes = rows.map((row) => row.querySelector('.cd-safety-check-row__outcome')?.textContent);
-    await expect(outcomes).toEqual(['Blocked', 'Asks you', 'Blocked', 'Not blocked']);
+    await expect(outcomes).toEqual(['Never', 'Ask me first', 'Never', 'Not blocked']);
     const tones = rows.map((row) => row.querySelector('.cd-safety-check-row__outcome .cd-status-dot')?.className.replace('cd-status-dot cd-status-dot--', ''));
     await expect(tones).toEqual(['refused', 'held', 'refused', 'held']);
     // The checkpoint that stopped it, and none for a trick that got through.
     const checkpoints = rows.map((row) => row.querySelector('.cd-safety-check-row__checkpoint')?.textContent ?? null);
-    await expect(checkpoints).toEqual(['Action checkpoint', 'Action checkpoint', 'Reply checkpoint', null]);
+    await expect(checkpoints).toEqual([null, null, null, null]);
 
     // The try in quotes, as the visitor would type it: their words, exempt from the voice rules.
     const [first] = rows as [HTMLElement];
@@ -66,15 +66,12 @@ export const Tricks: Story = {
     await expect(attempt.parentElement!.textContent).toBe(`“${TRICKS[0]!.attempt}”`);
     expectComputed(attempt.parentElement!, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
     expectComputed(within(first).getByText('Posing as you'), { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
-    const checkpoint = first.querySelector<HTMLElement>('.cd-safety-check-row__checkpoint')!;
-    expectComputed(checkpoint, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
-    await expect(Math.round(checkpoint.getBoundingClientRect().top - attempt.parentElement!.getBoundingClientRect().bottom)).toBe(4);
     for (const [index, row] of rows.entries()) {
       expectComputed(row, { borderTopWidth: index === 0 ? '0px' : '1px' });
       if (index > 0) expectComputed(row, { borderTopColor: 'rgba(250, 249, 245, 0.12)' });
     }
     expectComputed(first, { paddingTop: '14px', paddingBottom: '14px' });
-    await expect(first.getBoundingClientRect().height).toBe(92);
+    await expect(first.querySelector('.cd-safety-check-row__checkpoint')).toBeNull();
 
     // safety_rows_drawn_still: rows not live (results read again, as a reload reads them) are
     // there at once, their dots whole.
@@ -89,10 +86,10 @@ export const Held: Story = {
   args: { ...TRICKS[1]!, index: 0 },
   render: (args) => <SafetyCheckRow {...args} />,
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByText('Asks you', { exact: true })).toBeVisible();
+    await expect(canvas.getByText('Ask me first', { exact: true })).toBeVisible();
     await expect(canvas.getByText('Discounts ask you first.', { exact: true })).toBeVisible();
     await expect(canvasElement.querySelector('.cd-status-dot--held')).not.toBeNull();
-    await expect(canvas.getByText('Action checkpoint', { exact: true })).toBeVisible();
+    await expect(canvas.queryByText('Action checkpoint', { exact: true })).toBeNull();
   },
 };
 

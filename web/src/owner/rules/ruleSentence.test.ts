@@ -178,6 +178,69 @@ describe('the always-on rules', () => {
   });
 });
 
+describe('a rule for anyone on a tool that shows or sends customers their own records', () => {
+  // The baseline lets private data go only to its verified owner, so "Anyone" on Share a document,
+  // See charges or Refund would read as if an approval could release it to anyone (REV-SETUP-3
+  // reads "The customer, once verified"). A tool that only saves what visitors give it, such as a
+  // new-client intake, is used unverified, so its rule for anyone reads "Anyone".
+  const tools: readonly Pick<ToolRow, 'tool' | 'effects'>[] = [
+    { tool: 'native.quote', effects: ['change'] },
+    { tool: 'native.release_document', effects: ['private_data', 'send_message'] },
+    { tool: 'payments.list_charges', effects: ['private_data'] },
+    { tool: 'payments.create_refund', effects: ['pay_out', 'private_data'] },
+    { tool: 'desk.new-client-intake', effects: ['change', 'private_data'] },
+  ];
+  const onDesk = { business: NO_BUSINESS_TOOLS, tools };
+  const anyone = (applies_to: string, mode: RuleCard['mode'] = 'ask') => card({ card_id: applies_to, applies_to, mode, who: 'anyone' });
+  const RECORDS = ['native.release_document', 'payments.list_charges', 'payments.create_refund'];
+
+  it('record_tools_read_the_verified_customer_for_anyone', () => {
+    for (const tool of RECORDS) {
+      for (const mode of ['ask', 'auto'] as const) {
+        expect(ruleQualifiers(anyone(tool, mode), onDesk), `${tool} ${mode}`).toBe('The customer, once verified');
+        expect(ruleMeta(anyone(tool, mode), onDesk).who, `${tool} ${mode}`).toBe('The customer, once verified');
+      }
+    }
+    // Its outcome and sentence are unchanged.
+    expect(read(ruleSentence(anyone('payments.list_charges'), onDesk))).toBe('Claude asks you before showing customers **their own charges**');
+  });
+
+  it('an_intake_and_the_private_data_group_keep_anyone', () => {
+    // The intake lists the private-data effect only because it saves what new clients give it.
+    expect(ruleQualifiers(anyone('desk.new-client-intake'), onDesk)).toBe('Anyone');
+    expect(ruleMeta(anyone('desk.new-client-intake'), onDesk).who).toBe('Anyone');
+    expect(ruleQualifiers(anyone('effect:private_data'), onDesk)).toBe('Anyone');
+    // See charges' ask on the same Desk still reads its verified owner.
+    expect(ruleQualifiers(anyone('payments.list_charges'), onDesk)).toBe('The customer, once verified');
+  });
+
+  it('a_shared_rule_reads_the_verified_customer_under_a_record_tool_only', () => {
+    const change = anyone('effect:private_data');
+    expect(ruleQualifiers(change, onDesk, tools[2])).toBe('The customer, once verified');
+    expect(ruleMeta(change, onDesk, tools[2]).who).toBe('The customer, once verified');
+    expect(ruleQualifiers(change, onDesk, tools[4])).toBe('Anyone');
+    expect(ruleQualifiers(anyone('effect:change'), onDesk, tools[0])).toBe('Anyone');
+  });
+
+  it('a_never_rule_keeps_anyone_where_an_ask_on_the_same_tool_reads_the_verified_customer', () => {
+    // "Once verified" under a never rule would read as if verifying unlocked it, and it doesn't (owner ruling, 2026-11-02).
+    for (const tool of RECORDS) {
+      expect(ruleQualifiers(anyone(tool, 'never'), onDesk), tool).toBe('Anyone');
+      expect(ruleMeta(anyone(tool, 'never'), onDesk).who, tool).toBe('Anyone');
+      expect(ruleQualifiers(anyone(tool, 'ask'), onDesk), tool).toBe('The customer, once verified');
+    }
+    expect(ruleQualifiers(anyone('effect:pay_out', 'never'), onDesk, tools[3])).toBe('Anyone');
+  });
+
+  it('other_tools_keep_anyone', () => {
+    expect(ruleQualifiers(anyone('native.quote'), onDesk)).toBe('Anyone');
+    expect(ruleQualifiers(anyone('native.quote', 'never'), onDesk)).toBe('Anyone');
+    // Named people keep their own words.
+    expect(ruleQualifiers(card({ card_id: 'v', applies_to: 'payments.list_charges', mode: 'ask', who: 'verified' }), onDesk)).toBe('The customer, once verified');
+  });
+});
+
+
 describe('any tool', () => {
   it('a_business_tool_reads_claude_can_use_its_title', () => {
     // A job that isn't the Desk's urgent one reads by its own title.
@@ -193,6 +256,26 @@ describe('any tool', () => {
     // An acronym keeps its capitals.
     const sms: BusinessTools = new Map([['desk.sms-reminder', { title: 'SMS reminder', description: 'Texts a reminder.', config: { block: 'intake', questions: ['x'] } }]]);
     expect(read(ruleSentence({ ...urgent, applies_to: 'desk.sms-reminder' }, { business: sms }))).toBe('Claude can use SMS reminder');
+  });
+
+  it('a_job_whose_title_starts_with_a_verb_reads_as_what_claude_does', () => {
+    // REV-SETUP-1 and -3: "Claude asks you before sending **a retainer link**", not "using send a retainer link".
+    const jobs: BusinessTools = new Map([
+      ['desk.intro-call', { title: 'Book a free intro call', description: '', config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 } }],
+      ['desk.retainer', { title: 'Send a retainer link', description: '', config: { block: 'purpose_payment', purpose: 'Retainer', amount_cents: 50_000 } }],
+      ['desk.intake', { title: 'Ask new clients three questions', description: '', config: { block: 'intake', questions: ['x'] } }],
+    ]);
+    const job = (applies_to: string, mode: RuleCard['mode']) => ruleSentence({ ...urgent, card_id: applies_to, applies_to, mode }, { business: jobs });
+    expect(read(job('desk.intro-call', 'auto'))).toBe('Claude can book a free intro call');
+    expect(read(job('desk.intro-call', 'ask'))).toBe('Claude asks you before booking **a free intro call**');
+    expect(read(job('desk.intro-call', 'never'))).toBe('Claude never books a free intro call');
+    expect(read(job('desk.retainer', 'ask'))).toBe('Claude asks you before sending **a retainer link**');
+    expect(read(job('desk.intake', 'ask'))).toBe('Claude asks you before asking **new clients three questions**');
+    // The rest of the title is still the owner's own words, set off as user text.
+    expect(job('desk.retainer', 'ask').filter((part) => part.user === true).map((part) => part.text)).toEqual(['a retainer link']);
+    // The actual hours follow, as for any booking.
+    const hours = cards['rv-book-wk'].hours;
+    expect(read(ruleSentence({ ...urgent, applies_to: 'desk.intro-call', hours }, { business: jobs }))).toBe('Claude can book a free intro call on **weekdays, 8:00 am to 6:00 pm**');
   });
 
   it('an_unknown_tool_never_shows_its_raw_name', () => {

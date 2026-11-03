@@ -1,11 +1,43 @@
 import { useEffect, useRef, useState } from 'react';
-import type { JobKind, JobProposal, ProposalCard as Proposal, SetupProposalBody } from '../api/views.ts';
-import { Button, Card, ConnectorIcon, type ConnectorIconName, ConnectorName, Pill, TextField } from '../ds/index.ts';
+import type { HoursWindow, RuleCard } from '../api/contracts.ts';
+import type { BusinessToolDef, JobKind, JobProposal, ProposalCard as Proposal, SetupProposalBody } from '../api/views.ts';
+import { Button, Card, ConnectorIcon, type ConnectorIconName, ConnectorName, Pill, RuleSentence, TextField } from '../ds/index.ts';
+import { NO_BUSINESS_TOOLS, type BusinessTools } from '../owner/connectors/catalog.ts';
+import { ruleMeta, ruleSentence } from '../owner/rules/ruleSentence.ts';
 import { Icon, type IconName } from '../ds/icons/index.tsx';
 import { SETUP_COPY } from './copy.ts';
 import { decisionBody } from './conversation.ts';
 
 const copy = SETUP_COPY.proposal;
+/** The tool a proposed job will be, named here only so its rule can read the job's title. */
+const PROPOSED_TOOL = 'desk.proposed-job';
+/** The built-in tool each job without a setup of its own starts on. */
+const BUILT_IN: Partial<Record<JobKind, string>> = {
+  schedule: 'native.book', intake: 'native.capture_lead', payment: 'native.payment_link',
+  price: 'native.quote', documents: 'native.release_document', urgent: 'native.request_callback',
+};
+
+/**
+ * The rule a proposed job will start under, read as Rules reads a card (`ruleSentence`, `ruleMeta`):
+ * a card on the job's own tool, named by its title ("Claude can book a free intro call"), at the
+ * job's autonomy, for anyone (a customer's documents only to that customer), and for a booking at
+ * the Desk's opening `hours`, none when they're unknown. A preview only: it is never sent as a rule.
+ * Null for a job Claude can't do yet, or one with no tool to start on.
+ */
+export function proposedJobRule(job: JobProposal, hours?: HoursWindow | null) {
+  if (!job.can_do_today) return null;
+  const tool = job.config === null ? BUILT_IN[job.job] : PROPOSED_TOOL;
+  if (tool === undefined) return null;
+  const business: BusinessTools = job.config === null ? NO_BUSINESS_TOOLS
+    : new Map([[PROPOSED_TOOL, { title: job.title, description: job.how, config: job.config as BusinessToolDef['config'] }]]);
+  const card: RuleCard = {
+    card_id: 'proposal-preview', applies_to: tool, mode: job.autonomy, who: job.job === 'documents' ? 'record_owner' : 'anyone',
+    hours: job.job === 'schedule' ? hours ?? null : null, reason: '',
+  };
+  const words = { business };
+  return { parts: ruleSentence(card, words), meta: ruleMeta(card, words), outcome: job.autonomy };
+}
+
 /** Job vocabulary stays local to setup; tiles use the design system's own glyphs. */
 const JOB_GLYPH: Record<JobKind, IconName> = {
   schedule: 'calendar', intake: 'person', payment: 'card', status: 'document',
@@ -19,6 +51,8 @@ export interface CardDecision {
 }
 export interface ProposalCardProps {
   proposal: Proposal;
+  /** The Desk's available opening hours; missing hours add no weekday claim. */
+  hours?: HoursWindow | null;
   live: boolean;
   failed: boolean;
   amountRequired: boolean;
@@ -82,7 +116,7 @@ function jobRows(job: JobProposal): [string, string][] {
   ];
 }
 
-function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired, onRetry, onDecision }: ProposalCardProps) {
+function JobCard({ proposal, hours, live, disabled, busyAction, failed, amountRequired, onRetry, onDecision }: ProposalCardProps) {
   const job = proposal.job!;
   const payment = job.job === 'payment';
   const initialCents = job.config?.block === 'purpose_payment' ? job.config.amount_cents : null;
@@ -94,6 +128,7 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
   const accepted = proposal.state === 'accepted';
   const collapsed = accepted || proposal.state === 'declined';
   const rows = jobRows(job);
+  const rule = proposedJobRule(job, hours);
   const decide = (action: CardAction) => {
     if (disabled || !live || proposal.state !== 'proposed') return;
     const dollars = amount.trim().replace(/^\$/, '').trim();
@@ -118,6 +153,10 @@ function JobCard({ proposal, live, disabled, busyAction, failed, amountRequired,
       </dl> : null}
       {payment && proposal.state === 'proposed' ? <div className="cd-setup-c3__amount cd-setup-c3__indent">
         <TextField label={copy.amount} value={amount} onChange={(value) => { setAmount(value); setError(null); }} hint={copy.amountHint} readOnly={disabled || !live || failed} fieldRef={amountRef} {...(error ? { error } : {})} />
+      </div> : null}
+      {!collapsed && rule !== null ? <div className="cd-setup-c3__rule cd-setup-c3__indent" role="group" aria-label="The rule it will start under">
+        <p className="cd-setup-c3__rule-label cd-type-caption">The rule it will start under</p>
+        <RuleSentence {...rule} />
       </div> : null}
       {live && proposal.state === 'proposed' ? failed ? <FailedDecision disabled={disabled} onRetry={onRetry} /> : <div className="cd-setup-c3__actions cd-setup-c3__indent">
         {/* Pressed with no amount, it says why under Amount and sends nothing (`decisionBody`). */}

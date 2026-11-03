@@ -933,7 +933,7 @@ describe('rule drafts', () => {
       },
     ];
     for (const { name, tool, cards, mode, limit } of cases) {
-      const onRules = hubSections({ active: version(8, cards), tools: TOOLS, preset: null }, PEOPLE)
+      const onRules = hubSections({ active: version(8, cards), tools: TOOLS }, PEOPLE)
         .flatMap((section) => section.tools)
         .find((row) => row.key === tool);
       const turnedOn = changeRows(draftFromVersion(version(7, cards), version(8, cards), [toolRow(tool, { status: 'needs_review' })]), PEOPLE, TOOLS)[0]?.after;

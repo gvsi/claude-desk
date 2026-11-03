@@ -27,6 +27,8 @@ function countLabel(n: number): string {
 export interface NeedsYouProps {
   /** Held requests still waiting for the owner, oldest first. */
   held: readonly HeldItem[];
+  /** Requests this view drew held, now absent from Needs you, whose final decisions are being read. */
+  reading: readonly HeldItem[];
   /** Open handoffs, in the order Needs you lists them. */
   callbacks: readonly CallbackItem[];
   answers: UseAnswer;
@@ -59,10 +61,12 @@ export interface NeedsYouProps {
  * failed read of the rules its card would name; then one list of the held
  * requests and those answered here, oldest first, each an approval card answered in place, then
  * each open handoff. A request answered here stays where it was answered, with its final line and
- * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
+ * Dismiss under it, until the owner dismisses it. A request seen held here that closes elsewhere
+ * stays in the same way. The count counts only what is still open.
  */
 export function NeedsYou({
   held,
+  reading,
   callbacks,
   answers,
   readAt,
@@ -81,7 +85,7 @@ export function NeedsYou({
   const now = useTodayNow();
   const open = held.length + callbacks.length;
   // Each request keeps its place, and its card, from held to answered.
-  const requests = heldOldestFirst([...held, ...[...answers.answered.values()].map((entry) => entry.item)]);
+  const requests = heldOldestFirst([...held, ...reading, ...[...answers.answered.values()].map((entry) => entry.item)]);
   // The chats with a request held and not yet answered here: their handoff cards leave Claude's note out.
   const heldChats = new Set(held.filter((item) => !answers.answered.has(item.decision.decision_id)).map((item) => item.decision.session_id));
   const { register: registerAnswered } = answeredFocus;
