@@ -17,6 +17,9 @@ wakes Claude only while the visitor's credential is present. Each step:
 1. Wait for the Desk: until Claude's turn ends (`turn_end`), or, once the owner has taken the chat over, until the
    owner says something or hands it back (waiting for Claude when work resumes). While the owner stays quiet, it sends its one fixed nudge
    (`DEMO_VISITOR_NUDGE`) after 90 seconds, with no model call, and ends `owner_silent` after four minutes.
+   Once its brief is done while a request the chat showed as held has no outcome yet, it waits instead of ending: for
+   that outcome (`resolved`) and Claude's turn after it, with no nudge and no model call, since the owner answers in
+   Approvals, not in the chat.
 2. Its model reads what a visitor saw since its last step: each delivered message's plain text labelled by who said
    it (Claude, or the owner by the name the stream carries, as a person), each request's signed status, and where the
    owner joined and left, all inside `<desk_reply>` (`prompts.wrap`), as information.
@@ -30,12 +33,13 @@ wakes Claude only while the visitor's credential is present. Each step:
 Its persona is the fixed line of the Desk's set (`prompts.DEMO_VISITORS`, chosen by the caller with
 `agents.demo_task_set`), so no business's, owner's or visitor's words reach its model except the chat it is shown.
 
-A run ends `done` once its brief is done (`finished`), at a cap (`limit`: ten messages, twelve model calls or fifteen
-minutes) or when the owner stays quiet (`owner_silent`); `stopped` when the owner stops it (`stopped_by_owner`, with no
-further model call, and its stream closed) or the chat's session is gone (`chat_ended`: a 401 `no_session`, a closed
-stream or the stream's `session` error); `failed` for today's budget (`budget`) or a model or HTTP failure (`failed`,
-logged by type only, never with the Desk's text). Runs live in this process's memory (`DemoVisitors`): the 50 newest
-that have ended, for an hour, and every one still running, each readable by its copy alone.
+A run ends `done` once its brief is done and no held request waits on the owner (`finished`), at a cap (`limit`: ten
+messages, twelve model calls or fifteen minutes) or when the owner stays quiet (`owner_silent`); `stopped` when the
+owner stops it (`stopped_by_owner`, with no further model call, and its stream closed) or the chat's session is gone
+(`chat_ended`: a 401 `no_session`, a closed stream or the stream's `session` error); `failed` for today's budget
+(`budget`) or a model or HTTP failure (`failed`, logged by type only, never with the Desk's text). Runs live in this
+process's memory (`DemoVisitors`): the 50 newest that have ended, for an hour, and every one still running, each
+readable by its copy alone.
 """
 
 import asyncio
@@ -322,6 +326,22 @@ def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
     return _Answer(False, "owner" if handoff else mode, heard)
 
 
+def _deciding(events: Sequence[_Seen]) -> bool:
+    """Whether the chat still waits on the owner's answer to a request it showed as `held`: one with no `resolved`
+    for it yet, or Claude's turn after the latest `resolved` not ended yet (a fenced turn's end doesn't count)."""
+    held, following = set(), False
+    for _, seen in _unfenced_events(events):
+        event = seen.event
+        if event.type == "held":
+            held.add(event.decision_id)
+        elif event.type == "resolved":
+            held.discard(event.decision_id)
+            following = True
+        elif event.type == "turn_end":
+            following = False
+    return bool(held) or following
+
+
 async def _first(feed: _Feed, timer: Awaitable[None]) -> None:
     """Wait until the feed changes or `timer` ends, whichever is first."""
     changed = asyncio.ensure_future(feed.after(len(feed.events)))
@@ -439,6 +459,13 @@ class _Chat:
                 wait = min(wait, (OWNER_SILENT_S if nudged else NUDGE_AFTER_S) - quiet)
             await _first(self.feed, self.sleep(wait))
 
+    async def decided(self) -> None:
+        """Wait while the chat waits on the owner's answer to a held request (`_deciding`). The owner answers it in
+        Approvals, not in the chat, so it sends no nudge; the run's own time limit holds throughout."""
+        while _deciding(self.feed.events):
+            self.check()
+            await _first(self.feed, self.sleep((self.deadline - self.clock()).total_seconds()))
+
 
 async def _step(model: ModelClient, messages: list[dict], record: Record) -> VisitorStep:
     """The visitor's next step, its usage recorded right after the call; `ModelUnavailable` when there is none."""
@@ -527,11 +554,15 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
         step = await chat.active(_step(model, messages, record))
         calls += 1
         if step.done:
-            raise _Ended("finished")
-        if not step.message.strip():
+            if not _deciding(chat.feed.events):
+                raise _Ended("finished")
+            await chat.decided()                  # a held request's outcome, and Claude's turn after it
+            nudged = False
+        elif not step.message.strip():
             raise RunFailed("the model wrote an empty message")
-        mark = await chat.active(chat.write(step.message, read=read))
-        nudged = await chat.answered(mark, chat.clock())
+        else:
+            mark = await chat.active(chat.write(step.message, read=read))
+            nudged = await chat.answered(mark, chat.clock())
         lines = _lines(chat.feed.events, shown)
         shown, read = len(chat.feed.events), sum(len(line) for line in lines)
         messages += [{"role": "assistant", "content": [{"type": "text", "text": step.model_dump_json()}]},
