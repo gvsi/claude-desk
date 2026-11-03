@@ -77,7 +77,7 @@
 
   /* 2. The box travels from the description's field to the message over twice motion-base, its edge
      and fill becoming the message's, with a transform only. The message's words rise in over the
-     travel's last 60%, from 40% of it, so the box never travels empty as the field's words fade
+     travel's last 70%, from 30% of it, so the box never travels empty as the field's words fade
      with the start page; the message's fill is clear until the box has landed. */
   .cd-setup-start-words__box--moving {
     animation: cd-setup-start-move calc(2 * var(--motion-base)) var(--motion-ease-emphasis) both;
@@ -85,7 +85,7 @@
 
   .cd-setup-start-words--moving .cd-visitor-message__bubble {
     background-color: transparent;
-    animation: cd-setup-start-rise calc(1.2 * var(--motion-base)) var(--motion-ease) calc(0.8 * var(--motion-base)) both;
+    animation: cd-setup-start-rise calc(1.4 * var(--motion-base)) var(--motion-ease) calc(0.6 * var(--motion-base)) both;
   }
 
   /* 3. One move at a time: once the box has landed, the read rises in, its quieter second line half a

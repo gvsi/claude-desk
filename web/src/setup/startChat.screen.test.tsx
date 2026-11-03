@@ -266,12 +266,12 @@ describe('setup start', () => {
     expect(title.animationName).toBe('cd-setup-start-enter');
     expect(ms(title.animationDelay)).toBeCloseTo(ms(token('--motion-fast')), 3);
     expect(ms(title.animationDuration)).toBeCloseTo(ms(token('--motion-base')), 3);
-    // The message's words rise in over the box's travel from 40% of it, so the box never travels empty.
+    // The message's words rise in over the box's travel from 30% of it, so the box never travels empty.
     const travel = 2 * ms(token('--motion-base'));
     const bubble = getComputedStyle(ownWords(screen).element());
     expect(bubble.animationName).toBe('cd-setup-start-rise');
-    expect(ms(bubble.animationDelay)).toBeCloseTo(0.4 * travel, 3);
-    expect(ms(bubble.animationDuration)).toBeCloseTo(0.6 * travel, 3);
+    expect(ms(bubble.animationDelay)).toBeCloseTo(0.3 * travel, 3);
+    expect(ms(bubble.animationDuration)).toBeCloseTo(0.7 * travel, 3);
 
     await expect.poll(() => document.querySelector('.cd-setup-start-words__box')).toBeNull();
     await expect.poll(() => document.querySelector('.cd-setup-start-leaving-screen')).toBeNull();
