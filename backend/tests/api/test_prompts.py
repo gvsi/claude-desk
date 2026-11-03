@@ -153,8 +153,8 @@ def test_system_prompt_uses_the_business_policies():
         "Never make up a figure",
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
         "at a time, before you take their details or book. Before booking or proposing a deposit or payment link, ask for "
-        "what's missing of their name and a phone number or email, and for a visit at their place their address, "
-        "reusing anything already given, and finish any intake questions, then save their name and contact with "
+        "what's missing of their name and a phone number or email, and for a visit at their place their address if "
+        "they'd like to add it, reusing anything already given, and finish any intake questions, then save their name and contact with "
         "native__capture_lead in the same turn if it's one of your tools, and pass them on the booking as its name "
         "and contact, with the address if they gave one; save a lead only once you have their name, and keep its "
         "note short. Unless they're verified, a booking needs their name and a phone number or email, and is refused "
@@ -393,8 +393,13 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
             "business, never \"the owner\" or \"this business\", unless a name itself would trip the check, as "
             "above.") in lines
     intake = next(line for line in lines if line.startswith("- For a new request"))
-    assert ("Before booking or proposing a deposit or payment link, ask for what's missing of their name and a phone "
-            "number or email, and for a visit at their place their address") in intake
+    # the ask lists only what a booking needs, and for a visit at their place offers the address as theirs to add,
+    # so Claude never asks for it as if it were needed
+    ask = intake[intake.index("Before booking"):intake.index(", reusing anything already given")]
+    needed, _, address = ask.partition(", and for a visit at their place ")
+    assert needed == ("Before booking or proposing a deposit or payment link, ask for what's missing of their name and "
+                      "a phone number or email")
+    assert address == "their address if they'd like to add it"
     assert "reusing anything already given, and finish any intake questions" in intake
     assert ("then save their name and contact with native__capture_lead in the same turn if it's one of your tools, "
             "and pass them on the booking as its name and contact, with the address if they gave one") in intake
@@ -431,7 +436,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.34"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.35"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
