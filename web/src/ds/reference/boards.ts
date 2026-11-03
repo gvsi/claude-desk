@@ -80,7 +80,7 @@ export const REFERENCE_BOARDS = [
   // The agent's run inside the same card, its reply cards held there, and a charge over its limit.
   'N-R2-Agents-04-Run',
   'N-R2-Agents-05-Over-Limit',
-  // The agents page on a phone; both page boards redrawn on 2026-11-02 (canvas v326).
+  // The agents page on a phone; both page boards redrawn on 2026-11-02 (canvas v380).
   'N-R2-Agents-06-Phone',
   // The chat: a payment link a rule change cancelled.
   'N-R2-Chat-Link-Cancelled',
@@ -145,12 +145,12 @@ export const BOARD_VIEWPORTS = {
   sidebar: { name: 'Sidebar alone', width: 264, height: 982 },
   phone: { name: 'Phone', width: 390, height: 844 },
   'phone-900': { name: 'Phone, a 900 px page', width: 390, height: 900 },
-  'phone-2100': { name: 'Phone, a 2100 px page', width: 390, height: 2100 },
+  'phone-2740': { name: 'Phone, a 2740 px page', width: 390, height: 2740 },
   'laptop-994': { name: '14-inch laptop, a 994 px page', width: 1512, height: 994 },
   'laptop-1100': { name: '14-inch laptop, a 1100 px page', width: 1512, height: 1100 },
   'laptop-1142': { name: '14-inch laptop, a 1142 px page', width: 1512, height: 1142 },
   'laptop-1150': { name: '14-inch laptop, a 1150 px page', width: 1512, height: 1150 },
-  'laptop-1800': { name: '14-inch laptop, an 1800 px page', width: 1512, height: 1800 },
+  'laptop-2200': { name: '14-inch laptop, a 2200 px page', width: 1512, height: 2200 },
 } as const;
 
 export type BoardViewport = keyof typeof BOARD_VIEWPORTS;
@@ -173,12 +173,12 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Setup-05-Tools': 'laptop-1100',
   'N-R2-Setup-09-Situations': 'laptop-1100',
   'N-R2-Setup-11-Safety': 'laptop-1150',
-  'N-R2-Agents-01-Page': 'laptop-1800',
+  'N-R2-Agents-01-Page': 'laptop-2200',
   'N-R2-Agents-02-Demo-Key': 'laptop',
   'N-R2-Agents-03-Send': 'laptop',
   'N-R2-Agents-04-Run': 'laptop-1150',
   'N-R2-Agents-05-Over-Limit': 'laptop',
-  'N-R2-Agents-06-Phone': 'phone-2100',
+  'N-R2-Agents-06-Phone': 'phone-2740',
   'N-R2-Chat-Link-Cancelled': 'laptop',
   'N-R2-TakeOver-A-1512-EN': 'laptop',
   'N-R2-TakeOver-A-390-EN': 'phone',
