@@ -7,6 +7,7 @@ import '../../owner/today/Today.css';
 import { DEMO_VISITOR_THING, THINGS_TO_TRY as IDEAS } from '../../owner/arrival/ideas.ts';
 import { DEMO_VISITOR_NOTE, DEMO_VISITOR_PILL } from '../../owner/conversations/copy.ts';
 import { TODAY_COPY } from '../../owner/today/copy.ts';
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
@@ -172,7 +173,7 @@ function TodayBoard({ failed = false }: { failed?: boolean }) {
     <RiveraFrame current="today" reviewer fill={false} counts={{ conversations: { n: 1, label: '1 needs you' }, safety: { n: 2, label: '2 blocked' } }}>
       <div className="board-demo-today">
         <DemoThings failed={failed} />
-        <ConceptFooter />
+        <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
       </div>
     </RiveraFrame>
   );
@@ -265,7 +266,7 @@ function DemoConversation({ stage }: { stage: Stage }) {
           )}
         </>
       )}
-      <ConceptFooter />
+      <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
     </div>
   );
 }
@@ -326,6 +327,17 @@ async function expectNoSidewaysScroll(): Promise<void> {
   await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
 }
 
+/** One exposed caption: under About on desktop, at the page bottom on phones. */
+async function expectOwnerFooter(root: HTMLElement, phone = false): Promise<void> {
+  await expectFooter(root);
+  const footer = one(root, '[data-ds="concept-footer"]');
+  await expect(footer).toBeVisible();
+  await expect(footer.closest('[aria-hidden="true"], [inert]')).toBeNull();
+  await expect(within(root).getByRole('link', { name: 'Giovanni Alcantara' })).toBe(footer.querySelector('a'));
+  await expect(footer.closest('.cd-sidebar') !== null).toBe(!phone);
+  await expect(within(root).getByRole('main').contains(footer)).toBe(phone);
+}
+
 /** The cards in rows of three: each row's tops level, every card the same width. */
 async function expectThreeAcross(root: HTMLElement): Promise<HTMLElement[]> {
   const cards = [...root.querySelectorAll<HTMLElement>('.cd-things__item')];
@@ -353,7 +365,7 @@ export const ThingsToTry: Story = {
     const demo = within(cards[1]!);
     await expect(demo.getByText(DEMO_VISITOR_THING.detail)).toBeVisible();
     await expect(demo.getByRole('button', { name: DEMO_VISITOR_THING.start })).toBeVisible();
-    await expectFooter(canvasElement);
+    await expectOwnerFooter(canvasElement);
     await expectNoSidewaysScroll();
   },
 };
@@ -409,6 +421,7 @@ export const RunningLaptop: Story = {
   play: async ({ canvasElement, userEvent }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 982]);
     await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
+    await expectOwnerFooter(canvasElement);
     await expectTaggedRow(canvasElement);
     await expectHeadAndNote(canvasElement, DEMO_VISITOR_NOTE.running, true);
     const log = within(canvasElement).getByRole('log', { name: `Conversation with ${RILEY}` });
@@ -432,6 +445,7 @@ export const RunningPhone: Story = {
   },
   play: async ({ canvasElement }) => {
     await expect([window.innerWidth, window.innerHeight]).toEqual([390, 844]);
+    await expectOwnerFooter(canvasElement, true);
     await expectHeadAndNote(canvasElement, DEMO_VISITOR_NOTE.running, true);
     await expectNoSidewaysScroll();
   },

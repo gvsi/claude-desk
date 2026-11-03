@@ -71,7 +71,7 @@ export { SectionHeader, type SectionHeaderProps } from './components/SectionHead
 export { Mark, MarkAppIcon, Wordmark, type MarkAppIconProps, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { AUTHOR_NAME, AUTHOR_URL, ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
-export { AppShell, type AppShellProps } from './components/AppShell/AppShell.tsx';
+export { AppShell, AppShellOnly, type AppShellProps, type AppShellOnlyProps } from './components/AppShell/AppShell.tsx';
 export {
   NAV_LABELS,
   Sidebar,

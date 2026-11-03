@@ -1,5 +1,5 @@
 /* OwnerLayout: what the owner frame adds inside the design system's AppShell. The page, with a
-   notice above it when something didn't save, and the one concept footer under it. The business
+   notice above it when something didn't save, and the concept footer under it on phones (in the sidebar on desktop). The business
    switcher sits beside the sidebar's business row, placed by the screen, above the page. While the
    copy's Desks load, its frame draws shapes; a failed read keeps its plain error page. Gutters are 40 px, 16 px on a phone. */
 
@@ -81,6 +81,14 @@
   flex: 1 0 auto;
   align-items: center;
   justify-content: center;
+}
+
+.cd-owner-state__home {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: inherit;
+  text-decoration: none;
 }
 
 

@@ -65,6 +65,7 @@ interface VisionOwnerFrameProps {
 function VisionOwnerFrame({ business, owner, desks, currentDeskId, current, peopleLabel, counts, answeringDescription, children }: VisionOwnerFrameProps) {
   return (
     <AppShell
+      todayHref={OWNER_HREFS.today}
       business={business}
       fill
       banner={<VisionBar backHref={VISION_BACK_HREF} />}
