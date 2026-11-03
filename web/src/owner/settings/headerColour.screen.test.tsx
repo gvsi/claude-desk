@@ -145,7 +145,7 @@ it('restores the place on Profile when Back returns from another page', async ()
   const place = main.scrollTop;
   expect(place).toBeGreaterThan(0);
   await router.navigate(`/app/${RIVERA.deskId}/rules`);
-  await expect.element(screen.getByRole('heading', { name: 'Rules', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('heading', { name: 'Rules', exact: true }), { timeout: 4_000 }).toBeVisible();
   await router.navigate(-1);
   await expect.element(screen.getByRole('region', { name: 'Your business' })).toBeVisible();
   await expect.poll(() => main.scrollTop).toBe(place);

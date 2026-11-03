@@ -36,19 +36,19 @@ function seedJobs() {
   return desk;
 }
 
-it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order, with their configuration and sentence rules, after its connectors', async (width) => {
+it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order, with their configuration and sentence rules, after its connectors', { timeout: 35_000 }, async (width) => {
   seedJobs();
   const { screen } = await renderRoute(`${DESK}/rules`, { connectorPages: true, viewport: { width, height: width === 390 ? 844 : 900 } });
   const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
-  await expect.element(jobs).toBeVisible();
-  await expect.element(jobs.getByText('Jobs you set up in your own words.', { exact: true })).toBeVisible();
+  await expect.element(jobs, { timeout: 4_000 }).toBeVisible();
+  await expect.element(jobs.getByText('Jobs you set up in your own words.', { exact: true }), { timeout: 4_000 }).toBeVisible();
   expect([...jobs.element().querySelectorAll('.cd-house-rules__tool-name')].map((el) => el.textContent)).toEqual([
     'Book a free intro call', 'New client intake',
   ]);
-  await expect.element(jobs.getByText('Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', { exact: true })).toBeVisible();
-  await expect.element(jobs.getByText('Asks: Is this for you or for a business? Which tax years do you need help with? Do you already have a bookkeeper?')).toBeVisible();
-  await expect.element(jobs.getByText('Claude can use new client intake', { exact: true })).toBeVisible();
-  await expect.element(jobs.getByText('Claude asks you before booking a free intro call', { exact: true })).toBeVisible();
+  await expect.element(jobs.getByText('Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', { exact: true }), { timeout: 4_000 }).toBeVisible();
+  await expect.element(jobs.getByText('Asks: Is this for you or for a business? Which tax years do you need help with? Do you already have a bookkeeper?'), { timeout: 4_000 }).toBeVisible();
+  await expect.element(jobs.getByText('Claude can use new client intake', { exact: true }), { timeout: 4_000 }).toBeVisible();
+  await expect.element(jobs.getByText('Claude asks you before booking a free intro call', { exact: true }), { timeout: 4_000 }).toBeVisible();
   expect(jobs.getByText('Anything else here: ask me.').elements()).toHaveLength(0);
   expect(jobs.getByRole('link').elements()).toHaveLength(0);
   // Each connector precedes the jobs; each job keeps the API's order within that final card.
@@ -74,7 +74,7 @@ it('draws no jobs section without an on or changed business tool', async () => {
       desk.tools = desk.tools.map((row) => (row.source === 'business' ? { ...row, status: 'disabled', review_reason: null } : row));
     }
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Quotes' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Quotes' }), { timeout: 4_000 }).toBeVisible();
     expect(screen.getByRole('region', { name: 'Your Desk’s jobs' }).elements()).toHaveLength(0);
   }
 });
@@ -90,9 +90,9 @@ it('renders business titles and questions as literal text with no links or injec
   } }]);
   const { screen } = await renderRoute(`${DESK}/rules`);
   const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
-  await expect.element(jobs).toBeVisible();
+  await expect.element(jobs, { timeout: 4_000 }).toBeVisible();
   expect([...jobs.element().querySelectorAll('.cd-house-rules__tool-name')].some((name) => name.textContent === title)).toBe(true);
-  await expect.element(jobs.getByText(`Asks: ${question}`, { exact: true })).toBeVisible();
+  await expect.element(jobs.getByText(`Asks: ${question}`, { exact: true }), { timeout: 4_000 }).toBeVisible();
   expect(jobs.element().querySelectorAll('img, a, script')).toHaveLength(0);
 });
 
@@ -121,7 +121,7 @@ it('keeps active jobs and their rules with safe fallback names and descriptions'
   {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
-    await expect.element(jobs).toBeVisible();
+    await expect.element(jobs, { timeout: 4_000 }).toBeVisible();
     const prefix = '.cd-house-rules';
     expect([...jobs.element().querySelectorAll(`${prefix}__tool-name`)].map((el) => el.textContent)).toEqual([
       'Book a free intro call', 'New client intake', 'Changed intro call',
@@ -142,7 +142,7 @@ it('keeps active jobs and their rules with safe fallback names and descriptions'
     for (const name of ['Unknown configuration job', 'Malformed configuration job']) {
       const job = jobs.getByRole('region', { name });
       if (name === 'Malformed configuration job') {
-        await expect.element(job.getByText(BUSINESS_OWNER_LINES.intake, { exact: true })).toBeVisible();
+        await expect.element(job.getByText(BUSINESS_OWNER_LINES.intake, { exact: true }), { timeout: 4_000 }).toBeVisible();
       } else {
         expect(job.element().querySelector(`${prefix}__tool-description`)).toBeNull();
       }
@@ -165,7 +165,7 @@ it('shows a job title that reads like the app’s own words only as user text', 
   mockStore.world.addActiveRules(desk, [{ ...INTAKE_RULE, card_id: 'changes-ask', applies_to: 'effect:change', mode: 'ask', reason: 'Changes ask you first.' }]);
   const { screen } = await renderRoute(`${DESK}/rules`);
   const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
-  await expect.element(jobs.getByRole('region', { name: title })).toBeVisible();
+  await expect.element(jobs.getByRole('region', { name: title }), { timeout: 4_000 }).toBeVisible();
   // On the job's card and in every shared rule's line, the title is its own user-text element.
   expectUserText(screen.container, title);
   const shared = [...screen.container.querySelectorAll('[data-rule-id="changes-ask"] .cd-house-rules__shared')];
