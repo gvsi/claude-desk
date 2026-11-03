@@ -1497,8 +1497,10 @@ describe('ReaderPage', () => {
         const meta =
           size === PHONE ? root.querySelector('[data-hero] [data-byline]') : root.querySelector('aside[aria-label="About this document"] dd');
         const footer = root.querySelector('[data-ds="concept-footer"]');
+        // On a phone the line under the summary is the author alone: the meta line above the title has the date and
+        // the reading time.
         for (const [part, words] of [
-          [meta, /^Giovanni Alcantara(?: · |$)/],
+          [meta, /^Giovanni Alcantara$/],
           [footer, /^Concept prototype by Giovanni Alcantara, not an Anthropic product$/],
         ] as const) {
           expect(flat(part?.textContent), where).toMatch(words);

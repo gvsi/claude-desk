@@ -272,12 +272,15 @@ function Details({ document, alsoRead }: { document: AboutDocument; alsoRead: Ab
   );
 }
 
-/** The same details as one line under the summary, on a phone. */
+/**
+ * The author, under the summary on a phone, where there are no details beside the article: the meta line above the
+ * title has the date and the reading time.
+ */
 function BylineLine({ document }: { document: AboutDocument }) {
-  const { author, date, day } = bylineOf(document.blocks);
+  const { author } = bylineOf(document.blocks);
   return (
     <p className="cd-about-hero__byline cd-type-meta" data-byline="">
-      <Author name={author} /> · {day ? <time dateTime={day}>{date}</time> : date} · {`${readingMinutes(document.blocks)} min read`}
+      <Author name={author} />
     </p>
   );
 }
