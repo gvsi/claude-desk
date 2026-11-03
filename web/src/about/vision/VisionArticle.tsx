@@ -15,7 +15,7 @@
 import { Fragment, useContext, useId, useLayoutEffect, useRef } from 'react';
 import { Link, UNSAFE_NavigationContext, useLocation, useNavigationType } from 'react-router';
 
-import { ConceptFooter, Icon } from '../../ds/index.ts';
+import { ConceptFooter, Icon, MarkAppIcon } from '../../ds/index.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { AboutBar, useAboutNarrow } from '../AboutBar.tsx';
 import { slug } from '../anchors.ts';
@@ -305,6 +305,8 @@ export function VisionArticle() {
       <main>
         <article>
           <header className="va-hero">
+            {/* The Claude Desk app icon the reading pages open with, at their size (owner, 2026-11-02). */}
+            <MarkAppIcon size={compact ? 'compact' : 'large'} />
             {/* Spaces between the three, which the line's gaps draw, so they read as three. */}
             <p className="va-meta" data-meta="">
               <strong>{ARTICLE.kicker}</strong> <time dateTime={ARTICLE.date.iso}>{ARTICLE.date.text}</time>{' '}

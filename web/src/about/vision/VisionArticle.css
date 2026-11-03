@@ -79,6 +79,10 @@
   text-align: center;
 }
 
+.vision-article .va-hero > .cd-mark-app-icon {
+  margin: 0 auto calc(var(--space-18) * 2);
+}
+
 .vision-article .va-meta {
   display: flex;
   flex-wrap: wrap;
@@ -725,6 +729,10 @@
   .vision-article .va-hero {
     padding: 56px 16px 28px;
     text-align: left;
+  }
+
+  .vision-article .va-hero > .cd-mark-app-icon {
+    margin: 0 0 var(--space-28);
   }
 
   .vision-article .va-meta {

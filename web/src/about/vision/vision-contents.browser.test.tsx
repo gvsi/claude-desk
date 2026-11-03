@@ -288,4 +288,48 @@ describe('The Vision article’s contents', () => {
       else expect((onVision?.box[0] ?? 0) + (onVision?.box[2] ?? 0), where).toBe(size.width - 16);
     }
   });
+  it('the_hero_opens_with_the_reading_pages_app_icon', async () => {
+    // The Claude Desk app icon the reading pages open with (owner, 2026-11-02): the same tile at the same size, first in
+    // the hero, the same gap above the meta line, centred on a laptop and at the hero's left edge on a phone, where the
+    // Vision article's headline block sits to the left. Decorative: the bar names the product.
+    const opening = () => {
+      const hero = document.querySelector<HTMLElement>('.va-hero') ?? document.querySelector<HTMLElement>('[data-hero]');
+      const icon = hero?.querySelector<HTMLElement>('.cd-mark-app-icon');
+      const meta = hero?.querySelector('[data-meta], .cd-about-hero__kicker');
+      if (!hero || !icon || !meta) return null;
+      const box = icon.getBoundingClientRect();
+      const title = (hero.querySelector('h1') as Element).getBoundingClientRect();
+      return {
+        first: hero.firstElementChild === icon,
+        hidden: icon.getAttribute('aria-hidden'),
+        size: [Math.round(box.width), Math.round(box.height)],
+        radius: getComputedStyle(icon).borderTopLeftRadius,
+        gap: Math.round(meta.getBoundingClientRect().top - box.bottom),
+        centred: Math.abs(box.left + box.width / 2 - (title.left + title.width / 2)) <= 0.5,
+        left: Math.round(box.left - hero.getBoundingClientRect().left - parseFloat(getComputedStyle(hero).paddingLeft)),
+      };
+    };
+    for (const size of [DESKTOP, PHONE]) {
+      const where = `at ${size.width}`;
+      const vision = await renderVision(size);
+      const onVision = opening();
+      await vision.unmount();
+      await page.viewport(size.width, size.height);
+      const reader = await render(
+        <MemoryRouter initialEntries={['/about/prediction']}>
+          <Routes>
+            <Route path="/about/prediction" element={<ReaderPage id="prediction" />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      const onReader = opening();
+      await reader.unmount();
+      expect(onVision, `${where}: an app icon in the hero`).not.toBeNull();
+      expect(onVision?.first, where).toBe(true);
+      expect(onVision?.hidden, where).toBe('true');
+      expect([onVision?.size, onVision?.radius, onVision?.gap], where).toEqual([onReader?.size, onReader?.radius, onReader?.gap]);
+      if (size === DESKTOP) expect(onVision?.centred, where).toBe(true);
+      else expect(onVision?.left, where).toBe(0);
+    }
+  });
 });
