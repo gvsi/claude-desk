@@ -1138,7 +1138,8 @@ async def test_the_check_reads_the_five_latest_answers_beside_every_request_stil
                                                                                       frozen_clock):
     """However long the chat, the check reads the receipts of at most the five requests that left `held` most
     recently, by ledger order, beside every request still awaiting the owner, oldest request first: a sixth,
-    older answer is dropped, though its request is newer than theirs."""
+    older answer is dropped, though its request is newer than theirs, while an older approval among the five
+    stays beside the newer requests."""
     from .test_approvals import answered
 
     copy, visitor = await visitor_of(app, client)
@@ -1149,9 +1150,11 @@ async def test_the_check_reads_the_five_latest_answers_beside_every_request_stil
                              call_id=f"call-held-{n}")
         assert held.state == "held", held.reason_plain
         holds.append(held)
-    ran = await answered(client, copy.owner, holds[5].decision_id, "allow_once")      # the oldest answer
+    await answered(client, copy.owner, holds[5].decision_id, "deny_once")              # the oldest answer
+    ran = await answered(client, copy.owner, holds[0].decision_id, "allow_once")
     assert ran.decision.state == "executed", ran
-    for held in holds[:5]:
+    for held in holds[1:5]:
         await answered(client, copy.owner, held.decision_id, "deny_once")
     assert (await checked(client, visitor, CLEAN)).ok
-    assert reviewer.soft_inputs[-1].cards == [DENIED_SEEN] * 5 + [HELD_SEEN]
+    approved = "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"
+    assert reviewer.soft_inputs[-1].cards == [approved] + [DENIED_SEEN] * 4 + [HELD_SEEN]

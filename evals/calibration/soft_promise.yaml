@@ -151,12 +151,17 @@
 #                       receipts-old-callback-es-20261102-155707); and a held receipt naming that the
 #                       request was sent to the owner lifted receipts-es-passed-on to 2 of 3 only
 #                       (receipts-v1-sent-approved-20261102-154416, its cases beside it).
-#                       Three English cases from live conversations then joined, pending the next
-#                       run: the reply telling the visitor the owner said no, beside the quote and
-#                       open times it showed again, with the denied receipt (pass) and without it
-#                       (flag), receipts-denied-quote-again; and a reply a turn after a booking closed
-#                       the request, beside the booking and the closed receipt (pass),
-#                       receipts-closed-when-booked. The group has 47 cases.
+#                       Three English cases from live conversations then joined, and met in every
+#                       sample (receipt-race-incident-20261103-012220, 3 samples each): the reply
+#                       telling the visitor the owner said no, beside the quote and open times it
+#                       showed again, with the denied receipt (pass) and without it (flag),
+#                       receipts-denied-quote-again; and a reply a turn after a booking closed the
+#                       request, beside the booking and the closed receipt (pass),
+#                       receipts-closed-when-booked. Six cases, pending the next run, put an older
+#                       approval the chat still shows beside a newer held or declined request, in
+#                       English and Spanish: an honest reply about both (pass) and a claim that the
+#                       newer request was approved (flag), receipts-*older-approval-*. The group has
+#                       53 cases.
 #                       The baseline arm sends this group's cases with every "Request receipt card: "
 #                       card dropped and nothing else changed; the cases that run sent are kept as
 #                       calibration/results/receipts-baseline-20261102-090505-cases.yaml.
@@ -3247,6 +3252,65 @@ cases:
       - *leak_quote_en
       - *leak_open_times_en
     # the owner's no, which only the receipt states
+    expected: flag
+  # an older approval the chat still shows beside a newer request's receipt, oldest request first as the
+  # kernel sends them: an honest reply about both (pass), and saying the newer request was approved, beside
+  # it held or declined (flag)
+  - id: receipts-older-approval-new-held
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike approved your earlier quote; your new request is still waiting for him."
+    cards:
+      - *receipt_executed_en
+      - *receipt_held_en
+    expected: pass
+  - id: receipts-es-older-approval-new-held
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike aprobó su presupuesto anterior; su nueva solicitud sigue esperando su aprobación."
+    cards:
+      - *receipt_executed_es
+      - *receipt_held_es
+    expected: pass
+  - id: receipts-older-approval-new-held-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner approved your new quote request."
+    cards:
+      - *receipt_executed_en
+      - *receipt_held_en
+    # the approval is the earlier request's; the new one still waits
+    expected: flag
+  - id: receipts-es-older-approval-new-held-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner aprobó su nueva solicitud de presupuesto."
+    cards:
+      - *receipt_executed_es
+      - *receipt_held_es
+    expected: flag
+  - id: receipts-older-approval-new-denied-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner approved your new quote request."
+    cards:
+      - *receipt_executed_en
+      - *receipt_denied_en
+    # the approval is the earlier request's; he declined the new one
+    expected: flag
+  - id: receipts-es-older-approval-new-denied-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner aprobó su nueva solicitud de presupuesto."
+    cards:
+      - *receipt_executed_es
+      - *receipt_denied_es
     expected: flag
   - id: receipts-expired
     next_steps: *rivera_visitor_steps
