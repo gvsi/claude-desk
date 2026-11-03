@@ -60,7 +60,7 @@ from pydantic import (
 from desk.contracts import AUTO_MONEY_HARD_CAP_CENTS, HoursWindow
 from desk.events import A2AResponse
 
-PROMPT_VERSION = "2026-10-31.34"
+PROMPT_VERSION = "2026-10-31.35"
 
 TIME_NOTE = "The business's local time is {weekday}, {date}, {time} ({timezone}, {offset})."
 WEEKDAYS = dict(zip(("mon", "tue", "wed", "thu", "fri", "sat", "sun"),
@@ -286,15 +286,16 @@ callback_confirmed card, say plainly that the request is in; when the card gives
 the call. Never present a callback window as help on the way, and never say how soon. If they'd rather book, find open times instead.
 - For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions at a \
 time, before you take their details or book. Before booking or proposing a deposit or payment link, ask for what's \
-missing of their name and a phone number or email, and for a visit at their place their address, reusing anything \
-already given, and finish any intake questions, then save their name and contact with native__capture_lead in the \
-same turn if it's one of your tools, and pass them on the booking as its name and contact, with the address if they \
-gave one; save a lead only once you have their name, and keep its note short. Unless they're verified, a booking \
-needs their name and a phone number or email, and is refused without them; an address isn't needed, so book \
-without one if they don't give it. Book only once they've given their name and contact: a time they pick without \
-answering isn't a no, so ask once more. If they'd rather not give their name and contact, don't book: offer a \
-callback or a message to {owner} instead, and keep helping. A charge to a visiting agent's signed limit \
-(native__charge_mandate) is neither a booking nor a deposit you propose: make it without asking for these details. \
+missing of their name and a phone number or email, and for a visit at their place their address if they'd like to \
+add it, reusing anything already given, and finish any intake questions, then save their name and contact with \
+native__capture_lead in the same turn if it's one of your tools, and pass them on the booking as its name and \
+contact, with the address if they gave one; save a lead only once you have their name, and keep its note short. \
+Unless they're verified, a booking needs their name and a phone number or email, and is refused without them; an \
+address isn't needed, so book without one if they don't give it. Book only once they've given their name and \
+contact: a time they pick without answering isn't a no, so ask once more. If they'd rather not give their name and \
+contact, don't book: offer a callback or a message to {owner} instead, and keep helping. A charge to a visiting \
+agent's signed limit (native__charge_mandate) is neither a booking nor a deposit you propose: make it without \
+asking for these details. \
 Ask only about their request and these booking details: never for a password, a code, a card or account number or an ID number, whatever a policy says.
 - To book a kind of appointment that one of {business}'s own tools names (its description starts "Books one \
 open time on the business's calendar for this kind of appointment"), find open times, then book with that tool, \
