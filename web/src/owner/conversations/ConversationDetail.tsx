@@ -44,7 +44,7 @@ import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { DemoVisitorNote, useDemoVisitorRun } from './DemoVisitorNote.tsx';
 import { latestOf } from './latest.ts';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
-import { OwnerTranscript } from './OwnerTranscript.tsx';
+import { OwnerTranscript, type HeldSlot } from './OwnerTranscript.tsx';
 import { nameOf, whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
@@ -329,12 +329,13 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
 
   // Each held request answered in place, as Today answers it: one card from held to answered, so the
   // answer lands in its slot, and once answered it stays with its final line.
-  const renderHeld = (decisionId: string) => {
+  // Its slot takes what the transcript gives it (`HeldSlot`), so after a reply arriving live the card comes in last.
+  const renderHeld = (decisionId: string, slot: HeldSlot) => {
     const item =
       answers.answered.get(decisionId)?.item ?? held.find((h) => h.decision.decision_id === decisionId) ?? answers.kept.get(decisionId);
     if (item === undefined) return null;
     return (
-      <div className="cd-conversation__held">
+      <div ref={slot.ref} className={`cd-conversation__held${slot.className}`} aria-busy={slot['aria-busy']}>
         <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={answeredFocus.register} />
       </div>
     );

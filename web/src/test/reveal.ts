@@ -98,20 +98,30 @@ export interface Played {
   end: number;
 }
 
-/** What each motion that brings a reply in is part of: its words settling, a card, a line. */
-const PARTS: Readonly<Record<string, 'words' | 'card' | 'line'>> = {
+/** What each motion that brings a reply in is part of: its words settling, a card, a line, or a held request's card after it. */
+const PARTS: Readonly<Record<string, 'words' | 'card' | 'line' | 'held'>> = {
   'cd-md-settle': 'words',
   'cd-md-settle-marker': 'words',
   'cd-claude-message-follow': 'card',
   'cd-transcript-row-follow': 'line',
+  'cd-conversation-held-follow': 'held',
 };
+
+/** What comes after `row` and before the next row: in the owner's view, the held requests' cards after the reply. */
+function after(row: Element): Element[] {
+  const parts: Element[] = [];
+  for (let el = row.nextElementSibling; el !== null && !el.classList.contains('cd-transcript-row'); el = el.nextElementSibling) parts.push(el);
+  return parts;
+}
 
 /**
  * Watches the message of Claude's at `nth` on the page (by default the next one it draws) and the
  * row it arrived in, every frame, until nothing in that row has moved for two frames running after
  * its words are whole, and says when each part played: its words (from the first word's settle to
- * the last's end), each card and each line attached under it, by its text. A part attached late is
- * watched too, as long as it comes before the row is still. Start it before the reply can arrive.
+ * the last's end), each card and each line attached under it, by its text, and a held request's
+ * card after the row ("held card"), which is still coming while it waits its turn (`aria-busy`). A
+ * part attached late is watched too, as long as it comes before the row is still. Start it before
+ * the reply can arrive.
  */
 export function watchSequence(nth: number = document.querySelectorAll('.cd-claude-message').length): Promise<Played[]> {
   const played = new Map<Animation, Played>();
@@ -122,18 +132,23 @@ export function watchSequence(nth: number = document.querySelectorAll('.cd-claud
       const message = document.querySelectorAll('.cd-claude-message')[nth];
       const row = message?.closest('.cd-transcript-row');
       if (message && row) {
-        for (const animation of row.getAnimations({ subtree: true })) {
+        const following = after(row);
+        // After the row, only a held card's own motion: what is inside it (its waiting dot, say) isn't a part.
+        const heldMotion = following.flatMap((el) => el.getAnimations({ subtree: true }).filter((a) => a instanceof CSSAnimation && PARTS[a.animationName] === 'held'));
+        for (const animation of [...row.getAnimations({ subtree: true }), ...heldMotion]) {
           const kind = animation instanceof CSSAnimation ? PARTS[animation.animationName] : undefined;
           const target = (animation.effect as KeyframeEffect | null)?.target;
           if (kind === undefined || !target || animation.startTime === null || played.has(animation)) continue;
           const { delay = 0, activeDuration = 0 } = animation.effect?.getComputedTiming() ?? {};
           const start = Number(animation.startTime) + delay;
           const cards = [...message.querySelectorAll(':scope > .cd-reply-card')];
-          const part = kind === 'words' ? 'words' : kind === 'card' ? `card ${cards.indexOf(target) + 1}` : `line ${target.textContent ?? ''}`;
+          const part =
+            kind === 'words' ? 'words' : kind === 'card' ? `card ${cards.indexOf(target) + 1}` : kind === 'held' ? 'held card' : `line ${target.textContent ?? ''}`;
           played.set(animation, { part, start, end: start + Number(activeDuration) });
         }
-        const moving = row.getAnimations({ subtree: true }).some((animation) => animation.playState === 'running');
-        still = message.classList.contains('cd-claude-message--revealing') || moving ? 0 : still + 1;
+        const waiting = following.some((el) => el.getAttribute('aria-busy') === 'true');
+        const moving = [...row.getAnimations({ subtree: true }), ...heldMotion].some((animation) => animation.playState === 'running');
+        still = message.classList.contains('cd-claude-message--revealing') || moving || waiting ? 0 : still + 1;
         if (still >= 2) {
           // The words are one part, from the first word's settle to the last's end.
           const words = [...played.values()].filter(({ part }) => part === 'words');

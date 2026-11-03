@@ -26,6 +26,7 @@ import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
 import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, nextFrames, tokenColor } from '../../test/screen.ts';
+import { reduceMotion } from '../../ds/test/reducedMotion.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
@@ -202,6 +203,36 @@ function priceTurn(chat: SessionRecord, question: string): void {
   world.visitorText(chat, question);
   const turn = world.context(chat, 'en', question);
   for (const step of [...price.steps, turnEnd]) world.emit(chat, step(turn));
+}
+
+/** Dana asks `question` in her chat for a discount, and Claude holds it for the owner and says so: each event at once. */
+function discountTurn(chat: SessionRecord, question: string): void {
+  const world = mockStore.world;
+  const discount = SCRIPT.find((rule) => rule.name === 'discount');
+  if (!discount) throw new Error('the script has its discount row');
+  world.visitorText(chat, question);
+  const turn = world.context(chat, 'en', question);
+  for (const step of [...discount.steps, turnEnd]) world.emit(chat, step(turn));
+}
+
+/** The held requests' slots after the rows of the conversation, in order. */
+const heldSlots = () => [...document.querySelectorAll('[role="log"] .cd-conversation__held')];
+
+/**
+ * Watches every held card's slot drawn from now on, at every change to the page, until the test
+ * ends, and says whether any ever waited unseen: hidden, or busy, while a reply came in before it.
+ */
+function watchHeldWaits(): () => boolean {
+  let waited = false;
+  const look = () => {
+    for (const slot of heldSlots()) {
+      if (slot.getAttribute('aria-busy') === 'true' || getComputedStyle(slot).visibility === 'hidden') waited = true;
+    }
+  };
+  const observer = new MutationObserver(look);
+  observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+  onTestFinished(() => observer.disconnect());
+  return () => waited;
 }
 
 /** The owner's reads of the Desk's conversations, of one chat and of Needs you, as the mock answers them now. */
@@ -2293,6 +2324,124 @@ describe('Conversations', () => {
     const lines = [...(row?.querySelectorAll(':scope > .cd-transcript-row__margin > *') ?? [])].map((line) => `line ${line.textContent ?? ''}`);
     expect(lines).toHaveLength(2);
     expectInSequence(await played, ['words', 'card 1', ...lines]);
+  });
+
+  it('a_live_reply_that_holds_a_request_brings_its_card_in_last', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    const replies = () => document.querySelectorAll('[role="log"] .cd-claude-message').length;
+    const before = { replies: replies(), held: heldSlots().length };
+
+    // Dana asks for a discount while the owner watches, and Claude holds it for him. The reply comes
+    // in first; Needs you is read while its words still are, so its card is drawn mid-reveal.
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    const played = watchSequence();
+    discountTurn(chat, 'Could I get 10% off as a returning customer?');
+    await expect.poll(replies).toBe(before.replies + 1);
+    needsYou.release();
+    await expect.poll(() => heldSlots().length).toBe(before.held + 1);
+
+    // The held request's card comes in last: after the reply's words, then each line under it.
+    const row = [...document.querySelectorAll('.cd-claude-message')].at(-1)?.closest('.cd-transcript-row');
+    const lines = [...(row?.querySelectorAll(':scope > .cd-transcript-row__margin > *') ?? [])].map((line) => `line ${line.textContent ?? ''}`);
+    expect(lines.length).toBeGreaterThan(0);
+    expectInSequence(await played, ['words', ...lines, 'held card']);
+
+    // Then it is whole and usable: seen, not busy, its answers there to press.
+    const slot = heldSlots().at(-1);
+    if (!slot) throw new Error('the reply has its held card');
+    expect(slot.getAttribute('aria-busy')).toBeNull();
+    expect(getComputedStyle(slot).visibility).toBe('visible');
+    await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
+  });
+
+  it('a_held_requests_card_from_history_or_under_reduced_motion_shows_at_once', async () => {
+    // Opening a chat with a request already held draws its card at once, never waiting.
+    const waited = watchHeldWaits();
+    const { screen, router } = await renderRoute(conversation(SEEDED_HOLD));
+    await expect.poll(() => heldSlots().length).toBeGreaterThan(0);
+    await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).first()).toBeVisible();
+    expect(waited()).toBe(false);
+
+    // Under reduced motion, a reply that holds a request while the owner watches shows whole, and its
+    // card shows at once with it.
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    await reduceMotion(true);
+    onTestFinished(() => reduceMotion(reduced));
+    await router.navigate(conversation(DANA_LIVE));
+    const chat = named(DANA_LIVE, DANA);
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    const held = heldSlots().length;
+    const replies = () => document.querySelectorAll('[role="log"] .cd-claude-message').length;
+    const before = replies();
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    discountTurn(chat, 'Could I get 10% off as a returning customer?');
+    await expect.poll(replies).toBe(before + 1);
+    needsYou.release();
+    await expect.poll(() => heldSlots().length).toBe(held + 1);
+    await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeVisible();
+    expect(waited()).toBe(false);
+  });
+
+  it('a_held_card_waiting_for_its_reply_never_stays_unseen', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen, router } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    const replies = () => document.querySelectorAll('[role="log"] .cd-claude-message').length;
+    const seen = (slot: Element | undefined) =>
+      slot !== undefined && slot.getAttribute('aria-busy') !== 'true' && getComputedStyle(slot).visibility === 'visible';
+    const heldReply = async (question: string) => {
+      const before = { replies: replies(), held: heldSlots().length };
+      const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+      discountTurn(chat, question);
+      await expect.poll(replies).toBe(before.replies + 1);
+      needsYou.release();
+      await expect.poll(() => heldSlots().length).toBe(before.held + 1);
+      return heldSlots().at(-1);
+    };
+
+    // The tab is hidden while the card waits for the reply's words, so nothing would play them: the
+    // card shows at once.
+    const waiting = await heldReply('Could I get 10% off as a returning customer?');
+    expect(waiting?.getAttribute('aria-busy')).toBe('true');
+    const hidden = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    onTestFinished(() => hidden.mockRestore());
+    document.dispatchEvent(new Event('visibilitychange'));
+    // Long before the reply's words could have come in.
+    await nextFrames();
+    expect(seen(heldSlots().at(-1))).toBe(true);
+    hidden.mockRestore();
+
+    // The owner goes to the list and back while a card waits: reopened, the chat draws it at once.
+    const again = await heldReply('And 10% off the next visit too?');
+    expect(again?.getAttribute('aria-busy')).toBe('true');
+    await router.navigate(LIST);
+    await expect.element(screen.getByText('Choose a conversation to read it.', { exact: true })).toBeVisible();
+    const waited = watchHeldWaits();
+    await router.navigate(conversation(DANA_LIVE));
+    await expect.poll(() => heldSlots().length).toBeGreaterThan(1);
+    expect(heldSlots().every(seen)).toBe(true);
+    expect(waited()).toBe(false);
+
+    // Where the browser can't list its animations, nothing can say when the reply has come in: the
+    // card shows at once.
+    const listing = Object.getOwnPropertyDescriptor(Element.prototype, 'getAnimations');
+    if (!listing) throw new Error('the browser lists animations');
+    Object.defineProperty(Element.prototype, 'getAnimations', { configurable: true, value: undefined });
+    onTestFinished(() => {
+      Object.defineProperty(Element.prototype, 'getAnimations', listing);
+    });
+    const unlisted = watchHeldWaits();
+    await heldReply('Could I get 5% off then?');
+    expect(seen(heldSlots().at(-1))).toBe(true);
+    expect(unlisted()).toBe(false);
   });
 
   it('a_reply_that_came_while_away_draws_still', async () => {

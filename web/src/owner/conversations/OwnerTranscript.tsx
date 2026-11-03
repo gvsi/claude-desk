@@ -7,7 +7,7 @@
  * the full trace of its ledger entry under its row; Escape or the close button returns focus to the
  * receipt. A record that can't be read says so there, with "Try again" and "Close". A reply that
  * arrives while the owner has the chat open is revealed as on the public page: its words, then its
- * cards and receipts one by one.
+ * cards and receipts one by one, and then the card of a request it held, last.
  */
 import { useQuery } from '@tanstack/react-query';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -66,9 +66,12 @@ export interface OwnerTranscriptProps {
   timezone: string;
   /** The Desk whose signed record a receipt's trace is read from. */
   deskId: string;
-  /** Held requests to answer here, each drawn by `renderHeld` after the row its hold is under. */
+  /**
+   * Held requests to answer here, each drawn by `renderHeld` after the row its hold is under, in a
+   * slot that takes `slot`: after a reply coming in live, its card comes in last.
+   */
   heldIds: readonly string[];
-  renderHeld: (decisionId: string) => ReactNode;
+  renderHeld: (decisionId: string, slot: HeldSlot) => ReactNode;
   /** Recorded history replayed into this copy: no one adds to it, so nothing in it arrives live. */
   recorded?: boolean;
   /**
@@ -77,6 +80,14 @@ export interface OwnerTranscriptProps {
    * was away, so nothing arrives live.
    */
   readSinceOpened: boolean;
+}
+
+/** What the slot a held request's card is drawn in takes from the transcript, so the card can come in after a reply arriving live. */
+export interface HeldSlot {
+  ref: RefObject<HTMLDivElement>;
+  /** Its classes after `cd-conversation__held`: waiting, or coming in. */
+  className: string;
+  'aria-busy': true | undefined;
 }
 
 /** Cards that report something done: their executed receipt draws the check. */
@@ -183,6 +194,133 @@ function cardsAfter(rows: readonly (readonly OwnerReceiptSource[])[], heldIds: r
       return true;
     }),
   );
+}
+
+/**
+ * What brings a revealed reply in, and a held request's card after it: its words settling, its
+ * cards, the lines under it, and a held card before this one.
+ */
+const COMING_IN: ReadonlySet<string> = new Set([
+  'cd-md-settle',
+  'cd-md-settle-marker',
+  'cd-claude-message-follow',
+  'cd-transcript-row-follow',
+  'cd-conversation-held-follow',
+]);
+
+/**
+ * The longest a held card waits for the reply before it: longer than any reply takes to come in
+ * (its words in at most about 3 s, then its cards and lines), so a reveal that never finishes
+ * can't keep a request unseen.
+ */
+const LONGEST_WAIT_MS = 8_000;
+
+/** The page's animation clock now, in ms. */
+function clockNow(): number {
+  const time = document.timeline?.currentTime;
+  return typeof time === 'number' ? time : performance.now();
+}
+
+/** The row a held card's slot follows, and the held cards' slots between them; null when no row is before it. */
+function partsBefore(slot: Element): { row: Element; held: Element[] } | null {
+  const held: Element[] = [];
+  for (let el = slot.previousElementSibling; el !== null; el = el.previousElementSibling) {
+    if (el.classList.contains('cd-transcript-row')) return { row: el, held };
+    if (el.classList.contains('cd-conversation__held')) held.push(el);
+  }
+  return null;
+}
+
+/**
+ * Whether what comes before a held card's slot is still coming in: the reply's words, its cards
+ * and the lines under it, playing or waiting for their beat, or a held card before this one.
+ */
+function comingIn(slot: Element): boolean {
+  const parts = partsBefore(slot);
+  if (parts === null) return false;
+  const { row, held } = parts;
+  if (row.classList.contains('cd-transcript-row--waiting') || row.querySelector('.cd-claude-message--revealing') !== null) return true;
+  if (held.some((el) => el.classList.contains('cd-conversation__held--waiting'))) return true;
+  const now = clockNow();
+  return [row, ...held].some((el) =>
+    el.getAnimations({ subtree: true }).some((animation) => {
+      if (!(animation instanceof CSSAnimation) || !COMING_IN.has(animation.animationName) || animation.playState === 'finished') return false;
+      const start = animation.startTime === null ? now : Number(animation.startTime);
+      return start + Number(animation.effect?.getComputedTiming().endTime ?? 0) > now;
+    }),
+  );
+}
+
+/**
+ * A held request's card after the row its hold is under. After a reply that is coming in live, it
+ * comes in last: it waits unseen in its place, not focusable and busy for assistive technology,
+ * until the reply's words, cards and lines have all come in, then fades and rises in (Conversations.css).
+ * Anything else shows it at once, and never later: a card already seen, one from history (its row
+ * isn't arriving), reduced motion, a hidden tab, where the browser can't list its animations, and
+ * a reply that hasn't come in after `LONGEST_WAIT_MS`. A reply replaced or gone while it waits
+ * ends the wait: nothing before it is coming in.
+ */
+function HeldAfter({ shownBefore, render }: { shownBefore: boolean; render: (slot: HeldSlot) => ReactNode }) {
+  const slot = useRef<HTMLDivElement>(null);
+  const [phase, setPhase] = useState<'shown' | 'waiting' | 'landing'>('shown');
+  // Read once, when the card is first drawn, before it is painted.
+  const [first] = useState(() => ({ shownBefore }));
+  useLayoutEffect(() => {
+    const el = slot.current;
+    if (first.shownBefore || el === null || typeof el.getAnimations !== 'function' || typeof CSSAnimation === 'undefined') return;
+    if (document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    if (partsBefore(el)?.row.classList.contains('cd-transcript-row--live') && comingIn(el)) setPhase('waiting');
+  }, [first]);
+  useEffect(() => {
+    const el = slot.current;
+    if (phase !== 'waiting' || el === null) return undefined;
+    const show = () => setPhase('shown');
+    let frame = 0;
+    const step = () => {
+      if (comingIn(el)) frame = requestAnimationFrame(step);
+      else setPhase('landing');
+    };
+    frame = requestAnimationFrame(step);
+    // A hidden tab plays nothing, so the reply would never finish coming in.
+    const hidden = () => {
+      if (document.hidden) show();
+    };
+    document.addEventListener('visibilitychange', hidden);
+    const longest = window.setTimeout(show, LONGEST_WAIT_MS);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('visibilitychange', hidden);
+      window.clearTimeout(longest);
+    };
+  }, [phase]);
+  // Once it has come in, it is like any other card.
+  useEffect(() => {
+    const el = slot.current;
+    if (phase !== 'landing' || el === null) return undefined;
+    const landed = (event: AnimationEvent) => {
+      if (event.target === el) setPhase('shown');
+    };
+    el.addEventListener('animationend', landed);
+    el.addEventListener('animationcancel', landed);
+    return () => {
+      el.removeEventListener('animationend', landed);
+      el.removeEventListener('animationcancel', landed);
+    };
+  }, [phase]);
+  return render({ ref: slot, className: phase === 'shown' ? '' : ` cd-conversation__held--${phase}`, 'aria-busy': phase === 'waiting' ? true : undefined });
+}
+
+/**
+ * The held requests this view has drawn, as of its last draw: a card already drawn (after the
+ * question, say, or last while its hold wasn't in the conversation yet) never waits again when it
+ * moves after the reply.
+ */
+function useShownHeld(ids: readonly string[]): ReadonlySet<string> {
+  const shown = useRef(new Set<string>());
+  useEffect(() => {
+    for (const id of ids) shown.current.add(id);
+  }, [ids]);
+  return shown.current;
 }
 
 interface ReceiptLineProps {
@@ -296,6 +434,7 @@ export function OwnerTranscript({
   const paymentBlock = usePaymentLinks(messages, paymentLinks, focusTarget);
   const arrived = useArrivals(groups.rows, recorded, readSinceOpened);
   const shown = useShownReceipts(groups);
+  const shownHeld = useShownHeld(heldIds);
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const traceBox = useRef<HTMLDivElement>(null);
@@ -381,7 +520,9 @@ export function OwnerTranscript({
   const leading = groups.leading;
   const [leadingCards = [], ...rowCards] = cardsAfter([leading, ...groups.rows.map((row) => row.receipts)], heldIds);
   const placed = new Set([leadingCards, ...rowCards].flat());
-  const held = (ids: readonly string[]): ReactNode[] => ids.map((id) => <Fragment key={`held-${id}`}>{renderHeld(id)}</Fragment>);
+  // A request's card drawn after a reply coming in live comes in after it (HeldAfter).
+  const held = (ids: readonly string[]): ReactNode[] =>
+    ids.map((id) => <HeldAfter key={`held-${id}`} shownBefore={shownHeld.has(id)} render={(slot) => renderHeld(id, slot)} />);
   const hasSeq = (receipts: readonly OwnerReceiptSource[]) => openSeq !== null && receipts.some((r) => r.event.ledger_seq === openSeq);
 
   const rows = groups.rows.map((row, index) => {
