@@ -123,7 +123,7 @@ describe('useSetupStream', () => {
     worker.use(
       sse<Named>(EVENTS_URL, ({ client }) => {
         client.send({ event: 'reading', data: { run: 'r_10', read: 'memory', host: null } });
-        client.send({ event: 'label', data: { run: 'r_10', read: 'memory', text: 'Searched your Claude memory' } });
+        client.send({ event: 'label', data: { run: 'r_10', read: 'memory', text: 'Searched your sample Claude memory' } });
         client.send({ event: 'delta', data: { run: 'r_10', text: 'Thanks.' } });
       }),
     );
@@ -138,7 +138,7 @@ describe('useSetupStream', () => {
         connections += 1;
         if (connections === 1) client.send({ retry: 50 });
         client.send({ event: 'reading', data: { run: 'r_11', read: 'memory', host: null } });
-        client.send({ event: 'label', data: { run: 'r_11', read: 'memory', text: 'Searched your Claude memory' } });
+        client.send({ event: 'label', data: { run: 'r_11', read: 'memory', text: 'Searched your sample Claude memory' } });
         // The connection drops; the browser reconnects, and the API replays the turn so far.
         if (connections === 1) client.close();
         else client.send({ event: 'delta', data: { run: 'r_11', text: 'Thanks. From your' } });
@@ -147,20 +147,20 @@ describe('useSetupStream', () => {
     const hook = await follow({ watching: true, inFlight: false });
     await vi.waitFor(() => expect(hook.result.current.growing?.text).toBe('Thanks. From your'));
     expect(connections).toBe(2);
-    expect(hook.result.current.growing?.labels).toEqual([{ read: 'memory', text: 'Searched your Claude memory' }]);
+    expect(hook.result.current.growing?.labels).toEqual([{ read: 'memory', text: 'Searched your sample Claude memory' }]);
   });
 
   it('shows_the_reads_labels_and_clears_the_text_on_reset', async () => {
     worker.use(
       sse<Named>(EVENTS_URL, ({ client }) => {
         client.send({ event: 'reading', data: { run: 'r_2', read: 'memory', host: null } });
-        client.send({ event: 'label', data: { run: 'r_2', read: 'memory', text: 'Searched your Claude memory' } });
+        client.send({ event: 'label', data: { run: 'r_2', read: 'memory', text: 'Searched your sample Claude memory' } });
         client.send({ event: 'delta', data: { run: 'r_2', text: "Here's what I'd" } });
         client.send({ event: 'reset', data: { run: 'r_2' } });
       }),
     );
     const hook = await follow({ watching: true, inFlight: false });
-    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '', final: false }));
+    await vi.waitFor(() => expect(hook.result.current.growing).toEqual({ labels: [{ read: 'memory', text: 'Searched your sample Claude memory' }], text: '', final: false }));
   });
 
   it('closes_its_stream_when_watching_ends_and_on_unmount', async () => {

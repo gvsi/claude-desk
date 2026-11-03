@@ -174,7 +174,9 @@ export const SETUP_COPY = {
     move: 'to move', pick: 'to pick', send: 'to send', typeInstead: 'to type instead',
     /** A question that takes several answers: Space's line in its hint, and the button that sends the picks. */
     toggle: 'to toggle', sendPicks: 'Send',
-    allow: 'Yes, use it',
+    allow: 'Yes, use it (recommended)',
+    /** The owner's echoed answer excludes the choice's recommendation hint, as the API writes it. */
+    allowAnswer: 'Yes, use it',
     decline: "No, I'll type it",
     composerLabel: 'Your answer',
     placeholder: 'Answer in your own words',
@@ -270,7 +272,7 @@ export const SETUP_COPY = {
 
   publicLines: {
     suggestedTitle: 'Suggested by Claude, please check',
-    suggestedIntro: 'Claude found these in your memory and online. Customers see them only once you choose “Looks right”.',
+    suggestedIntro: 'Claude found these in your sample memory and online. Customers see them only once you choose “Looks right”.',
     remove: 'Remove',
     hours: 'Hours',
     prices: 'Price list',

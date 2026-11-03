@@ -55,11 +55,11 @@ describe('playReply', () => {
 
   it('reads_first_then_writes', async () => {
     const out = record();
-    playReply({ text: 'Thanks.', wordMs: 10, reads: [{ read: 'memory', host: null, text: 'Searched your Claude memory' }] }, out.sink);
+    playReply({ text: 'Thanks.', wordMs: 10, reads: [{ read: 'memory', host: null, text: 'Searched your sample Claude memory' }] }, out.sink);
     await vi.runAllTimersAsync();
     expect(out.played).toEqual([
       { name: 'reading', read: 'memory', host: null },
-      { name: 'label', read: 'memory', text: 'Searched your Claude memory' },
+      { name: 'label', read: 'memory', text: 'Searched your sample Claude memory' },
       { name: 'delta', text: 'Thanks.' },
     ]);
     expect(out.ended()).toBe('done');

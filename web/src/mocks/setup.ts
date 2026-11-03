@@ -105,8 +105,8 @@ export const TEST_CLIENT_OFFER = 'Want to try your Desk the way a client would? 
 export const TEST_CLIENT_YES = 'Add me as a test client';
 export const TEST_CLIENT_NO = 'Not now';
 export const TEST_CLIENT_ADDED = "Done: you're a test client on your Desk, with the contact you gave me.";
-/** The label of the read of the owner's Claude memory, as the API writes it. */
-export const MEMORY_LABEL = 'Searched your Claude memory';
+/** The label of the read of the sample Claude memory, as the API writes it. */
+export const MEMORY_LABEL = 'Searched your sample Claude memory';
 
 /** One interview, as the API keeps it in `app.setup_interviews`. */
 interface Interview {
@@ -1489,10 +1489,10 @@ function connectPayments(desk: DeskRecord): void {
 
 /**
  * Claude's first words after "Start", the memory question, word for word as the API composes it
- * (`CONSENT_QUESTION`): no greeting before it, and its two answers are `SETUP_COPY.questions`'
- * "Yes, use it" and "No, I'll type it".
+ * (`CONSENT_QUESTION`): no greeting before it, and its two answers echo "Yes, use it" and
+ * "No, I'll type it" without the choice's recommendation hint.
  */
-export const CONSENT_QUESTION = "Can I look at your Claude memory and your website to fill in what I can? If you'd rather not, you can type it all in.";
+export const CONSENT_QUESTION = "Can I look at your sample Claude memory (this demo doesn't read your real one) and your website to fill in what I can? If you'd rather not, you can type it all in.";
 
 /** A new interview and its Desk, made with Answering off from the owner's description. */
 function newInterview(world: MockWorld, text: string, timezone: string): Interview {

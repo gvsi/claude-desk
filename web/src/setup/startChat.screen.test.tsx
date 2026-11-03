@@ -148,7 +148,7 @@ describe('setup start', () => {
     // The interview swaps in at its own address, which replaces the start page's: the memory
     // question where the dots were, the owner's words where they were.
     release();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
     expect(router.state.historyAction).toBe('REPLACE');
     await expect.poll(() => screen.getByText('Claude is writing').elements().length).toBe(0);
@@ -186,7 +186,7 @@ describe('setup start', () => {
     await expectLineInChat(screen, setupStartSpentLine());
     expect(router.state.location.pathname).toBe('/app/setup');
     await screen.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     await expect.element(ownWords(screen)).toBeVisible();
 
     const keys = startKeys();
@@ -211,7 +211,7 @@ describe('setup start', () => {
     await expect.element(screen.getByRole('textbox', { name: 'Your business' })).not.toHaveAttribute('readonly');
     expect(screen.getByRole('log', { name: SETUP_COPY.questions.conversation }).elements()).toHaveLength(0);
     await screen.getByRole('button', { name: 'Start' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     const keys = startKeys();
     expect(keys).toHaveLength(2);
     expect(keys[1]).not.toBe(keys[0]);
@@ -236,12 +236,12 @@ describe('setup start', () => {
     // The interview opens: the dots go, and the owner's words are all the conversation holds above
     // the memory question, docked.
     release();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     await expect.poll(() => rows(screen).length).toBe(1);
     expect(rows(screen)[0]!.contains(ownWords(screen).element())).toBe(true);
 
     // Answered, the question takes its place in the conversation, right under the owner's words.
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeInTheDocument();
     await expect.element(conversation(screen).getByText(CONSENT_QUESTION, { exact: true })).toBeVisible();
     expect(rows(screen)[1]!.textContent).toBe(CONSENT_QUESTION);
@@ -276,7 +276,7 @@ describe('setup start', () => {
     expect(getComputedStyle(ownWords(screen).element()).backgroundColor).toBe(tokenColor('--fill-bubble'));
 
     release();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeInTheDocument();
     const panel = document.querySelector('.cd-setup-dock .cd-setup-question-panel')!;
     expect(panel.getAnimations().length, 'the question rising into the dock').toBe(1);
   });
@@ -292,8 +292,8 @@ describe('setup start', () => {
     await expect.element(conversation(screen).getByText('Claude is writing')).toBeInTheDocument();
     await settle();
     release();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
@@ -346,7 +346,7 @@ describe('setup start', () => {
     // The interview opens at its end: nothing leaving, the owner's words alone in the conversation,
     // the question in the dock, still.
     release();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
     expect(rows(screen)).toHaveLength(1);
     expect(document.querySelector('.cd-setup-chat')!.getAnimations({ subtree: true })).toEqual([]);

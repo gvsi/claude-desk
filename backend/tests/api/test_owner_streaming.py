@@ -240,7 +240,7 @@ async def test_setup_yes_streams_each_read_then_the_opening_and_saves_only_the_t
         assert live.sent.empty() and not live.buffer         # the failed search waits for the reads before it
         reads.set()
         site = f"Read {HOST}, 3 pages" if website == "pages" else f"Couldn't read {HOST}"
-        labels = ["Searched your Claude memory", site, f"Searched the web: {QUERIES[0]}",
+        labels = ["Searched your sample Claude memory", site, f"Searched the web: {QUERIES[0]}",
                   "Couldn't search the web just now"]
         for read, label in zip(["memory", "website", "web_search", "web_search"], labels, strict=True):
             assert await live.next() == ("label", {"run": run, "read": read, "text": label})
@@ -327,7 +327,7 @@ async def test_setup_late_subscribers_get_the_reads_in_order_then_done(app, brow
         assert frames == [
             ("reading", {"run": run, "read": "memory", "host": None}),
             ("reading", {"run": run, "read": "website", "host": HOST}),
-            ("label", {"run": run, "read": "memory", "text": "Searched your Claude memory"}),
+            ("label", {"run": run, "read": "memory", "text": "Searched your sample Claude memory"}),
             ("label", {"run": run, "read": "website", "text": f"Couldn't read {HOST}"}),
             ("delta", {"run": run, "text": "Thanks. From your site, you fix leaks"})]
         for gate in gates:

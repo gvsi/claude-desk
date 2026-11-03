@@ -532,7 +532,7 @@ export function QuestionsStep({ state, hours, onState, reread, onContinue, chang
         ))}
         {sending !== null ? <VisitorMessage text={sending} /> : null}
         {/* The memory question's answer shows the moment it is pressed, with Claude writing under it. */}
-        {consenting === null ? null : <VisitorMessage text={consenting ? copy.allow : copy.decline} />}
+        {consenting === null ? null : <VisitorMessage text={consenting ? copy.allowAnswer : copy.decline} />}
         {/* The running turn as it is written: its reads' labels, then Claude's reply, which the saved
             turn replaces. Screen readers hear "Claude is writing" until the saved turn, then it once. */}
         {growing?.labels.map((label, index) =>

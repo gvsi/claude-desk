@@ -21,11 +21,11 @@ describe('readSetupEvent', () => {
     });
     expect(readSetupEvent('reading', '{"run":"r_2","read":"memory","host":null}')).toEqual({ type: 'reading', run: 'r_2', read: 'memory', host: null });
     expect(readSetupEvent('reading', '{"run":"r_2","read":"web_search","host":null}')).toEqual({ type: 'reading', run: 'r_2', read: 'web_search', host: null });
-    expect(readSetupEvent('label', '{"run":"r_2","read":"memory","text":"Searched your Claude memory"}')).toEqual({
+    expect(readSetupEvent('label', '{"run":"r_2","read":"memory","text":"Searched your sample Claude memory"}')).toEqual({
       type: 'label',
       run: 'r_2',
       read: 'memory',
-      text: 'Searched your Claude memory',
+      text: 'Searched your sample Claude memory',
     });
   });
 

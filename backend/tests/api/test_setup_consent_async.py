@@ -384,7 +384,7 @@ async def test_consent_lands_its_reads_and_the_first_question(
     landed = await landed_state(owner, state["interview_id"])
     assert landed["busy"] is False and landed["question"] == setup.QUESTION_KEYS[0]
     assert [message["text"] for message in landed["messages"][2:4]] == [
-        "Searched your Claude memory", "Read turner-plumbing.example"]
+        "Searched your sample Claude memory", "Read turner-plumbing.example"]
     assert [message["role"] for message in landed["messages"]] == [
         "claude", "owner", "tool_label", "tool_label", "claude"]
     (transcript,) = db.execute("SELECT transcript FROM app.setup_interviews WHERE interview_id = %s",
