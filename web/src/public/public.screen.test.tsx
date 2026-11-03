@@ -2283,6 +2283,36 @@ describe('public chat page', () => {
     expectShownWhole(await reply);
   });
 
+  it.each(['desktop', 'phone'] as const)('the_visitors_own_chat_keeps_their_words_right_and_claudes_left_on_%s', async (viewport) => {
+    // The owner's view flips the sides (board REV-FLIP); the visitor's own chat doesn't: their words
+    // on the right and Claude's on the left, so each side reads its own words on the right.
+    const { screen } = await renderRoute(PAGE, { viewport });
+    await ready(screen);
+    const question = 'How much is drain clearing?';
+    await say(screen, question);
+    const log = screen.getByRole('log').element();
+    expect(log.classList.contains('cd-transcript--owner')).toBe(false);
+    const box = log.getBoundingClientRect();
+    const bubble = rowOf(screen.getByRole('log').getByText(question, { exact: true }).element()).querySelector('.cd-visitor-message__bubble');
+    if (!bubble) throw new Error('no visitor bubble');
+    expect(Math.abs(bubble.getBoundingClientRect().right - box.right), 'their bubble ends at the right edge').toBeLessThanOrEqual(1);
+    const replies = [...log.querySelectorAll<HTMLElement>('.cd-claude-message')];
+    expect(replies.length).toBeGreaterThan(0);
+    for (const reply of replies) {
+      // Claude's reply and its receipts start at the left edge, across the chat's column.
+      for (const part of rowOf(reply).querySelectorAll(':scope > :is(.cd-transcript-row__main, .cd-transcript-row__margin)')) {
+        const rect = part.getBoundingClientRect();
+        expect(Math.abs(rect.left - box.left), "Claude's side starts at the left edge").toBeLessThanOrEqual(1);
+        expect(Math.abs(rect.width - box.width), "Claude's side takes the chat's width").toBeLessThanOrEqual(1);
+      }
+    }
+    // Its card keeps its own 520 px cap, from the left edge.
+    const card = log.querySelector('.cd-claude-message .cd-reply-card');
+    if (!card) throw new Error('no reply card');
+    expect(card.getBoundingClientRect().width).toBeLessThanOrEqual(520);
+    expect(Math.abs(card.getBoundingClientRect().left - box.left)).toBeLessThanOrEqual(1);
+  });
+
   it('the_end_follows_a_reply_as_its_words_are_revealed', async () => {
     const { screen } = await renderRoute(PAGE, { seed: 'rivera' });
     await ready(screen);
