@@ -15,6 +15,7 @@ import { expect, it, onTestFinished, vi } from 'vitest';
 import { proseBlock, rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { motion, reduceMotion } from '../../test/reducedMotion.ts';
+import { expectInSequence, watchSequence } from '../../../test/reveal.ts';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { MarginNote } from '../MarginNote/MarginNote.tsx';
 import { MarginReceipt } from '../MarginReceipt/MarginReceipt.tsx';
@@ -201,8 +202,8 @@ it('a_revealed_replys_lines_wait_for_its_words_then_follow_its_cards', async () 
   // Once the words are whole, the card comes in a beat after them, then each line a beat apart.
   await pass(400);
   expect(lineArrivals(el)).toEqual([
-    { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.24s' },
-    { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.36s' },
+    { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.4s' },
+    { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.6s' },
   ]);
 });
 
@@ -255,8 +256,8 @@ it('a_receipts_dot_and_check_wait_with_its_line_then_come_on_its_beat', async ()
 
   // Then the dot grows and the check draws as the line comes in, on its beat after the card.
   await pass(700);
-  expectComputed(dot, { animationName: 'cd-margin-line-dot', animationDelay: '0.24s' });
-  expectComputed(check, { animationName: 'cd-margin-line-draw', animationDelay: '0.24s' });
+  expectComputed(dot, { animationName: 'cd-margin-line-dot', animationDelay: '0.4s' });
+  expectComputed(check, { animationName: 'cd-margin-line-draw', animationDelay: '0.4s' });
 });
 
 it('a_line_shown_before_its_row_arrived_shows_at_once_under_a_revealed_reply', async () => {
@@ -276,5 +277,24 @@ it('every_line_follows_on_its_own_beat_after_every_card', async () => {
   const { el, pass } = actHost(revealed([...LINES, 'Cancelled'], [proseBlock(WORDS), ...four]));
   await pass(700);
   // Four cards on the beats after the words, then each line on its own beat after the last card.
-  expect(lineArrivals(el).map((line) => line.delay)).toEqual(['0.6s', '0.72s', '0.84s']);
+  expect(lineArrivals(el).map((line) => line.delay)).toEqual(['1s', '1.2s', '1.4s']);
+});
+
+it('a_revealed_replys_parts_play_strictly_one_after_another', async () => {
+  await motion();
+  const played = watchSequence();
+  actHost(revealed(LINES, [proseBlock(WORDS), rivera.blocks.quote.en, rivera.blocks.booking_options.en]), 'real');
+  // Its words, then each card, then each line, each starting once the one before has ended.
+  expectInSequence(await played, ['words', 'card 1', 'card 2', ...LINES.map((line) => `line ${line}`)]);
+});
+
+it('a_line_attached_while_the_reply_comes_in_waits_its_turn', async () => {
+  await motion();
+  const played = watchSequence();
+  const { el, rerender } = actHost(revealed(LINES), 'real');
+  // A newer status comes in once the words are whole, while the card and the lines are on their beats.
+  await vi.waitFor(() => expect(el.querySelector('.cd-transcript-row--following')).not.toBeNull(), { interval: 10 });
+  rerender(revealed([...LINES, 'Cancelled']));
+  // It comes in after everything before it has, never with it.
+  expectInSequence(await played, ['words', 'card 1', ...[...LINES, 'Cancelled'].map((line) => `line ${line}`)]);
 });

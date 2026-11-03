@@ -23,7 +23,7 @@ import { DEMO_CODE, HELD_PROSE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, type 
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
-import { expectRevealed, expectShownWhole, watchReveal, watchRevealing } from '../test/reveal.ts';
+import { expectInSequence, expectRevealed, expectShownWhole, watchReveal, watchRevealing, watchSequence } from '../test/reveal.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { mockDrain } from '../test/mockDrain.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
@@ -2023,8 +2023,32 @@ describe('public chat page', () => {
     // showed. Then its words come in word by word, its quote card a beat after them, and the quote's
     // receipt a beat after the card.
     const frames = await reply;
-    expectRevealed(frames, { cards: [0.12], lines: [0.24] });
+    expectRevealed(frames, { cards: [0.2], lines: [0.4] });
     expect(frames.at(-1)?.words).toBe("Here's the price for clearing a drain, from Mike's price list.");
+  });
+
+  it('a_live_replys_parts_come_in_one_after_another_and_a_late_line_waits_its_turn', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const played = watchSequence();
+    await say(screen, 'How much is drain clearing?');
+
+    // A line the stream brings once the reply's words are whole, while its card and its receipt are
+    // still on their beats.
+    await vi.waitFor(() => expect(document.querySelector('.cd-transcript-row--following')).not.toBeNull(), { interval: 10 });
+    const ran = chatEvents().findLast(({ ev }) => ev.type === 'receipt')?.ev;
+    if (ran?.type !== 'receipt') throw new Error('the quote ran');
+    const late = 'Saved as a new lead.';
+    mockStore.emit(RIVERA.slug, { ...ran, decision_id: `${ran.decision_id}-late`, visitor_plain: late, ledger_seq: ran.ledger_seq + 100 });
+
+    // Its words, then its card, then each line under it, the late one last: each starts once the
+    // one before has ended.
+    const parts = await played;
+    const row = [...document.querySelectorAll('.cd-claude-message')].at(-1)?.closest('.cd-transcript-row');
+    const lines = [...(row?.querySelectorAll(':scope > .cd-transcript-row__margin > *') ?? [])].map((line) => `line ${line.textContent ?? ''}`);
+    expect(lines).toHaveLength(2);
+    expect(lines.at(-1)).toContain(late);
+    expectInSequence(parts, ['words', 'card 1', ...lines]);
   });
 
   it('takes_typing_while_a_reply_is_on_its_way_and_revealed_and_sends_it_once_it_has_come_in', async () => {
