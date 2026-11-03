@@ -18,7 +18,7 @@ import { FONT_SHEET_URL, loadWebFonts } from '../ds/test/fonts.ts';
 import { writeLocal } from '../lib/storage.ts';
 import { placeholderTexts } from '../test/about.ts';
 import { AXE_TAGS, assertNoJargon, tokenColor } from '../test/screen.ts';
-import { ABOUT_DOCUMENTS, documentText } from './documents.ts';
+import { ABOUT_DOCUMENTS, documentText, type Block } from './documents.ts';
 import type { AboutId } from './links.ts';
 import { ReaderPage } from './ReaderPage.tsx';
 
@@ -425,55 +425,63 @@ describe('ReaderPage', () => {
     }
   });
 
-  it('prediction_opens_in_the_reading_column', async () => {
-    // The prediction's own opening (owner, 2026-11-02): no app icon and no centred hero. On a laptop, the meta line,
-    // the title and the summary open the article's column, left-aligned on the article's edge, level
-    // with the contents list and the details, 80 px under the top bar; 14 px from the kicker to the title, 20 px to
-    // the summary and 40 px to the first section. On a phone they keep their place above the folded contents,
-    // left-aligned on the article's edge with the byline. The proposal keeps its centred hero.
+  it('prediction_opens_with_the_proposals_hero', async () => {
+    // The prediction opens as the proposal does (owner, 2026-11-02): the meta line, the title and the summary
+    // centred above the body, then its hero figure at the proposal's hero width, which is the claim card. No app icon:
+    // the bar names the product. The body under it, the contents list, the article and the details, is laid out the
+    // same; the article opens with "Capability" and the paragraph after the claim.
     for (const size of [DESKTOP, PHONE]) {
-      const where = `prediction at ${size.width}`;
-      const screen = await renderReader('prediction', { size });
-      const root = screen.container;
-      expect(root.querySelector('.cd-mark-app-icon'), where).toBeNull();
-      const hero = root.querySelector<HTMLElement>('[data-hero]');
-      if (!hero) throw new Error(`${where}: no opening`);
-      const kicker = hero.querySelector('.cd-about-hero__kicker') as Element;
-      const title = hero.querySelector('h1') as Element;
-      const summary = hero.querySelector('[data-summary]') as Element;
-      const article = root.querySelector('article') as Element;
-      const first = article.querySelector('h2') as Element;
-      const box = (el: Element) => el.getBoundingClientRect();
-      expect(getComputedStyle(hero).textAlign, where).toBe('left');
-      const edges = [kicker, title, summary, first, ...(size === PHONE ? [hero.querySelector('[data-byline]') as Element] : [])];
-      for (const el of edges) expect(Math.abs(box(el).left - box(article).left), `${where}: ${el.localName} on the article's edge`).toBeLessThanOrEqual(0.5);
-
-      if (size === DESKTOP) {
-        const column = root.querySelector('.cd-about-column');
-        expect(hero.parentElement, where).toBe(column);
-        expect(column?.firstElementChild, where).toBe(hero);
-        expect(hero.nextElementSibling, where).toBe(article);
+      const opening = async (id: AboutId) => {
+        const screen = await renderReader(id, { size });
+        const root = screen.container;
+        const hero = root.querySelector<HTMLElement>('[data-hero]') as HTMLElement;
+        const box = (selector: string) => {
+          const el = hero.querySelector(selector) as Element;
+          const r = el.getBoundingClientRect();
+          return { middle: Math.round(r.left + r.width / 2), left: Math.round(r.left), width: Math.round(r.width) };
+        };
         const body = root.querySelector('.cd-about-body') as Element;
-        expect(getComputedStyle(body).paddingTop, where).toBe('80px');
-        const contents = root.querySelector('nav[aria-label="On this page"]') as Element;
-        const details = root.querySelector('aside[aria-label="About this document"]') as Element;
-        expect(box(contents).top, `${where}: the contents list level with the kicker`).toBe(box(hero).top);
-        expect(box(details).top, `${where}: the details level with the kicker`).toBe(box(hero).top);
-        expect(box(kicker).top, where).toBe(box(hero).top);
-        expect(box(title).top - box(kicker).bottom, where).toBe(14);
-        expect(box(summary).top - box(title).bottom, where).toBe(20);
-        expect(box(first).top - box(summary).bottom, where).toBe(40);
-      } else {
-        expect(hero.closest('.cd-about-body'), where).toBeNull();
-        const contents = root.querySelector('nav[aria-label="On this page"]') as Element;
-        expect(hero.compareDocumentPosition(contents) & Node.DOCUMENT_POSITION_FOLLOWING, where).toBeTruthy();
-      }
-      await screen.unmount();
+        const placed = {
+          inBody: hero.closest('.cd-about-body') !== null,
+          align: getComputedStyle(hero).textAlign,
+          meta: box('[data-meta]').middle,
+          title: box('h1').middle,
+          summary: box('[data-summary]').middle,
+          figure: { left: box('.cd-about-hero__figure').left, width: box('.cd-about-hero__figure').width },
+          figureBelowSummary:
+            hero.querySelector('.cd-about-hero__figure')!.getBoundingClientRect().top - hero.querySelector('[data-summary]')!.getBoundingClientRect().bottom,
+          body: getComputedStyle(body).paddingTop,
+        };
+        return { screen, root, hero, placed };
+      };
+      const proposal = await opening('proposal');
+      await proposal.screen.unmount();
+      const prediction = await opening('prediction');
+      const where = `prediction at ${size.width}`;
+      const { root, hero } = prediction;
+      expect(prediction.placed, where).toEqual(
+        size === PHONE ? { ...proposal.placed, figureBelowSummary: prediction.placed.figureBelowSummary } : proposal.placed,
+      );
+      expect(prediction.placed.inBody, where).toBe(false);
+      expect(root.querySelector('.cd-mark-app-icon'), where).toBeNull();
+      // Its hero figure is the claim card, and only that.
+      const figure = hero.querySelector('.cd-about-hero__figure') as Element;
+      expect([...figure.children].map((child) => child.hasAttribute('data-claim')), where).toEqual([true]);
+      // The article opens with "Capability", then the paragraph after the claim.
+      const article = root.querySelector('article') as Element;
+      expect(article.querySelector('[data-claim]'), where).toBeNull();
+      expect(article.firstElementChild?.id, where).toBe('capability');
+      expect(flat(article.firstElementChild?.nextElementSibling?.textContent), where).toMatch(/^On its own means over a whole conversation/);
+      // The side list and the details beside the article on a laptop; the folded list and the byline on a phone.
+      expect(root.querySelector('nav[aria-label="On this page"]'), where).not.toBeNull();
+      if (size === DESKTOP) expect(root.querySelector('aside[aria-label="About this document"]'), where).not.toBeNull();
+      else expect(hero.querySelector('[data-byline]'), where).not.toBeNull();
+      await prediction.screen.unmount();
     }
   });
 
   it('prediction_claim_reads_as_a_card', async () => {
-    // The claim opens "Capability" as a card on the page's paper (owner, 2026-11-02), drawn from the document's own
+    // The claim is the page's hero figure, a card on the page's paper (owner, 2026-11-02), drawn from the document's own
     // words: the bold lead, the three things the model will do as the reader's bulleted list, tightened (8 px under
     // the lead, 4 px apart, 16 px over the caveat), then the caveat, whose payoff alone is bold. Bold is the reader's
     // 640. Under them, the prediction at a glance in five rows: a label column and a value column between hairlines.
@@ -502,10 +510,13 @@ describe('ReaderPage', () => {
       const cards = [...root.querySelectorAll<HTMLElement>('[data-claim]')];
       expect(cards, where).toHaveLength(1);
       const card = cards[0] as HTMLElement;
-      // Right under the section's heading, inside the article, on a figure's card.
-      expect(card.parentElement?.localName, where).toBe('article');
-      expect(card.previousElementSibling?.id, where).toBe('capability');
-      expect(flat(card.nextElementSibling?.textContent), where).toMatch(/^On its own means over a whole conversation/);
+      // The hero's figure, under the summary, on a figure's card, its words left-aligned in the article's type.
+      expect(card.parentElement?.classList.contains('cd-about-hero__figure'), where).toBe(true);
+      expect(card.closest('[data-hero]'), where).not.toBeNull();
+      expect(getComputedStyle(card).textAlign, where).toBe('left');
+      expect(getComputedStyle(card.querySelector('p') as Element).fontFamily, where).toBe(
+        getComputedStyle(root.querySelector('article > p') as Element).fontFamily,
+      );
       expect(card.classList.contains('cd-about-frame'), where).toBe(true);
       expect(getComputedStyle(card).backgroundColor, where).toBe(tokenColor('--bg-panel', card));
 
@@ -797,10 +808,14 @@ describe('ReaderPage', () => {
 
   it('article_shows_every_block_in_order', async () => {
     for (const id of IDS) {
-      const { blocks, pullQuote } = ABOUT_DOCUMENTS[id];
-      const expected = documentText(blocks).map(apostrophes);
+      const { blocks, pullQuote, claim } = ABOUT_DOCUMENTS[id];
+      // In the page's order: the prediction's claim is its hero figure, above the article, and the rest in the
+      // document's order.
+      const inClaim = (b: number) => claim !== undefined && b >= claim.first && b <= claim.last;
+      const order = [...blocks.keys()].sort((a, b) => Number(inClaim(b)) - Number(inClaim(a)));
+      const expected = order.flatMap((b) => documentText([blocks[b] as Block])).map(apostrophes);
       // Each piece's key is its block's place in the document and its place in the block.
-      const keys = blocks.flatMap((block, b) => documentText([block]).map((_, i) => `${b}.${i}`));
+      const keys = order.flatMap((b) => documentText([blocks[b] as Block]).map((_, i) => `${b}.${i}`));
       // Header cells the page shows again as labels: the readiness scale's "Watch for", and on a phone each list's
       // headings from its third column on (the proposal's "Prototype", the prediction's fits' "Reaches 80%" and its
       // results' two models).
@@ -826,10 +841,14 @@ describe('ReaderPage', () => {
         expect(article, where).not.toBeNull();
         expect(article?.querySelectorAll('.cd-about-chart'), where).toHaveLength(id === 'prediction' ? 1 : 0);
         const unmarked: string[] = [];
-        const walker = document.createTreeWalker(article ?? document.body, NodeFilter.SHOW_TEXT);
-        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-          if ((node.textContent ?? '').trim() === '' || node.parentElement?.closest('[data-doc-text], .cd-about-chart')) continue;
-          unmarked.push((node.textContent ?? '').trim());
+        // The claim card, the prediction's hero figure, before the article.
+        for (const part of [screen.container.querySelector('[data-hero] [data-claim]'), article]) {
+          if (!part) continue;
+          const walker = document.createTreeWalker(part, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if ((node.textContent ?? '').trim() === '' || node.parentElement?.closest('[data-doc-text], .cd-about-chart')) continue;
+            unmarked.push((node.textContent ?? '').trim());
+          }
         }
         const steps = ['Lagging', 'Early', 'Gated', 'Near'];
         const glance = [

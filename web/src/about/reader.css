@@ -873,16 +873,12 @@
 }
 
 /* The meta line, as the Vision article's: the document's kind in the ink and a heavier weight, then its date and
-   reading time, spaced apart on one line, centred in the hero and on the article's edge in the column. */
+   reading time, spaced apart on one line, centred in the hero. */
 .cd-about-hero__meta {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: var(--space-6) var(--space-18);
-}
-
-.cd-about-hero--column .cd-about-hero__meta {
-  justify-content: flex-start;
 }
 
 .cd-about-page .cd-about-hero__meta strong {
@@ -910,36 +906,9 @@
   margin-top: calc(var(--space-24) * 3);
 }
 
-/* The capability prediction's opening (ReaderPage's `column` layout): no app icon and no lead figure, and
-   the meta line, the title and the summary left-aligned on the article's edge. On a laptop they open the
-   article's column, level with the contents list and the details, 80 px under the top bar: 14 px from the kicker
-   to the title, 20 px to the summary and 40 px to the first section. On a phone they keep the hero's place above
-   the folded contents. */
-
-.cd-about-hero--column {
-  align-items: flex-start;
+/* The prediction's hero figure is its claim card, in the article's type: its words left-aligned, as the article's. */
+.cd-about-hero__figure > .cd-about-claim {
   text-align: left;
-}
-
-.cd-about-column > .cd-about-hero--column {
-  display: block;
-  padding: 0;
-}
-
-.cd-about-column > .cd-about-hero--column .cd-about-hero__kicker {
-  margin: 0;
-}
-
-.cd-about-page .cd-about-column > .cd-about-hero--column .cd-about-hero__title {
-  max-width: none;
-  margin-top: var(--space-14);
-  text-wrap: pretty;
-}
-
-.cd-about-column > .cd-about-hero--column .cd-about-hero__summary {
-  max-width: none;
-  margin: var(--space-20) 0 var(--space-40);
-  text-wrap: pretty;
 }
 
 /* The body: the contents list, the article and its details. The side columns grow with the window, so the
@@ -954,10 +923,6 @@
   max-width: calc(var(--size-article-measure) + 4 * var(--size-article-side) + 2 * var(--about-gutter));
   margin: 0 auto;
   padding: var(--about-step) var(--about-gutter) 0;
-}
-
-.cd-about-page--column:not(.cd-about-page--compact) .cd-about-body {
-  padding-top: calc(var(--space-40) * 2);
 }
 
 .cd-about-meta {
@@ -1046,13 +1011,17 @@
 /* The prediction's claim, as a card at the top of its first section (ClaimCard): the bold lead, the reader's
    bulleted list tightened (8 px under the lead, 4 px between items, 16 px over the caveat), the caveat, then the
    prediction at a glance, a label column and a value column between hairlines. */
-.cd-about-article .cd-about-claim {
-  margin: var(--space-4) 0 var(--space-32);
+.cd-about-page .cd-about-claim {
   padding: var(--space-28) var(--space-32) var(--space-20);
 }
 
-.cd-about-article .cd-about-claim--compact {
+.cd-about-page .cd-about-claim--compact {
   padding: var(--space-20);
+}
+
+/* Bold in the claim is the article's 640. */
+.cd-about-claim strong {
+  font-weight: 640;
 }
 
 .cd-about-claim > p {

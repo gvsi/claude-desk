@@ -45,16 +45,18 @@ export interface AboutDocument {
   /** The one line under the title (`links.ts`). */
   summary: string;
   /**
-   * How the page opens. `hero`: the app icon, then the meta line, the title and the summary centred
-   * above the lead figure, `hero`. `column`: the meta line, the title and the summary left-aligned at the
-   * top of the article's column, with no icon and no lead figure.
+   * The app icon above the opening, which is otherwise the same on both documents: the meta line, the title and the
+   * summary centred, then the hero figure, `hero` or the claim card.
    */
-  layout: 'hero' | 'column';
-  /** The figure under the summary in the `hero` layout; its marker in the article renders nothing. */
+  icon?: true;
+  /** The figure under the summary; its marker in the article renders nothing. */
   hero?: FigureName;
   /** A sentence of the document, shown after its first section. */
   pullQuote?: string;
-  /** The opening of the first section that the page sets in a card with the prediction at a glance (`claimOf`). */
+  /**
+   * The opening of the first section, which the page sets in a card with the prediction at a glance (`claimOf`) as
+   * its hero figure, in place of the article.
+   */
   claim?: BlockSpan;
   /**
    * Column widths, in percent of the article's column, for the one table in a section, by the section's anchor. On a
@@ -71,7 +73,7 @@ interface Source {
   next: AboutId;
   /** The page's named changes to the Markdown, applied before parsing. */
   forThePage: (markdown: string) => string;
-  words: Pick<AboutDocument, 'layout' | 'pullQuote' | 'hero' | 'columns'>;
+  words: Pick<AboutDocument, 'icon' | 'pullQuote' | 'hero' | 'columns'>;
   /** Whether the first section's opening is set as a claim card (`claimOf`). */
   claimCard?: true;
 }
@@ -82,7 +84,7 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'prediction',
     forThePage: proposalForThePage,
     words: {
-      layout: 'hero',
+      icon: true,
       pullQuote: 'Prompt injection and social engineering can’t make Claude act past the owner’s rules.',
       hero: 'architecture',
     },
@@ -92,7 +94,7 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'proposal',
     forThePage: (markdown) => markdown,
     // The safety results' model columns need room for their figures and notes (design lane, 2026-11-02).
-    words: { layout: 'column', columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] } },
+    words: { columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] } },
     claimCard: true,
   },
 };

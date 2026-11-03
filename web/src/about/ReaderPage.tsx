@@ -1,7 +1,7 @@
 /**
  * An About this prototype reading page: the product proposal or the capability prediction, laid out as the
- * reader boards draw them. The proposal opens with a centered title, its summary and the lead figure; the
- * prediction with its title and summary at the top of the article's column, and its claim as a card. Then the
+ * reader boards draw them. Each opens with its meta line, title and summary centred, then its hero figure: the
+ * proposal's architecture under its app icon, the prediction's claim as a card. Then the
  * numbered contents list, the document in a serif column and the author, date and reading time beside it; then
  * "Read next", the next page in the About set. On a phone the contents list folds into one row and the details
  * into a line under the summary.
@@ -154,8 +154,8 @@ function ArticleBlock({ blocks, index, hero, columns, compact }: ArticleBlockPro
 }
 
 /**
- * The document's blocks, with the pull quote, if it has one, after the first section, and its claim, if it has one,
- * as a card: the claim's blocks render inside it, as the article would draw them, and nowhere else.
+ * The document's blocks, with the pull quote, if it has one, after the first section. Its claim, if it has one, is the
+ * hero's figure (`Opening`), so its blocks render there and not here.
  */
 function Article({ document, compact }: { document: AboutDocument; compact: boolean }) {
   const { blocks, hero, pullQuote, claim, columns } = document;
@@ -172,17 +172,11 @@ function Article({ document, compact }: { document: AboutDocument; compact: bool
   return (
     <article className={`cd-about-article ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}>
       {blocks.map((_, i) => {
-        if (claim && i > claim.first && i <= claim.last) return null;
+        if (claim && i >= claim.first && i <= claim.last) return null;
         return (
           <Fragment key={i}>
             {i === quoteAt ? quote : null}
-            {claim?.first === i ? (
-              <ClaimCard compact={compact}>
-                {Array.from({ length: claim.last - claim.first + 1 }, (_, n) => block(claim.first + n))}
-              </ClaimCard>
-            ) : (
-              block(i)
-            )}
+            {block(i)}
           </Fragment>
         );
       })}
@@ -206,15 +200,15 @@ function MetaLine({ document, kind }: { document: AboutDocument; kind: string })
 }
 
 /**
- * How the page opens: the meta line, the title, the summary and, on a phone, the byline. In the `hero` layout,
- * centred, with the app icon above and the lead figure below; in the `column` layout, left-aligned on the article's
- * edge, with neither.
+ * How the page opens, centred: the app icon if the document has one, the meta line, the title, the summary and, on a
+ * phone, the byline; then the hero figure, the document's lead figure or its claim as a card, drawn in the article's
+ * type as the article would draw its blocks.
  */
 function Opening({ document, kind, compact }: { document: AboutDocument; kind: string; compact: boolean }) {
-  const hero = document.layout === 'hero';
+  const { blocks, claim } = document;
   return (
-    <div className={`cd-about-hero${hero ? '' : ' cd-about-hero--column'}`} data-hero="">
-      {hero ? <MarkAppIcon size={compact ? 'compact' : 'large'} /> : null}
+    <div className="cd-about-hero" data-hero="">
+      {document.icon ? <MarkAppIcon size={compact ? 'compact' : 'large'} /> : null}
       <MetaLine document={document} kind={kind} />
       <h1 className={`cd-about-hero__title ${compact ? 'cd-type-greeting' : 'cd-type-article-title'}`}>{document.title}</h1>
       <p
@@ -224,9 +218,18 @@ function Opening({ document, kind, compact }: { document: AboutDocument; kind: s
         {document.summary}
       </p>
       {compact ? <BylineLine document={document} /> : null}
-      {hero && document.hero ? (
+      {document.hero ? (
         <div className="cd-about-hero__figure">
           <Figure name={document.hero} compact={compact} />
+        </div>
+      ) : null}
+      {claim ? (
+        <div className={`cd-about-hero__figure ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}>
+          <ClaimCard compact={compact}>
+            {Array.from({ length: claim.last - claim.first + 1 }, (_, n) => (
+              <ArticleBlock key={n} blocks={blocks} index={claim.first + n} compact={compact} />
+            ))}
+          </ClaimCard>
         </div>
       ) : null}
     </div>
@@ -321,22 +324,17 @@ export function ReaderPage({ id }: ReaderPageProps) {
   // The tab names the document while it is open, and goes back to what it said when it closes.
   useDocumentTitle(inApp(about.title));
 
-  // In the column layout on a laptop the opening moves into the article's column, level with the contents list
-  // and the details; on a phone it keeps its place above the folded contents, left-aligned.
-  const inColumn = about.layout === 'column' && !compact;
-  const layout = about.layout === 'column' ? ' cd-about-page--column' : '';
 
   return (
     <div
-      className={`cd-about-paper cd-about-paper--app cd-about-set cd-about-page${layout}${compact ? ' cd-about-page--compact' : ''}`}
+      className={`cd-about-paper cd-about-paper--app cd-about-set cd-about-page${compact ? ' cd-about-page--compact' : ''}`}
     >
       <AboutBar current={id} />
       <main className="cd-about-main">
-        {inColumn ? null : <Opening document={about} kind={KINDS[id]} compact={compact} />}
+        <Opening document={about} kind={KINDS[id]} compact={compact} />
         <div className="cd-about-body">
           <Contents sections={sections} compact={compact} />
           <div className="cd-about-column">
-            {inColumn ? <Opening document={about} kind={KINDS[id]} compact={compact} /> : null}
             <Article document={about} compact={compact} />
             <ReadNext next={readNext(id)} compact={compact} />
           </div>
