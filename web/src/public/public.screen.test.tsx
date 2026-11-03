@@ -1817,7 +1817,9 @@ describe('public chat page', () => {
     const { screen, router } = await renderRoute(PAGE);
     await ready(screen);
     await say(screen, 'How much is drain clearing?');
-    const quotes = () => screen.getByRole('article', { name: 'Quote' }).elements();
+    // Each price reply, by its words. The question asked while away isn't in this page's chat, so
+    // to it that reply's quote repeats the first in the same turn, and only its words are drawn.
+    const replies = () => screen.getByText(rivera.blocks.prose.quoteIntro.en.text, { exact: true }).elements();
     expect(landed.rows()).toHaveLength(1);
 
     // The visitor leaves the page, and a reply comes meanwhile. Back on the page, it shows where it
@@ -1827,15 +1829,15 @@ describe('public chat page', () => {
     priceTurnWithoutThePage('And for two drains?');
     await router.navigate(PAGE);
     await ready(screen);
-    await expect.poll(() => quotes().length).toBe(2);
+    await expect.poll(() => replies().length).toBe(2);
     await sleep(CAUGHT_UP_AFTER_MS);
     expect(landed.rows()).toHaveLength(1);
 
     // Caught up, the chat lands a reply that arrives while the page is open again.
     await say(screen, 'How much is drain clearing?');
-    await expect.poll(() => quotes().length).toBe(3);
+    await expect.poll(() => replies().length).toBe(3);
     expect(landed.rows()).toHaveLength(2);
-    expect(landed.rows().at(-1)).toBe(rowOf(quotes().at(-1) as Element));
+    expect(landed.rows().at(-1)).toBe(rowOf(replies().at(-1) as Element));
   });
 
   it('a_reconnect_with_an_unseen_message_draws_still', async () => {
@@ -2362,6 +2364,37 @@ describe('public chat page', () => {
     }
     // Once the cards have come in, the end of the conversation is back above the composer.
     await vi.waitFor(() => expectEndAboveTheComposer(screen), { timeout: 1_000 });
+  });
+
+  it('a_card_drawn_earlier_in_the_turn_is_not_drawn_again', async () => {
+    // The confirming reply draws the Booked card, then a second reply in the same turn draws it
+    // again and nothing else. The visitor sees the card once, and no second, empty reply; a reload
+    // reads the stored conversation the same way (#947).
+    const first = await renderRoute(PAGE);
+    await ready(first.screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const booked = rivera.blocks.booking_confirmed.en;
+    const bookedCards = () => [...document.querySelectorAll('.cd-reply-card')].filter((card) => card.textContent?.includes(booked.title ?? '')).length;
+    const messages = messagesOf(chatEvents()).length;
+    const rows = rowsShown().length;
+    const context = mockStore.world.context(chat, 'en', '');
+    mockStore.world.emit(chat, context.reply([proseBlock('Your booking is confirmed.'), booked]));
+    mockStore.world.emit(chat, context.reply([booked]));
+    await vi.waitFor(
+      () => {
+        expect(messagesOf(chatEvents())).toHaveLength(messages + 2);
+        expect(document.querySelector(COMING_IN)).toBeNull();
+        expect(bookedCards()).toBe(1);
+      },
+      { timeout: 5_000 },
+    );
+    expect(rowsShown()).toHaveLength(rows + 1);
+
+    const again = await renderRoute(PAGE);
+    await ready(again.screen);
+    await vi.waitFor(() => expect(bookedCards()).toBe(1), { timeout: 5_000 });
+    expect(rowsShown()).toHaveLength(rows + 1);
   });
 
   it.each(['desktop', 'phone'] as const)('hand_back_answers_the_waiting_line_after_claude_is_back_%s', async (viewport) => {

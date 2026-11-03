@@ -1139,6 +1139,24 @@ describe('Conversations', () => {
     expect(message.textContent).not.toMatch(/\*|^- /m);
   });
 
+  it('a_card_drawn_earlier_in_the_turn_is_not_drawn_again', async () => {
+    // The confirming reply draws the Booked card, then a second reply in the same turn draws it
+    // again and nothing else: the owner reads the card once, with no second, empty reply (#947).
+    const chat = named(DANA_LIVE, DANA);
+    const booked = { ...rivera.blocks.booking_confirmed.en, fact_id: 'booking:B-90', title: 'Friday, November 6' };
+    const before = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(log(before.screen).getByRole('article').first()).toBeVisible();
+    const rows = document.querySelectorAll('.cd-transcript-row').length;
+    const context = mockStore.world.context(chat, 'en', '');
+    mockStore.world.emit(chat, context.reply([proseBlock('Your booking is confirmed.'), booked]));
+    mockStore.world.emit(chat, context.reply([booked]));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText('Your booking is confirmed.', { exact: true })).toBeVisible();
+    const bookedCards = [...document.querySelectorAll('.cd-reply-card')].filter((card) => card.textContent?.includes('Friday, November 6'));
+    expect(bookedCards).toHaveLength(1);
+    expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(rows + 1);
+  });
+
   it('agent_name_reads_as_its_own_words', async () => {
     // An agent's chat: the name it gave is its own words wherever the page shows it, the caption
     // over the transcript included.
@@ -2457,7 +2475,8 @@ describe('Conversations', () => {
     const delivered = read.items.findLast((item) => item.kind === 'delivered' && item.event?.type === 'message');
     if (delivered?.event?.type !== 'message') throw new Error("the seeded visitor's chat has a reply");
     const n = Math.max(...read.items.map((item) => item.n)) + 1;
-    const later = { ...delivered, n, event: { ...delivered.event, message_id: 'msg-recorded-later' } };
+    // Words of its own: the same cards again in the same turn wouldn't be drawn twice.
+    const later = { ...delivered, n, event: { ...delivered.event, message_id: 'msg-recorded-later', blocks: [proseBlock('Mike will text you when he is on his way.')] } };
     mockStore.inject({ route: 'conversation', status: 200, times: 1, body: { ...read, replayed: true } });
     mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, replayed: true, items: [...read.items, later] } });
 

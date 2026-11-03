@@ -28,7 +28,7 @@ import {
   Whisper,
 } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
-import { groupRows, opensAReply, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
+import { groupRows, opensAReply, withoutRepeatedCards, type CardsRow, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
 import { paymentLinkMemory } from '../../public/paymentLinks.ts';
 import { usePaymentLinks } from '../../public/usePaymentLinks.ts';
 import { ledgerQuery } from '../safety/queries.ts';
@@ -49,6 +49,11 @@ type OwnerRowItem =
   | { kind: 'message'; n: number; ev: EvMessage };
 
 type OwnerRow = GroupedRow<OwnerRowItem, OwnerReceiptSource>;
+
+/** How a row reads for `withoutRepeatedCards`: Claude's reply, or someone's words, which start a turn. */
+function cardsRowOf({ item }: OwnerRow): CardsRow {
+  return item.kind === 'message' && item.ev.author !== 'owner' ? { kind: 'reply', blocks: item.ev.blocks } : { kind: 'words' };
+}
 
 export interface OwnerTranscriptProps {
   items: readonly OwnerTranscriptItem[];
@@ -225,16 +230,21 @@ interface RowViewProps {
   cards: readonly string[];
   /** The receipts shown so far, by ledger seq. */
   shown: ReadonlySet<number>;
+  /** Claude's reply's blocks to draw, without the cards its turn already drew; null for other rows. */
+  blocks: readonly RenderedBlock[] | null;
   agentName: string;
   ownerName: string;
   timezone: string;
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
-function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
+function RowView({ row, paymentBlock, live, cards, shown, blocks, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
   const { item } = row;
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
-  const margin = row.receipts.map((source, index) => (
+  // A reply with nothing its turn hasn't drawn already isn't drawn, nor its own check, the check
+  // of nothing shown. Any other receipt under it stays.
+  const hidden = item.kind === 'message' && item.ev.author !== 'owner' && blocks?.length === 0;
+  const margin = row.receipts.filter((source) => !hidden || source.event.type !== 'message').map((source, index) => (
     <ReceiptLine
       key={`${source.event.ledger_seq}-${index}`}
       source={source}
@@ -260,13 +270,14 @@ function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, 
         item.ev.author === 'owner' ? (
           <PersonMessage name="You" initials={initialsOf(ownerName)} blocks={item.ev.blocks} language={item.ev.language} />
         ) : (
-          <ClaudeMessage blocks={item.ev.blocks.map(paymentBlock)} language={item.ev.language} ownerName={ownerName} reveal={live} />
+          <ClaudeMessage blocks={(blocks ?? item.ev.blocks).map(paymentBlock)} language={item.ev.language} ownerName={ownerName} reveal={live} />
         );
       break;
   }
+  if (hidden && margin.length === 0) return null;
   return (
     <TranscriptRow margin={margin} live={live}>
-      {message}
+      {hidden ? null : message}
     </TranscriptRow>
   );
 }
@@ -291,6 +302,8 @@ export function OwnerTranscript({
   readSinceOpened,
 }: OwnerTranscriptProps) {
   const groups = useMemo(() => rowsOf(items), [items]);
+  // Each reply's blocks without the cards its turn already drew.
+  const replyBlocks = useMemo(() => withoutRepeatedCards(groups.rows.map(cardsRowOf)), [groups]);
   const messages = useMemo(() => groups.rows.flatMap(({ item }) => item.kind === 'message' ? [item.ev] : []), [groups]);
   const [paymentLinks] = useState(paymentLinkMemory);
   const paymentBlock = usePaymentLinks(messages, paymentLinks, focusTarget);
@@ -394,6 +407,7 @@ export function OwnerTranscript({
           live={arrived(row)}
           cards={cards}
           shown={shown}
+          blocks={replyBlocks[index] ?? null}
           agentName={agentName}
           ownerName={ownerName}
           timezone={timezone}

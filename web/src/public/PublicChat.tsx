@@ -41,6 +41,7 @@ import {
 import { breakItIdea, type BreakItIdea } from '../lib/breakItIdeas.ts';
 import { fillComposer } from '../lib/composer.ts';
 import { browserLanguage } from '../lib/language.ts';
+import { withoutRepeatedCards, type CardsRow } from '../lib/transcript.ts';
 import { useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { useTopFade } from '../lib/useTopFade.ts';
 import { brandFrom, givenOwnerName } from './brand.ts';
@@ -136,6 +137,13 @@ interface RowProps {
   resendHeld?: boolean;
   /** What goes under the row's receipts: "Cancel this request" for each open hold it holds. */
   after?: ReactNode[];
+  /** Claude's reply's blocks to draw, without the cards its turn already drew; null for other rows. */
+  blocks?: readonly RenderedBlock[] | null;
+}
+
+/** How a row reads for `withoutRepeatedCards`: Claude's reply, or words or a line that start a turn. */
+function cardsRowOf({ item }: ChatRow): CardsRow {
+  return item.kind === 'message' && item.ev.author !== 'owner' ? { kind: 'reply', blocks: item.ev.blocks } : { kind: 'words' };
 }
 
 /**
@@ -147,7 +155,7 @@ function streamOwnerName(name: string, ownerName: string): string {
 }
 
 /** One row: the message and its visible receipts, exactly as the kernel wrote them. */
-function ChatRowView({ row, ownerPreview, ownerName, language, onResend, composer, resendHeld = false, paymentBlock, after = [] }: RowProps) {
+function ChatRowView({ row, ownerPreview, ownerName, language, onResend, composer, resendHeld = false, paymentBlock, after = [], blocks = null }: RowProps) {
   const retryButton = useRef<HTMLButtonElement>(null);
   const [restoreRetryFocus, setRestoreRetryFocus] = useState<{ posted: boolean; composer: boolean } | null>(null);
   const { item } = row;
@@ -164,8 +172,11 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, compose
   }, [restoreRetryFocus, retryStatus, composer]);
   const copy = PUBLIC_COPY[language];
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
+  // A reply with nothing its turn hasn't drawn already isn't drawn, nor its own check, the check
+  // of nothing shown. Any other receipt under it stays.
+  const hidden = item.kind === 'message' && item.ev.author !== 'owner' && blocks?.length === 0;
   const receipts = [
-    ...shownReceipts(row, ownerPreview).map((receipt: ReceiptView, index) => (
+    ...shownReceipts(row, ownerPreview).filter((receipt) => !hidden || receipt.source.kind !== 'reply').map((receipt: ReceiptView, index) => (
       <MarginReceipt
         key={`${receipt.ledgerSeq}-${index}`}
         source={receipt.source}
@@ -222,6 +233,13 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, compose
     );
   }
   const { ev } = item;
+  if (hidden) {
+    return receipts.length === 0 ? null : (
+      <TranscriptRow margin={receipts} live={row.live}>
+        {null}
+      </TranscriptRow>
+    );
+  }
   // A reply that arrived on the stream lands, its receipts one by one; Claude's is revealed, its
   // words first, then its cards and receipts.
   return (
@@ -229,7 +247,7 @@ function ChatRowView({ row, ownerPreview, ownerName, language, onResend, compose
       {ev.author === 'owner' ? (
         <PersonMessage name={ownerName} blocks={ev.blocks} language={ev.language} />
       ) : (
-        <ClaudeMessage blocks={ev.blocks.map(paymentBlock)} language={ev.language} ownerName={ownerName} reveal={row.live === true} />
+        <ClaudeMessage blocks={(blocks ?? ev.blocks).map(paymentBlock)} language={ev.language} ownerName={ownerName} reveal={row.live === true} />
       )}
     </TranscriptRow>
   );
@@ -832,6 +850,8 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // runs on is the one `/d/<slug>` resumes. Setup's preview sits inside an owner screen, so its
   // links note no chat to go back to.
   const messages = useMemo(() => chat.state.rows.flatMap(({ item }) => (item.kind === 'message' ? [item.ev] : [])), [chat.state.rows]);
+  // Each reply's blocks without the cards its turn already drew.
+  const replyBlocks = useMemo(() => withoutRepeatedCards(chat.state.rows.map(cardsRowOf)), [chat.state.rows]);
   const paymentBlock = usePaymentLinks(messages, chat.paymentLinks, composerRef, embedded ? undefined : `/d/${slug}`);
   const newest = useNewestInView(endRef, composerRef, !opening && desk !== null, conversationStarted(chat.state, chat.status));
   // After useNewestInView, so it looks once the newest message is in its place.
@@ -1188,10 +1208,11 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               {null}
             </TranscriptRow>
           ) : null}
-          {state.rows.map((row) => (
+          {state.rows.map((row, index) => (
             <ChatRowView
               key={rowKey(row)}
               row={row}
+              blocks={replyBlocks[index] ?? null}
               paymentBlock={paymentBlock}
               ownerPreview={ownerPreview}
               ownerName={shownOwner}
