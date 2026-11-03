@@ -90,10 +90,15 @@
 }
 
 .cd-house-rules__rule {
+  padding: var(--space-8) 0;
+  min-width: 0;
+}
+
+/* The sentence at the left; its dot and its Details at the right. Its panel opens under it, in the li. */
+.cd-house-rules__rule-row {
   display: flex;
   align-items: flex-start;
   gap: var(--space-12);
-  padding: var(--space-8) 0;
 }
 
 .cd-house-rules__rule-actions {
@@ -102,6 +107,13 @@
   gap: var(--space-8);
   flex: none;
   min-height: 1lh;
+}
+
+/* Details is 24 px tall, a target's least; it centres on the first line of its row's words, which
+   stay where they were. */
+.cd-house-rules__rule-actions > .cd-advanced-details__toggle,
+.cd-house-rules__tool-header > .cd-advanced-details__toggle {
+  margin-block: calc(-1 * var(--space-2));
 }
 
 .cd-house-rules__rule--reference {

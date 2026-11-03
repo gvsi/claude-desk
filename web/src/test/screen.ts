@@ -18,7 +18,10 @@ import { framesWithin } from '../ds/test/framesWithin.ts';
 /** The axe rule tags a screen must pass with zero violations. */
 export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] as const;
 
-/** Words the owner never reads, with their plurals (the full trace and quoted untrusted text excepted). */
+/**
+ * Words the owner never reads, with their plurals (the full trace, a tool's or a rule's advanced
+ * details, which the owner opens to see them, and quoted untrusted text excepted).
+ */
 export const OWNER_JARGON = ['policy', 'Cedar', 'MCP', 'SymCC', 'kernel', 'schema', 'JSON', 'API', 'token', 'proof', 'proven', 'hash'] as const;
 
 const JARGON =
@@ -27,10 +30,14 @@ const JARGON =
 /** Attributes whose text is read aloud or shown. */
 const READ_ATTRIBUTES = ['aria-label', 'aria-description', 'aria-valuetext', 'title', 'placeholder', 'alt'];
 
-/** Subtrees the jargon check skips: the full trace, someone's own words, what isn't read. */
+/**
+ * Subtrees the jargon check skips: the full trace, an opened Details panel (REV-RULES-D's "Policy
+ * hash"), someone's own words, what isn't read.
+ */
 function skipped(el: Element): boolean {
   return (
     el.classList.contains('cd-type-trace') ||
+    el.classList.contains('cd-advanced-details') ||
     el.getAttribute('data-copy') === 'user' ||
     el.getAttribute('aria-hidden') === 'true' ||
     ['script', 'style', 'template', 'noscript'].includes(el.localName)
