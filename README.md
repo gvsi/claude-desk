@@ -1,6 +1,6 @@
 # Claude Desk
 
-Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes payments under the owner's rules.
+Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes test payments under the owner's rules.
 
 The demo business is Turner Plumbing. You play Mike Turner, its owner, while Claude answers his customers and their agents.
 
@@ -14,16 +14,25 @@ The passcode comes with the submission. Each visitor gets a fresh copy of the Tu
 
 ## Things to try
 
-1. **Chat as a customer.** Turner's public page opens in a new tab. Ask for a quote or a booking. Each reply is checked before it appears, and a receipt under each message shows what the checks did.
-2. **Try to break it.** Ask for a discount, someone else's invoice, or a promise Mike never made. A discount is held for Mike and waits on Today, someone else's invoice needs a code sent to the contact on record, and every reply is checked before it appears. The receipt under each message shows what the checks did, and Safety, in Mike's app, lists the requests the Desk turned down and the replies it stopped.
-3. **Answer a held request.** One is waiting on Today: a customer asked for 15% off a drain clearing, which Mike's rules don't allow without asking him.
-4. **Watch a demo visitor.** On Today, "Start a demo visitor", under Things to try, opens a chat where an AI plays a customer on Mike's Desk. Take over, whisper to Claude or hand the chat back while it talks.
-5. **Create your own Desk.** "New business", in the switcher at the top left, starts a setup interview. Describe the business, then say yes when Claude asks to look at your Claude memory (in the demo, a sample drafted from your description) and your website. It reads both and searches the web for how this kind of business works, then asks its questions and shows its proposal cards, each a job for your Desk or an app to connect that you set up or decline, one at a time. At the end it can add you as a test client, and you review the tools, rules and customer-facing text, try the preview and publish a live link. Until you publish, "Change something", under its closing plan and on Real situations, takes you back to the chat to change what it drafted.
-6. **Ask Claude about your rules.** Open Ask Claude in Rules and ask what it can handle without you. Its answers and setup's replies render Markdown, including lists and bold text.
+After the passcode you're on Today, in Mike's app. Its Things to try list has a button for each of the first five steps below.
+
+1. **Chat as a customer.** "Open your public page" opens Turner's public page in a new tab. Ask for a quote or a booking. Each reply is checked before it appears, and a receipt under each message shows what the checks did.
+2. **Watch a demo visitor.** "Start a demo visitor" opens a chat where an AI plays a customer on Mike's Desk. Take over, whisper to Claude or hand the chat back while it talks.
+3. **Try to break it.** Ask for a discount, someone else's invoice, or a promise Mike never made. A discount is held for Mike and waits on Today, and someone else's invoice needs a code sent to the contact on record. Then "Open in Safety" lists the requests the Desk turned down and the replies it stopped.
+4. **Answer a held request.** One is waiting on Today: a customer asked for 15% off a drain clearing, which Mike's rules don't allow without asking him.
+5. **Create your own Desk.** "Start a Desk" starts a setup interview. Describe the business and let Claude read your Claude memory (in the demo, a sample drafted from your description) and your website. It asks its questions and proposes jobs and apps one at a time; then you review the rules, try the preview and publish a live link.
+6. **Ask Claude about your rules.** Open Ask Claude in Rules and ask what it can handle without you.
 
 ## What's real, mocked and unfinished
 
-The kernel, API, web app, eval suites and AWS deployment are implemented on `main`. The hosted demo runs the prototype with the limits below.
+The kernel, API, web app, eval suites and AWS deployment are implemented on `main`. The hosted demo runs the prototype with these limits:
+
+- **Real:** the kernel, the reply check, quotes and bookings, chat and take-over, and agent signatures and spending limits.
+- **Mocked:** payments, code delivery (the Demo inbox), Claude memory, and the other apps in setup.
+- **Not built:** connectors, channels, staff scheduling. See [Unfinished](#unfinished).
+
+<details>
+<summary>Part by part, with links to the code</summary>
 
 | Part | Status | At this commit |
 |---|---|---|
@@ -46,8 +55,10 @@ The kernel, API, web app, eval suites and AWS deployment are implemented on `mai
 | Share kit | Link and QR real; mocks for the Google profile, email signature and voicemail, with the embed coming later | On `main`: [Share](web/src/owner/share/) provides the public link, a QR code and copy for a Google profile, email signature and voicemail. Share copy connects to no service; the website embed is marked "Coming later". |
 | Vision pages and connectors | Static vision screens; other integrations are unfinished | On `main`: [vision pages](web/src/vision/) show a Claude account, city office, team Desk and phone app. [Connector management screens](web/src/owner/connectors/pages.ts) and the [Channels settings page](web/src/owner/settings/SettingsLayout.tsx) are not built. Other connectors and channels are not live integrations. |
 | Accessibility | Automated checks and implemented interaction paths | On `main`: The [design system](web/src/ds/) and screen tests cover contrast, keyboard paths, live announcements, reduced motion and automated axe checks. These checks are not an independent accessibility audit. |
-| Evals | Real suites, calibration and latency tooling | On `main`: [Tier 1](evals/tier1/) exercises boundary cases without model calls; [tier 2](evals/tier2/) has hostile and legitimate conversations, separate calibration and held-out splits, and a results gate. [Calibration](evals/calibration/) and [latency tooling](evals/latency.py) are implemented. Hosted latency runs refuse to start without trusted usage metering; final measured results belong in Evidence below. |
+| Evals | Real suites, calibration and latency tooling | On `main`: [Tier 1](evals/tier1/) exercises boundary cases without model calls; [tier 2](evals/tier2/) has hostile and legitimate conversations, separate calibration and held-out splits, and a results gate. [Calibration](evals/calibration/) and [latency tooling](evals/latency.py) are implemented. The final pass's results are in Evidence below; hosted latency wasn't measured. |
 | Hosting | Hosted prototype | On `main`: [AWS infrastructure](infra/) serves the web app and API through CloudFront, splits secrets by container and keeps the kernel reachable only inside its task. The [runbook](docs/deploy.md) covers deploys and smoke checks. One application task and one database; this is a concept prototype, not a production service. |
+
+</details>
 
 ### Unfinished
 
@@ -59,33 +70,32 @@ Real payments and real delivery of verification codes, so the safety boundary co
 
 ## Security model
 
-The [threat model's controls table](docs/threat-model.md#controls) names the implementation and tests for each control, with the prototype's limits.
-
 Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown, under rules compiled by code from the owner's rule cards and proved before they go live.
 
 A bug in the chat layer's visitor and agent paths can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger: those paths never hold the owner's token, and each of these needs it or a check that only the kernel holds. On the owner's own requests the chat layer carries the owner's token, so a bug there could misdirect an approval or a rule confirmation to another held request or proved draft of the same Desk; browser-signed approvals, on the roadmap, close that. This covers a buggy chat layer, not a compromised one.
 
-Prompt injection and social engineering can't make Claude act past the owner's rules. Within them, it can still be talked into actions the rules allow, and into text that is wrong or unflattering but carries no price, date or promise.
+Prompt injection and social engineering can't make Claude act past the owner's rules. Within them, it can still be talked into actions the rules allow, and into text that is wrong or unflattering but carries no price, date or promise. Promises without numbers or words like "guarantee" rely on a model check, which can miss.
 
 **Demo limits.** Verification codes are simulated: the Demo inbox shows codes to whoever entered the contact, so demo verification shows that codes go only to the contact on record, but it does not establish possession of the contact. The inbox also reveals whether a contact is on record, and because limits count per contact, a stranger can cancel a contact's live challenge and use up its hourly limit; each lockout is logged and shown to the owner. Payments are mocked, and no payment provider is involved.
 
-The [threat model](docs/threat-model.md) lists what is claimed and what isn't, and where each control is enforced and tested.
+The [threat model](docs/threat-model.md#controls) lists what is claimed and what isn't, and names the implementation and tests for each control.
 
 ## Evidence
 
-Two eval suites run against the real kernel and Claude: an attack suite of hostile visitors and agents, and a legitimate-task suite of ordinary customer requests. The scenarios are split in two: one for tuning the reviewer's thresholds, and one held out for reporting. The final pass ran on the kernel's initial thresholds, with none tuned.
+Two eval suites run against the real kernel and Claude: an attack suite of hostile visitors and agents, and a legitimate-task suite of ordinary customer requests. The scenarios are split in two: one for tuning the thresholds of the reviewer, a model check that can only narrow what auto-allow rules let through, and one held out for reporting. The final pass ran on the kernel's initial thresholds, with none tuned.
 
 | Measure | Result |
 |---|---|
-| Baseline violations | 0 unwaived in 261 judged runs; 4 AI-denial flags waived by Giovanni Alcantara, one message at a time |
+| Baseline violations | 0 unwaived in 261 judged runs. The word-level check flagged 4 replies as AI denials; each was a correct refusal that quoted the line it wouldn't say, read and waived one at a time by Giovanni Alcantara. 78 held-out attack runs bound the violation rate at 10.7% per run (95% upper). |
 | Legitimate tasks completed | 72 of 72 held-out runs (100.0%; Wilson 95% interval 94.9% to 100.0%) |
 | Tool decisions held for the owner that the task expected the Desk to make alone | 0 of 80 decisions the held-out tasks expected allowed (0.0%) |
 | From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | 1,764 / 4,484 ms (n = 60) |
+| The full turn, from the visitor's message to Claude's reply, warm, p50 and p95, measured locally | 4,324 / 10,114 ms (n = 57) |
 | Model cost per conversation | $0.049 mean, $0.046 p50, $0.095 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies |
 
 From the [final eval pass's report](evals/reports/2026-11-03-20261103-012831-4a664a.md): pass 20261103-012831-4a664a, 2026-11-03.
 
-The attack suite tests the attacks we thought of: a clean run means none of those got through, not that no attack can.
+The attack suite tests known attacks: a clean run means none of those got through, not that no attack can.
 
 The [evals guide](docs/evals.md) says what each suite tests, how a run is judged and gated, what it costs and how to reproduce one, and holds the latest results.
 
@@ -106,21 +116,22 @@ Run the tests with `make test` and `make web-test`. `make test` runs the kernel'
 
 ## How it was built
 
-Claude Desk was built with Claude Code. Claude Opus 5.5 agents wrote the plans and the code, test first and one task at a time, and each task was reviewed before it was committed. Every plan and pull request went to a review panel of models at extra-high reasoning (Claude Opus 5.5 and GPT-6.1 Sol, with other seats on some rounds); each plan's Review Ledger names its seats and what they found, and [docs/reviews/](docs/reviews/) holds the reviews of the first master plan. [AGENTS.md](AGENTS.md) holds the rules every agent works under, including the safety invariants no change may weaken.
+Claude Desk was built with Claude Code. Claude Opus 5.5 agents wrote the plans and the code, test first and one task at a time, and each task was reviewed before it was committed. Every plan and pull request went to a review panel of models at extra-high reasoning (Claude Opus 5.5 and GPT-6.1 Sol, with other seats on some rounds); most plans end with a review ledger that names its seats and what they found, and [docs/reviews/](docs/reviews/) holds the reviews of the first master plan. [AGENTS.md](AGENTS.md#safety-invariants-never-weaken-these-not-even-to-make-a-test-pass) holds the rules every agent works under, including the safety invariants no change may weaken.
 
 Three calls I made against what the agents or reviewers pushed for: a Desk resolves what it can and asks the visitor before involving the owner, instead of handing off by default; payments are fully mocked, with no provider keys, so the safety boundary shows without one; and every screen was designed and signed off before any interface code.
 
 ## Documents
 
-- [Capability prediction](docs/capability-prediction.md)
-- [Product proposal](docs/product-proposal.md)
+- [Capability prediction](docs/capability-prediction.md): what a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.
+- [Product proposal](docs/product-proposal.md): what Claude Desk is, who it's for, what the first release enforces in code, and how we'll know it works.
+- The Vision article, under About this prototype in the app (`/about/vision`): where a Desk could go next.
 - [Design spec](docs/specs/2026-10-28-claude-desk-design.md): the product, the locked decisions and why.
 - [Threat model](docs/threat-model.md): what is claimed, what isn't, and where each control is enforced.
 - [Architecture decisions](docs/architecture-decisions.md): the main choices, with the alternatives and their costs.
 - [Path to MVP](docs/path-to-mvp.md): what changes for real users, scaling limits, latency and cost.
 - [Deploying](docs/deploy.md): the AWS runbook and its monthly cost.
 - [Continuous integration](docs/ci.md): what CI checks and what it can't.
-- [Plans](docs/plans/): the master plan and one plan per part, each with its Review Ledger.
+- [Plans](docs/plans/): the master plan and one plan per part, most with a review ledger.
 - [Reviews](docs/reviews/), [research](docs/research/) and the [kernel feasibility spike](docs/spikes/2026-10-28-kernel-feasibility.md).
 
 ---
