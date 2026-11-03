@@ -11,6 +11,7 @@
 
 - It is a native modal `<dialog>` that draws its own scrim (`scrim`, fixed to the whole window), so the page behind is inert and the consumer needs no portal or stacking order. While it is open the page behind doesn't scroll.
 - It can't be dismissed. There is no close button. Escape does nothing: the key is stopped before the browser handles it, a cancel is always refused, and `closedby="none"` is set where browsers support it (Chrome otherwise closes a modal on a second Escape). A press on the scrim does nothing, and doesn't move focus either.
+- The field is labelled "Passcode" and its placeholder says "Enter the passcode", never the passcode itself.
 - Focus starts in the passcode field. Tab and Shift+Tab go round the dialog's own controls and nowhere else.
 - Enter in the field or the button calls `onSubmit` once, with the trimmed passcode. The button is disabled while the trimmed field is empty.
 - While `busy`, the button shows the busy spinner in place of its words, like every busy `Button`, and is still named by `submitLabel`; a status line seen only by screen readers says "Starting the demo", and the form has `aria-busy="true"`. The button stays focusable but inert (`aria-disabled="true"`, a press is ignored), so a person who pressed it keeps their place. Only the empty state is truly `disabled`. A second submit does nothing, and neither does one sent before the last `onSubmit` promise settles, so a quick double Enter can't start two copies.

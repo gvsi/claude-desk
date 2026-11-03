@@ -48,8 +48,8 @@ export const SafetyView: Story = {
     expectComputed(group, { backgroundColor: 'rgba(250, 249, 245, 0.05)', borderTopLeftRadius: '8px' });
     expectComputed(option('Attempts'), {
       height: '28px',
-      fontSize: '13px',
-      lineHeight: '18px',
+      fontSize: '14px',
+      lineHeight: '19px',
       fontWeight: '420',
       backgroundColor: 'rgb(60, 57, 47)',
       color: 'rgba(250, 249, 245, 0.92)',

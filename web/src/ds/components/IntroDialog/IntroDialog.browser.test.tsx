@@ -185,6 +185,16 @@ it('an_unknown_error_code_reads_as_unreachable', async () => {
   expect(document.body.innerHTML).not.toContain('brand_new_code');
 });
 
+it('the_field_asks_for_the_passcode_in_every_state', async () => {
+  // The owner's words, never the passcode itself. The label still names the field.
+  for (const args of [{}, { error: 'wrong_passcode' as const }, { busy: true }]) {
+    const dialog = await runWith(args);
+    const field = dialog.querySelector<HTMLInputElement>('input[type="password"]');
+    expect(field?.placeholder, JSON.stringify(args)).toBe('Enter the passcode');
+    expect(field?.labels?.[0]?.textContent, JSON.stringify(args)).toBe('Passcode');
+  }
+});
+
 afterEach(async () => {
   await page.viewport(1280, 820);
 });

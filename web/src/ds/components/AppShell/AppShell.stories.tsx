@@ -35,9 +35,9 @@ function RouterLink({ children, href, ...props }: SidebarLinkProps) {
 const hrefs = {
   today: '/app/desk-rivera-main/today',
   conversations: '/app/desk-rivera-main/conversations',
-  people: '/app/desk-rivera-main/people',
   rules: '/app/desk-rivera-main/rules',
   safety: '/app/desk-rivera-main/safety',
+  people: '/app/desk-rivera-main/people',
   profile: '/app/desk-rivera-main/profile',
   share: '/app/desk-rivera-main/share',
   knowledge: '/app/desk-rivera-main/knowledge',
@@ -78,10 +78,10 @@ const sidebar = (
 );
 
 /** The nine pages, including Knowledge, without Connectors. */
-const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
+const PAGES = ['Today', 'Conversations', 'Rules', 'Safety', 'Customers', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
 /** The ten pages with Connectors after Rules and Knowledge just above Settings. */
-const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Rules', 'Connectors', 'Safety', 'Customers', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
 /** The words of each page row in a nav, in order (a row's count is read separately). */
 function pageNames(nav: HTMLElement): string[] {

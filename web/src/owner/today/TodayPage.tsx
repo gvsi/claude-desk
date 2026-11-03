@@ -25,6 +25,7 @@ import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
 import { useTodayNow } from './todayClock.ts';
 import { skeletonSetupOf, TodaySkeleton } from './TodaySkeleton.tsx';
+import { useClosedRequests } from './useClosedRequests.ts';
 import { useReadRecoveryFocus } from './useReadRecoveryFocus.ts';
 
 import './Today.css';
@@ -61,9 +62,9 @@ export { COPIED_FOR_MS } from '../../ds/index.ts';
  * the Desk's setup hasn't gone live, "How your Desk works" with what Claude did today under it, and
  * "Things to try"; under it two columns: in this order "Needs
  * you" and "Live now" when they have something, and "Since last night" always; at the right the last
- * 7 days. Today opens no visitor chat itself, and
+ * 7 days. Today has no inline visitor chat; its request links open the conversation page, and it
  * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
- * request (`#request-<id>`, as Notifications links an owner's alert) brings that request's card
+ * request (`#request-<id>`, for old links and requests without a conversation) brings that request's card
  * into view and focus. Until what the page first shows is read, it holds its own shapes, so it
  * opens drawn however the owner came to it.
  */
@@ -85,8 +86,6 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // The rules each held card names (Today opens once they are in, with a request held).
   const rules = useRequestRules(deskId, { retryOnMount: false });
   const answers = useAnswer(deskId);
-  // An answered card stays where it was answered, and focus that fell to the page follows it.
-  const answeredFocus = useAnsweredFocus(answers.answered);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
   // The pill says "Copied" while this is set: a count of the copies that worked since it last cleared,
   // so each one starts the COPIED_FOR_MS wait again. A failed copy clears it; leaving Today ends the wait.
@@ -109,7 +108,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // and for a Desk listed without it (an API from before it).
   const setup = isLive(desk) ? null : desk.setup;
   // Today's skeleton draws the "Not live yet" card where it will land.
-  const skeletonSetup = skeletonSetupOf(desk);
+  const skeletonSetup = skeletonSetupOf(desk, business);
   const link = publicLink(desk.slug);
   const live = today.data?.live ?? [];
 
@@ -123,6 +122,11 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const listedIds = new Set(listed.map((item) => item.decision.decision_id));
   const kept = [...answers.kept.values()].filter((item) => !listedIds.has(item.decision.decision_id));
   const held: HeldItem[] = heldOldestFirst([...listed, ...kept]).filter((item) => !answers.answered.has(item.decision.decision_id));
+  const elsewhere = useClosedRequests(held, answers, !opening, needsYou.isSuccess, listedIds);
+  // Share the existing card, Dismiss and focus behaviour, while Things to try below receives only
+  // answers actually given here. A booking or expiry must never become an answer on this screen.
+  const cardAnswers = { ...answers, answered: new Map([...elsewhere.closed, ...answers.answered]) };
+  const answeredFocus = useAnsweredFocus(cardAnswers.answered);
   const callbacks = items.filter((item): item is CallbackItem => item.handoff != null);
   // When Needs you was last read, read on every render so each read renders Today again, even one
   // whose items are unchanged: after a conflict, it is what lets a request's answers back.
@@ -141,8 +145,6 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     if (el) cards.current.set(decisionId, el);
     else cards.current.delete(decisionId);
   }, []);
-  // Focus brings the card into view too. A request with no card here is left alone.
-  const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
   // Share the post-commit landing for dismissed answers and completed callbacks. A cached hold
   // can keep Needs you mounted, and a closed callback stays until its refreshed list commits.
   const needsYouSection = useRef<HTMLElement>(null);
@@ -171,6 +173,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const pendingFocus = useRef<PendingFocus | null>(null);
   const dismissAnswer = (id: string, next: string | undefined) => {
     pendingFocus.current = { kind: 'dismiss', next };
+    elsewhere.dismiss(id);
     answers.dismiss(id);
   };
   const callbackDone = (handoffId: string) => {
@@ -203,11 +206,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
       (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true });
     }
   });
-  const focusFirstHeld = () => {
-    if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
-  };
 
-  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
+  // An arrival at `#request-<id>` lands on that card once: on the held
   // request's card, whether it is still held or was answered here. It lands once the latest
   // read of Needs you has worked (a list kept from before a failed read may be missing the request),
   // and once the page has drawn its sections. A request that isn't in the list gets one more read
@@ -308,17 +308,18 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
               heldCount={readWorked ? listed.length : undefined}
               callbackCount={callbacks.length}
-              firstHeldId={firstHeld?.decision.decision_id ?? null}
+              firstHeld={firstHeld}
             />
-            <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
+            <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} />
           </div>
           <div className="cd-today__main">
             {/* Drawn while it lists something or a read has failed: its Dismiss sends focus on when neither is left. */}
-            {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
+            {held.length + callbacks.length + cardAnswers.answered.size + elsewhere.reading.length > 0 || readFailure !== null ? (
               <NeedsYou
                 held={held}
+                reading={elsewhere.reading}
                 callbacks={callbacks}
-                answers={answers}
+                answers={cardAnswers}
                 readAt={readAt}
                 rules={rules.rules}
                 rulesFailure={rules.failure}

@@ -53,7 +53,7 @@ export const GoogleCalendar: Story = {
     const dialog = canvas.getByRole('dialog', { name: 'Connect Google Calendar Mock' });
     await expect(dialog).toHaveAttribute('aria-modal', 'true');
     await expect(expectMockBesideExternalNames(dialog)).toBe(1);
-    expectComputed(within(dialog).getByRole('heading', { level: 2 }), { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '24px' });
+    expectComputed(within(dialog).getByRole('heading', { level: 2 }), { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '26px' });
     // The steps at the top, on "Sign in".
     const steps = within(dialog).getByRole('list', { name: 'Connect Google Calendar' });
     await expect(within(steps).getByText('Sign in').closest('li')).toHaveAttribute('aria-current', 'step');

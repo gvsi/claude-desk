@@ -13,7 +13,8 @@ import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { ReadFailed } from '../ReadFailed.tsx';
 import { useRequestRules, type RequestRules } from '../rules/useRequestRules.ts';
-import { heldOldestFirst, todayPath, useNeedsYou, useToday } from '../useDesks.ts';
+import { heldOldestFirst, useNeedsYou, useToday } from '../useDesks.ts';
+import { requestPath } from '../today/requestLink.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { AttemptDetail } from './AttemptDetail.tsx';
 import {
@@ -127,14 +128,15 @@ function Headline({ deskId, slug }: { deskId: string; slug: string }) {
   );
 }
 
-/** Requests held for the owner right now, a click from Today. */
+/** Requests held for the owner right now, opening the oldest one's conversation. */
 function HeldForYou({ deskId }: { deskId: string }) {
   const needsYou = useNeedsYou(deskId);
-  const held = heldOldestFirst(needsYou.data ?? []).length;
-  if (held === 0) return null;
+  const held = heldOldestFirst(needsYou.data ?? []);
+  const first = held[0];
+  if (first === undefined) return null;
   return (
-    <Button variant="secondary" href={todayPath(deskId)}>
-      <StatusLabel tone="held">{heldForYou(held)}</StatusLabel>
+    <Button variant="secondary" href={requestPath(deskId, first.decision.decision_id, first.session)}>
+      <StatusLabel tone="held">{heldForYou(held.length)}</StatusLabel>
     </Button>
   );
 }

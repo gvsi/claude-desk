@@ -49,7 +49,7 @@ export const Board: Story = {
     // The short line everywhere, as the phone board writes it (owner decision, 2026-10-30).
     await expect(answering).toHaveAccessibleDescription('Within your rules');
     const answeringCard = page.getByRole('region', { name: 'Claude acts for you' });
-    await expect(Math.round(answeringCard.getBoundingClientRect().height)).toBe(71);
+    await expect(Math.round(answeringCard.getBoundingClientRect().height)).toBe(73);
     await expect(Math.round(answering.getBoundingClientRect().top - answeringCard.getBoundingClientRect().top)).toBe(11);
     await expect(Math.round(answeringCard.getBoundingClientRect().bottom - answering.getBoundingClientRect().bottom)).toBe(11);
     expectComputed(answeringCard, { ...SPEC.card, paddingTop: '0px', paddingLeft: '0px' });

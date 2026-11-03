@@ -27,11 +27,11 @@ import { expectInSequence, expectRevealed, watchReveal, watchRevealing, watchSeq
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, tokenColor } from '../../test/screen.ts';
+import { conversationAtTop, expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, nextFrames, tokenColor } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
-// A phone whose open conversation's pane stays under the single column's 46rem, so the pane scrolls as one.
+// A phone whose open conversation's pane stays under the single column's 47.5rem, so the pane scrolls as one.
 const SHORT_PHONE = { width: 390, height: 780 };
 const LA = 'America/Los_Angeles';
 const OWNER = rivera.business.ownerName;
@@ -377,10 +377,10 @@ describe('Conversations', () => {
     expect(preview!.dataset.copy).toBe('user');
     expect(getComputedStyle(preview!).whiteSpace).toBe('nowrap');
     expect(getComputedStyle(preview!).textOverflow).toBe('ellipsis');
-    expect(getComputedStyle(preview!).fontSize).toBe('13px');
+    expect(getComputedStyle(preview!).fontSize).toBe('14px');
     expect(getComputedStyle(preview!).color).toBe(tokenColor('--text-secondary'));
     expect(preview!.scrollWidth).toBeGreaterThan(preview!.clientWidth);
-    expect(preview!.getBoundingClientRect().height).toBe(18);
+    expect(preview!.getBoundingClientRect().height).toBe(19);
     const status = links[0]!.querySelector('.cd-conversation-item__status')!;
     expect(status.textContent).toContain('Needs you');
     expect(status.textContent).toContain('Recorded');
@@ -400,7 +400,7 @@ describe('Conversations', () => {
       const day = group.querySelector<HTMLElement>('.cd-conversations__day')!;
       const style = getComputedStyle(day);
       const rule = getComputedStyle(day, '::after');
-      expect(style.fontSize).toBe('12px');
+      expect(style.fontSize).toBe('13px');
       expect(style.fontWeight).toBe('520');
       expect(style.color).toBe(tokenColor('--text-tertiary'));
       expect(style.gap).toBe('8px');
@@ -467,12 +467,12 @@ describe('Conversations', () => {
       expect(line.dataset.copy).toBeUndefined();
       expect(line.className).toBe(visitor.className);
       const style = getComputedStyle(line);
-      expect(style.fontSize).toBe('13px');
+      expect(style.fontSize).toBe('14px');
       expect(style.fontStyle).toBe('normal');
       expect(style.color).toBe(tokenColor('--text-secondary'));
       expect(style.whiteSpace).toBe('nowrap');
       expect(style.textOverflow).toBe('ellipsis');
-      expect(line.getBoundingClientRect().height).toBe(18);
+      expect(line.getBoundingClientRect().height).toBe(19);
       expect(line.getBoundingClientRect().left).toBe(visitor.getBoundingClientRect().left);
       const status = row(id).querySelector('.cd-conversation-item__status')!;
       expect(status.textContent).toContain('Agent');
@@ -786,7 +786,7 @@ describe('Conversations', () => {
     const chat = named(DANA_LIVE, DANA);
     lengthen(chat);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 47.5rem, so it scrolls as one.
     const { screen } = await renderRoute(LIST, { viewport: viewport === 'phone' ? SHORT_PHONE : viewport, pollScale: 100 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
@@ -1190,6 +1190,7 @@ describe('Conversations', () => {
     // The booked card and its checks stay under their message.
     await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
     await expect.element(log(screen).getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).last()).toBeVisible();
+    await conversationAtTop();
     await expectScreenBasics(screen.container, { owner: true });
     expectNoHorizontalScroll();
 
@@ -1431,6 +1432,44 @@ describe('Conversations', () => {
     expect(transcript.scrollTop + transcript.clientHeight).toBeGreaterThanOrEqual(transcript.scrollHeight - 1);
   });
 
+  it.each(['desktop', 'phone'] as const)('a_request_link_lands_on_its_card_above_later_messages_on_%s', async (viewport) => {
+    lengthen(session(SEEDED_HOLD));
+    const { screen, router } = await renderRoute(`${DESK}/today`, { viewport });
+    const opener = screen.getByRole('region', { name: 'Things to try' }).getByRole('link', {
+      name: viewport === 'phone' ? 'Answer a held request' : 'Open the request', exact: true,
+    });
+    await expect.element(opener).toBeVisible();
+    opener.element().focus();
+    await userEvent.keyboard('{Enter}');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeInViewport({ ratio: 1 });
+    const focusTarget = page.elementLocator(card.element().closest('.cd-approval-card__card')!);
+    await expect.element(focusTarget).toHaveFocus();
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeInViewport({ ratio: 1 });
+    await expect.element(card.getByRole('button', { name: 'Deny this time' })).toBeInViewport({ ratio: 1 });
+    // Polling does not take her back to the request after she moves on.
+    const composer = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    composer.element().focus();
+    await readsMore('conversation', 2);
+    await expect.element(composer).toHaveFocus();
+    // A new arrival at the same address lands again, even with a warm transcript.
+    const address = router.state.location.pathname + router.state.location.hash;
+    await router.navigate(address);
+    await expect.element(focusTarget).toHaveFocus();
+    await expect.element(card).toBeInViewport({ ratio: 1 });
+  });
+
+  it.each(['desktop', 'phone'] as const)('another_requests_hash_keeps_the_existing_chat_landing_on_%s', async (viewport) => {
+    const other = mockStore.world.addHeldRefund();
+    const last = lengthen(session(SEEDED_HOLD));
+    const { screen } = await renderRoute(`${conversation(SEEDED_HOLD)}#request-${other.decision_id}`, { viewport });
+    await expect.element(log(screen).getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
+    if (viewport === 'phone') await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor', exact: true })).toHaveFocus();
+    else expect(document.activeElement).toBe(document.body);
+    const focusTarget = page.elementLocator(heldCard(screen, SEEDED_REASON).element().closest('.cd-approval-card__card')!);
+    await expect.element(focusTarget).not.toHaveFocus();
+  });
+
   it('take_over_keeps_the_list_and_the_head_in_place', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     const { screen } = await renderRoute(conversation(DANA_LIVE));
@@ -1645,7 +1684,7 @@ describe('Conversations', () => {
 
   it('in_a_short_window_focus_in_the_transcript_holds_it', async () => {
     // A long chat with Dana's refund held at its end, opened at 1440 by 640, where the open
-    // conversation scrolls as one (under 37.5rem of content) and its end still shows the last held
+    // conversation scrolls as one (under 38rem of content) and its end still shows the last held
     // card's receipt above the card, with its "Your rule" box, and the owner's controls: it opens
     // at its end, and the owner is on the last receipt.
     const first = mockStore.world.addHeldRefund();
@@ -2826,7 +2865,7 @@ describe('Conversations', () => {
   it('conversations_fit_a_phone', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
-    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 47.5rem, so it scrolls as one.
     const { screen, router } = await renderRoute(LIST, { viewport: SHORT_PHONE });
 
     // The list has the page to itself.

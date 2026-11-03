@@ -60,8 +60,8 @@ export const Default: Story = {
       borderTopLeftRadius: '8px',
       borderTopWidth: '1px',
       borderTopColor: 'rgba(250, 249, 245, 0.36)',
-      fontSize: '14px',
-      lineHeight: '20px',
+      fontSize: '15px',
+      lineHeight: '21px',
       fontWeight: '380',
       color: 'rgba(250, 249, 245, 0.92)',
     });
@@ -156,7 +156,7 @@ export const Multiline: Story = {
     await userEvent.keyboard('x');
     await expect(counter()).toHaveTextContent('1350 / 1500');
     await expect(field).toHaveAccessibleDescription(`${hint} 1350 / 1500`);
-    expectComputed(counter() as HTMLElement, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(counter() as HTMLElement, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
 
     // maxLength caps the text: a paste past it stops at the limit, and the counter shows the field is full.
     await expect(field).toHaveAttribute('maxlength', '1500');

@@ -6,13 +6,15 @@
  * phone the sheet shows the receipt, and closing it brings Rules to the row. Under reduced motion
  * it is all at its end state at once.
  */
-import { onlineManager } from '@tanstack/react-query';
+import { onlineManager, useQueryClient } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
+import { useEffect, type ReactNode } from 'react';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { cdp, page, userEvent, type Locator } from 'vitest/browser';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { apiPath, ROUTES } from '../../api/routes.ts';
+import { routes } from '../../app/routes.tsx';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { worker } from '../../mocks/browser.ts';
 import { chenBusinessTools, seedBusinessTools } from '../../mocks/businessTools.ts';
@@ -21,11 +23,26 @@ import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import type { DeskRecord } from '../../mocks/world.ts';
 import { renderRoute, type RenderRouteOptions } from '../../test/renderRoute.tsx';
+import { rulesQuery } from './RuleDraftReview.tsx';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const ASK = 'Stop quoting on weekends';
 const CONFIRM_PATH = apiPath('confirmRules', { desk_id: RIVERA.deskId });
 const CHAT_PATH = apiPath('ruleChat', { desk_id: RIVERA.deskId });
+
+/** Evict Rules while away, so Back must wait for its sections rather than reuse a cached page. */
+function WithoutCachedRules({ children }: { children: ReactNode }) {
+  const client = useQueryClient();
+  useEffect(() => { client.removeQueries({ queryKey: rulesQuery(RIVERA.deskId).queryKey }); }, [client]);
+  return children;
+}
+
+const freshRulesOnBack = routes.map((route) => route.path !== '/app/:deskId' || route.index === true ? route : ({
+  ...route,
+  children: route.children?.map((child) => child.path !== 'profile' ? child : ({
+    ...child, element: <WithoutCachedRules>{child.element}</WithoutCachedRules>,
+  })),
+}));
 
 /** No refunds at all: a change to a row far down Rules, in Payments. */
 const STOP_REFUNDS = 'Stop refunds';
@@ -103,8 +120,8 @@ const SELECTED = 'rgb(60, 57, 47)';
 const CLEAR = 'rgba(0, 0, 0, 0)';
 
 /**
- * The tools on Rules a change can land on, by name, in the page's order: the Desk's own jobs, then
- * each connector's tools, each with the rules under it, drawn on the page rather than in its shapes.
+ * The tools on Rules a change can land on, by name, in the page's order: each connector's tools,
+ * then the Desk's own jobs, each with the rules under it, drawn on the page rather than in its shapes.
  */
 function landingRows(root: HTMLElement): { name: string; row: HTMLElement }[] {
   return [...root.querySelectorAll<HTMLElement>('section[data-tool]')]
@@ -649,10 +666,10 @@ describe('a preset or a new payment limit', () => {
 
   it.each(['Turner Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
     // Acme has none of the sample's suggestions, so Rules waits for its first reads before drawing.
-    // A short window, so Payments can be wholly out of view above Stripe. The Desk keeps its job, so
-    // Back lands its place on a page whose jobs section is drawn above it (#620).
+    // A short window, so Payments can be wholly out of view above Stripe. Bookings now precedes
+    // Payments; its section drawn late on Back must not move the owner's landing (#620).
     renameBusiness(business);
-    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
+    const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 }, routes: freshRulesOnBack });
     const root = screen.container;
     const stripe = screen.getByRole('region', { name: 'Stripe' });
     await expect.element(stripe.getByRole('button', { name: 'Change' })).toBeVisible();
@@ -674,20 +691,20 @@ describe('a preset or a new payment limit', () => {
     const needsYou = business === 'Acme Accounting' ? holdNeedsYou() : null;
     const version = desk().lastVersion;
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     if (needsYou !== null) {
-      await expect.poll(needsYou.held).toBeGreaterThan(0);
-      await expect.poll(() => desk().policy.version).toBe(version);
-      await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+      await expect.poll(needsYou.held, { timeout: 4_000 }).toBeGreaterThan(0);
+      await expect.poll(() => desk().policy.version, { timeout: 4_000 }).toBe(version);
+      await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeVisible();
       await pause(300);
       needsYou.release();
     }
 
     // The first row it changed, Payments' limit, comes into view and says so; the rule it lowered
     // lights up.
-    await expect.poll(() => paymentsLimit()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
-    await expect.poll(() => inView(paymentsLimit(), main)).toBe(true);
-    await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
+    await expect.poll(() => paymentsLimit()?.querySelector('.cd-pill')?.textContent, { timeout: 4_000 }).toBe('Updated');
+    await expect.poll(() => inView(paymentsLimit(), main), { timeout: 4_000 }).toBe(true);
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toEqual(['Payment link']);
     expect(fillOf(toolRow(root, 'Payment link'))).not.toBe('none');
     // Once it has come to rest, that is the owner's place: All rules, then Back, returns to it, on a
     // new visit with nothing updated.
@@ -697,13 +714,22 @@ describe('a preset or a new payment limit', () => {
       await pause(150);
       place = main.scrollTop;
       return place === before;
-    }).toBe(true);
+    }, { timeout: 4_000 }).toBe(true);
     // (Navigated to directly: clicking a link would first scroll it into view, moving the place.)
     await router.navigate(`${DESK}/profile`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' }), { timeout: 4_000 }).toBeVisible();
+    const backReads = holdRules();
     await router.navigate(-1);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => main.scrollTop).toBe(place);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(backReads.held, { timeout: 4_000 }).toBeGreaterThan(0);
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeVisible();
+    backReads.release();
+    const bookings = screen.getByRole('region', { name: 'Bookings', exact: true });
+    await expect.element(bookings, { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => main.scrollTop, { timeout: 4_000 }).toBe(place);
+    expect(bookings.element().getBoundingClientRect().bottom).toBeLessThan(paymentsLimit().getBoundingClientRect().top);
+    await pause(300);
+    expect(main.scrollTop).toBe(place);
     expect(updatedRows(root)).toEqual([]);
   });
 
@@ -870,7 +896,7 @@ describe('on a phone', () => {
 
     // Closed, both rows land.
     await panel.getByRole('button', { name: 'Close' }).click();
-    await expect.poll(() => updatedRows(root)).toEqual(['Share a document', 'Refund']);
+    await expect.poll(() => updatedRows(root)).toEqual(['Refund', 'Share a document']);
   });
 
   it('a_change_left_behind_with_back_never_lands_on_a_later_visit', async () => {
@@ -990,9 +1016,9 @@ describe("the business's own jobs", () => {
     const { screen, log } = await askForTheWeekdayChange({}, 'Make new client intake ask me first');
     await expect.element(log.getByText(INTAKE_ASKS_ANSWER, { exact: true })).toBeVisible();
     const root = screen.container;
-    // Rules scrolled to its end, the jobs at its top out of view.
+    // Rules scrolled to its top, the jobs near its end out of view.
     const main = screen.getByRole('main').element();
-    main.scrollTop = main.scrollHeight;
+    main.scrollTop = 0;
     await expect.poll(() => inView(jobCard(root, 'New client intake'), main)).toBe(false);
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();

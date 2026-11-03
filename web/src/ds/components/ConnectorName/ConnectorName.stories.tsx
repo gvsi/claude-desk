@@ -40,16 +40,16 @@ export const BuiltIn: Story = {
     await expect(heading).toHaveTextContent('Payments Built in');
     const title = heading.querySelector('.cd-connector-name__name');
     if (title === null) throw new Error('No name in the heading');
-    expectComputed(title, { fontFamily: /Source Serif 4/, fontSize: '24px', lineHeight: '32px' });
+    expectComputed(title, { fontFamily: /Source Serif 4/, fontSize: '26px', lineHeight: '34px' });
     // Beside each name, "Built in" in quiet caption type, and no Mock badge.
     const builtIn = canvas.getAllByText('Built in');
     await expect(builtIn).toHaveLength(3);
-    for (const label of builtIn) expectComputed(label, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    for (const label of builtIn) expectComputed(label, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(canvas.queryByText('Mock')).toBeNull();
     // The section size is the section type; inline takes the line's own type.
     const names = [...canvasElement.querySelectorAll('.cd-connector-name__name')];
-    expectComputed(names[1] ?? heading, { fontSize: '15px', fontWeight: '520' });
-    expectComputed(names[2] ?? heading, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(names[1] ?? heading, { fontSize: '16px', fontWeight: '520' });
+    expectComputed(names[2] ?? heading, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
   },
 };
 

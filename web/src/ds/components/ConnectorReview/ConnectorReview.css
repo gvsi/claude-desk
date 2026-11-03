@@ -197,3 +197,27 @@
     width: 100%;
   }
 }
+
+/* Setup’s signed review keeps the rules together, one sentence for each tool. */
+.cd-connector-review__rules {
+  margin-top: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  min-width: 0;
+}
+
+.cd-connector-review__rules-title {
+  margin: 0 0 var(--space-6);
+  color: var(--text-secondary);
+  font-weight: inherit;
+}
+
+.cd-connector-review__rules > .cd-rule-sentence + .cd-rule-sentence {
+  margin-top: var(--space-12);
+}
+
+.cd-connector-review__money {
+  margin: var(--space-12) 0 0;
+  color: var(--text-secondary);
+}

@@ -152,14 +152,14 @@
   min-height: 1lh;
 }
 
-/* Details is 24 px tall, a target's least; it centres on the first line of its row's words, which
-   stay where they were. */
+/* Details is 25 px tall, over a target's least of 24; it centres on the first line of its row's
+   words, which stay where they were. */
 .cd-house-rules__rule-actions > .cd-advanced-details__toggle,
 .cd-house-rules__tool-header > .cd-advanced-details__toggle {
   margin-block: calc(-1 * var(--space-2));
 }
 
-/* Details' empty place, on a row without Details ("Anything not listed here"), keeps the button's
+/* Details' empty place, on a tool row without Details (a money job's payment limit), keeps the button's
    whole box 2 px under the row's top, as the board draws every Details, so the row is as tall as
    the place and its dot sits at the place's middle. */
 .cd-house-rules__rule-actions:has(> .cd-advanced-details__slot) {

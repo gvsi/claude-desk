@@ -151,7 +151,7 @@ export const Board: Story = {
       await expect(tag.getBoundingClientRect().top).toBeGreaterThanOrEqual(time.getBoundingClientRect().bottom);
     }
     // Every lead keeps one height, tagged or not.
-    await expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([51]));
+    await expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([53]));
 
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);

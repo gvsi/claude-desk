@@ -10,7 +10,7 @@
  * none behind.
  */
 import { effectiveBrand } from './brand.ts';
-import type { Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
+import type { HoursWindow, Probe, ProbeResult, PublicDesk, RuleCard } from '../api/contracts.ts';
 import type {
   BusinessOut,
   Choice,
@@ -37,7 +37,8 @@ import type {
 } from '../api/views.ts';
 import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
-import { formatHours } from '../lib/format.ts';
+import { bookingHoursWords, formatHours } from '../lib/format.ts';
+import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { pickedAnswer } from '../setup/pickedAnswer.ts';
 import { replaceBusinessTools } from './businessTools.ts';
@@ -498,7 +499,7 @@ interface SituationWords {
 const SALON_WORDS: SituationWords = {
   // Open Tuesday to Saturday, as its description says.
   bookingDays: ['tue', 'wed', 'thu', 'fri', 'sat'],
-  bookings: 'Books appointments Tuesday to Saturday in your hours.',
+  bookings: 'Books appointments on Tuesday to Saturday, 8:00 am to 6:00 pm.',
   weekday: 'A visitor wants a cut on Tuesday afternoon',
   discount: 'A visitor asks for 10% off a cut and color',
   agentPays: 'the color appointment deposit',
@@ -511,7 +512,7 @@ const SALON_WORDS: SituationWords = {
 /** Turner Plumbing's words: the situations as the mock always told them. */
 const PLUMBER_WORDS: SituationWords = {
   bookingDays: WEEKDAYS,
-  bookings: 'Books weekday visits in your hours.',
+  bookings: 'Books weekday visits on weekdays, 8:00 am to 6:00 pm.',
   weekday: 'A visitor wants a drain cleared on Tuesday afternoon',
   discount: 'A visitor asks for 10% off if they pay cash',
   agentPays: 'the service call deposit',
@@ -524,7 +525,7 @@ const PLUMBER_WORDS: SituationWords = {
 /** Words for a business none of the starters describes: nothing in them names a kind of work. */
 const ANY_BUSINESS_WORDS: SituationWords = {
   bookingDays: WEEKDAYS,
-  bookings: 'Books weekday times in your hours.',
+  bookings: 'Books weekday times on weekdays, 8:00 am to 6:00 pm.',
   weekday: 'A visitor wants to book a time on Tuesday afternoon',
   discount: 'A visitor asks for 10% off if they pay cash',
   agentPays: 'the deposit',
@@ -550,7 +551,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
     [CPA_FIRM, /\b(?:contab|contador|impuestos)/i],
     {
       bookingDays: WEEKDAYS,
-      bookings: 'Books weekday consults in your hours.',
+      bookings: 'Books weekday consults on weekdays, 8:00 am to 6:00 pm.',
       weekday: 'A visitor wants a free consult on Tuesday afternoon',
       discount: 'A visitor asks for 10% off their tax return',
       agentPays: 'the retainer',
@@ -567,7 +568,7 @@ const STARTER_WORDS: readonly [business: readonly RegExp[], words: SituationWord
     [/\b(?:apartments?|tenants?|landlords?|departamentos?|inquilinos?)\b/i],
     {
       bookingDays: WEEKDAYS,
-      bookings: 'Books weekday viewings in your hours.',
+      bookings: 'Books weekday viewings on weekdays, 8:00 am to 6:00 pm.',
       weekday: 'A visitor wants a viewing on Tuesday afternoon',
       discount: "A visitor asks for 10% off the first month's rent",
       agentPays: 'the application fee',
@@ -797,12 +798,20 @@ function markDecided(interview: Interview, proposalId: string): void {
 
 /** The CPA fixture's proposals, made once so their ids remain stable throughout the interview. */
 const proposalId = () => `p-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
-function consultantProposals(): ProposalCard[] {
+function bookingHow(hours: readonly HoursWindow[], minutes: number, autonomy: JobProposal['autonomy']): string {
+  const when = bookingHoursWords(hours);
+  const clause = when ? ` ${when}` : '';
+  return autonomy === 'ask'
+    ? `New clients ask for a time${clause}, and you approve each ${minutes}-minute call.`
+    : `New clients pick a time${clause} and book a ${minutes}-minute call.`;
+}
+
+function consultantProposals(hours: readonly HoursWindow[]): ProposalCard[] {
   const jobs: JobProposal[] = [
     {
       job: 'schedule', title: 'Book a free intro call', autonomy: 'auto', who: 'New clients',
       why: 'New clients pick a time for their free consult without emailing back and forth.',
-      how: 'New clients pick a time within your opening hours and book a 20-minute call.',
+      how: bookingHow(hours, 20, 'auto'),
       can_do_today: true, config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
     },
     {
@@ -883,7 +892,7 @@ function openConsultant(interview: Interview): void {
 }
 
 /** One proposal per turn; an older client is never left waiting on a hidden card. */
-function nextConsultant(interview: Interview): void {
+function nextConsultant(world: MockWorld, interview: Interview): void {
   const shown = new Set(interview.state.messages.flatMap(({ card }) => card ? [card.proposal_id] : []));
   const next = interview.cardsEnabled ? interview.proposals.find((card) => !shown.has(card.proposal_id)) : undefined;
   interview.state.pending_card = next?.proposal_id ?? null;
@@ -892,10 +901,13 @@ function nextConsultant(interview: Interview): void {
     if (next.connector && !next.connector.connectable) {
       say(interview, 'claude', CPA_COPY.consult);
       interview.state.messages.push({ role: 'claude', text: '', choices: [], card: next });
-      nextConsultant(interview);
+      nextConsultant(world, interview);
       return;
     }
     const job = next.job;
+    if (job?.config?.block === 'typed_booking') {
+      job.how = bookingHow(world.desk(interview.state.desk_id)!.summary.hours, job.config.minutes, job.autonomy);
+    }
     const intro = next.connector?.app === 'google_calendar' ? CPA_COPY.consult
       : job?.job === 'schedule' ? interview.proposals.some(({ state, connector }) => state === 'accepted' && connector?.app === 'google_calendar' && connector.connected === true) ? CPA_COPY.calendarConnected : null
       : job?.job === 'intake' ? CPA_COPY.intake
@@ -1203,9 +1215,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       changed = booking.minutes !== previousMinutes || updated.job.autonomy !== card.job?.autonomy;
       if (changed) {
         updated.job.title = updated.job.autonomy === 'ask' ? 'Request a free intro call' : 'Book a free intro call';
-        updated.job.how = updated.job.autonomy === 'ask'
-          ? `New clients ask for a time within your opening hours, and you approve each ${booking.minutes}-minute call.`
-          : `New clients pick a time within your opening hours and book a ${booking.minutes}-minute call.`;
+        updated.job.how = bookingHow(world.desk(interview.state.desk_id)!.summary.hours, booking.minutes, updated.job.autonomy);
       }
     }
     if (changed) {
@@ -1225,7 +1235,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
       // As the API's typed decision: a yes can't accept a payment with no amount, so its decline is setup's, not the owner's.
       if (no || !unpriced) markDecided(interview, card.proposal_id);
       connectAcceptedProposal(world, interview, card);
-      nextConsultant(interview);
+      nextConsultant(world, interview);
     } else {
       // Questions and unknown words leave the proposal pending, with no permission granted.
       say(interview, 'claude', card.job?.how ?? CPA_COPY.connectorPending);
@@ -1244,7 +1254,7 @@ function applyAnswer(world: MockWorld, interview: Interview, text: string, owner
   }
   if (interview.state.question === 'money_limit') interview.capCents = interview.consultant ? consultantCap(text) : capFromAnswer(text);
   if (interview.consultant) {
-    if (question === 'what_you_do') nextConsultant(interview);
+    if (question === 'what_you_do') nextConsultant(world, interview);
     else if (question === 'money_limit' && !interview.moneyOptedIn && text.trim() === CPA_COPY.optChoices[1]) {
       interview.moneyOptedIn = true;
       interview.capCents = 0;
@@ -1508,7 +1518,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     consultant: CPA_FIRM.test(text),
     words: situationWordsOf(text),
     cardsEnabled: false,
-    proposals: consultantProposals(),
+    proposals: consultantProposals(desk.summary.hours),
     moneyOptedIn: false,
     covered: new Set(),
     answers: {},
@@ -1758,7 +1768,7 @@ export const SETUP_ROUTES: ServedRoutes = {
       if (proposal.job && typeof body.title === 'string') proposal.job.title = body.title;
       if (proposal.job?.config?.block === 'purpose_payment' && typeof body.amount_cents === 'number') proposal.job.config.amount_cents = body.amount_cents;
       connectAcceptedProposal(sv.world, interview, proposal);
-      if (interview.state.pending_card === proposal.proposal_id) nextConsultant(interview);
+      if (interview.state.pending_card === proposal.proposal_id) nextConsultant(sv.world, interview);
     };
     if (interview.holdDecision) {
       interview.holdDecision = false;

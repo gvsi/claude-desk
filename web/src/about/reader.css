@@ -822,9 +822,12 @@
   color: var(--text-secondary);
 }
 
-/* A placeholder pill and the punctuation after it, kept on one line. */
+/* A placeholder pill and the punctuation after it, kept together: one box that moves whole to the next line
+   rather than splitting, as the owner's name does in the public chat's disclosure, and that wraps inside itself
+   only when it is longer than the line, so it never runs past the column. */
 .cd-about-nowrap {
-  white-space: nowrap;
+  display: inline-block;
+  max-width: 100%;
 }
 
 /* The reading page, as the reader boards draw it. On a desktop: a top bar, the centered title, summary and

@@ -10,10 +10,10 @@
   color: var(--text-secondary);
 }
 
-/* The 14 px icon sits on the middle of the meta type's 18 px first line. */
+/* The 14 px icon sits on the middle of the meta type's 19 px first line. */
 .cd-tool-label__icon {
   flex: none;
-  margin-top: var(--space-2);
+  margin-top: 2.5px;
 }
 
 .cd-tool-label__text {

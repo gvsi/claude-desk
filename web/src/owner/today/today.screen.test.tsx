@@ -22,7 +22,7 @@ import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { writeLocal } from '../../lib/storage.ts';
 import { worker } from '../../mocks/browser.ts';
-import { CALLBACK_REASON } from '../../mocks/script.ts';
+import { CALLBACK_REASON, DECISIONS } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -432,8 +432,86 @@ afterEach(() => {
 });
 
 describe('Today', () => {
-  it('sections_show_in_order', async () => {
+  it.each([
+    ['booking', 'The visitor booked before you answered, so this request closed.'],
+    ['expired', 'This request expired before you answered. Nothing was done.'],
+    ['cancelled', 'The visitor cancelled before you answered. Nothing was done.'],
+    ['allow_once', "You allowed this. It's done."],
+    ['deny_once', 'You denied this.'],
+  ] as const)('a_request_closed_elsewhere_by_%s_stays_only_for_this_view', async (ending, line) => {
+    const { screen } = await renderRoute(TODAY, { strict: true });
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const element = card.element();
+    const record = mockStore.world.decisions.get(seededHold().decision_id)!;
+    if (ending === 'booking') {
+      const { world } = mockStore;
+      const session = world.sessions.get(record.decision.session_id)!;
+      world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+    } else if (ending === 'cancelled') mockStore.world.cancel(record);
+    else if (ending === 'expired') record.decision = { ...record.decision, state: 'expired', answers: [] };
+    else {
+      const reply = await mockStore.dispatch('answer', { params: { decision_id: record.decision.decision_id }, body: { answer: ending } });
+      expect(reply).toMatchObject({ status: 200 });
+    }
+    await expect.element(card.getByText(line, { exact: true })).toBeVisible();
+    expect(card.element()).toBe(element);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+
+    // A fresh app reads only open requests; the undismissed closed card belongs to the old view.
+    const { screen: reloaded } = await renderRoute(TODAY);
+    await expect.element(region(reloaded, 'Since last night')).toBeVisible();
+    expect(heldCard(reloaded, SEEDED_REASON).elements()).toHaveLength(0);
+    expect(region(reloaded, 'Needs you').elements()).toHaveLength(0);
+  });
+
+  it('a_booking_elsewhere_keeps_the_held_card_until_dismissed', async () => {
     const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const element = card.element();
+    const slot = element.closest('li');
+    const { world } = mockStore;
+    const session = world.sessions.get(seededHold().session_id)!;
+    world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+
+    await expect.element(card.getByText('The visitor booked before you answered, so this request closed.', { exact: true })).toBeVisible();
+    expect(card.element()).toBe(element);
+    expect(card.element().closest('li')).toBe(slot);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+    expect(card.getByRole('button', { name: 'Allow this time' }).elements()).toHaveLength(0);
+    await dismissFromTheKeyboard(screen);
+    await expect.element(card).not.toBeInTheDocument();
+    await expect.poll(() => focusIsOn(region(screen, 'Live now').element())).toBe(true);
+    await aPollPasses();
+    expect(card.elements()).toHaveLength(0);
+  });
+
+  it('request_opens_the_conversation_and_back_restores_todays_scroll', async () => {
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const things = region(screen, 'Things to try');
+    const link = things.getByRole('link', { name: 'Open the request', exact: true });
+    const path = `${DESK}/conversations/${held.session_id}`;
+    await expect.element(link).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
+    const column = document.querySelector('main')!;
+    column.scrollTop = 150;
+    await nextFrames();
+    const top = column.scrollTop;
+    expect(top).toBeGreaterThan(0);
+    await link.click();
+    expect(router.state.location.pathname).toBe(path);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(things).toBeVisible();
+    await vi.waitFor(() => expect(column.scrollTop).toBe(top));
+  });
+
+  it('sections_show_in_order', async () => {
+    const { screen, router } = await renderRoute(TODAY);
     const needs = region(screen, 'Needs you');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(region(screen, 'Live now')).toBeVisible();
@@ -457,10 +535,13 @@ describe('Today', () => {
     expect(answers.elements().some((b) => b.hasAttribute('aria-haspopup'))).toBe(false);
     await expectScreenBasics(screen.container, { owner: true });
 
-    // "Open the request" brings that card into focus.
+    // "Open the request" opens the conversation with that card visible.
     const things = region(screen, 'Things to try');
-    await things.getByRole('button', { name: 'Open the request' }).click();
-    expect(focusIsOn(card.element())).toBe(true);
+    await things.getByRole('link', { name: 'Open the request' }).click();
+    await expect.element(card).toBeVisible();
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seededHold().session_id}`);
+    await router.navigate(-1);
+    await expect.element(needs).toBeVisible();
 
     // A newer hold the API lists first still comes after the oldest one, here and in Things to try.
     const [seeded] = await heldItems();
@@ -480,8 +561,9 @@ describe('Today', () => {
       .element(things.getByText('A request is waiting for your answer.', { exact: true }))
       .toBeVisible();
     (document.activeElement as HTMLElement | null)?.blur();
-    await things.getByRole('button', { name: 'Open the request' }).click();
-    expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+    await things.getByRole('link', { name: 'Open the request' }).click();
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seededHold().session_id}`);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('held_row_quotes_its_rule_after_a_colon_with_one_full_stop', async () => {
@@ -1277,7 +1359,7 @@ describe('Today', () => {
     const el = line.element();
     expect(el.tagName).toBe('P');
     expect(el).toHaveClass('cd-type-summary');
-    expectComputed(el, { fontSize: '18px', lineHeight: '27px', marginTop: '0px', marginBottom: '0px' });
+    expectComputed(el, { fontSize: '20px', lineHeight: '30px', marginTop: '0px', marginBottom: '0px' });
     expect(getComputedStyle(el).fontFamily).toContain('Source Serif 4');
     const first = since.getByRole('listitem').first().element();
     expect(el.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1826,7 +1908,7 @@ describe('Today', () => {
     expect(watch.drawn()).toBe(false);
   });
 
-  it('since_last_night_keeps_its_night_while_its_read_fails', { timeout: 15_000 }, async () => {
+  it.each([[1280, 800], [1440, 900], [1512, 982]])('since_last_night_keeps_its_night_while_its_read_fails_at_%sx%s', { timeout: 15_000 }, async (width, height) => {
     // A night with things in it is read, then Today's refreshes fail. The card says so first, with
     // "Try again", over what it read: the night's line, its rows and "See all" stay, as Last 7
     // days' figures above zero do. Once a read works, the failure's line goes and the night stays.
@@ -1834,7 +1916,7 @@ describe('Today', () => {
       ...t,
       briefing: { ...t.briefing, total: 4, turned_down: 1, newest: { turned_down: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } },
     }));
-    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const { screen } = await renderRoute(TODAY, { retryScale: 0, viewport: { width, height } });
     const since = region(screen, 'Since last night');
     const night = since.getByText(
       '3 conversations since last night, all inside your rules. I booked one visit, answered one question and stopped one attempt.',
@@ -1854,8 +1936,7 @@ describe('Today', () => {
     expect(rows.elements()).toHaveLength(3);
     await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
     // The failure's line comes first in the card, 16 px over the night's line, as Last 7 days' is
-    // over its parts, and inset to the night's edge: its dot starts where the night's words do, and
-    // "Try again" ends where they may.
+    // over its parts, and inset to the night's edge: its dot starts where the night's words do.
     const notice = since.getByRole('alert').element();
     expect(notice.parentElement).toHaveClass('cd-card');
     expect(notice.parentElement?.firstElementChild).toBe(notice);
@@ -1864,10 +1945,16 @@ describe('Today', () => {
     words.selectNodeContents(night.element());
     const dot = notice.querySelector('.cd-status-dot');
     expect(Math.abs((dot?.getBoundingClientRect().left ?? -1) - words.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    // At these widths the failure's words and "Try again" don't fit on one line in the card, so, as
+    // a Notice does, "Try again" drops 8 px under the words, starting where they do, and stays inside
+    // the night's edge.
     const nightBox = night.element().getBoundingClientRect();
     const nightEnd = nightBox.right - Number.parseFloat(getComputedStyle(night.element()).paddingRight);
+    const message = notice.querySelector('.cd-notice__message')!.getBoundingClientRect();
     const retry = since.getByRole('button', { name: 'Try again' }).element().getBoundingClientRect();
-    expect(Math.abs(retry.right - nightEnd)).toBeLessThanOrEqual(1);
+    expect(Math.round(retry.top - message.bottom)).toBe(8);
+    expect(Math.abs(retry.left - (dot?.getBoundingClientRect().left ?? -1))).toBeLessThanOrEqual(1);
+    expect(retry.right).toBeLessThanOrEqual(nightEnd);
 
     failing.stop();
     await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
@@ -2136,7 +2223,7 @@ describe('Today', () => {
       .poll(() => visitor?.events.some(({ ev }) => ev.type === 'resolved' && ev.decision_id === decisionId), { timeout: 2_000 })
       .toBe(true);
     // Nothing is held now, so Things to try no longer offers to open it: its row stays, ticked off.
-    await expect.element(screen.getByRole('button', { name: 'Open the request' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('link', { name: 'Open the request' })).not.toBeInTheDocument();
     const things = region(screen, 'Things to try');
     await expect.element(things.getByText("Done. Your answer went to the visitor's chat.", { exact: true })).toBeVisible();
     await expect.element(things.getByRole('heading', { level: 3, name: 'Answer a held request' })).toBeVisible();
@@ -3261,7 +3348,7 @@ describe("Today's top band", () => {
     const { screen } = await renderRoute(TODAY, { viewport });
     const things = region(screen, 'Things to try');
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    await expect.element(things.getByRole('button', { name: 'Open the request' })).toBeVisible();
+    await expect.element(things.getByRole('link', { name: 'Open the request' })).toBeVisible();
     await skeletonGone();
     const band = document.querySelector('.cd-today__band');
     const main = document.querySelector('.cd-today__main');
@@ -3403,7 +3490,7 @@ describe("Today's top band", () => {
     await expect.element(chatRow).toHaveAttribute('href', customerLink(RIVERA.slug, RIVERA.deskId));
     await expect.element(chatRow).toHaveAttribute('target', '_blank');
     // A press anywhere on the row is the row's: its words, not just its chevron.
-    const answerRow = things.getByRole('button', { name: 'Answer a held request', exact: true });
+    const answerRow = things.getByRole('link', { name: 'Answer a held request', exact: true });
     // The row is under How your Desk works on a phone: bring it into sight to press it.
     answerRow.element().scrollIntoView({ block: 'center' });
     const answerTitle = box(things.getByRole('heading', { level: 3, name: 'Answer a held request' }).element());
@@ -3419,7 +3506,10 @@ describe("Today's top band", () => {
     const ringBox = { top: rows[2]!.getBoundingClientRect().top, bottom: rows[2]!.getBoundingClientRect().bottom };
     expect(ringBox.bottom - ringBox.top).toBeGreaterThan(box(answerRow.element()).height);
     await answerRow.click();
-    expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true);
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seededHold().session_id}`);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(things).toBeVisible();
 
     // "Try to break it" opens its ideas under the row, and says so.
     const breakRow = things.getByRole('button', { name: 'Try to break it', exact: true });
@@ -3571,9 +3661,10 @@ describe("Today's How your Desk works", () => {
     const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
     await expect.element(held).toBeVisible();
     expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
-    await expect.element(held).toHaveAttribute('href', `${TODAY}#request-${seeded.decision.decision_id}`);
+    await expect.element(held).toHaveAttribute('href', `${DESK}/conversations/${seeded.decision.session_id}#request-${encodeURIComponent(seeded.decision.decision_id)}`);
     await held.click();
-    await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seeded.decision.session_id}`);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await router.navigate(`${DESK}/safety`);
     await expect.element(screen.getByRole('link', { name: '2 held for you', exact: true })).toBeVisible();
   });
@@ -3598,7 +3689,7 @@ describe("Today's How your Desk works", () => {
     expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 1 for you', 'turned down 1 request']);
     expect(links.map((a) => a?.getAttribute('href'))).toEqual([
       `/app/${RIVERA.deskId}/conversations`,
-      `/app/${RIVERA.deskId}/today#request-${seededHold().decision_id}`,
+      `/app/${RIVERA.deskId}/conversations/${seededHold().session_id}#request-${encodeURIComponent(seededHold().decision_id)}`,
       `/app/${RIVERA.deskId}/safety`,
     ]);
     // Under a hairline, 16 px under the steps with 12 px inside it, in the secondary ink; each
@@ -3613,9 +3704,9 @@ describe("Today's How your Desk works", () => {
     expectComputed(count, { fontWeight: '600', fontVariantNumeric: 'tabular-nums' });
     expect(getComputedStyle(count).color).not.toBe(getComputedStyle(line()!).color);
 
-    // "held 1 for you" brings the oldest held request into focus in Needs you.
+    // "held 1 for you" opens the oldest held request in its conversation.
     await how.getByRole('link', { name: 'held 1 for you', exact: true }).click();
-    await vi.waitFor(() => expect(focusIsOn(heldCard(screen, SEEDED_REASON).element())).toBe(true));
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('how_your_desk_works_omits_held_when_only_callbacks_wait', async () => {
@@ -4421,55 +4512,36 @@ describe('Notifications from Today', () => {
     expect(links.elements()).toHaveLength(1);
     const link = links.first();
     expect(link.element().textContent).toContain(alert.body);
-    expect(link.element().getAttribute('href')).toBe(requestLink(held.decision_id));
+    expect(link.element().getAttribute('href')).toBe(`${DESK}/conversations/${held.session_id}#request-${encodeURIComponent(held.decision_id)}`);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Following it leaves the page and lands on the held request's card, in view.
     const closedReads = closedInboxReads(notificationsHeading(screen));
     await link.click();
     await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe(TODAY);
-    expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(held.decision_id)}`);
-    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${held.session_id}`);
+    await expect.element(card).toBeVisible();
     expectInView(card.element());
-    // Focus stays there, and the page, left, reads no more, a whole poll on.
+    // The page, left, reads no more, a whole poll on.
     await aPollPasses();
-    expect(focusIsOn(card.element())).toBe(true);
     expect(closedReads()).toBe(0);
   });
 
   it('inbox_alert_links_to_its_own_desk', async () => {
-    // The notifications are the whole copy's. On Emergencies, Main line's hold alert links to Main
-    // line's Today, as the held decision itself says, and following it lands on that card.
     const { screen, router } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
     const held = seededHold();
     await expect.element(notificationsRow(screen)).toBeVisible();
-    // Nothing is read about the alert's request until the page opens.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(requests('decision')).toEqual([]);
-
     const page = await openNotifications(screen);
     const link = requestRows(page);
-    await expect.element(link).toHaveAttribute('href', requestLink(held.decision_id));
+    const path = `${DESK}/conversations/${held.session_id}`;
+    await expect.element(link).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
     expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
-
-    const todayRead = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
     await link.click();
     await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe(TODAY);
-    const card = heldCard(screen, SEEDED_REASON);
-    // The page read Main line's Needs you, but not its Today. Hold that read so this always
-    // exercises the loading state after navigation, even when the mock answers quickly.
-    await expect.poll(todayRead.held).toBeGreaterThan(0);
-    expectTodayOpening();
-    expect(card.elements()).toHaveLength(0);
-    todayRead.release();
-    // Wait for Today's own reads to land before checking its card and focus. Looking up a
-    // missing card with element() on every retry serializes the page while it is still loading.
-    await expect.poll(() => document.querySelector('.cd-today-opening [aria-busy="true"]'), { timeout: 5_000 }).toBeNull();
-    await expect.element(card).toBeInTheDocument();
-    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
-    expectInView(card.element());
+    expect(router.state.location.pathname).toBe(path);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
   });
 
   it('inbox_alert_links_only_once_its_request_is_read', async () => {

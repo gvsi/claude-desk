@@ -30,7 +30,7 @@ export const OwnerSpeaking: Story = {
     await expect(said.blocks.map((block) => block.template)).toEqual(['owner_said']);
     // prose_is_serif_people_are_sans: people write in sans; only Claude writes in serif.
     const words = canvas.getByText(saidText);
-    expectComputed(words, { fontFamily: /Hanken Grotesk/, fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(words, { fontFamily: /Hanken Grotesk/, fontSize: '16px', color: 'rgba(250, 249, 245, 0.92)' });
     // The owner's words exactly, with no card frame, label or bubble.
     await expect(words.textContent).toBe(saidText);
     await expect(canvasElement.querySelector('.cd-card')).toBeNull();

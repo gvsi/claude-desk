@@ -15,13 +15,14 @@ export type ConnectorIconName =
 
 /** Each built-in connector's line icon. */
 const BUILT_IN = {
+  store: 'store',
   quotes: 'quote',
   bookings: 'calendar',
   leads: 'person',
   verification: 'lock',
   documents: 'document',
   payments: 'card',
-} as const satisfies Partial<Record<ConnectorIconName, IconName>>;
+} as const satisfies Partial<Record<ConnectorIconName | 'store', IconName>>;
 
 /**
  * Each third-party connector's own mark on the 24-unit grid, filled in its brand color token: Stripe's
@@ -41,7 +42,7 @@ const BRAND = {
 } as const satisfies Partial<Record<ConnectorIconName, { fill: string; d: string }>>;
 
 export interface ConnectorIconProps {
-  icon: ConnectorIconName;
+  icon: ConnectorIconName | 'store';
   /** Overrides the connector mark with a built-in glyph tile. */
   glyph?: IconName;
   /**
