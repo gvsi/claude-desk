@@ -312,9 +312,8 @@ function HeldAfter({ seen, waitsForReply, since, onSeen, render }: HeldAfterProp
     const waits = (): boolean => {
       if (first.seen || typeof el.getAnimations !== 'function' || typeof CSSAnimation === 'undefined') return false;
       if (document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
-      if (partsBefore(el)?.row.classList.contains('cd-transcript-row--live') && comingIn(el)) return true;
       forReply.current = first.waitsForReply && performance.now() - first.since < REPLY_WAIT_MS;
-      return forReply.current;
+      return forReply.current || (partsBefore(el)?.row.classList.contains('cd-transcript-row--live') === true && comingIn(el));
     };
     if (waits()) setPhase('waiting');
     else said.current();
@@ -328,11 +327,10 @@ function HeldAfter({ seen, waitsForReply, since, onSeen, render }: HeldAfterProp
     };
     let frame = 0;
     const step = () => {
-      if (forReply.current) {
-        // No reply came in time: it shows at once, where it is.
-        if (performance.now() - first.since < REPLY_WAIT_MS) frame = requestAnimationFrame(step);
-        else come('shown');
-      } else if (comingIn(el)) frame = requestAnimationFrame(step);
+      // Waiting for its reply, and for whatever before it is still coming in.
+      if ((forReply.current && performance.now() - first.since < REPLY_WAIT_MS) || comingIn(el)) frame = requestAnimationFrame(step);
+      // No reply came in time: it shows at once, where it is.
+      else if (forReply.current) come('shown');
       else come('landing');
     };
     frame = requestAnimationFrame(step);
@@ -587,10 +585,15 @@ export function OwnerTranscript({
   const [leadingCards = [], ...rowCards] = cardsAfter([leading, ...groups.rows.map((row) => row.receipts)], heldIds);
   const placed = new Set([leadingCards, ...rowCards].flat());
   // Each held request's card comes in after the reply that held it (HeldAfter). One whose hold
-  // came in while the owner watched, under a row that isn't Claude's reply (her question, before
-  // the reply has come), or not yet in the conversation at all, waits for that reply.
-  const holdCameLive = (receipts: readonly OwnerReceiptSource[], id: string) =>
-    liveAfter !== null && receipts.some(({ event, n }) => event.type === 'held' && event.decision_id === id && n > liveAfter);
+  // came in while the owner watched, before that reply has come, waits for it: a hold under a row
+  // that isn't Claude's reply (her question), under a reply older than the hold (a turn Claude
+  // started itself, whose own reply hasn't come), or not yet in the conversation at all.
+  const isReply = (row: OwnerRow) => row.item.kind === 'message' && row.item.ev.author !== 'owner';
+  const holdCameLive = (receipts: readonly OwnerReceiptSource[], id: string, under?: OwnerRow) =>
+    liveAfter !== null &&
+    receipts.some(
+      ({ event, n }) => event.type === 'held' && event.decision_id === id && n > liveAfter && (under === undefined || !isReply(under) || n > under.item.n),
+    );
   const held = (ids: readonly string[], waitsForReply: (id: string) => boolean): ReactNode[] =>
     ids.map((id) => (
       <HeldAfter
@@ -602,7 +605,6 @@ export function OwnerTranscript({
         render={(slot) => renderHeld(id, slot)}
       />
     ));
-  const isReply = (row: OwnerRow) => row.item.kind === 'message' && row.item.ev.author !== 'owner';
   const hasSeq = (receipts: readonly OwnerReceiptSource[]) => openSeq !== null && receipts.some((r) => r.event.ledger_seq === openSeq);
 
   const rows = groups.rows.map((row, index) => {
@@ -621,7 +623,7 @@ export function OwnerTranscript({
           onOpenTrace={openTrace}
         />
         {hasSeq(row.receipts) ? trace : null}
-        {held(cards, (id) => !isReply(row) && holdCameLive(row.receipts, id))}
+        {held(cards, (id) => holdCameLive(row.receipts, id, row))}
       </Fragment>
     );
   });

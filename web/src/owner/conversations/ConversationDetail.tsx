@@ -294,16 +294,28 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   // A request address takes its landing after useEndInView's initial end-of-chat scroll and the
   // ordinary phone/handoff arrival. Card refs exist once the loaded transcript has committed.
   // Spend each history arrival once, so polling never takes focus back after the owner moves on.
+  // A card still waiting its turn after a reply coming in (OwnerTranscript's HeldAfter) is unseen
+  // and can't take focus: the address waits for it to show, as long as the owner is still at it.
   const requestArrival = useRef<string | null>(null);
   const { cardFor } = answeredFocus;
   useEffect(() => {
-    if (loading || chat.data === undefined || !ready || requestArrival.current === location.key) return;
-    requestArrival.current = location.key;
+    if (loading || chat.data === undefined || !ready || requestArrival.current === location.key) return undefined;
+    const arrival = location.key;
     const decisionId = requestInHash(location.hash);
-    const card = decisionId === null ? undefined : cardFor(decisionId);
-    if (card === undefined) return;
-    card.focus();
-    card.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    const land = (): boolean => {
+      const card = decisionId === null ? undefined : cardFor(decisionId);
+      if (card?.closest('.cd-conversation__held')?.getAttribute('aria-busy') === 'true') return false;
+      requestArrival.current = arrival;
+      card?.focus();
+      card?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      return true;
+    };
+    if (land()) return undefined;
+    const waiting = new MutationObserver(() => {
+      if (land()) waiting.disconnect();
+    });
+    waiting.observe(transcriptRef.current ?? document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy'] });
+    return () => waiting.disconnect();
   }, [loading, chat.data, ready, location.key, location.hash, cardFor]);
   const pane = (content: ReactNode) => (
     <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
