@@ -4,8 +4,10 @@ import { expect, fn, within } from 'storybook/test';
 
 import type { SseEvent } from '../../api/contracts.ts';
 import '../../owner/today/Today.css';
-import { DEMO_VISITOR_THING, THINGS_TO_TRY as IDEAS } from '../../owner/arrival/ideas.ts';
+import { DEMO_VISITOR_THING, STOPPED_THING, THINGS_TO_TRY as IDEAS } from '../../owner/arrival/ideas.ts';
 import { DEMO_VISITOR_NOTE, DEMO_VISITOR_PILL } from '../../owner/conversations/copy.ts';
+import { doneCaption } from '../../owner/arrival/doneSignals.ts';
+import { ThingsProgress } from '../../owner/arrival/ThingsProgress.tsx';
 import { TODAY_COPY } from '../../owner/today/copy.ts';
 import { Button } from '../components/Button/Button.tsx';
 import { Card } from '../components/Card/Card.tsx';
@@ -32,7 +34,6 @@ import { expectFooter, expectOwnerFrame, one } from './spec.ts';
 
 const RILEY = 'Riley';
 const OWNER = rivera.business.ownerName;
-const OWNER_FIRST = OWNER.split(' ')[0]!;
 const turns = rivera.conversations.danaLive.turns;
 const WHISPER_CAPTION = 'Your whisper, 11:00 pm. Only Claude sees this.';
 const TAKE_OVER_WORDS = "Hi Mike! Will you bring something for a deep clog? It's been slow for a week.";
@@ -69,37 +70,20 @@ interface Thing {
 
 const [CHAT, BREAK, ANSWER, CREATE] = IDEAS;
 
-/**
- * "Try to break it" and the held row in the REV-DEMO boards' own words. The web app's Today words
- * have since changed (#865, #867); the stories' `canvasNote` says how.
- */
-const BOARD_BREAK = ["Ask for a discount, another customer's address or ", "'s home number. Safety shows what was stopped and why."] as const;
-const BOARD_HELD_BY = 'Held by your rule: ';
-
 function things(failed: boolean): Thing[] {
   return [
     { title: CHAT.title, detail: TODAY_COPY.chatDetail, icon: 'conversations', step: 'Open your public page', link: true },
     { title: DEMO_VISITOR_THING.title, detail: failed ? DEMO_VISITOR_THING.startFailed : DEMO_VISITOR_THING.detail, icon: DEMO_VISITOR_THING.icon, step: DEMO_VISITOR_THING.start, failed },
     {
       title: BREAK.title,
-      detail: (
-        <>
-          {BOARD_BREAK[0]}
-          <span data-copy="user">{OWNER_FIRST}</span>
-          {BOARD_BREAK[1]}
-        </>
-      ),
+      detail: TODAY_COPY.breakDetail,
       icon: 'safety',
       step: 'Show me ideas',
     },
+    { title: STOPPED_THING.title, detail: STOPPED_THING.detail, icon: STOPPED_THING.icon, step: STOPPED_THING.start },
     {
       title: ANSWER.title,
-      detail: (
-        <>
-          {TODAY_COPY.waiting} {BOARD_HELD_BY}
-          <span data-copy="user">{rivera.ruleCards['rv-quote'].reason}</span>
-        </>
-      ),
+      detail: TODAY_COPY.waiting,
       icon: 'clock',
       step: 'Open the request',
       held: true,
@@ -108,8 +92,10 @@ function things(failed: boolean): Thing[] {
   ];
 }
 
-/** Today's "Things to try" as the web app draws it: five cards, three across from 1280 px. */
-function DemoThings({ failed = false }: { failed?: boolean }) {
+/** Today's "Things to try" as the web app draws it: six cards, three across from 1280 px. */
+function DemoThings({ failed = false, completed = false }: { failed?: boolean; completed?: boolean }) {
+  const done = completed ? { chat: true, demo: true, break: true } : {};
+  const doneLines = [CHAT.done, DEMO_VISITOR_THING.done, BREAK.done];
   return (
     <section className="cd-things" aria-labelledby="board-demo-things">
       <div className="cd-things__head">
@@ -124,15 +110,16 @@ function DemoThings({ failed = false }: { failed?: boolean }) {
           </div>
         </div>
         <p className="cd-things__caption cd-type-meta">
-          <span className="cd-things__caption-now">About 10 minutes. No real customer sees any of it.</span>
+          <span className="cd-things__caption-now">{doneCaption(completed ? 3 : 0)}</span>
         </p>
+        <ThingsProgress done={done} />
       </div>
       <Card padding={16}>
         <ul className="cd-things__list">
-          {things(failed).map((thing) => (
-            <li key={thing.title} className="cd-things__item">
-              <span className="cd-things__icon">
-                <Icon name={thing.icon} size={16} />
+          {things(failed).map((thing, i) => (
+            <li key={thing.title} className={completed && i < 3 ? 'cd-things__item cd-things__item--done' : 'cd-things__item'}>
+              <span className={completed && i < 3 ? 'cd-things__icon cd-things__icon--done' : 'cd-things__icon'}>
+                <Icon name={completed && i < 3 ? 'check' : thing.icon} size={16} />
               </span>
               <div className="cd-things__text">
                 <h3 className="cd-things__item-title cd-type-control">
@@ -145,9 +132,10 @@ function DemoThings({ failed = false }: { failed?: boolean }) {
                     {thing.detail}
                   </p>
                 ) : (
-                  <p className="cd-things__detail cd-type-meta">{thing.detail}</p>
+                  <p className="cd-things__detail cd-type-meta">{completed && i < 3 ? doneLines[i] : thing.detail}</p>
                 )}
               </div>
+              {completed && i < 3 ? null : <>
               <div className="cd-things__action">
                 {thing.link ? (
                   <Button variant="secondary" href="#step">
@@ -159,19 +147,22 @@ function DemoThings({ failed = false }: { failed?: boolean }) {
                   </Button>
                 )}
               </div>
+              <button type="button" className="cd-things__go" aria-label={thing.title} onClick={fn()}><Icon name="chevron-right" size={16} /></button>
+              </>}
             </li>
           ))}
         </ul>
       </Card>
+      <p className="cd-things__vision cd-type-meta"><a className="cd-text-link" href="/about/vision">{TODAY_COPY.vision}</a></p>
     </section>
   );
 }
 
-function TodayBoard({ failed = false }: { failed?: boolean }) {
+function TodayBoard({ failed = false, completed = false }: { failed?: boolean; completed?: boolean }) {
   return (
     <RiveraFrame current="today" reviewer fill={false} counts={{ conversations: { n: 1, label: '1 needs you' }, safety: { n: 2, label: '2 blocked' } }}>
       <div className="board-demo-today">
-        <DemoThings failed={failed} />
+        <DemoThings failed={failed} completed={completed} />
         <ConceptFooter />
       </div>
     </RiveraFrame>
@@ -298,9 +289,8 @@ const IN_REVIEW = 'Built against the board in review; sign-off pending.';
 const SINCE_THE_BAR =
   'The board predates the bar pinned to the top of the open conversation (REV-720 C). The web app draws "Demo visitor" in that bar, right after the level pill, and the note at the top of the transcript, 16 px under the bar and over its opening lines, so it scrolls away with them. The web app\'s take-over and whisper composers now show example placeholders, with a helper line under the take-over one (#905), where the board draws the older placeholder words.';
 
-/** What the web app's Things to try draws differently from the REV-DEMO Today boards, by the owner's later choices. */
-const SINCE_THE_CHOICES =
-  "The other cards keep the board's words, where the web app's have since moved on: a hold past an automatic rule's limit has no “Held by your rule” line, since the held card's headline in Needs you already quotes that rule (owner decision, 2026-11-02, #671); “Try to break it” points at each reply's receipt, and a hold by a named rule reads “A request is waiting for your answer: {rule}.” (owner, 2026-11-02, #867).";
+/** Today's Things to try now follows the approved progress option A. */
+const SINCE_THE_CHOICES = 'The list uses the approved six-item progress layout, with See what was stopped after Try to break it.';
 
 const meta = {
   title: 'Boards/Demo visitor',
@@ -311,7 +301,7 @@ const meta = {
     canvas: 'N-Live-REV-DEMO-today-1512',
     canvasNote: [
       IN_REVIEW,
-      'REV-DEMO entry A, Today › Things to try (#artboard-cdae4f209f2e): "Watch a demo visitor" second of five cards, three across from 1280 px.',
+      'REV-DEMO entry A, Today › Things to try (#artboard-cdae4f209f2e): "Watch a demo visitor" second of six cards, three across from 1280 px.',
       'Only the band\'s Things to try is drawn; the greeting, How your Desk works, Needs you and the rest of Today are as the Today boards draw them.',
       SINCE_THE_CHOICES,
     ].join(' '),
@@ -333,6 +323,7 @@ async function expectThreeAcross(root: HTMLElement): Promise<HTMLElement[]> {
     'Chat as a customer',
     'Watch a demo visitor',
     'Try to break it',
+    'See what was stopped',
     'Answer a held request',
     'Create your own Desk',
   ]);
@@ -480,6 +471,34 @@ export const Ended: Story = {
     await expectHeadAndNote(canvasElement, DEMO_VISITOR_NOTE.finished, false);
     await expect(within(canvasElement).queryByRole('button', { name: 'Take over' })).toBeNull();
     await expect(within(canvasElement).queryByRole('textbox', { name: 'Whisper to Claude' })).toBeNull();
+    await expectNoSidewaysScroll();
+  },
+};
+
+/** Approved option A: the first three things done, with no Done pills. */
+export const ThingsProgressLaptop: Story = {
+  render: () => <TodayBoard completed />,
+  parameters: { canvas: 'REV-THINGS-A-1512', canvasNote: 'Things to try section of approved REV-THINGS-A-1512: six progress segments, flat done cards and green check discs. The demo visitor uses its approved done line; the rest of Today is outside this story.' },
+  play: async ({ canvasElement }) => {
+    const cards = await expectThreeAcross(canvasElement);
+    await expect(canvasElement.querySelectorAll('.cd-things__segment--done')).toHaveLength(3);
+    for (const card of cards.slice(0, 3)) {
+      await expect(card).toHaveClass('cd-things__item--done');
+      await expect(card.querySelector('.cd-things__icon--done')).not.toBeNull();
+      await expect(card.querySelector('.cd-things__action')).toBeNull();
+    }
+    await expect(within(cards[1]!).getByText(DEMO_VISITOR_THING.done)).toBeVisible();
+  },
+};
+
+export const ThingsProgressPhone: Story = {
+  render: () => <TodayBoard completed />,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+  parameters: { canvas: 'REV-THINGS-A-390', canvasNote: 'Things to try section of approved REV-THINGS-A-390: six rows in one card, with green check discs for the three done things. The rest of Today is outside this story.' },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelectorAll('.cd-things__item')).toHaveLength(6);
+    await expect(canvasElement.querySelectorAll('.cd-things__icon--done')).toHaveLength(3);
+    await expect(canvasElement.querySelectorAll('.cd-things__segment--done')).toHaveLength(3);
     await expectNoSidewaysScroll();
   },
 };

@@ -7,6 +7,11 @@
 import { useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { fn } from 'storybook/test';
 
+import '../../owner/today/Today.css';
+import { DEMO_VISITOR_THING, STOPPED_THING } from '../../owner/arrival/ideas.ts';
+import { ThingsProgress } from '../../owner/arrival/ThingsProgress.tsx';
+import { TODAY_COPY } from '../../owner/today/copy.ts';
+
 import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEvent, ToolName } from '../../api/contracts.ts';
 import { AlwaysOnList } from '../components/AlwaysOnList/AlwaysOnList.tsx';
 import { Breadcrumb } from '../components/Breadcrumb/Breadcrumb.tsx';
@@ -190,7 +195,7 @@ export interface ThingToTry {
   /** A held dot after the title, for something waiting on the owner. */
   waiting?: boolean;
   detail: string;
-  action: string;
+  action: string | null;
 }
 
 /** Today's things to try, as the arrival board signs them. */
@@ -201,6 +206,8 @@ export const THINGS_TO_TRY = {
     detail: 'Your public page opens in a new tab. Ask about a price or a time.',
     action: 'Open your public page',
   },
+  demo: { icon: DEMO_VISITOR_THING.icon, title: DEMO_VISITOR_THING.title, detail: DEMO_VISITOR_THING.detail, action: DEMO_VISITOR_THING.start },
+  stopped: { icon: STOPPED_THING.icon, title: STOPPED_THING.title, detail: STOPPED_THING.detail, action: STOPPED_THING.start },
   breakIt: {
     icon: 'safety',
     title: 'Try to break it',
@@ -223,44 +230,36 @@ export const THINGS_TO_TRY = {
   },
 } satisfies Record<string, ThingToTry>;
 
-/** "Things to try": a heading with its caption and Hide, then one card of rows, each with its button. */
+/** Today's six things, using the same grid, progress segments and phone rows as the app. */
 export function ThingsToTry({ things }: { things: ThingToTry[] }) {
   return (
-    <section className="board-section" aria-labelledby="board-things-to-try">
-      <div className="board-section__head">
-        <h2 id="board-things-to-try" className="board-section__title cd-type-section">
-          Things to try
-        </h2>
-        <p className="board-section__caption cd-type-meta">About 10 minutes. No real customer sees any of it.</p>
-        <span className="board-section__end">
-          <Button variant="ghost" onClick={fn()}>
-            Hide this list
-          </Button>
-        </span>
+    <section className="cd-things" aria-labelledby="board-things-to-try">
+      <div className="cd-things__head">
+        <div className="cd-things__head-line">
+          <h2 id="board-things-to-try" className="cd-things__title cd-type-section">Things to try</h2>
+          <div className="cd-things__hide"><Button variant="ghost" onClick={fn()}>Hide this list</Button></div>
+        </div>
+        <p className="cd-things__caption cd-type-meta">About 10 minutes. No real customer sees any of it.</p>
+        <ThingsProgress done={{}} />
       </div>
       <Card padding={16}>
-        <ul className="board-things">
+        <ul className="cd-things__list">
           {things.map((thing) => (
-            <li key={thing.title} className="board-thing">
-              <span className="board-thing__icon" aria-hidden="true">
-                <Icon name={thing.icon} size={16} />
-              </span>
-              <span className="board-thing__text">
-                <span className="board-thing__title cd-type-control">
-                  {thing.title}
-                  {thing.waiting ? <StatusDot tone="held" /> : null}
-                </span>
-                <span className="board-thing__detail cd-type-meta">{thing.detail}</span>
-              </span>
-              <span className="board-thing__action">
-                <Button variant="secondary" onClick={fn()}>
-                  {thing.action}
-                </Button>
-              </span>
+            <li key={thing.title} className="cd-things__item">
+              <span className="cd-things__icon" aria-hidden="true"><Icon name={thing.icon} size={16} /></span>
+              <div className="cd-things__text">
+                <h3 className="cd-things__item-title cd-type-control">{thing.title}{thing.waiting ? <StatusDot tone="held" /> : null}</h3>
+                <p className="cd-things__detail cd-type-meta">{thing.detail}</p>
+              </div>
+              {thing.action === null ? null : <>
+                <div className="cd-things__action"><Button variant="secondary" onClick={fn()}>{thing.action}</Button></div>
+                <button type="button" className="cd-things__go" aria-label={thing.title} onClick={fn()}><Icon name="chevron-right" size={16} /></button>
+              </>}
             </li>
           ))}
         </ul>
       </Card>
+      <p className="cd-things__vision cd-type-meta"><TextLink href="/about/vision">{TODAY_COPY.vision}</TextLink></p>
     </section>
   );
 }
@@ -432,7 +431,7 @@ export function TodayNeedsYou({
       <div className="board-today">
         <div className="board-today__main">
           <Greeting text="Good morning, Mike" presence={{ line: 'Quiet right now.', people: [] }} link={{ label: PUBLIC_LINK, onCopy: fn() }} />
-          <ThingsToTry things={[THINGS_TO_TRY.chat, THINGS_TO_TRY.breakIt, THINGS_TO_TRY.held, THINGS_TO_TRY.ownDesk]} />
+          <ThingsToTry things={[THINGS_TO_TRY.chat, THINGS_TO_TRY.demo, THINGS_TO_TRY.breakIt, THINGS_TO_TRY.stopped, THINGS_TO_TRY.held, THINGS_TO_TRY.ownDesk]} />
           <section className="board-section" aria-labelledby="board-needs-you">
             <SectionHeader id="board-needs-you" title="Needs you" count={{ n: 1, label: '1 needs you' }} />
             <ApprovalCard

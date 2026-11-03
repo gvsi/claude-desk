@@ -18,7 +18,7 @@ function TodayFreshCopy() {
       <div className="board-today">
         <div className="board-today__main">
           <Greeting text="Good morning, Mike" presence={{ line: 'Quiet right now.', people: [] }} link={{ label: PUBLIC_LINK, onCopy: fn() }} />
-          <ThingsToTry things={[THINGS_TO_TRY.chat, THINGS_TO_TRY.breakIt, THINGS_TO_TRY.ownDesk]} />
+          <ThingsToTry things={[THINGS_TO_TRY.chat, THINGS_TO_TRY.demo, THINGS_TO_TRY.breakIt, { ...THINGS_TO_TRY.stopped, detail: "When Claude turns a request down, it shows up here.", action: null }, { ...THINGS_TO_TRY.held, waiting: false, detail: "When a request waits for your answer, it shows up here.", action: null }, THINGS_TO_TRY.ownDesk]} />
           <section className="board-section" aria-labelledby="board-since-last-night">
             <SectionHeader id="board-since-last-night" title="Since last night" />
             <Card padding={20}>
@@ -40,7 +40,7 @@ const meta = {
     layout: 'fullscreen',
     canvas: 'N-Today-Empty-Run1',
     canvasNote: [
-      'Today with nothing recorded yet: no held request, so no "Answer a held request" row and no Needs you; "A quiet night" under Since last night; and "Last 7 days" saying there is nothing in each part, with no "Includes recorded history".',
+      'Today with nothing recorded yet: no held request, so its thing has no next step and no Needs you; "A quiet night" under Since last night; and "Last 7 days" saying there is nothing in each part, with no "Includes recorded history".',
       'The empty card under Since last night is EmptyState in a Card; the rest of the page is composed as on the Today board.',
       'The public link reads desk.example/rivera where the board writes “[prototype-domain]/rivera”; the board’s numbered pins are canvas notes.',
     ].join(' '),
@@ -57,8 +57,8 @@ export const Board: Story = {
     await expect(canvas.getByText('Your public page opens in a new tab. Ask about a price or a time.')).toBeVisible();
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' }), SPEC.greeting);
 
-    // Nothing is held, so neither the held row nor Needs you shows; nothing counts in the sidebar.
-    await expect(canvas.queryByText('Answer a held request')).toBeNull();
+    // Nothing is held, so its thing has no next step and Needs you is absent; the sidebar has no count.
+    await expect(canvas.getByText('Answer a held request')).toBeVisible();
     await expect(canvas.queryByRole('heading', { name: 'Needs you' })).toBeNull();
     const sidebar = canvas.getByRole('complementary', { name: 'Claude Desk' });
     await expect(sidebar.querySelector('.cd-count-pill')).toBeNull();
