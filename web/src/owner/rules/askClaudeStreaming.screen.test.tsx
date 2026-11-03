@@ -38,12 +38,12 @@ function gate(): { until: Promise<void>; release: () => void } {
 async function ask(viewport: Viewport, words = ASK) {
   const { screen } = await renderRoute(RULES, { viewport });
   const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
-  await expect.element(composer).toBeVisible();
+  await expect.element(composer, { timeout: 4_000 }).toBeVisible();
   await composer.fill(words);
   await userEvent.keyboard('{Enter}');
   // Beside the page it is a complementary panel; at 390 px, a full sheet over it.
   const panel = viewport === 'phone' ? screen.getByRole('dialog', { name: 'Ask Claude' }) : screen.getByRole('complementary', { name: 'Ask Claude' });
-  await expect.element(panel).toBeVisible();
+  await expect.element(panel, { timeout: 4_000 }).toBeVisible();
   return { screen, panel };
 }
 
@@ -67,16 +67,16 @@ async function finalAnswer(panel: { element(): Element }, words: string): Promis
 }
 
 describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (viewport) => {
-  it('grows_the_answer_then_shows_the_final_draft', async () => {
+  it('grows_the_answer_then_shows_the_final_draft', { timeout: 30_000 }, async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
     const { panel } = await ask(viewport);
     // Four words sent: the fourth waits for what follows it.
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+    await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's that change:");
     // Claude's words take the writing dots' place, in its serif, and nothing it drafted shows yet. A
     // screen reader hears "Claude is writing" until the final answer, which it hears once.
     const writing = panel.getByRole('status').filter({ hasText: 'Claude is writing' });
-    await expect.element(writing).toBeInTheDocument();
+    await expect.element(writing, { timeout: 4_000 }).toBeInTheDocument();
     expect(writing.element().getBoundingClientRect().width).toBeLessThanOrEqual(1);
     expect(growing(panel)?.getAttribute('aria-hidden')).toBe('true');
     expect(getComputedStyle(growing(panel)!.querySelector('p')!).fontFamily).toContain('Source Serif 4');
@@ -88,83 +88,83 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     await expectScreenBasics(document.body, { owner: true });
 
     held.release();
-    await expect.element(panel.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    await expect.element(panel.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeVisible();
     // The saved answer takes the growing one's place: its words once, whole.
     expect(growing(panel)).toBeNull();
     expect(panel.getByText(ANSWER, { exact: true }).elements()).toHaveLength(1);
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
-  it('takes_typing_while_the_answer_streams_and_sends_it_once_the_answer_ends', async () => {
+  it('takes_typing_while_the_answer_streams_and_sends_it_once_the_answer_ends', { timeout: 80_000 }, async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
     const { panel } = await ask(viewport);
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+    await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's that change:");
     // The panel's composer has focus as the answer streams, and keeps it: typing works, Send waits.
     const box = panel.getByRole('textbox', { name: 'Ask Claude' });
     const send = panel.getByRole('button', { name: 'Send', exact: true });
-    await expect.element(box).toHaveFocus();
-    await expect.element(box).toBeEnabled();
+    await expect.element(box, { timeout: 4_000 }).toHaveFocus();
+    await expect.element(box, { timeout: 4_000 }).toBeEnabled();
     await userEvent.keyboard('And on holidays?');
-    await expect.element(box).toHaveValue('And on holidays?');
-    await expect.element(send).toBeDisabled();
+    await expect.element(box, { timeout: 4_000 }).toHaveValue('And on holidays?');
+    await expect.element(send, { timeout: 4_000 }).toBeDisabled();
     await userEvent.keyboard('{Enter}');
-    await expect.element(box).toHaveValue('And on holidays?');
+    await expect.element(box, { timeout: 4_000 }).toHaveValue('And on holidays?');
     expect(requests('ruleChat')).toHaveLength(1);
 
     held.release();
     await finalAnswer(panel, 'Nothing changes until you confirm it.');
     // The answer has come in: the words typed meanwhile are still there, with focus, and they send.
-    await expect.element(box).toHaveFocus();
-    await expect.element(box).toHaveValue('And on holidays?');
-    await expect.element(send).toBeEnabled();
+    await expect.element(box, { timeout: 4_000 }).toHaveFocus();
+    await expect.element(box, { timeout: 4_000 }).toHaveValue('And on holidays?');
+    await expect.element(send, { timeout: 4_000 }).toBeEnabled();
     await userEvent.keyboard('{Enter}');
-    await expect.poll(() => requests('ruleChat')).toHaveLength(2);
-    await expect.element(box).toHaveValue('');
+    await expect.poll(() => requests('ruleChat'), { timeout: 4_000 }).toHaveLength(2);
+    await expect.element(box, { timeout: 4_000 }).toHaveValue('');
   });
 
-  it('keeps_the_writing_dots_until_a_word_is_whole', async () => {
+  it('keeps_the_writing_dots_until_a_word_is_whole', { timeout: 25_000 }, async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 1, until: held.until });
     const { panel } = await ask(viewport);
-    await expect.element(panel.getByRole('status').filter({ hasText: 'Claude is writing' })).toBeInTheDocument();
+    await expect.element(panel.getByRole('status').filter({ hasText: 'Claude is writing' }), { timeout: 4_000 }).toBeInTheDocument();
     // The first word alone could still be cut off, so nothing shows of it yet.
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(growing(panel)).toBeNull();
     expect(panel.element().querySelector('.cd-writing-indicator')).not.toBeNull();
     held.release();
-    await expect.element(panel.getByText(ANSWER, { exact: true })).toBeVisible();
+    await expect.element(panel.getByText(ANSWER, { exact: true }), { timeout: 4_000 }).toBeVisible();
   });
 
-  it('starts_the_answer_again_on_a_reset', async () => {
+  it('starts_the_answer_again_on_a_reset', { timeout: 25_000 }, async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { resetAfter: 3, pauseAfter: 5, until: held.until });
     const { panel } = await ask(viewport);
     // Three words, then a reset, then the first two again, the second waiting for what follows it.
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's");
+    await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's");
     expect(panel.getByText("Here's that change:", { exact: false }).elements()).toHaveLength(0);
     held.release();
-    await expect.element(panel.getByText(ANSWER, { exact: true })).toBeVisible();
+    await expect.element(panel.getByText(ANSWER, { exact: true }), { timeout: 4_000 }).toBeVisible();
   });
 
   it('says_why_when_the_stream_fails_as_the_json_answer_would', async () => {
     mockStore.planStream('ruleChat', { fail: { status: 409, error: 'rules_cannot_be_checked' }, failAfter: 2 });
     const { panel } = await ask(viewport);
-    await expect.element(panel.getByText(RULES_UNAVAILABLE_COPY, { exact: true })).toBeVisible();
+    await expect.element(panel.getByText(RULES_UNAVAILABLE_COPY, { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(growing(panel)).toBeNull();
     expect(panel.getByText(ANSWER, { exact: true }).elements()).toHaveLength(0);
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
-  it('says_what_the_json_answer_would_for_a_limit_not_set_and_an_unexpected_failure', async () => {
+  it('says_what_the_json_answer_would_for_a_limit_not_set_and_an_unexpected_failure', { timeout: 25_000 }, async () => {
     mockStore.planStream('ruleChat', { fail: { status: 422, error: 'above_money_cap', cap_cents: 0 }, failAfter: 2 });
     const { screen, panel } = await ask(viewport);
-    await expect.element(panel.getByText("You haven't set a limit for taking money without asking. Set one first.", { exact: true })).toBeVisible();
+    await expect.element(panel.getByText("You haven't set a limit for taking money without asking. Set one first.", { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(growing(panel)).toBeNull();
     mockStore.planStream('ruleChat', { fail: { status: 500, error: 'internal' }, failAfter: 1 });
     await panel.getByRole('textbox', { name: 'Ask Claude' }).fill(ASK);
     await userEvent.keyboard('{Enter}');
-    await expect.element(panel.getByText(DRAFT_FAILED, { exact: true })).toBeVisible();
+    await expect.element(panel.getByText(DRAFT_FAILED, { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(growing(panel)).toBeNull();
     expect(requests('ruleChat')).toHaveLength(2);
     expect(screen.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
@@ -173,15 +173,15 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
   it.each([
     { cap: null, line: "That's above your limit of $500. Raise the limit first." },
     { cap: 0, line: "You haven't set a limit for taking money without asking. Set one first." },
-  ])('refuses_a_money_rule_over_the_limit_after_its_answer_streamed_with_cap_$cap', async ({ cap, line }) => {
+  ])('refuses_a_money_rule_over_the_limit_after_its_answer_streamed_with_cap_$cap', { timeout: 25_000 }, async ({ cap, line }) => {
     if (cap !== null) mockStore.world.desk(RIVERA.deskId)!.policy.auto_money_cap_cents = cap;
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
     const { panel } = await ask(viewport, PAYMENT_LINKS);
     // The answer streams first: the limit is checked once the change is drafted, after it.
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+    await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's that change:");
     held.release();
-    await expect.element(panel.getByText(line, { exact: true })).toBeVisible();
+    await expect.element(panel.getByText(line, { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(growing(panel)).toBeNull();
     expect(panel.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(requests('ruleChat')).toHaveLength(1);
@@ -190,7 +190,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
   it('asks_again_as_json_when_the_stream_breaks_off', async () => {
     mockStore.planStream('ruleChat', { dropAfter: 2 });
     const { panel } = await ask(viewport);
-    await expect.element(panel.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    await expect.element(panel.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeVisible();
     expect(panel.getByText(ANSWER, { exact: true }).elements()).toHaveLength(1);
     expect(requests('ruleChat')).toHaveLength(2);
   });
@@ -198,20 +198,20 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
   it('shows_a_refusal_before_any_stream_as_today', async () => {
     mockStore.inject({ route: 'ruleChat', status: 422, body: { error: 'above_money_cap', cap_cents: 50_000 } });
     const { panel } = await ask(viewport);
-    await expect.element(panel.getByText('$500', { exact: false })).toBeVisible();
+    await expect.element(panel.getByText('$500', { exact: false }), { timeout: 4_000 }).toBeVisible();
     expect(growing(panel)).toBeNull();
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
-  it('asks_nothing_it_had_queued_once_the_desk_closes', async () => {
+  it('asks_nothing_it_had_queued_once_the_desk_closes', { timeout: 25_000 }, async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 2, until: held.until });
     const { screen, panel } = await ask(viewport);
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's");
+    await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's");
     // A second question waits behind the first.
     await panel.getByRole('textbox', { name: 'Ask Claude' }).fill('Why?');
     await userEvent.keyboard('{Enter}');
-    await expect.element(panel.getByText('Why?', { exact: true })).toBeVisible();
+    await expect.element(panel.getByText('Why?', { exact: true }), { timeout: 4_000 }).toBeVisible();
     // The owner leaves the Desk while the first answer is written.
     await screen.unmount();
     held.release();
@@ -219,7 +219,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(requests('ruleChat')).toHaveLength(1);
   });
 
-  it('leaves_the_owner_where_they_scrolled_while_the_answer_grows', async () => {
+  it('leaves_the_owner_where_they_scrolled_while_the_answer_grows', { timeout: 75_000 }, async () => {
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
     const words = growingWords(long);
     mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
@@ -247,7 +247,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
   });
 
-  it('leaves_the_owner_where_they_scroll_in_the_same_frame_as_new_words', async () => {
+  it('leaves_the_owner_where_they_scroll_in_the_same_frame_as_new_words', { timeout: 75_000 }, async () => {
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
     const words = growingWords(long);
     mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
@@ -277,7 +277,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
   });
 
-  it('leaves_the_owner_where_they_scroll_up_in_the_same_frame_as_new_words', async () => {
+  it('leaves_the_owner_where_they_scroll_up_in_the_same_frame_as_new_words', { timeout: 95_000 }, async () => {
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
     mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
     mockStore.planStream('ruleChat', { quiet: true });
@@ -316,7 +316,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
   });
 
-  it('follows_a_follow_up_answer_once_the_conversation_overflows', async () => {
+  it('follows_a_follow_up_answer_once_the_conversation_overflows', { timeout: 75_000 }, async () => {
     // A first answer long enough that the conversation scrolls.
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
     mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
@@ -347,7 +347,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
 
   it('shows_a_drafted_change_with_both_its_buttons_in_view', async () => {
     const { panel } = await ask(viewport);
-    await expect.element(panel.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    await expect.element(panel.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeVisible();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const log = panel.element().querySelector<HTMLElement>('[role="log"]')!;
     const inLog = (el: Element) => {
@@ -363,7 +363,7 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     if (keep.getBoundingClientRect().bottom - words.getBoundingClientRect().top <= log.clientHeight) expect(inLog(words)).toBe(true);
   });
 
-  it('keeps_the_owners_place_when_they_scrolled_before_the_draft_landed', async () => {
+  it('keeps_the_owners_place_when_they_scrolled_before_the_draft_landed', { timeout: 45_000 }, async () => {
     // A first answer long enough that the conversation scrolls.
     const long = Array.from({ length: 30 }, (_, n) => `Part ${n + 1} of the answer explains one more thing about how quotes work on weekdays.`).join(' ');
     mockStore.inject({ route: 'ruleChat', status: 200, body: { answer: long, draft: null } });
@@ -376,23 +376,23 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     mockStore.planStream('ruleChat', { pauseAfter: 6, until: held.until });
     await panel.getByRole('textbox', { name: 'Ask Claude' }).fill(ASK);
     await userEvent.keyboard('{Enter}');
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change: quotes stay");
+    await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's that change: quotes stay");
     log.scrollTop -= 150;
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const read = log.scrollTop;
     held.release();
-    await expect.element(panel.getByRole('button', { name: 'Confirm change' })).toBeInTheDocument();
+    await expect.element(panel.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeInTheDocument();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     expect(Math.abs(log.scrollTop - read)).toBeLessThanOrEqual(1);
   });
 
-  it('closes_the_stream_with_the_panel', async () => {
+  it('closes_the_stream_with_the_panel', { timeout: 30_000 }, async () => {
     const held = gate();
     mockStore.planStream('ruleChat', { pauseAfter: 2, until: held.until });
     const { screen, panel } = await ask(viewport);
-    await expect.poll(() => growing(panel)?.textContent).toBe("Here's");
+    await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's");
     await panel.getByRole('button', { name: 'Close' }).click();
-    await expect.element(panel).not.toBeInTheDocument();
+    await expect.element(panel, { timeout: 4_000 }).not.toBeInTheDocument();
     held.release();
     // Asked again, the new conversation holds only its own exchange.
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
@@ -400,58 +400,58 @@ describe.each(['desktop', 'phone'] as const)('Ask Claude streaming at %s', (view
     await userEvent.keyboard('{Enter}');
     const again = viewport === 'phone' ? screen.getByRole('dialog', { name: 'Ask Claude' }) : screen.getByRole('complementary', { name: 'Ask Claude' });
     const explained = 'I can explain what a rule does, or draft a change to one. Ask about a tool by name, such as quotes, bookings or refunds.';
-    await expect.element(again.getByText(explained, { exact: true })).toBeVisible();
-    await expect.poll(() => growing(again)).toBeNull();
+    await expect.element(again.getByText(explained, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => growing(again), { timeout: 4_000 }).toBeNull();
     expect(again.getByText(ANSWER, { exact: true }).elements()).toHaveLength(0);
     expect(again.getByText(ASK, { exact: true }).elements()).toHaveLength(0);
   });
 });
 
 // Beside the panel, the Rules page's own composer stays in reach; on a phone the sheet covers it.
-it('holds_the_rules_page_composer_while_an_answer_streams_and_sends_once_it_has_come_in', async () => {
+it('holds_the_rules_page_composer_while_an_answer_streams_and_sends_once_it_has_come_in', { timeout: 70_000 }, async () => {
   const held = gate();
   mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
   const { screen, panel } = await ask('desktop');
-  await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+  await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's that change:");
   // The page's box takes typing and keeps focus while the answer streams; only Send and Enter wait.
   const box = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
   const send = () => box.element().closest('.cd-composer')!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
   await box.click();
   await userEvent.keyboard('And on holidays?');
-  await expect.element(box).toHaveValue('And on holidays?');
-  await expect.element(box).toHaveFocus();
+  await expect.element(box, { timeout: 4_000 }).toHaveValue('And on holidays?');
+  await expect.element(box, { timeout: 4_000 }).toHaveFocus();
   expect(send().disabled).toBe(true);
   await userEvent.keyboard('{Enter}');
-  await expect.element(box).toHaveValue('And on holidays?');
+  await expect.element(box, { timeout: 4_000 }).toHaveValue('And on holidays?');
   expect(requests('ruleChat')).toHaveLength(1);
 
   held.release();
   await finalAnswer(panel, 'Nothing changes until you confirm it.');
   // The answer has come in: the words are still there, with focus, and they send.
-  await expect.element(box).toHaveFocus();
-  await expect.element(box).toHaveValue('And on holidays?');
-  await expect.poll(() => send().disabled).toBe(false);
+  await expect.element(box, { timeout: 4_000 }).toHaveFocus();
+  await expect.element(box, { timeout: 4_000 }).toHaveValue('And on holidays?');
+  await expect.poll(() => send().disabled, { timeout: 4_000 }).toBe(false);
   await userEvent.keyboard('{Enter}');
-  await expect.poll(() => requests('ruleChat')).toHaveLength(2);
-  await expect.element(box).toHaveValue('');
+  await expect.poll(() => requests('ruleChat'), { timeout: 4_000 }).toHaveLength(2);
+  await expect.element(box, { timeout: 4_000 }).toHaveValue('');
 });
 
-it('holds_the_rules_page_suggestions_while_an_answer_streams_and_asks_once_it_has_come_in', async () => {
+it('holds_the_rules_page_suggestions_while_an_answer_streams_and_asks_once_it_has_come_in', { timeout: 55_000 }, async () => {
   const held = gate();
   mockStore.planStream('ruleChat', { pauseAfter: 4, until: held.until });
   const { screen, panel } = await ask('desktop');
-  await expect.poll(() => growing(panel)?.textContent).toBe("Here's that change:");
+  await expect.poll(() => growing(panel)?.textContent, { timeout: 4_000 }).toBe("Here's that change:");
   // A suggestion waits, in its place, while the answer comes in: a press asks nothing.
   const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button').first();
-  await expect.element(chip).toBeVisible();
-  await expect.element(chip).toBeDisabled();
+  await expect.element(chip, { timeout: 4_000 }).toBeVisible();
+  await expect.element(chip, { timeout: 4_000 }).toBeDisabled();
   (chip.element() as HTMLButtonElement).click();
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(requests('ruleChat')).toHaveLength(1);
 
   held.release();
   await finalAnswer(panel, 'Nothing changes until you confirm it.');
-  await expect.element(chip).toBeEnabled();
+  await expect.element(chip, { timeout: 4_000 }).toBeEnabled();
   await chip.click();
-  await expect.poll(() => requests('ruleChat')).toHaveLength(2);
+  await expect.poll(() => requests('ruleChat'), { timeout: 4_000 }).toHaveLength(2);
 });

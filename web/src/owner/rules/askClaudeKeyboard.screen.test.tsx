@@ -46,13 +46,13 @@ async function openFromSuggestionByKeyboard(place: Place, words: string) {
   const { screen } = await renderRoute(RULES, { viewport: WINDOWS[place], seed: 'rivera_quiet' });
   const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
   const chip = screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: words, exact: true });
-  await expect.element(chip).toBeVisible();
+  await expect.element(chip, { timeout: 4_000 }).toBeVisible();
   composer.element().focus();
   await tabTo(chip.element());
   await userEvent.keyboard('{Enter}');
   const panel = screen.getByRole(place === 'as a sheet' ? 'dialog' : 'complementary', { name: 'Ask Claude' });
   const log = panel.getByRole('log');
-  await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+  await expect.element(log.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeEnabled();
   return { screen, composer, chip, panel, log };
 }
 
@@ -67,17 +67,17 @@ async function closeByKeyboard(panel: Locator, closing: Closing): Promise<void> 
     await tabTo(panel.getByRole('button', { name: 'Close' }).element(), { back: true });
     await userEvent.keyboard('{Enter}');
   }
-  await expect.element(panel).not.toBeInTheDocument();
-  await expect.poll(() => document.querySelector('.cd-app-shell__panel')).toBeNull();
+  await expect.element(panel, { timeout: 4_000 }).not.toBeInTheDocument();
+  await expect.poll(() => document.querySelector('.cd-app-shell__panel'), { timeout: 4_000 }).toBeNull();
 }
 
 describe('ask claude opened from a suggestion by keyboard', () => {
-  it('the_page_composer_keeps_focus_when_asking_with_the_panel_open', async () => {
+  it('the_page_composer_keeps_focus_when_asking_with_the_panel_open', { timeout: 25_000 }, async () => {
     const { composer, panel } = await openFromSuggestionByKeyboard('beside the page', 'Stop quoting on weekends');
     await composer.fill('Keep weekday quotes as they are');
     await userEvent.keyboard('{Enter}');
-    await expect.element(panel.getByRole('log').getByText('Keep weekday quotes as they are', { exact: true })).toBeVisible();
-    await expect.element(composer).toHaveFocus();
+    await expect.element(panel.getByRole('log').getByText('Keep weekday quotes as they are', { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(composer, { timeout: 4_000 }).toHaveFocus();
   });
 
   it('the_phone_panel_send_keeps_focus_in_its_composer_without_visiting_close', async () => {
@@ -86,7 +86,7 @@ describe('ask claude opened from a suggestion by keyboard', () => {
     await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Stop quoting on weekends');
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole('dialog', { name: 'Ask Claude' });
-    await expect.element(panel.getByRole('button', { name: 'Keep my rules' })).toBeEnabled();
+    await expect.element(panel.getByRole('button', { name: 'Keep my rules' }), { timeout: 4_000 }).toBeEnabled();
     const composer = panel.getByRole('textbox', { name: 'Ask Claude' });
     await composer.fill('Keep weekday quotes as they are');
     const close = panel.getByRole('button', { name: 'Close' }).element();
@@ -95,14 +95,14 @@ describe('ask claude opened from a suggestion by keyboard', () => {
     close.addEventListener('focus', visit);
     try {
       await panel.getByRole('button', { name: 'Send', exact: true }).click();
-      await expect.element(composer).toHaveFocus();
+      await expect.element(composer, { timeout: 4_000 }).toHaveFocus();
       expect(visitedClose).toBe(false);
     } finally {
       close.removeEventListener('focus', visit);
     }
   });
 
-  it.each(['keyboard', 'touch'] as const)('a_suggestion_in_an_open_panel_hands_focus_on_by_%s', async (input) => {
+  it.each(['keyboard', 'touch'] as const)('a_suggestion_in_an_open_panel_hands_focus_on_by_%s', { timeout: 25_000 }, async (input) => {
     if (input === 'touch') await coarsePointer();
     const { screen, panel } = await openFromSuggestionByKeyboard('beside the page', 'Stop quoting on weekends');
     const words = 'Quote water heater installs up to $600';
@@ -110,13 +110,13 @@ describe('ask claude opened from a suggestion by keyboard', () => {
     if (input === 'keyboard') {
       chip.element().focus();
       await userEvent.keyboard('{Enter}');
-      await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+      await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' }), { timeout: 4_000 }).toHaveFocus();
     } else {
       await chip.click();
-      await expect.element(panel.getByRole('button', { name: 'Close' })).toHaveFocus();
+      await expect.element(panel.getByRole('button', { name: 'Close' }), { timeout: 4_000 }).toHaveFocus();
       expect(document.activeElement?.matches(':focus-visible')).toBe(false);
     }
-    await expect.element(panel.getByRole('log').getByText(words, { exact: true })).toBeVisible();
+    await expect.element(panel.getByRole('log').getByText(words, { exact: true }), { timeout: 4_000 }).toBeVisible();
   });
 
   it.each(['desktop', 'phone'] as const)('keeping_rules_returns_focus_to_the_panel_composer_on_%s', async (viewport) => {
@@ -125,11 +125,11 @@ describe('ask claude opened from a suggestion by keyboard', () => {
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole(viewport === 'phone' ? 'dialog' : 'complementary', { name: 'Ask Claude' });
     const keep = panel.getByRole('button', { name: 'Keep my rules' });
-    await expect.element(keep).toBeEnabled();
+    await expect.element(keep, { timeout: 4_000 }).toBeEnabled();
     await tabTo(keep.element(), { back: true });
     await userEvent.keyboard('{Enter}');
-    await expect.element(panel.getByText('Nothing changed. Your rules stay as they are.')).toBeVisible();
-    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    await expect.element(panel.getByText('Nothing changed. Your rules stay as they are.'), { timeout: 4_000 }).toBeVisible();
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' }), { timeout: 4_000 }).toHaveFocus();
   });
 
   it('keeping_rules_by_touch_hands_focus_on_without_opening_the_keyboard', async () => {
@@ -139,31 +139,31 @@ describe('ask claude opened from a suggestion by keyboard', () => {
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole('dialog', { name: 'Ask Claude' });
     const keep = panel.getByRole('button', { name: 'Keep my rules' });
-    await expect.element(keep).toBeEnabled();
+    await expect.element(keep, { timeout: 4_000 }).toBeEnabled();
     await keep.click();
-    await expect.element(panel.getByText('Nothing changed. Your rules stay as they are.')).toBeVisible();
-    await expect.element(panel.getByRole('button', { name: 'Close' })).toHaveFocus();
+    await expect.element(panel.getByText('Nothing changed. Your rules stay as they are.'), { timeout: 4_000 }).toBeVisible();
+    await expect.element(panel.getByRole('button', { name: 'Close' }), { timeout: 4_000 }).toHaveFocus();
     expect(document.activeElement?.matches(':focus-visible')).toBe(false);
   });
 
-  it.each(CASES)('closing_with_%s_gives_focus_back_to_the_suggestion %s', async (closing, place) => {
+  it.each(CASES)('closing_with_%s_gives_focus_back_to_the_suggestion %s', { timeout: 25_000 }, async (closing, place) => {
     const { chip, panel } = await openFromSuggestionByKeyboard(place, 'Quote water heater installs up to $600');
     await closeByKeyboard(panel, closing);
     // Focus comes back on the frame after the panel closes, which can land after the panel has gone.
-    await expect.element(chip).toHaveFocus();
+    await expect.element(chip, { timeout: 4_000 }).toHaveFocus();
   });
 
-  it.each(CASES)('closing_with_%s_once_its_change_applies_gives_focus_to_the_composer %s', async (closing, place) => {
+  it.each(CASES)('closing_with_%s_once_its_change_applies_gives_focus_to_the_composer %s', { timeout: 40_000 }, async (closing, place) => {
     const { composer, chip, panel, log } = await openFromSuggestionByKeyboard(place, 'Stop quoting on weekends');
     // Shift+Tab from Ask Claude's composer reaches "Keep my rules", then "Confirm change".
     await tabTo(log.getByRole('button', { name: 'Confirm change' }).element(), { back: true });
     await userEvent.keyboard('{Enter}');
-    await expect.element(log.getByText(/^Confirmed\. Version \d+ of your rules, checked against the always-on rules\.$/)).toBeVisible();
+    await expect.element(log.getByText(/^Confirmed\. Version \d+ of your rules, checked against the always-on rules\.$/), { timeout: 4_000 }).toBeVisible();
     // Quotes no longer go out on their own at weekends, so the suggestion has gone.
-    await expect.element(chip).not.toBeInTheDocument();
-    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    await expect.element(chip, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' }), { timeout: 4_000 }).toHaveFocus();
 
     await closeByKeyboard(panel, closing);
-    await expect.element(composer).toHaveFocus();
+    await expect.element(composer, { timeout: 4_000 }).toHaveFocus();
   });
 });

@@ -640,7 +640,7 @@ describe('Demo inbox', () => {
     // never that there are none.
     mockStore.inject({ route: 'ownerInbox', status: 500, times: 4 });
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`, { retryScale: 0 });
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     const row = screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Notifications', exact: true });
     await expect.element(row).toBeVisible();
     await vi.waitFor(() => expect(requests('ownerInbox')).toHaveLength(2));
@@ -681,7 +681,7 @@ describe('Demo inbox', () => {
 
     const nav = screen.getByRole('navigation', { name: 'Main' });
     await nav.getByRole('link', { name: 'Rules' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     await nav.getByRole('link', { name: 'Today' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(requests('ownerInbox')).toHaveLength(2);

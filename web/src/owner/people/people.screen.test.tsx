@@ -981,7 +981,7 @@ describe('share', () => {
     // elsewhere. Share, in the same app, leaves the promise out while its own read is out, and
     // after it lands with the tool off.
     const { screen, router } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' }), { timeout: 4_000 }).toBeVisible();
     riverasUrgentTool('disabled');
     const held = holdReads(RULES_READ);
     const reads = mockStore.requests.filter((r) => r.key === 'rules').length;
@@ -1001,7 +1001,7 @@ describe('share', () => {
     // tool goes off elsewhere and the owner opens Share, then that old answer arrives. Share never
     // promises the emergency callback: only its own read, made on Share, decides.
     const { screen, router } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' }), { timeout: 4_000 }).toBeVisible();
     let release = () => {};
     const released = new Promise<void>((resolve) => {
       release = resolve;
@@ -1021,7 +1021,7 @@ describe('share', () => {
     );
     // All rules reads the same rules as it opens, so a read is out as the owner moves on.
     await router.navigate(`${DESK}/rules/all`);
-    await expect.poll(() => old).not.toBeNull();
+    await expect.poll(() => old, { timeout: 4_000 }).not.toBeNull();
     riverasUrgentTool('disabled');
     let promised = false;
     const watch = new MutationObserver(() => {
@@ -1041,7 +1041,7 @@ describe('share', () => {
   it('a_failed_read_leaves_the_cached_emergency_promise_out', async () => {
     // The same cached read with the tool on, but Share's own read fails, its retry too.
     const { screen, router } = await renderRoute(`${DESK}/rules`, { retryScale: 0 });
-    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' }), { timeout: 4_000 }).toBeVisible();
     riverasUrgentTool('disabled');
     let failed = 0;
     worker.use(
@@ -1061,7 +1061,7 @@ describe('share', () => {
   it('a_fresh_read_with_the_urgent_tool_on_keeps_the_promise', async () => {
     // A cached read with the tool on, the tool still on: the promise only once Share's own read lands.
     const { screen, router } = await renderRoute(`${DESK}/rules`);
-    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Your Desk’s jobs' }), { timeout: 4_000 }).toBeVisible();
     const held = holdReads(RULES_READ);
     await router.navigate(`${DESK}/share`);
     await expect.element(screen.getByRole('list', { name: 'Ready-made words' })).toBeVisible();

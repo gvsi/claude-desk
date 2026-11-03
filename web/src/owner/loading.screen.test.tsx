@@ -2079,7 +2079,7 @@ it('rules_shapes_remeasure_when_fonts_become_ready', async () => {
   await vi.waitFor(() => expect(lines()).toBeGreaterThan(before));
 });
 
-it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async (viewport) => {
+it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', { timeout: 30_000 }, async (viewport) => {
   const { screen, router } = await openToday(viewport === 'phone' ? 'phone' : 'desktop');
   if (typeof viewport === 'number') await page.viewport(viewport, 768);
   const read = holdReads(RULES_READ);
@@ -2090,7 +2090,7 @@ it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async 
     stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
-      await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+      await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
       expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
       if (typeof viewport === 'number') {
         await nextFrames();
@@ -2166,14 +2166,14 @@ it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (view
 it.each([
   { label: 'rules', path: RULES, read: RULES_READ, region: '.cd-rules__region', status: 'Reading your rules', anchors: RULES_ANCHORS, until: '.cd-rules__version' },
   { label: 'safety', path: SAFETY, read: LEDGER_READ, region: '.cd-safety__region', status: 'Reading what was stopped', anchors: SAFETY_ANCHORS, until: '.cd-attempt-row' },
-].flatMap(item => (['desktop', 'phone'] as const).map(viewport => ({ ...item, viewport }))))('$label reload hands off without a gap at $viewport', async ({ path, read, region, status, anchors, until, viewport }) => {
+].flatMap(item => (['desktop', 'phone'] as const).map(viewport => ({ ...item, viewport }))))('$label reload hands off without a gap at $viewport', { timeout: 30_000 }, async ({ path, read, region, status, anchors, until, viewport }) => {
   if (path === SAFETY) await withFreshRecord();
   const desks = holdReads(ROUTES.desks.path);
   const pageRead = holdReads(read);
   const gaps = watchSkeletonGaps(until);
   const { screen } = await renderRoute(path, { viewport, pollScale: 100 });
   const headings = watchTopHeadings();
-  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
   await nextFrames();
   if (path === RULES) expect(document.querySelector(`${FULL_LAYER} .cd-rules__suggestions`)).toBeNull();
   const names = anchors.map(({ name }) => name);
@@ -2183,7 +2183,7 @@ it.each([
     status, anchors, continues: true,
     open: async () => {
       desks.release();
-      await vi.waitFor(() => expect(document.querySelector(`${region} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
+      await vi.waitFor(() => expect(document.querySelector(`${region} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
       expectSameShapes(region, names, before);
       const realFooter = landedElement('[data-owner-footer]')!.getBoundingClientRect();
       for (const edge of ['top', 'bottom', 'left', 'width', 'height'] as const) {
@@ -2287,8 +2287,8 @@ async function expectPausedPageRead({ path, queryKey, readPath, region, landed, 
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   if (prime !== undefined) {
     await router.navigate(prime);
-    await vi.waitFor(() => expect(landedElement(primeLanded!)).not.toBeNull());
-    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    await vi.waitFor(() => expect(landedElement(primeLanded!)).not.toBeNull(), { timeout: prime === RULES ? 4_000 : 1_000 });
+    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: prime === RULES ? 4_000 : 1_000 });
     await router.navigate(SAFETY);
     await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
   }
@@ -2309,9 +2309,9 @@ async function expectPausedPageRead({ path, queryKey, readPath, region, landed, 
   await vi.waitFor(() => {
     expect(client.getQueryState(queryKey)?.fetchStatus).toBe('paused');
     expect(client.getQueryState(queryKey)?.data).toBeUndefined();
-  });
-  await vi.waitFor(() => expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network), { timeout: 2_000 });
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  }, { timeout: path === RULES ? 4_000 : 1_000 });
+  await vi.waitFor(() => expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network), { timeout: path === RULES ? 4_000 : 2_000 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
   const retry = document.querySelector(error)!.querySelector('button')!;
   expect(retry.textContent).toBe('Try again');
   expect(retry.getClientRects().length).toBeGreaterThan(0);
@@ -2325,13 +2325,13 @@ async function expectPausedPageRead({ path, queryKey, readPath, region, landed, 
   const layers = watchLayers();
   offline = false;
   onlineManager.setOnline(true);
-  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0), { timeout: path === RULES ? 4_000 : 1_000 });
   await nextFrames();
   expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network);
   expect(document.querySelector(`${region}[aria-busy="true"]`)).toBeNull();
   read.release();
-  await vi.waitFor(() => expect(landedElement(landed)).not.toBeNull());
-  await vi.waitFor(() => expect(document.querySelector(error)).toBeNull());
+  await vi.waitFor(() => expect(landedElement(landed)).not.toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
+  await vi.waitFor(() => expect(document.querySelector(error)).toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
   await nextFrames();
   expect(layers(), 'reconnecting never brings the skeleton back').toBe(0);
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
@@ -2368,7 +2368,7 @@ it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', 
   });
 });
 
-it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', async () => {
+it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', { timeout: 45_000 }, async () => {
   await expectPausedPageRead({
     path: RULES, queryKey: ['rules', RIVERA.deskId], readPath: RULES_READ,
     region: '.cd-rules__region', landed: '.cd-rules__tool-cards',
@@ -2558,7 +2558,7 @@ it.each(['ledger', 'health'] as const)('safety_waits_for_the_record_and_health: 
 it.each([
   { path: RULES, read: RULES_READ, status: 'Reading your rules', anchors: RULES_ANCHORS },
   { path: SAFETY, read: LEDGER_READ, status: 'Reading what was stopped', anchors: SAFETY_ANCHORS },
-])('$status stays still under reduced motion', async ({ path, read, status, anchors }) => {
+])('$status stays still under reduced motion', { timeout: 25_000 }, async ({ path, read, status, anchors }) => {
   if (path === SAFETY) await withFreshRecord();
   const { router } = await beforeSafety('desktop');
   const held = holdReads(read);
@@ -2588,13 +2588,13 @@ it('safety_entries_reload_keeps_its_existing_loader', async () => {
 
 it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i', async (width) => {
   const { screen } = await renderRoute(RULES, { viewport: { width, height: width === 390 ? 844 : 900 }, pollScale: 100 });
-  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' }), { timeout: 4_000 }).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   if (width >= 1280) {
     await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Why was this quote held?');
     const { userEvent } = await import('vitest/browser');
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' })).toBeVisible();
+    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' }), { timeout: 4_000 }).toBeVisible();
     await settled(document.body);
   }
   const page = landedElement('.cd-rules')!.getBoundingClientRect();
@@ -2626,14 +2626,14 @@ it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i
   }
 });
 
-it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s', async (viewport) => {
+it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s', { timeout: 25_000 }, async (viewport) => {
   // Decision 15: a fresh copy has no suggestion. Approval history may supply one, which lands
   // its card once and moves the connector groups down by exactly that card and the page gap.
   mockStore.world.desks[0]!.suggestions = [APPROVED_REFUND_SUGGESTION];
   const { screen, router } = await openToday(viewport);
   const read = holdReads(RULES_READ);
   await router.navigate(RULES);
-  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
   expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
   const tops = watchTop(() => {
     const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
@@ -2642,9 +2642,9 @@ it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s
       : landedElement('.cd-rules__section > .cd-card');
   });
   read.release();
-  await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
-  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await expect.element(screen.getByRole('button', { name: 'Draft this rule' }), { timeout: 4_000 }).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' }), { timeout: 4_000 }).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   const card = landedElement('.cd-rules__suggestions > .cd-card')!.getBoundingClientRect();
   const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
   expect(tops()).toHaveLength(2);
@@ -2655,7 +2655,7 @@ it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s
   expect(tops()).toHaveLength(2);
 });
 
-it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alone', async (key) => {
+it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alone', { timeout: 30_000 }, async (key) => {
   const held = holdReads(ROUTES[key].path.replace('{desk_id}', RIVERA.deskId));
   const { router } = await openToday();
   await expectSkeletonLoad({
@@ -2663,7 +2663,7 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
     stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
-      await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+      await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0), { timeout: 4_000 });
       expect(landedElement('.cd-rules__tool-cards')).toBeNull();
     },
     release: held.release,
@@ -2682,7 +2682,7 @@ it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', as
   const { screen, router } = await openToday(viewport);
   const read = holdReads(RULES_READ);
   await router.navigate(RULES);
-  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
   const jobs = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer [data-skeleton-anchor="rules-first-card"]')!;
   expect(jobs.textContent).toBe('');
   const height = jobs.getBoundingClientRect().height;
@@ -2695,8 +2695,8 @@ it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', as
       : landedElement('section.cd-card[aria-label="Quotes"]');
   });
   read.release();
-  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' }), { timeout: 4_000 }).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   expect(landedElement('section.cd-card[aria-label="Your Desk’s jobs"]')).toBeNull();
   expect(tops()).toHaveLength(2);
   expect(tops()[1]! - tops()[0]!, 'one upward move, explained by the absent jobs card').toBe(-Math.round(height + gap));

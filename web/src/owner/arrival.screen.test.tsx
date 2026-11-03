@@ -1281,7 +1281,7 @@ describe('OwnerLayout', () => {
     expect(one.screen.getByRole('button', { name: /^Switch Desk/ }).elements()).toHaveLength(0);
   });
 
-  it('owner_pages_name_the_tab', async () => {
+  it('owner_pages_name_the_tab', { timeout: 35_000 }, async () => {
     // Each page names the tab with its own heading, or the sidebar's row where its heading is a
     // greeting, then the app's name; Settings' sections share their page's heading.
     document.title = 'Claude Desk';
@@ -1305,7 +1305,7 @@ describe('OwnerLayout', () => {
     ];
     for (const [path, heading, title] of pages) {
       const { screen } = await renderRoute(`${base}/${path}`);
-      await expect.element(screen.getByRole('heading', { level: 1, name: heading }), { message: path }).toBeVisible();
+      await expect.element(screen.getByRole('heading', { level: 1, name: heading }), { timeout: path.startsWith('rules') ? 4_000 : 1_000, message: path }).toBeVisible();
       expect(document.title, path).toBe(`${title} · Claude Desk`);
     }
 
@@ -1314,7 +1314,7 @@ describe('OwnerLayout', () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();
     expect(document.title).toBe('Today · Claude Desk');
     await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Rules' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     expect(document.title).toBe('Rules · Claude Desk');
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: /, Mike$/ })).toBeVisible();

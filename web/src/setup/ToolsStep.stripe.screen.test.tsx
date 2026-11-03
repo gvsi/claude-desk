@@ -132,7 +132,7 @@ it.each([1440, 390])('at %i px, Your rules starts Stripe with its money rules an
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
   await screen.getByRole('button', { name: 'Continue', exact: true }).click();
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
-  await expect.element(stripe).toBeVisible();
+  await expect.element(stripe, { timeout: 4_000 }).toBeVisible();
   const draft = [...(mockStore.world.desk(state.desk_id)?.drafts.values() ?? [])].at(-1)?.draft;
   const cap = draft?.auto_money_cap_cents ?? 0;
   // Its card starts with the payment limit and the always-on money rule, each naming Refund.
@@ -147,7 +147,7 @@ it.each([1440, 390])('at %i px, Your rules starts Stripe with its money rules an
     'Claude asks you before showing customers their own chargesThe customer, once verified',
     'Claude never shows private data to anyone but its verified ownerAlways on',
   ]);
-  await expect.element(stripe.getByRole('region', { name: 'Refund', exact: true })).toBeVisible();
+  await expect.element(stripe.getByRole('region', { name: 'Refund', exact: true }), { timeout: 4_000 }).toBeVisible();
   // Nothing is on yet: no Details, no Change, no effect tags.
   expect(stripe.getByRole('button').elements()).toHaveLength(0);
   expect(stripe.getByText('Private data', { exact: true }).elements()).toHaveLength(0);

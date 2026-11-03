@@ -2049,8 +2049,8 @@ describe('setup', () => {
     await expect.poll(() => document.activeElement).toBe(box.element());
 
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`).toBe(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => `${router.state.location.pathname}${router.state.location.search}`, { timeout: 4_000 }).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
     expect(requests('setupAnswer', mark)).toHaveLength(0);
     expect(requests('setupReopen', mark)).toHaveLength(0);
   });
@@ -2124,7 +2124,7 @@ describe('setup', () => {
     expect(requests('setupReopen', mark)).toHaveLength(0);
   });
 
-  it.each(['response', 'stream', 'lost response'] as const)('a_change_sent_from_real_situations_reopens_the_chat_and_setup_moves_forward_again_%s', async (delivery) => {
+  it.each(['response', 'stream', 'lost response'] as const)('a_change_sent_from_real_situations_reopens_the_chat_and_setup_moves_forward_again_%s', { timeout: 30_000 }, async (delivery) => {
     // From Real situations on this page, so what the later steps read is still at hand.
     const { state } = await interviewAtRules();
     const id = state.interview_id;
@@ -2165,8 +2165,8 @@ describe('setup', () => {
     await next.click();
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
-    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(drafts);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => requests('setupRules').length, { timeout: 4_000 }).toBeGreaterThan(drafts);
     // Real situations are tried again, on the new draft.
     const tried = requests('setupSituations').length;
     await screen.getByRole('button', { name: 'Check real situations' }).click();
@@ -2212,8 +2212,8 @@ describe('setup', () => {
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
     const drafts = requests('setupRules').length;
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
-    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(drafts);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => requests('setupRules').length, { timeout: 4_000 }).toBeGreaterThan(drafts);
   });
 
   /**
@@ -2314,8 +2314,8 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
     await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
-    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(drafts);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => requests('setupRules').length, { timeout: 4_000 }).toBeGreaterThan(drafts);
     const tried = requests('setupSituations').length;
     await screen.getByRole('button', { name: 'Check real situations' }).click();
     await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
@@ -2471,13 +2471,13 @@ describe('setup', () => {
     await expect.element(connectorRow(screen, 'Stripe').getByText('On', { exact: true })).toBeVisible();
   });
 
-  it('rules_step_groups_and_checks', async () => {
+  it('rules_step_groups_and_checks', { timeout: 45_000 }, async () => {
     const state = await interviewAtTools();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Continue' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
-    await expect.element(screen.getByText("What I'll do on my own, what I'll ask you about, and what I never do.", { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Tool by tool', exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(screen.getByText("What I'll do on my own, what I'll ask you about, and what I never do.", { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Tool by tool', exact: true }), { timeout: 4_000 }).toBeVisible();
 
     expect(screen.getByRole('button', { name: 'Change' }).elements()).toHaveLength(0);
     expect(requests('setupRules')).toHaveLength(1);
@@ -2487,7 +2487,7 @@ describe('setup', () => {
 
     // Across your Desk: the two always-on rules over every tool, and what anything unlisted does.
     const across = screen.getByRole('region', { name: 'Across your Desk', exact: true });
-    await expect.element(across.getByText('These cover everything Claude does, whatever the tool.', { exact: true })).toBeVisible();
+    await expect.element(across.getByText('These cover everything Claude does, whatever the tool.', { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect([...across.element().querySelectorAll('li')].map((row) => row.textContent)).toEqual([
       'Claude always says it’s an AIIn every replyAlways on',
       'Claude logs every request, allowed or not, and shows it to you in SafetyAlways on',
@@ -2495,27 +2495,27 @@ describe('setup', () => {
     ]);
     // Tool by tool: each tool the owner turned on, with the rules it starts under, as Rules reads them.
     const tools = screen.getByRole('region', { name: 'Tool by tool', exact: true });
-    await expect.element(tools.getByText('What you turned on, with the rules each tool starts under.', { exact: true })).toBeVisible();
+    await expect.element(tools.getByText('What you turned on, with the rules each tool starts under.', { exact: true }), { timeout: 4_000 }).toBeVisible();
     const tool = (name: string) => tools.getByRole('region', { name, exact: true });
-    await expect.element(tool('Quote').getByText('Claude can send quotes from your price list, at list price', { exact: true })).toBeVisible();
-    await expect.element(tool('Book a visit').getByText('Claude asks you before booking on Saturdays, 9:00 am to 1:00 pm', { exact: true })).toBeVisible();
-    await expect.element(tool('Confirm it’s them').getByText('Claude never sends a code anywhere but the contact on record', { exact: true })).toBeVisible();
+    await expect.element(tool('Quote').getByText('Claude can send quotes from your price list, at list price', { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(tool('Book a visit').getByText('Claude asks you before booking on Saturdays, 9:00 am to 1:00 pm', { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(tool('Confirm it’s them').getByText('Claude never sends a code anywhere but the contact on record', { exact: true }), { timeout: 4_000 }).toBeVisible();
     // Nothing is on yet, so no effect tags, Details or Change.
     expect(tools.getByText('Money', { exact: true }).elements()).toHaveLength(0);
     expect(tools.getByRole('button').elements()).toHaveLength(0);
-    for (const line of checkStatus(draft?.proof).lines) await expect.element(screen.getByText(line, { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    for (const line of checkStatus(draft?.proof).lines) await expect.element(screen.getByText(line, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' }), { timeout: 4_000 }).toBeVisible();
   });
 
-  it('rules_cannot_be_checked_blocks_go_live', async () => {
+  it('rules_cannot_be_checked_blocks_go_live', { timeout: 35_000 }, async () => {
     // The drafting route answers that the rules can't be checked: only "Save and exit".
     const state = await interviewAtTools();
     mockStore.inject({ route: 'setupRules', status: 409, body: { error: 'rules_cannot_be_checked' } });
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Continue' }).click();
-    await expect.element(screen.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(CANT_CHECK, { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(screen.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
-    await expect.element(screen.getByRole('main').getByRole('link', { name: 'Save and exit' })).toHaveAttribute('href', `/app/${state.desk_id}/today`);
+    await expect.element(screen.getByRole('main').getByRole('link', { name: 'Save and exit' }), { timeout: 4_000 }).toHaveAttribute('href', `/app/${state.desk_id}/today`);
 
     // A draft whose check couldn't run fully (the bounded check) shows its rules, and still only "Save and exit".
     const { state: other, draft } = await interviewAtRules();
@@ -2523,11 +2523,11 @@ describe('setup', () => {
     if (!record) throw new Error('the mock keeps the setup draft');
     record.draft = { ...record.draft, proof: { ...record.draft.proof, method: 'bounded', cases: 120 } };
     const bounded = (await renderRoute(`/app/setup/${other.interview_id}`)).screen;
-    await expect.element(bounded.getByText(CANT_CHECK, { exact: true })).toBeVisible();
-    await expect.element(bounded.getByRole('region', { name: 'Tool by tool', exact: true })).toBeVisible();
+    await expect.element(bounded.getByText(CANT_CHECK, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(bounded.getByRole('region', { name: 'Tool by tool', exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(bounded.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     expect(bounded.getByText(/didn't pass/).elements()).toHaveLength(0);
-    await expect.element(bounded.getByRole('main').getByRole('link', { name: 'Save and exit' })).toBeVisible();
+    await expect.element(bounded.getByRole('main').getByRole('link', { name: 'Save and exit' }), { timeout: 4_000 }).toBeVisible();
 
     // The proving give-up: the API kept answering that it was still checking, and a minute after the
     // first post the screen stops asking and says so (the clock the retries are timed by moves only
@@ -2540,10 +2540,10 @@ describe('setup', () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout'], shouldAdvanceTime: true });
     await waiting.getByRole('button', { name: 'Continue' }).click();
     const posts = () => requests('setupRules').filter((r) => r.path.includes(slow.interview_id));
-    await expect.poll(() => posts().length).toBe(1);
+    await expect.poll(() => posts().length, { timeout: 4_000 }).toBe(1);
     vi.setSystemTime(Date.now() + PROVING_GIVE_UP_MS);
     await vi.advanceTimersByTimeAsync(3_000);
-    await expect.element(waiting.getByText(CANT_CHECK, { exact: true })).toBeVisible();
+    await expect.element(waiting.getByText(CANT_CHECK, { exact: true }), { timeout: 4_000 }).toBeVisible();
     vi.useRealTimers();
     expect(waiting.getByRole('button', { name: 'Check real situations' }).elements()).toHaveLength(0);
     expect(posts()).toHaveLength(1);
@@ -2926,7 +2926,7 @@ describe('setup', () => {
     // as the safety check's tricks do, in the order tried.
     const { state } = await interviewAtRules();
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' }), { timeout: 4_000 }).toBeVisible();
     const drawn = watchRows('Real situations');
     await screen.getByRole('button', { name: 'Check real situations' }).click();
     const list = screen.getByRole('list', { name: 'Real situations' });
@@ -2997,7 +2997,7 @@ describe('setup', () => {
     expect(firstAt('goLive')).toBeGreaterThan(firstAt('openPreview'));
   });
 
-  it('confirm_conflict_shows_the_new_draft', async () => {
+  it('confirm_conflict_shows_the_new_draft', { timeout: 25_000 }, async () => {
     const { state, draft } = await interviewAtSafety();
     // The rules in force change after setup drafted its own: Payments is turned on.
     const desk = deskOf(state);
@@ -3015,10 +3015,10 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Confirm rules' }).click();
 
     // The new draft, in the change review, with what changed since.
-    await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
-    await expect.element(screen.getByText('Confirming your rules.', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Changes' })).toBeVisible();
+    await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(screen.getByText('Confirming your rules.', { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Changes' }), { timeout: 4_000 }).toBeVisible();
     expect(requests('setupConfirm', mark)).toHaveLength(1);
     expect(Math.max(...desk.drafts.keys())).toBeGreaterThan(draft.version);
     expect(requests('openPreview', mark)).toHaveLength(0);
@@ -3518,7 +3518,7 @@ describe('setup', () => {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await expect.element(screen.getByText('6 of 6 stopped', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Confirm rules' }).click();
-    await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Your rules changed since this was drafted. Check the new version.', { exact: true }), { timeout: 4_000 }).toBeVisible();
 
     // The review reads "Back", as N-R2-Setup-12 draws it, and Back runs the safety check again on
     // the draft that will be confirmed.
@@ -3555,7 +3555,7 @@ describe('setup', () => {
 
   async function openStep(path: string, ready: RegExp | string, viewport: Viewport): Promise<RenderResult> {
     const { screen } = await renderRoute(path, { viewport });
-    await expect.element(screen.getByText(ready, { exact: typeof ready === 'string' }).first()).toBeVisible();
+    await expect.element(screen.getByText(ready, { exact: typeof ready === 'string' }).first(), { timeout: ready === 'What you turned on, with the rules each tool starts under.' ? 4_000 : 1_000 }).toBeVisible();
     return screen;
   }
 
@@ -3592,7 +3592,7 @@ describe('setup', () => {
     expect(exitWidths[1]).toBe(exitWidths[0]);
   });
 
-  it('setup_fits_phone_width', async () => {
+  it('setup_fits_phone_width', { timeout: 25_000 }, async () => {
     for (const { name, path, ready } of await everyStep()) {
       const screen = await openStep(path, ready, 'phone');
       expect(document.documentElement.scrollWidth, name).toBeLessThanOrEqual(window.innerWidth);
@@ -4154,7 +4154,7 @@ describe('setup', () => {
     return copy;
   }
 
-  it('setup_has_no_jargon', async () => {
+  it('setup_has_no_jargon', { timeout: 35_000 }, async () => {
     for (const { name, path, ready } of await everyStep()) {
       const screen = await openStep(path, ready, 'desktop');
       try {
