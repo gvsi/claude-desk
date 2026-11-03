@@ -501,4 +501,19 @@ function seedContents(world: MockWorld): void {
   const danaFrom = opened - 5 * MINUTE;
   const dana = world.at(danaFrom, () => world.addSession(main, { sessionId: world.scoped('ses-dana-web') }));
   world.replay(dana, danaFrom, danaTurns(), 2 * MINUTE);
+
+  // A historical Desk job in the record, with its decision beside its execution. It carries safe
+  // references only, as the real ledger does, and no call arguments or visitor details.
+  world.at(opened - 30_000, () => {
+    const decisionId = world.id('dec');
+    const actionId = world.id('act');
+    world.appendLedger(main, {
+      kind: 'decide', origin: 'kernel', session_id: null, ref_id: decisionId,
+      summary: { decision_id: decisionId, tool: 'desk.emergency-callback', outcome: 'allow', card_ids: ['rv-urgent'], reviewed: false },
+    });
+    world.appendLedger(main, {
+      kind: 'execute', origin: 'kernel', session_id: null, ref_id: decisionId,
+      summary: { decision_id: decisionId, action_id: actionId, state: 'executed' },
+    });
+  });
 }

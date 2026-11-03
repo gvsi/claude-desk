@@ -20,6 +20,8 @@ export interface RequestRules {
   /** The active version's cards, default ones included (the namers leave them out). */
   cards: readonly RuleCard[];
   words: SentenceWords;
+  /** The active version's number, so a record's older decision is never explained by a newer card. */
+  version?: number | null;
 }
 
 export interface RequestRulesRead {
@@ -55,7 +57,7 @@ export function useRequestRules(deskId: string, { retryOnMount = true }: ReadOpt
   if (view === undefined) return { rules: null, settled, failure };
   const cards = view.active.cards;
   return {
-    rules: { cards, words: { business: businessTools(view.tools), tools: view.tools, cards, people: people.data ?? null } },
+    rules: { cards, version: view.active.version, words: { business: businessTools(view.tools), tools: view.tools, cards, people: people.data ?? null } },
     settled,
     failure,
   };

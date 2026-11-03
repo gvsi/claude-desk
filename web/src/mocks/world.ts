@@ -623,7 +623,8 @@ export class MockWorld {
       origin: 'kernel',
       session_id: sessionId,
       ref_id: decisionId,
-      summary: { tool: spec.tool, outcome: spec.outcome, card_ids: [...spec.cardIds] },
+      summary: { decision_id: decisionId, tool: spec.tool, outcome: spec.outcome, card_ids: [...spec.cardIds],
+        reviewed: spec.cardIds.some((id) => desk.policy.cards.some((card) => card.card_id === id && card.review)) },
     });
     let state: DecisionState = hold ? 'held' : spec.outcome === 'refuse' ? 'refused' : 'allowed';
     let ledgerSeq = decided.seq;

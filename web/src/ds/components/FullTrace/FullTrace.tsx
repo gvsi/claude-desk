@@ -1,4 +1,4 @@
-import { useId, type KeyboardEvent } from 'react';
+import { useId, type KeyboardEvent, type ReactNode } from 'react';
 
 import type { Health, LedgerEntry, LedgerPage } from '../../../api/contracts.ts';
 import { IconButton } from '../IconButton/IconButton.tsx';
@@ -10,6 +10,8 @@ import './FullTrace.css';
 export interface FullTraceProps {
   /** The signed ledger entry, shown as the kernel returned it. */
   entry: LedgerEntry;
+  /** Optional owner context, between the plain line and the signed fields. */
+  children?: ReactNode;
   /** The page's chain check, or `null` before there is one. */
   chain: Pick<LedgerPage, 'chain_ok' | 'first_bad_seq'> | null;
   /** `Health.dev_signing_key`: the Desk signs with the development key. */
@@ -37,7 +39,7 @@ function shorten(value: string): string {
  * record in mono (the only mono in Claude Desk) and the chain's state. Nothing is computed:
  * values are shown as given, long ones shortened in the middle.
  */
-export function FullTrace({ entry, chain, devKey, onClose, tabIndex = -1 }: FullTraceProps) {
+export function FullTrace({ entry, chain, devKey, onClose, children, tabIndex = -1 }: FullTraceProps) {
   const titleId = useId();
   const status = traceChainLine(chain, entry.seq);
   const fields: readonly [label: string, value: string, full?: string][] = [
@@ -65,6 +67,7 @@ export function FullTrace({ entry, chain, devKey, onClose, tabIndex = -1 }: Full
         <IconButton label="Close the full trace" icon="close" onClick={onClose} />
       </div>
       <p className="cd-full-trace__plain cd-type-body">{traceLine(entry.event)}</p>
+      {children}
       <dl className="cd-full-trace__fields">
         {fields.map(([label, value, full]) => (
           <div key={label} className="cd-full-trace__field">

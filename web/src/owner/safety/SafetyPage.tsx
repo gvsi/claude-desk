@@ -344,7 +344,7 @@ export function SafetyPage() {
         </div>
         {view === 'entries' ? (
           ledger.data ? (
-            <RecordList page={ledger.data} devKey={devKey} timezone={business.timezone} onOpenEntry={setOpenedSeq} />
+            <RecordList rules={rules.rules} page={ledger.data} devKey={devKey} timezone={business.timezone} onOpenEntry={setOpenedSeq} />
           ) : null
         ) : (
           <AttemptsView deskId={deskId} rules={rules.rules} rulesFailure={rules.failure} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />
