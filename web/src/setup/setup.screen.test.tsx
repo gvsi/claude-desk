@@ -4687,7 +4687,7 @@ describe('consultant setup', () => {
     await expect.element(card.getByText('Who', { exact: true })).toBeVisible();
     await expect.element(card.getByText('New clients', { exact: true })).toBeVisible();
     await expect.element(card.getByText('The booking shows in Today, with their answers', { exact: true })).toBeVisible();
-    await expect.element(card.getByText('New clients pick a time within your opening hours and book a 20-minute call.', { exact: true })).toBeVisible();
+    await expect.element(card.getByText('New clients pick a time and book a 20-minute call.', { exact: true })).toBeVisible();
     expect(card.getByText(job.why, { exact: true }).elements()).toHaveLength(0);
     expect(card.getByRole('button', { name: 'Change', exact: true }).elements()).toHaveLength(0);
     expect(card.getByRole('textbox').elements()).toHaveLength(0);

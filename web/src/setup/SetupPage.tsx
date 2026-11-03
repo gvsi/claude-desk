@@ -381,11 +381,11 @@ function SetupInterview({ setupId }: { setupId: string }) {
       body = <QuestionsStep state={state} hours={desk?.hours[0]} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
       break;
     case 'tools':
-      body = <ToolsStep state={state} business={name} onContinue={() => moveTo('rules')} />;
+      body = <ToolsStep state={state} business={name} hours={desk?.hours ?? []} onContinue={() => moveTo('rules')} />;
       break;
     case 'rules':
     case 'situations':
-      body = <RulesStep state={state} business={name} onNext={moveTo} reread={reread} live={opened !== 'situations'} />;
+      body = <RulesStep state={state} business={name} hours={desk?.hours ?? []} onNext={moveTo} reread={reread} live={opened !== 'situations'} />;
       break;
     case 'safety_check':
       body = <SafetyStep state={state} onConfirmed={() => moveTo('preview')} reread={reread} live={opened !== 'safety_check'} />;

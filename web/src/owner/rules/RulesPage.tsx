@@ -438,7 +438,7 @@ export function RulesPage() {
     body = null;
   } else {
     const cap = capOf(active);
-    const view = rules.data;
+    const view = { ...rules.data, hours: desk.hours };
     // The payment limit, then "never moves money", atop a card whose tools move money.
     const moneyBand = (group: ToolGroup) => {
       const titles = moneyTitles(group, view);

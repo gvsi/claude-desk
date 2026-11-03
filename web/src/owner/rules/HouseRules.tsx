@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from 'react';
 
-import { MONEY_EFFECTS, type RuleCard } from '../../api/contracts.ts';
+import { MONEY_EFFECTS, type HoursWindow, type RuleCard } from '../../api/contracts.ts';
 import type { PeopleOut, PolicyVersionOut, RulesView, ToolRow } from '../../api/views.ts';
 import {
   Card,
@@ -276,6 +276,7 @@ export interface ToolGroupEntry extends ToolGroup {
 export interface ToolsView {
   tools: ToolRow[];
   active: Pick<PolicyVersionOut, 'cards'>;
+  hours?: readonly HoursWindow[];
 }
 
 /** The tools Claude reads to learn about the business, which act for no visitor, so Rules lists none of them. */
@@ -349,7 +350,7 @@ export function toolGroups(view: ToolsView, people: PeopleOut | null): ToolGroup
         row,
         title: toolDisplayName(row.tool, business) ?? 'A connected tool',
         description: row.source === 'business'
-          ? businessRulesDescription(row.business) ?? businessOwnerLine(row.business?.config) ?? ''
+          ? businessRulesDescription(row.business, view.hours) ?? businessOwnerLine(row.business?.config) ?? ''
           : isCatalogTool(row.tool) ? TOOL_NAMES[row.tool].line : '',
         status,
         covered: covering.length > 0,

@@ -201,6 +201,14 @@ const paymentsOff = (fixture: Fixture): Fixture => ({
   tools: fixture.tools.map((tool) => (/^(payments\.|native\.(payment_link|charge_mandate)$)/.test(tool.tool) ? { ...tool, status: 'disabled' } : tool)),
 });
 
+it('Your rules names the stored hours for Chen’s intro-call job', async () => {
+  const { state, fixture } = await chen();
+  deskOf(state).summary.hours = [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }];
+  const screen = await yourRules(state, fixture);
+  const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+  await expect.element(jobs.getByText('Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', { exact: true })).toBeVisible();
+});
+
 it.each(['Turner Plumbing', 'Chen & Co.', 'Chen & Co. with the payment connectors off'] as const)('Your rules draws every rule of %s as Rules does', async (name) => {
   const at = name === 'Turner Plumbing' ? { state: await chenAtTools(), fixture: turner() } : await chen();
   const fixture = name === 'Chen & Co. with the payment connectors off' ? paymentsOff(at.fixture) : at.fixture;
