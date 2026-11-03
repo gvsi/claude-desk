@@ -373,17 +373,15 @@ function toolsCovered(card: RuleCard, row: readonly RuleCard[], words: SentenceW
 /** The words every screen uses for a verified customer and for the record's owner, whose code proved it's them. */
 const VERIFIED_CUSTOMER = 'The customer, once verified';
 
-/** The tools that show or send customers their own records, whatever effects their rows list. */
+/**
+ * The tools that show or send customers their own records: Share a document, See charges and
+ * Refund. Only these release private data; a tool that lists the private-data effect only because
+ * it saves what visitors give it (a new-client intake) is used unverified.
+ */
 const PRIVATE_DATA_TOOLS: ReadonlySet<string> = new Set(['native.release_document', 'payments.list_charges', 'payments.create_refund']);
 
-/**
- * Whether a target touches private data: a tool that shows customers their own records, the
- * private-data group, or a tool whose row (`effects`, else the Desk's in `words.tools`) lists it.
- */
-function touchesPrivateData(target: string, words: SentenceWords, effects?: readonly string[]): boolean {
-  if (PRIVATE_DATA_TOOLS.has(target) || target === 'effect:private_data') return true;
-  return (effects ?? words.tools?.find((row) => row.tool === target)?.effects ?? []).includes('private_data');
-}
+/** Whether a target is one of the tools that show or send customers their own records. */
+const touchesPrivateData = (target: string): boolean => PRIVATE_DATA_TOOLS.has(target);
 
 /** The tool a rule is listed under, when it isn't the rule's own target (a shared rule under one of its tools). */
 export type RuleTool = Pick<ToolRow, 'tool' | 'effects'>;
@@ -392,14 +390,17 @@ export type RuleTool = Pick<ToolRow, 'tool' | 'effects'>;
  * Who a card is for, in one line, the same on every screen (REV-RULES-D, v354): "Anyone", signed
  * agents included; "The customer, once verified" for a verified customer or the record's owner; a
  * person by name, "Dana Whitfield, verified" on private data; an agent by its name, else "One agent".
- * A rule for anyone on a tool that touches private data, or its default ask, reads "The customer,
- * once verified", whatever its outcome (owner ruling, 2026-11-02): the baseline gives private data
- * only to its verified owner, so "Anyone" would read as if an approval could release it to anyone.
+ * A rule for anyone that lets Share a document, See charges or Refund run, or asks first (its
+ * default ask included), on its own target or listed under one of them (`under`), reads "The
+ * customer, once verified": the baseline gives private data only to its verified owner, so "Anyone"
+ * would read as if an approval could release it to anyone. Anywhere else, and on a never rule, it
+ * reads "Anyone": "once verified" under a never rule would read as if verifying unlocked it (owner
+ * rulings, 2026-11-02).
  */
 function whoLine(card: RuleCard, words: SentenceWords, under?: RuleTool): string {
   if (card.who === 'anyone') {
-    const reachesPrivateData = touchesPrivateData(card.applies_to, words) || (under !== undefined && touchesPrivateData(under.tool, words, under.effects));
-    return reachesPrivateData ? VERIFIED_CUSTOMER : 'Anyone';
+    const reachesPrivateData = touchesPrivateData(card.applies_to) || (under !== undefined && touchesPrivateData(under.tool));
+    return card.mode !== 'never' && reachesPrivateData ? VERIFIED_CUSTOMER : 'Anyone';
   }
   if (card.who === 'verified' || card.who === 'record_owner') return VERIFIED_CUSTOMER;
   return whoWords(card, words.people, words.agents)
