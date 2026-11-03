@@ -8,7 +8,7 @@ import { retryAfterMs, sleep } from '../app/poll.ts';
 import { useLeavingSignal } from '../app/useLeavingSignal.ts';
 import { Button, Notice, PageHeader, SuggestionChips, TextField } from '../ds/index.ts';
 import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
-import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
+import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES } from './copy.ts';
 
 /** Plan 02's limit on the business's description. */
 const DESCRIPTION_MAX = 1500;
@@ -28,40 +28,73 @@ function browserTimeZone(): string {
 }
 
 /** One press of "Start": its body and its idempotency key, sent again as they are by each retry. */
-interface Attempt {
+export interface Attempt {
   body: Omit<StartSetupBody, 'idempotency_key'>;
   key: string;
 }
 
 /**
- * A start the page can't yet call done or not done: its answer was `lost` (no answer, a timeout or
- * a 5xx), or the API still said it was `under_way` after the page's own retries.
+ * Why a start in setup's chat isn't settled: its answer was `lost` (no answer, a timeout or a
+ * 5xx), the API still said it was `under_way` after the page's own retries, or its key is `spent`
+ * (the start ended with its Desk unknown, so setup didn't start and only a new key starts again).
  */
-interface Unresolved {
-  attempt: Attempt;
-  why: 'lost' | 'under_way';
+export type StartFailure = 'lost' | 'under_way' | 'spent';
+
+/** Where setup's start stands, and what the start page and setup's chat can do with it. */
+export interface SetupStart {
+  /**
+   * The start setup's chat shows, from the press of "Start" until its interview opens, or a clear
+   * refusal gives its words back to the form; null on the form.
+   */
+  attempt: Attempt | null;
+  /** What keeps the start in the chat from settling, said where Claude's writing dots were; null while it is sent. */
+  failure: StartFailure | null;
+  /** A clear refusal, on the form: its line, and the words that were sent, back in the box. */
+  refusal: { line: string; words: string } | null;
+  /** "Start": the owner's words as a new start, with a new idempotency key. */
+  begin: (description: string) => void;
+  /** "Try again": the same start with the same key, or a new start of the same words once its key is spent. */
+  tryAgain: () => void;
+}
+
+/** What the start page hands the interview it opens: the owner's own words, their first message in setup's chat. */
+interface StartedState {
+  setupStartedWith: string;
 }
 
 /**
- * "Tell me about your business": a few sentences in the owner's own words, from which the API
- * takes the business's name and the owner's, and makes the new Desk with Answering off. Under the
- * box, four examples to start from: a chip puts its description in the box, focused, for the owner
- * to change, and sends nothing; while a start is being settled they are off, as the box is.
+ * The owner's own description, when the page was opened by the start that made its interview
+ * (`useSetupStart`); null otherwise. The API keeps the description but doesn't send it back, so an
+ * interview opened any other way shows the conversation from Claude's first question.
+ */
+export function startedWith(state: unknown): string | null {
+  if (typeof state !== 'object' || state === null) return null;
+  const words = (state as Partial<StartedState>).setupStartedWith;
+  return typeof words === 'string' && words !== '' ? words : null;
+}
+
+/**
+ * Setup's start, from the owner's words to its interview. "Start" puts the owner in setup's chat at
+ * once (`attempt`), and the start runs underneath: once the API answers with the interview, it is
+ * kept for the interview's page, which takes the start page's place in history, with the owner's
+ * words as their first message (`startedWith`).
  *
  * Each press of "Start" sends a new idempotency key, and its retries send it again, so the API
  * answers the interview that press made rather than making a second Desk. A start the API says is
  * under way is sent again after its `retry_after`, a few times. One whose outcome is still unknown
- * keeps "Start" off and offers "Try again", the same start with the same key; a clear refusal shows
- * its line, and the next press is a new start with a new key.
+ * stays in the chat with "Try again", the same start with the same key; one whose key is spent
+ * stays there too, and "Try again" starts anew. A clear refusal gives the words back to the form
+ * with its line, and the next press is a new start with a new key.
+ *
+ * Nothing is sent once the owner has left, even while the page is still on screen, and a start
+ * that went through meanwhile is theirs to open from their Desks, not to be taken back to.
  */
-export function StartStep() {
+export function useSetupStart(): SetupStart {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [description, setDescription] = useState('');
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [empty, setEmpty] = useState(false);
-  const [unresolved, setUnresolved] = useState<Unresolved | null>(null);
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const [failure, setFailure] = useState<StartFailure | null>(null);
+  const [refusal, setRefusal] = useState<SetupStart['refusal']>(null);
   // The start being sent, until the page settles it. One the owner left stays, unsettled, for the
   // page to offer again if they come back before it has gone.
   const sending = useRef<Attempt | null>(null);
@@ -75,11 +108,82 @@ export function StartStep() {
     const left = sending.current;
     sending.current = null;
     if (left === null) return;
-    setPending(false);
-    setUnresolved({ attempt: left, why: 'lost' });
+    setAttempt(left);
+    setFailure('lost');
   });
-  // Where focus goes when "Try again" goes with its line.
-  const titleRef = useRef<HTMLHeadingElement>(null);
+
+  const sendUntilSettled = async (sent: Attempt, signal: AbortSignal) => {
+    for (let retries = 0; ; retries += 1) {
+      try {
+        const state = await request('startSetup', { body: { ...sent.body, idempotency_key: sent.key } });
+        // The owner left meanwhile: the interview is theirs to open from their Desks, not to be taken back to.
+        if (signal.aborted) return;
+        queryClient.setQueryData(['setup', state.interview_id], state);
+        const started: StartedState = { setupStartedWith: sent.body.description };
+        void navigate(`/app/setup/${encodeURIComponent(state.interview_id)}`, { replace: true, state: started });
+        return;
+      } catch (err) {
+        if (signal.aborted) return;
+        // The session ended: the app goes back to the start, and there is nothing to say here.
+        if (err instanceof ApiError && err.kind === 'unauthorized') return;
+        const underWay = err instanceof ApiError && err.code === 'in_progress';
+        if (underWay && retries < UNDER_WAY_RETRIES) {
+          await sleep(retryAfterMs(err.retryAfter ?? UNDER_WAY_WAIT_S), signal);
+          if (signal.aborted) return;
+          continue;
+        }
+        if (underWay) setFailure('under_way');
+        else if (isUncertain(err)) setFailure('lost');
+        // The key can't start anything again: setup didn't start, and "Try again" is a new start.
+        else if (err instanceof ApiError && err.code === 'key_spent') setFailure('spent');
+        else {
+          setAttempt(null);
+          setRefusal({ line: ownerErrorCopy(err), words: sent.body.description });
+        }
+        return;
+      }
+    }
+  };
+
+  const send = async (next: Attempt) => {
+    const signal = leaving();
+    // Nothing is sent once the owner has left, even while this page is still on screen; nor a
+    // second start while one is out.
+    if (signal.aborted || sending.current !== null) return;
+    sending.current = next;
+    setAttempt(next);
+    setFailure(null);
+    setRefusal(null);
+    try {
+      await sendUntilSettled(next, signal);
+    } finally {
+      // A start the owner left isn't settled.
+      if (!signal.aborted) sending.current = null;
+    }
+  };
+
+  return {
+    attempt,
+    failure,
+    refusal,
+    begin: (description) => void send({ body: { description, timezone: browserTimeZone() }, key: newIdempotencyKey() }),
+    tryAgain: () => {
+      if (attempt === null || failure === null) return;
+      void send(failure === 'spent' ? { body: attempt.body, key: newIdempotencyKey() } : attempt);
+    },
+  };
+}
+
+/**
+ * "Tell me about your business": a few sentences in the owner's own words, from which the API
+ * takes the business's name and the owner's, and makes the new Desk with Answering off. Under the
+ * box, four examples to start from: a chip puts its description in the box, focused, for the owner
+ * to change, and sends nothing. "Start" sends the words (`useSetupStart`), and setup's chat takes
+ * the form's place; a clear refusal brings the form back with its line and the words as they were.
+ */
+export function StartStep({ start }: { start: SetupStart }) {
+  const [description, setDescription] = useState(start.refusal?.words ?? '');
+  const [empty, setEmpty] = useState(false);
   // The box, which takes focus as the page opens, and once an example is put in it.
   const boxRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   useFocusOnArrival(boxRef);
@@ -124,13 +228,11 @@ export function StartStep() {
   }, [picks]);
   const copy = SETUP_COPY.start;
   const examples = START_EXAMPLES[SETUP_LANGUAGE];
-  // A start in flight or unresolved is sent again with the words as they were: nothing changes them.
-  const locked = pending || unresolved !== null;
 
   /** An example's chip: its description goes in the box for the owner to change. Nothing is sent. */
   const pick = (chip: string) => {
     const example = examples.examples.find((each) => each.chip === chip);
-    if (locked || example === undefined) return;
+    if (example === undefined) return;
     setEmpty(false);
     setPicks((n) => n + 1);
     const box = boxRef.current;
@@ -145,76 +247,17 @@ export function StartStep() {
     setDescription(example.description);
   };
 
-  const send = async (attempt: Attempt) => {
-    const signal = leaving();
-    // Nothing is sent once the owner has left, even while this page is still on screen.
-    if (signal.aborted) return;
-    sending.current = attempt;
-    setPending(true);
-    setError(null);
-    setUnresolved(null);
-    try {
-      await sendUntilSettled(attempt, signal);
-    } finally {
-      // A start the owner left isn't settled.
-      if (!signal.aborted) sending.current = null;
-    }
-  };
-
-  const sendUntilSettled = async (attempt: Attempt, signal: AbortSignal) => {
-    for (let retries = 0; ; retries += 1) {
-      try {
-        const state = await request('startSetup', { body: { ...attempt.body, idempotency_key: attempt.key } });
-        // The owner left meanwhile: the interview is theirs to open from their Desks, not to be taken back to.
-        if (signal.aborted) return;
-        queryClient.setQueryData(['setup', state.interview_id], state);
-        void navigate(`/app/setup/${encodeURIComponent(state.interview_id)}`);
-        return;
-      } catch (err) {
-        if (signal.aborted) return;
-        // The session ended: the app goes back to the start, and there is nothing to say here.
-        if (err instanceof ApiError && err.kind === 'unauthorized') return;
-        const underWay = err instanceof ApiError && err.code === 'in_progress';
-        if (underWay && retries < UNDER_WAY_RETRIES) {
-          await sleep(retryAfterMs(err.retryAfter ?? UNDER_WAY_WAIT_S), signal);
-          if (signal.aborted) return;
-          continue;
-        }
-        setPending(false);
-        if (underWay) setUnresolved({ attempt, why: 'under_way' });
-        else if (isUncertain(err)) setUnresolved({ attempt, why: 'lost' });
-        // The key can't start anything again: setup didn't start, and the next press is a new start.
-        else if (err instanceof ApiError && err.code === 'key_spent') setError(setupStartSpentLine());
-        else setError(ownerErrorCopy(err));
-        return;
-      }
-    }
-  };
-
-  const start = async (event: FormEvent) => {
+  const submit = (event: FormEvent) => {
     event.preventDefault();
     const text = description.trim();
-    if (pending || unresolved !== null) return;
     setEmpty(text === '');
     if (text === '') return;
-    await send({ body: { description: text, timezone: browserTimeZone() }, key: newIdempotencyKey() });
+    start.begin(text);
   };
 
-  const tryAgain = unresolved === null ? null : (
-    <Button
-      variant="secondary"
-      onClick={() => {
-        titleRef.current?.focus({ preventScroll: true });
-        void send(unresolved.attempt);
-      }}
-    >
-      {SETUP_COPY.questions.tryAgain}
-    </Button>
-  );
-
   return (
-    <form className="cd-setup-step" noValidate onSubmit={(event) => void start(event)}>
-      <PageHeader title={copy.title} subtitle={copy.subtitle} titleRef={titleRef} />
+    <form className="cd-setup-step" noValidate onSubmit={submit}>
+      <PageHeader title={copy.title} subtitle={copy.subtitle} />
       <div className={`cd-setup-start__field${picks > 0 ? ' cd-setup-start__field--filled' : ''}`}>
         <TextField
           label={copy.field}
@@ -227,31 +270,19 @@ export function StartStep() {
           }}
           hint={copy.hint}
           maxLength={DESCRIPTION_MAX}
-          readOnly={locked}
           fieldRef={boxRef}
           {...(empty ? { error: copy.empty } : {})}
         />
         <div className="cd-setup-start__examples">
           <p className="cd-setup-start__line cd-type-meta">{examples.line}</p>
-          <SuggestionChips label={examples.label} suggestions={examples.examples.map((example) => example.chip)} max={4} onPick={pick} disabled={locked} />
+          <SuggestionChips label={examples.label} suggestions={examples.examples.map((example) => example.chip)} max={4} onPick={pick} />
         </div>
       </div>
-      {error === null ? null : <Notice tone="error">{error}</Notice>}
-      {unresolved === null ? null : (
-        <Notice tone="error" action={tryAgain}>
-          {unresolved.why === 'lost' ? setupStartLostLine() : setupStartSlowLine()}
-        </Notice>
-      )}
+      {start.refusal === null ? null : <Notice tone="error">{start.refusal.line}</Notice>}
       <div className="cd-setup-step__actions">
-        {unresolved !== null ? (
-          <Button variant="primary" size="main" type="submit" disabled>
-            {copy.action}
-          </Button>
-        ) : (
-          <Button variant="primary" size="main" type="submit" busy={pending}>
-            {copy.action}
-          </Button>
-        )}
+        <Button variant="primary" size="main" type="submit">
+          {copy.action}
+        </Button>
       </div>
     </form>
   );

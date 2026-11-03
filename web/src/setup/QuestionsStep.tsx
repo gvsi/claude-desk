@@ -37,6 +37,11 @@ export interface QuestionsStepProps {
    * questions; `onContinue` goes back to the step without sending.
    */
   changing?: boolean;
+  /**
+   * The owner's own description, when the start on this page made the interview: their first
+   * message, where setup's chat showed it while the interview was made (`StartingChat`).
+   */
+  opening?: string | null;
 }
 
 /** The owner hasn't answered whether Claude may read their memory and website. */
@@ -102,7 +107,7 @@ function Line({ message }: { message: SetupMessage }) {
  * each answer goes to the API, which asks the next question, docked with its choices while the
  * message box is hidden. An answer that didn't go through stays in the composer.
  */
-export function QuestionsStep({ state, onState, reread, onContinue, changing: changingHere = false }: QuestionsStepProps) {
+export function QuestionsStep({ state, onState, reread, onContinue, changing: changingHere = false, opening = null }: QuestionsStepProps) {
   const step = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   // Messages fade where they scroll under the bar, once the conversation is scrolled from its top.
@@ -508,6 +513,7 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
       <div className="cd-setup-chat__column cd-setup-step">
       <PageHeader title={copy.title} />
       <Transcript label={copy.conversation}>
+        {opening === null ? null : <VisitorMessage text={opening} />}
         {state.messages.map((message, index) => (
           <Fragment key={`${index}-${message.role}`}>
             {panel?.index === index || consentPanel === index ? null : isCard(message) ? <ProposalCard proposal={message.card!}

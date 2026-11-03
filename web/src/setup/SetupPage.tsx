@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
-import { useNavigate, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
+import { useLocation, useNavigate, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
 import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
 import { NotFound } from '../app/NotFound.tsx';
@@ -14,7 +14,8 @@ import { LiveStep } from './LiveStep.tsx';
 import { QuestionsStep } from './QuestionsStep.tsx';
 import { RulesStep } from './RulesStep.tsx';
 import { SafetyStep } from './SafetyStep.tsx';
-import { StartStep } from './StartStep.tsx';
+import { StartStep, startedWith, useSetupStart } from './StartStep.tsx';
+import { StartingChat } from './StartingChat.tsx';
 import { SETUP_REACHES, laterStep, opensSetupChat, setupPath, useOpensAtTop } from './shared.ts';
 import { SetupOpening } from './StepSkeletons.tsx';
 import { ToolsStep } from './ToolsStep.tsx';
@@ -130,11 +131,22 @@ function SetupShell({ business, step, live, exitTo, wide = false, chat = false, 
   );
 }
 
-/** `/app/setup`: the business in the owner's words, before there is an interview. */
+/**
+ * `/app/setup`: the business in the owner's words, before there is an interview; from the press of
+ * "Start", setup's chat while the interview is made, in the frame the interview opens in.
+ */
 function SetupStart() {
+  const start = useSetupStart();
+  const { attempt } = start;
   return (
-    <SetupShell business={null} step={0} exitTo="/">
-      <StartStep />
+    <SetupShell business={attempt === null ? null : undefined} step={0} exitTo="/" chat={attempt !== null}>
+      {attempt === null ? (
+        <StartStep start={start} />
+      ) : (
+        <SetupOpening loading={false}>
+          <StartingChat words={attempt.body.description} failure={start.failure} onTryAgain={start.tryAgain} />
+        </SetupOpening>
+      )}
     </SetupShell>
   );
 }
@@ -144,6 +156,9 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [search] = useSearchParams();
+  // The owner's own words, when the start on this page made the interview: their first message.
+  const { state: arrived } = useLocation();
+  const [opening] = useState(() => startedWith(arrived));
   const setup = useQuery({ ...setupQuery(setupId), staleTime: Infinity, refetchOnWindowFocus: false });
   const deskId = setup.data?.desk_id ?? null;
   // The business's name: the API names it from the owner's words, on the new Desk, so in an interview it's
@@ -378,7 +393,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
   };
   switch (shownStep) {
     case 'questions':
-      body = <QuestionsStep state={state} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
+      body = <QuestionsStep state={state} opening={opening} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
       break;
     case 'tools':
       body = <ToolsStep state={state} business={name} onContinue={() => moveTo('rules')} />;

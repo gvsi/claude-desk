@@ -1,0 +1,16 @@
+/* Setup's start transition: the press of "Start" puts the owner in setup's chat at once
+   (StartingChat), their own words as their first message and Claude's writing dots where its first
+   message will be. This block is the transition's one place: a different entrance drops in here
+   alone. For now the chat fades in over motion-base, and comes at once under reduced motion. The
+   interview that takes the chat's place draws still, in the same place, so nothing moves twice. */
+@media (prefers-reduced-motion: no-preference) {
+  .cd-setup-start-transition {
+    animation: cd-setup-start-enter var(--motion-base) var(--motion-ease);
+  }
+}
+
+@keyframes cd-setup-start-enter {
+  from {
+    opacity: 0;
+  }
+}
