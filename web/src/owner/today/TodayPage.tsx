@@ -25,6 +25,7 @@ import { briefingPath, SinceLastNight } from './SinceLastNight.tsx';
 import { TodayAside } from './TodayAside.tsx';
 import { useTodayNow } from './todayClock.ts';
 import { skeletonSetupOf, TodaySkeleton } from './TodaySkeleton.tsx';
+import { useClosedRequests } from './useClosedRequests.ts';
 import { useReadRecoveryFocus } from './useReadRecoveryFocus.ts';
 
 import './Today.css';
@@ -85,8 +86,6 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   // The rules each held card names (Today opens once they are in, with a request held).
   const rules = useRequestRules(deskId, { retryOnMount: false });
   const answers = useAnswer(deskId);
-  // An answered card stays where it was answered, and focus that fell to the page follows it.
-  const answeredFocus = useAnsweredFocus(answers.answered);
   const [linkCopy, setLinkCopy] = useState<LinkCopy>('idle');
   // The pill says "Copied" while this is set: a count of the copies that worked since it last cleared,
   // so each one starts the COPIED_FOR_MS wait again. A failed copy clears it; leaving Today ends the wait.
@@ -123,6 +122,11 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const listedIds = new Set(listed.map((item) => item.decision.decision_id));
   const kept = [...answers.kept.values()].filter((item) => !listedIds.has(item.decision.decision_id));
   const held: HeldItem[] = heldOldestFirst([...listed, ...kept]).filter((item) => !answers.answered.has(item.decision.decision_id));
+  const elsewhere = useClosedRequests(held, answers, !opening, needsYou.isSuccess, listedIds);
+  // Share the existing card, Dismiss and focus behaviour, while Things to try below receives only
+  // answers actually given here. A booking or expiry must never become an answer on this screen.
+  const cardAnswers = { ...answers, answered: new Map([...elsewhere.closed, ...answers.answered]) };
+  const answeredFocus = useAnsweredFocus(cardAnswers.answered);
   const callbacks = items.filter((item): item is CallbackItem => item.handoff != null);
   // When Needs you was last read, read on every render so each read renders Today again, even one
   // whose items are unchanged: after a conflict, it is what lets a request's answers back.
@@ -169,6 +173,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const pendingFocus = useRef<PendingFocus | null>(null);
   const dismissAnswer = (id: string, next: string | undefined) => {
     pendingFocus.current = { kind: 'dismiss', next };
+    elsewhere.dismiss(id);
     answers.dismiss(id);
   };
   const callbackDone = (handoffId: string) => {
@@ -309,11 +314,12 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
           </div>
           <div className="cd-today__main">
             {/* Drawn while it lists something or a read has failed: its Dismiss sends focus on when neither is left. */}
-            {held.length + callbacks.length + answers.answered.size > 0 || readFailure !== null ? (
+            {held.length + callbacks.length + cardAnswers.answered.size + elsewhere.reading.length > 0 || readFailure !== null ? (
               <NeedsYou
                 held={held}
+                reading={elsewhere.reading}
                 callbacks={callbacks}
-                answers={answers}
+                answers={cardAnswers}
                 readAt={readAt}
                 rules={rules.rules}
                 rulesFailure={rules.failure}
