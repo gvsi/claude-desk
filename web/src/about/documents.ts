@@ -12,6 +12,9 @@ import { curlQuotes, MarkdownError, parseDocument, type Block, type FigureName }
 export { documentText, inlineText, MarkdownError, readingMinutes } from './markdown.ts';
 export type { Block, FigureName, Inline } from './markdown.ts';
 
+/** A figure a page can open with: one a document places with its marker, or the launch film, which only a hero shows. */
+export type HeroFigure = FigureName | 'film';
+
 // The proposal's sentence that gives the hosted prototype's address, which reads oddly on the hosted page
 // itself. `$1` keeps the whole repository link: the placeholder until it is given, the Markdown link after.
 // It ends at the period that ends the sentence, one followed by whitespace or the end of the text, so a dot
@@ -49,8 +52,8 @@ export interface AboutDocument {
    * summary centred, then the hero figure, `hero` or the claim card.
    */
   icon?: true;
-  /** The figure under the summary; its marker in the article renders nothing. */
-  hero?: FigureName;
+  /** The figure under the summary; its marker in the article, if it has one, renders nothing. */
+  hero?: HeroFigure;
   /** A sentence of the document, shown after its first section. */
   pullQuote?: string;
   /**
@@ -86,7 +89,8 @@ const SOURCES: Record<AboutId, Source> = {
     words: {
       icon: true,
       pullQuote: 'Prompt injection and social engineering can’t make Claude act past the owner’s rules.',
-      hero: 'architecture',
+      // The launch film opens the page in place of the architecture (owner, 2026-11-02).
+      hero: 'film',
     },
   },
   prediction: {

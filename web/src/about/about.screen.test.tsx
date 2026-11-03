@@ -242,9 +242,11 @@ describe('About pages', () => {
         const { screen } = await renderRoute(path, { viewport });
         await expect.element(screen.getByRole('heading', { level: 1, name: title, exact: true }), { message: where }).toBeVisible();
         expect(look(screen.container, screen.container.querySelector('[data-summary]'), viewport === 'phone'), where).toEqual(paper);
-        // The figures sit on the article's paper cards, and a link in the text is in the article's link color.
-        const frame = screen.container.querySelector('main .cd-about-frame') as HTMLElement;
-        expect(getComputedStyle(frame).backgroundColor, where).toBe(paper.card[0]);
+        // The figures sit on the article's paper cards, as the proposal's launch film does until its poster is drawn,
+        // and a link in the text is in the article's link color.
+        const frames = [...screen.container.querySelectorAll<HTMLElement>('main :is(.cd-about-frame, .cd-about-film__player)')];
+        expect(frames.length, where).toBeGreaterThan(0);
+        for (const frame of frames) expect(getComputedStyle(frame).backgroundColor, where).toBe(paper.card[0]);
         const link = screen.container.querySelector('a.cd-text-link') as HTMLElement;
         expect(getComputedStyle(link).color, where).toBe(LINK);
       }

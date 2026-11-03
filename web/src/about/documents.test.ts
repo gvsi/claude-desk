@@ -182,7 +182,7 @@ describe('the About documents', () => {
       summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
       pullQuote: 'Prompt injection and social engineering can’t make Claude act past the owner’s rules.',
       icon: true,
-      hero: 'architecture',
+      hero: 'film',
       next: 'prediction',
     });
     const { blocks: _prediction, ...prediction } = ABOUT_DOCUMENTS.prediction;
@@ -196,8 +196,9 @@ describe('the About documents', () => {
       columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] },
       next: 'proposal',
     });
-    // The proposal's hero figure is one it places; the prediction draws its chart where its marker sits.
-    expect(ABOUT_DOCUMENTS.proposal.blocks).toContainEqual({ kind: 'figure', name: ABOUT_DOCUMENTS.proposal.hero });
+    // The proposal's hero figure is the launch film, which no document places; the architecture's marker, which the
+    // page leaves out, stays in the Markdown for readers of the repository.
+    expect(ABOUT_DOCUMENTS.proposal.blocks.filter((block) => block.kind === 'figure')).toEqual([{ kind: 'figure', name: 'architecture' }]);
     // The prediction's claim card holds its first section's opening: the bold lead, the list and the caveat, in the
     // document's words, which the card draws as the article would.
     const { blocks, claim } = ABOUT_DOCUMENTS.prediction;

@@ -251,9 +251,11 @@ const IMPORTS_INTRO_FROM_THE_INDEX = /\bimport\s*\{[^}]*\bIntroDialog\b[^}]*\}\s
 // Resource hints and speculation rules, which have a browser fetch a link before anyone clicks it
 // (React DOM's own forms among them), and the path of a card's single-use document link, which no
 // screen fetches or writes out: the web opens one only from the card's own link, which the visitor
-// clicks. As whole words, so React Query's `prefetchQuery`, which reads the app's own data, isn't one.
+// clicks. As whole words, so React Query's `prefetchQuery`, which reads the app's own data, isn't one. Nor is a
+// media player's `preload="metadata"` or `preload="none"`, which reads at most the length and size of the app's
+// own film, never a link.
 const LINK_HINT =
-  /(?<![\w-])(?:dns-prefetch|prefetch|preload|prerender|modulepreload|prefetchDNS|preinit|preloadModule|preinitModule)(?![\w-])|speculationrules/i;
+  /(?<![\w-])(?:dns-prefetch|prefetch|preload(?!=["'](?:metadata|none)["'])|prerender|modulepreload|prefetchDNS|preinit|preloadModule|preinitModule)(?![\w-])|speculationrules/i;
 const DOCUMENT_LINK = /\/api\/d\//i;
 
 // An API operation's name, "GET /api/d/{token}", in capitals as the API's document writes it, names
@@ -963,6 +965,9 @@ describe('app source guards', () => {
     ];
     for (const text of bad) expect(hits(LINK_HINT, sample(text)), text).toHaveLength(1);
     expect(hits(LINK_HINT, sample('queryClient.prefetchQuery(desksQuery()); // a link never prefetched, preloaded or preinitialised'))).toEqual([]);
+    expect(hits(LINK_HINT, sample('<video poster={poster} controls preload="metadata">'))).toEqual([]);
+    expect(hits(LINK_HINT, sample("<audio preload='none' />"))).toEqual([]);
+    for (const text of ['<video preload="auto">', 'link.rel = "preload";', '<video preload>']) expect(hits(LINK_HINT, sample(text)), text).toHaveLength(1);
     expect(documentLinks(sample("fetch(`/api/d/${token}`); const href = '/API/d/x';"))).toHaveLength(2);
     expect(documentLinks(sample("request('paymentLink', { params: { token } }); const page = '/d/rivera';"))).toEqual([]);
     // A link built any other way is one too: a whole address, or a path joined to a token.

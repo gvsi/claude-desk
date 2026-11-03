@@ -267,18 +267,19 @@ describe('ReaderPage', () => {
         expect(entries.map((entry) => entry.getAttribute('href')), where).toEqual(ids.map((anchor) => `#${anchor}`));
         for (const anchor of ids) expect(document.getElementById(anchor)?.localName, `${where}: #${anchor}`).toBe('h2');
 
-        // The proposal's lead figure, the architecture, in the hero and only there. The prediction has no lead
-        // figure: its τ³-Banking chart sits where its marker does, in "Why it’s coming", right after the
-        // paragraph that ends "in ten months."
+        // The proposal's lead figure, the launch film, in the hero and only there. The architecture it replaced there is
+        // drawn for the hero's width, so its marker in the article draws nothing. The prediction has no lead figure:
+        // its τ³-Banking chart sits where its marker does, in "Why it’s coming", right after the paragraph that ends
+        // "in ten months."
         const figures = [...screen.container.querySelectorAll('figure')];
+        const films = [...screen.container.querySelectorAll('video')];
+        expect(figures.filter((figure) => figure.querySelector('[data-diagram]')), where).toEqual([]);
         if (id === 'proposal') {
-          const lead = figures.filter((figure) => figure.querySelector('[data-diagram]'));
-          expect(lead.length, where).toBe(1);
-          expect(lead[0]?.closest('[data-hero]'), where).not.toBeNull();
-          await expect
-            .element(screen.getByRole('figure', { name: 'Claude proposes; the kernel decides what runs and what is shown', exact: true }))
-            .toBeInTheDocument();
+          expect(films.length, where).toBe(1);
+          expect(films[0]?.closest('[data-hero] .cd-about-hero__figure'), where).not.toBeNull();
+          expect(films[0]?.closest('figure')?.parentElement?.classList.contains('cd-about-hero__figure'), where).toBe(true);
         } else {
+          expect(films, where).toEqual([]);
           const charts = [...screen.container.querySelectorAll('svg[role="img"]')];
           expect(charts.length, where).toBe(1);
           expect(hero?.querySelector('figure'), where).toBeNull();
@@ -481,6 +482,57 @@ describe('ReaderPage', () => {
       if (size === DESKTOP) expect(root.querySelector('aside[aria-label="About this document"]'), where).toBeNull();
       else expect(hero.querySelector('[data-byline]'), where).not.toBeNull();
       await prediction.screen.unmount();
+    }
+  });
+
+  it('proposal_opens_with_the_launch_film', async () => {
+    // The proposal's hero figure is the launch film (owner, 2026-11-02): a 16:9 player across the hero figure's whole
+    // width, rounded as the prediction's hero card is. Its space is held from the first frame, so nothing under it
+    // moves when its poster and the film's size arrive, and nothing runs past the window.
+    const radius = async (size: { width: number; height: number }) => {
+      const screen = await renderReader('prediction', { size });
+      const card = screen.container.querySelector('[data-hero] [data-claim]') as HTMLElement;
+      const value = getComputedStyle(card).borderTopLeftRadius;
+      await screen.unmount();
+      return value;
+    };
+    for (const [size, width] of [
+      [DESKTOP, 1040],
+      [PHONE, 350],
+    ] as const) {
+      const where = `proposal at ${size.width}`;
+      const card = await radius(size);
+      const screen = await renderReader('proposal', { size });
+      const figure = screen.container.querySelector('[data-hero] .cd-about-hero__figure') as HTMLElement;
+      const video = figure.querySelector('video') as HTMLVideoElement;
+      const article = screen.container.querySelector('article') as HTMLElement;
+      const placed = () => ({
+        video: video.getBoundingClientRect().toJSON() as DOMRect,
+        figure: figure.getBoundingClientRect().height,
+        article: article.getBoundingClientRect().top,
+      });
+      const first = placed();
+      expect(first.video.width, where).toBe(width);
+      expect(Math.abs(first.video.height - (width * 9) / 16), where).toBeLessThanOrEqual(0.5);
+      expect(first.video.left, where).toBe(figure.getBoundingClientRect().left);
+      expect(getComputedStyle(video).borderTopLeftRadius, where).toBe(card);
+      expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
+
+      // The poster drawn and the film's length and size read, or the browser finding it can't play the file: either
+      // way the player has heard all it will before a reader presses play.
+      const poster = new Image();
+      poster.src = video.poster;
+      await poster.decode();
+      await expect
+        .poll(() => video.readyState >= HTMLMediaElement.HAVE_METADATA || video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE, {
+          message: `${where}: the player heard the film`,
+          timeout: 10_000,
+        })
+        .toBe(true);
+      await twoFrames();
+      expect(placed(), where).toEqual(first);
+      expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
+      await screen.unmount();
     }
   });
 
@@ -800,10 +852,12 @@ describe('ReaderPage', () => {
         else expect(root.querySelector('aside[aria-label="About this document"]'), where).toBeNull();
         const next = root.querySelector('[data-next-label]');
         expect(readText(next ?? document.body), where).toBe('Read next');
-        // "Figure 1" and the captions, without the architecture figure's name, a label from the checked list.
+        // The captions: the prediction's figures', "Figure 1" among them, and the proposal's one, under its launch
+        // film. A figure's name from a checked list (`data-figure-label`) is left out, as the documents' words are.
         const captions = [...root.querySelectorAll('figcaption')];
         expect(captions.length, where).toBeGreaterThan(0);
-        expect(captions.map((caption) => readText(caption).startsWith('Figure 1')), where).toContain(true);
+        if (id === 'prediction') expect(captions.map((caption) => readText(caption).startsWith('Figure 1')), where).toContain(true);
+        else expect(captions.map((caption) => root.querySelector('video')?.closest('figure')?.contains(caption)), where).toEqual([true]);
 
         const chrome = [
           topBar,
@@ -818,11 +872,10 @@ describe('ReaderPage', () => {
           expect(part, where).not.toBeNull();
           if (part) assertNoJargon(part as HTMLElement);
         }
-        // The check reads the words it is given: the architecture caption's name says "kernel".
-        if (id === 'proposal') {
-          const architecture = captions.find((caption) => caption.querySelector('[data-figure-label]'));
-          expect(() => assertNoJargon(architecture as HTMLElement), where).toThrow(/kernel/);
-        }
+        // The check reads the words it is given: a caption that names the kernel fails it.
+        const named = captions[0]?.cloneNode(true) as HTMLElement;
+        named.append(' The kernel decides.');
+        expect(() => assertNoJargon(named), where).toThrow(/kernel/);
         await screen.unmount();
       }
     }

@@ -1,14 +1,15 @@
 /**
  * An About this prototype reading page: the product proposal or the capability prediction, laid out as the
  * reader boards draw them. Each opens with its meta line, title and summary centred, then its hero figure: the
- * proposal's architecture under its app icon, the prediction's claim as a card. Then the
+ * proposal's launch film under its app icon, the prediction's claim as a card. Then the
  * numbered contents list, the document in a serif column and the author, date and reading time beside it; then
  * "Read next", the next page in the About set. On a phone the contents list folds into one row and the details
  * into a line under the summary.
  *
  * It is drawn on the About set's paper (`paper.css`), the Vision article's light reading style, so the set's
  * three pages read as one. The page is static: it reads its document from `documents.ts`, which only it loads,
- * and makes no request.
+ * and makes no request. The film's player reads only its poster and the film's length and size, from the site's
+ * own files, until a reader plays it.
  */
 import { Fragment } from "react";
 import { Link } from "react-router";
@@ -30,10 +31,11 @@ import {
   readingMinutes,
   type AboutDocument,
   type Block,
-  type FigureName,
+  type HeroFigure,
 } from "./documents.ts";
 import { ArchitectureFigure } from "./figures/ArchitectureFigure.tsx";
 import { ClaimCard } from "./figures/ClaimCard.tsx";
+import { LaunchFilm } from "./figures/LaunchFilm.tsx";
 import { MeasuresTable } from "./figures/MeasuresTable.tsx";
 import { ReadinessScale } from "./figures/ReadinessScale.tsx";
 import { Tau3Chart } from "./figures/Tau3Chart.tsx";
@@ -88,8 +90,9 @@ function Author({ name }: { name: string }) {
   );
 }
 
-/** A figure by its marker's name. */
-function Figure({ name, compact }: { name: FigureName; compact: boolean }) {
+/** A figure by its marker's name, or the launch film. */
+function Figure({ name, compact }: { name: HeroFigure; compact: boolean }) {
+  if (name === "film") return <LaunchFilm compact={compact} />;
   if (name === "architecture") return <ArchitectureFigure compact={compact} />;
   if (name === "tau3") return <Tau3Chart compact={compact} />;
   return null;
@@ -105,7 +108,7 @@ interface ArticleBlockProps {
   /** The block's place in the document. */
   index: number;
   /** The figure the hero draws, if any. */
-  hero?: FigureName;
+  hero?: HeroFigure;
   /** Set column widths for a table, by its section's anchor (`AboutDocument.columns`). */
   columns?: Record<string, readonly number[]>;
   compact: boolean;
@@ -122,7 +125,8 @@ function sectionOf(blocks: Block[], index: number): string | undefined {
 
 /**
  * One block of the document. The `#` title and the byline feed the hero and the details instead; the hero's
- * own figure marker renders nothing; the readiness marker's table renders as the readiness scale.
+ * own figure marker renders nothing, and so does the architecture's, which is drawn for the hero's width; the
+ * readiness marker's table renders as the readiness scale.
  */
 function ArticleBlock({
   blocks,
@@ -185,7 +189,9 @@ function ArticleBlock({
           throw new Error("the readiness marker has no table right after it");
         return null;
       }
-      return block.name === hero ? null : (
+      // The architecture's side-by-side layout needs the hero's width, which the article's column doesn't have, and
+      // the launch film took its place in the proposal's hero (owner, 2026-11-02).
+      return block.name === hero || block.name === "architecture" ? null : (
         <Figure name={block.name} compact={compact} />
       );
     case "byline":
