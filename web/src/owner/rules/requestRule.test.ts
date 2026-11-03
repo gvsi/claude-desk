@@ -192,8 +192,9 @@ describe('turnedDownRule', () => {
   it('an_owner_never_rule_by_its_card', () => {
     const never = card({ card_id: 'rv-no-refunds', applies_to: 'payments.create_refund', mode: 'never', who: 'anyone' });
     const withNever = [...active, never];
+    // Refund touches private data, so its rule for anyone reads its verified owner (owner ruling, 2026-11-02).
     expect(shown(turnedDownRule(refused({ cause: 'owner_rule', card_ids: ['rv-no-refunds'] }), withNever, { ...words, cards: withNever }))).toBe(
-      'Claude never sends refunds / Refund · Anyone / never',
+      'Claude never sends refunds / Refund · The customer, once verified / never',
     );
   });
 
