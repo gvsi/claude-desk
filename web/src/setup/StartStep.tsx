@@ -9,6 +9,7 @@ import { useLeavingSignal } from '../app/useLeavingSignal.ts';
 import { Button, Notice, PageHeader, SuggestionChips, TextField } from '../ds/index.ts';
 import { useFocusOnArrival } from '../lib/useFocusOnArrival.ts';
 import { SETUP_COPY, SETUP_LANGUAGE, START_EXAMPLES } from './copy.ts';
+import { takeStartScreen, type StartScreen } from './SetupStartTransition.tsx';
 
 /** Plan 02's limit on the business's description. */
 const DESCRIPTION_MAX = 1500;
@@ -51,8 +52,10 @@ export interface SetupStart {
   failure: StartFailure | null;
   /** A clear refusal, on the form: its line, and the words that were sent, back in the box. */
   refusal: { line: string; words: string } | null;
-  /** "Start": the owner's words as a new start, with a new idempotency key. */
-  begin: (description: string) => void;
+  /** The start page as "Start" left it, for setup's chat to come in from (SetupStartTransition); null for none. */
+  from: StartScreen | null;
+  /** "Start": the owner's words as a new start, with a new idempotency key, leaving the start page as it was (`from`). */
+  begin: (description: string, from?: StartScreen | null) => void;
   /** "Try again": the same start with the same key, or a new start of the same words once its key is spent. */
   tryAgain: () => void;
 }
@@ -95,6 +98,7 @@ export function useSetupStart(): SetupStart {
   const [attempt, setAttempt] = useState<Attempt | null>(null);
   const [failure, setFailure] = useState<StartFailure | null>(null);
   const [refusal, setRefusal] = useState<SetupStart['refusal']>(null);
+  const [from, setFrom] = useState<StartScreen | null>(null);
   // The start being sent, until the page settles it. One the owner left stays, unsettled, for the
   // page to offer again if they come back before it has gone.
   const sending = useRef<Attempt | null>(null);
@@ -166,7 +170,11 @@ export function useSetupStart(): SetupStart {
     attempt,
     failure,
     refusal,
-    begin: (description) => void send({ body: { description, timezone: browserTimeZone() }, key: newIdempotencyKey() }),
+    from,
+    begin: (description, left = null) => {
+      setFrom(left);
+      void send({ body: { description, timezone: browserTimeZone() }, key: newIdempotencyKey() });
+    },
     tryAgain: () => {
       if (attempt === null || failure === null) return;
       void send(failure === 'spent' ? { body: attempt.body, key: newIdempotencyKey() } : attempt);
@@ -184,6 +192,7 @@ export function useSetupStart(): SetupStart {
 export function StartStep({ start }: { start: SetupStart }) {
   const [description, setDescription] = useState(start.refusal?.words ?? '');
   const [empty, setEmpty] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
   // The box, which takes focus as the page opens, and once an example is put in it.
   const boxRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   useFocusOnArrival(boxRef);
@@ -252,11 +261,11 @@ export function StartStep({ start }: { start: SetupStart }) {
     const text = description.trim();
     setEmpty(text === '');
     if (text === '') return;
-    start.begin(text);
+    start.begin(text, takeStartScreen(formRef.current, boxRef.current));
   };
 
   return (
-    <form className="cd-setup-step" noValidate onSubmit={submit}>
+    <form ref={formRef} className="cd-setup-step" noValidate onSubmit={submit}>
       <PageHeader title={copy.title} subtitle={copy.subtitle} />
       <div className={`cd-setup-start__field${picks > 0 ? ' cd-setup-start__field--filled' : ''}`}>
         <TextField

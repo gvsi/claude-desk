@@ -43,6 +43,18 @@ export function setupStartSpentLine(): string {
 }
 
 /**
+ * Setup's chat while its start runs (SetupStartTransition): the line Claude's read of the owner's
+ * words takes above the writing dots, `reading` while it runs and `read` once the interview opens,
+ * and the quieter line under it while it runs. These words await the owner's sign-off: change or
+ * drop them here.
+ */
+export const SETUP_START_READING = {
+  reading: 'Reading what you wrote',
+  read: 'Read what you wrote',
+  usually: 'This usually takes about 15 seconds.',
+} as const;
+
+/**
  * Setup's language. The owner app is English (`index.html` sets it), and setup has no language of
  * its own yet, so every step reads English; copy kept in both languages, such as the start step's
  * examples, is ready for when it has one.

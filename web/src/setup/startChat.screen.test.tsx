@@ -13,8 +13,8 @@ import { worker } from '../mocks/browser.ts';
 import { holdNextStart } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
-import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts';
-import { SETUP_COPY, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
+import { expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
+import { SETUP_COPY, SETUP_START_READING, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 
 const DESCRIPTION =
   "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
@@ -43,6 +43,12 @@ function holdStart(): () => void {
   return release;
 }
 
+/** Lets every motion that ends run to its end. */
+async function settle(): Promise<void> {
+  const ending = document.getAnimations().filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity));
+  await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
+}
+
 /** Setup's chat, by its conversation's name, and the owner's own words in it. */
 const conversation = (screen: RenderResult) => screen.getByRole('log', { name: SETUP_COPY.questions.conversation });
 const ownWords = (screen: RenderResult) => conversation(screen).getByText(DESCRIPTION, { exact: true });
@@ -64,7 +70,8 @@ function watchFrames(): () => Frame[] {
     const chat = document.querySelector('.cd-setup-chat');
     const first = chat?.querySelector('[role="log"] .cd-visitor-message__bubble');
     frames.push({
-      form: document.querySelector('.cd-setup-start__field') !== null,
+      // The start page's own form; the copy of it fading out as it leaves is not on the page.
+      form: document.querySelector('main .cd-setup-start__field') !== null,
       chat: chat !== null,
       words: first?.textContent === DESCRIPTION,
       next: chat?.querySelector('.cd-writing-indicator, .cd-setup-question-panel, .cd-notice') != null,
@@ -115,7 +122,7 @@ describe('setup start', () => {
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
     expect(router.state.historyAction).toBe('REPLACE');
-    expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
+    await expect.poll(() => screen.getByText('Claude is writing').elements().length).toBe(0);
     const after = ownWords(screen).element().getBoundingClientRect();
     for (const side of ['top', 'left', 'width', 'height'] as const) {
       expect(Math.abs(after[side] - before[side]), `the owner's words' ${side}: ${before[side]}, then ${after[side]}`).toBeLessThanOrEqual(1);
@@ -178,8 +185,82 @@ describe('setup start', () => {
     expect(keys[1]).not.toBe(keys[0]);
   });
 
-  it.each([false, true])('the_chat_comes_in_with_one_fade_or_at_once_under_reduced_motion (reduced: %s)', async (reduced) => {
-    await reduceMotion(reduced);
+  it('the_read_line_says_reading_while_the_start_runs_then_read_above_the_question', async () => {
+    const release = holdStart();
+    const { screen } = await renderRoute('/app/setup');
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    await screen.getByRole('button', { name: 'Start' }).click();
+
+    // While the start runs: under the owner's words, the read as it runs, then the quieter line,
+    // then Claude's writing dots.
+    const log = conversation(screen);
+    const reading = log.getByText(SETUP_START_READING.reading, { exact: true });
+    const usually = log.getByText(SETUP_START_READING.usually, { exact: true });
+    const dots = log.getByText('Claude is writing');
+    await expect.element(reading).toBeVisible();
+    await expect.element(usually).toBeVisible();
+    const order = [ownWords(screen), reading, usually, dots].map((part) => part.element());
+    for (const [at, part] of order.entries()) {
+      if (at > 0) expect(order[at - 1]!.compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING, `part ${at}`).toBeTruthy();
+    }
+    expect(getComputedStyle(usually.element()).color).toBe(tokenColor('--text-tertiary'));
+    await settle();
+    const row = reading.element().closest('.cd-tool-label')!.getBoundingClientRect();
+
+    // Once the interview opens: the read, done, where it was; the quieter line and the dots go.
+    release();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    const read = conversation(screen).getByText(SETUP_START_READING.read, { exact: true });
+    await expect.element(read).toBeVisible();
+    const done = read.element().closest('.cd-tool-label')!.getBoundingClientRect();
+    expect(Math.abs(done.top - row.top)).toBeLessThanOrEqual(1);
+    expect(screen.getByText(SETUP_START_READING.reading, { exact: true }).elements()).toHaveLength(0);
+    await expect.poll(() => screen.getByText(SETUP_START_READING.usually, { exact: true }).elements().length).toBe(0);
+    await expect.poll(() => screen.getByText('Claude is writing').elements().length).toBe(0);
+
+    // It stays in the conversation, under the owner's words, as the questions go on.
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeInTheDocument();
+    const kept = conversation(screen).getByText(SETUP_START_READING.read, { exact: true });
+    await expect.element(kept).toBeVisible();
+    expect(ownWords(screen).element().compareDocumentPosition(kept.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a_start_that_did_not_settle_takes_the_read_line_down_with_the_dots', async () => {
+    const { screen } = await renderRoute('/app/setup');
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    mockStore.inject({ route: 'startSetup', status: 503 });
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expectLineInChat(screen, setupStartLostLine());
+    expect(screen.getByText(SETUP_START_READING.reading, { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText(SETUP_START_READING.usually, { exact: true }).elements()).toHaveLength(0);
+  });
+
+  it('the_start_screen_hands_its_words_to_the_chat', async () => {
+    // With motion: the start screen leaves, and a box travels from the field to the owner's first
+    // message behind its words, which then shows its own fill. Then the chat is at rest, and the
+    // interview's question rises into the dock.
+    const release = holdStart();
+    const { screen } = await renderRoute('/app/setup');
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.element(ownWords(screen)).toBeInTheDocument();
+    expect(document.querySelector('.cd-setup-start-leaving-screen'), 'the start screen, leaving').not.toBeNull();
+    expect(document.querySelector('.cd-setup-start-words__box'), 'the box on its way').not.toBeNull();
+    expect(getComputedStyle(document.querySelector('.cd-setup-chat .cd-page-header')!).animationName).toBe('cd-setup-start-enter');
+
+    await expect.poll(() => document.querySelector('.cd-setup-start-words__box')).toBeNull();
+    await expect.poll(() => document.querySelector('.cd-setup-start-leaving-screen')).toBeNull();
+    expect(getComputedStyle(ownWords(screen).element()).backgroundColor).toBe(tokenColor('--fill-bubble'));
+
+    release();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeInTheDocument();
+    const panel = document.querySelector('.cd-setup-dock .cd-setup-question-panel')!;
+    expect(panel.getAnimations().length, 'the question rising into the dock').toBe(1);
+  });
+
+  it('under_reduced_motion_every_part_is_at_its_end_at_once', async () => {
+    await reduceMotion(true);
     onTestFinished(() => reduceMotion(false));
     const release = holdStart();
     const { screen } = await renderRoute('/app/setup');
@@ -187,24 +268,25 @@ describe('setup start', () => {
     await screen.getByRole('button', { name: 'Start' }).click();
     await expect.element(ownWords(screen)).toBeVisible();
 
-    // The transition is the chat's own entrance, in one place: a fade over motion-base, or none.
-    const chat = document.querySelector('.cd-setup-start-transition');
-    expect(chat).not.toBeNull();
-    const style = getComputedStyle(chat!);
-    const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    if (reduced) {
-      expect(style.animationName).toBe('none');
-      expect(chat!.getAnimations()).toEqual([]);
-    } else {
-      expect(style.animationName).toBe('cd-setup-start-enter');
-      expect(parseFloat(style.animationDuration) * 1000).toBe(parseFloat(token('--motion-base')));
-      expect(style.animationTimingFunction).toBe(token('--motion-ease'));
+    // No leaving screen and no travelling box: the owner's words in their own fill, and the read,
+    // the quieter line and the dots in place, with nothing moving.
+    expect(document.querySelector('.cd-setup-start-leaving-screen')).toBeNull();
+    expect(document.querySelector('.cd-setup-start-words__box')).toBeNull();
+    expect(getComputedStyle(ownWords(screen).element()).backgroundColor).toBe(tokenColor('--fill-bubble'));
+    const chat = document.querySelector('.cd-setup-chat')!;
+    expect(chat.getAnimations({ subtree: true })).toEqual([]);
+    for (const part of [SETUP_START_READING.reading, SETUP_START_READING.usually]) {
+      const el = conversation(screen).getByText(part, { exact: true }).element();
+      expect(getComputedStyle(el.closest('.cd-transcript > *')!).opacity, part).toBe('1');
     }
 
-    // The interview draws still, in the transition's place.
+    // The interview opens at its end: the read done, nothing leaving, the question in the dock, still.
     release();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
-    expect(document.querySelector('.cd-setup-start-transition')).toBeNull();
-    expect(getComputedStyle(document.querySelector('.cd-setup-chat')!).animationName).toBe('none');
+    await expect.element(conversation(screen).getByText(SETUP_START_READING.read, { exact: true })).toBeVisible();
+    expect(screen.getByText(SETUP_START_READING.usually, { exact: true }).elements()).toHaveLength(0);
+    expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
+    expect(document.querySelector('.cd-setup-chat')!.getAnimations({ subtree: true })).toEqual([]);
+    expect(document.querySelector('.cd-setup__bar')!.getAnimations({ subtree: true })).toEqual([]);
   });
 });

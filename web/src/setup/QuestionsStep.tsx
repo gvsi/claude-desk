@@ -11,6 +11,7 @@ import { SETUP_COPY, stillCheckingLine } from './copy.ts';
 import { ProposalCard, type CardDecision } from './ProposalCard.tsx';
 import { isCard, liveChoices, pickedAnswer } from './conversation.ts';
 import { SetupChoices } from './SetupChoices.tsx';
+import { StartedOpening, type StartedOpeningProps } from './SetupStartTransition.tsx';
 import './SetupConversation.css';
 import { hasWords, useSetupStream } from './setupStream.ts';
 import { useChangeSomething } from './shared.ts';
@@ -39,9 +40,9 @@ export interface QuestionsStepProps {
   changing?: boolean;
   /**
    * The owner's own description, when the start on this page made the interview: their first
-   * message, where setup's chat showed it while the interview was made (`StartingChat`).
+   * message and Claude's read of it, where setup's chat showed them while the interview was made.
    */
-  opening?: string | null;
+  opening?: StartedOpeningProps | null;
 }
 
 /** The owner hasn't answered whether Claude may read their memory and website. */
@@ -513,7 +514,7 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
       <div className="cd-setup-chat__column cd-setup-step">
       <PageHeader title={copy.title} />
       <Transcript label={copy.conversation}>
-        {opening === null ? null : <VisitorMessage text={opening} />}
+        {opening === null ? null : <StartedOpening {...opening} />}
         {state.messages.map((message, index) => (
           <Fragment key={`${index}-${message.role}`}>
             {panel?.index === index || consentPanel === index ? null : isCard(message) ? <ProposalCard proposal={message.card!}

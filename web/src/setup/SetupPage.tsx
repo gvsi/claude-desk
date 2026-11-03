@@ -1,6 +1,6 @@
 import { queryOptions, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type Ref } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
+import { useLocation, useNavigate, useNavigationType, useParams, useSearchParams, type NavigateFunction, type NavigateOptions, type To } from 'react-router';
 
 import { ApiError, observeRequests, ownerErrorCopy, request } from '../api/http.ts';
 import { NotFound } from '../app/NotFound.tsx';
@@ -144,7 +144,7 @@ function SetupStart() {
         <StartStep start={start} />
       ) : (
         <SetupOpening loading={false}>
-          <StartingChat words={attempt.body.description} failure={start.failure} onTryAgain={start.tryAgain} />
+          <StartingChat words={attempt.body.description} failure={start.failure} onTryAgain={start.tryAgain} from={start.from} />
         </SetupOpening>
       )}
     </SetupShell>
@@ -156,9 +156,14 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [search] = useSearchParams();
-  // The owner's own words, when the start on this page made the interview: their first message.
+  // The owner's own words, when the start on this page made the interview: their first message,
+  // its hand-off from setup's chat played once, as the start opens it (not on a reload or Back).
   const { state: arrived } = useLocation();
-  const [opening] = useState(() => startedWith(arrived));
+  const navigationType = useNavigationType();
+  const [opening] = useState(() => {
+    const words = startedWith(arrived);
+    return words === null ? null : { words, arrived: navigationType === 'REPLACE' };
+  });
   const setup = useQuery({ ...setupQuery(setupId), staleTime: Infinity, refetchOnWindowFocus: false });
   const deskId = setup.data?.desk_id ?? null;
   // The business's name: the API names it from the owner's words, on the new Desk, so in an interview it's
