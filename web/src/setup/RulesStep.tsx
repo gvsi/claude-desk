@@ -20,9 +20,9 @@ import { businessTools } from '../owner/connectors/catalog.ts';
 import { checkStatus, type CheckStatus } from '../owner/rules/checkStatus.ts';
 import { RULES_SECTIONS } from '../owner/rules/copy.ts';
 import { capOf } from '../owner/rules/drafts.ts';
-import { AcrossYourDeskRules, AlwaysOnRule, moneyTitles, NeverMovesMoney, ToolConnectors, ToolRule, toolGroups, type ToolGroup, type ToolsView } from '../owner/rules/HouseRules.tsx';
+import { AcrossYourDeskRules, moneyTitles, NeverMovesMoney, ToolConnectors, ToolRule, toolGroups, type ToolGroup, type ToolsView } from '../owner/rules/HouseRules.tsx';
 import { peopleQuery } from '../owner/rules/RuleDraftReview.tsx';
-import { ALWAYS_ON_SENTENCES, moneyCapBandSentence, moneyCapSentence } from '../owner/rules/ruleSentence.ts';
+import { moneyCapBandSentence } from '../owner/rules/ruleSentence.ts';
 import { situationSentence } from './situationSentence.ts';
 import { SETUP_COPY } from './copy.ts';
 import { useLanding } from './landing.ts';
@@ -52,14 +52,12 @@ export interface RulesStepProps {
 
 const CHECK_TONES: Readonly<Record<CheckStatus['status'], StatusTone>> = { checked: 'handled', failed: 'refused', unavailable: 'held' };
 
-const neverMovesMoney = ALWAYS_ON_SENTENCES.find((rule) => rule.key === 'money');
-
 /**
  * The draft and its check, drawn as Rules draws its rules (REV-SETUP-3, option A), with the same
  * components, so a card reads the same here and there: "Across your Desk", then each tool the
  * owner turned on with the rules it starts under (`ToolConnectors`, read only: no Details, no
  * "Change", no links). Payments and Stripe open with the payment limit and "never moves money"; a
- * job that moves money ends its list with them. Then the check's lines.
+ * job that moves money ends its list with them, as on Rules. Then the check's lines.
  */
 function DraftRules({ draft, people, tools, check }: { draft: RulesDraft; people: PeopleOut | null | undefined; tools: readonly ToolRow[]; check: CheckStatus }) {
   const acrossId = useId();
@@ -77,13 +75,6 @@ function DraftRules({ draft, people, tools, check }: { draft: RulesDraft; people
       </>
     );
   };
-  // Under a job that moves money, its money rules are its own: no tools to name.
-  const moneyRules = () => (
-    <>
-      <ToolRule parts={moneyCapSentence(cap)} status="held" detailsPlace={false} data={{ 'data-money-limit': true }} />
-      {neverMovesMoney === undefined ? null : <AlwaysOnRule parts={neverMovesMoney.parts} />}
-    </>
-  );
   return (
     <>
       <section className="cd-rules__section" aria-labelledby={acrossId}>
@@ -94,7 +85,7 @@ function DraftRules({ draft, people, tools, check }: { draft: RulesDraft; people
         <SectionHeader id={toolsId} title={RULES_SECTIONS.tools.title} caption={copy.toolsCaption} />
         {none ? <EmptyState title={copy.empty} body={copy.emptyBody} /> : (
           <div className="cd-rules__tool-cards">
-            <ToolConnectors readOnly view={view} people={people ?? null} moneyBand={moneyBand} moneyRules={moneyRules} />
+            <ToolConnectors readOnly view={view} people={people ?? null} moneyBand={moneyBand} cap={cap} />
           </div>
         )}
       </section>

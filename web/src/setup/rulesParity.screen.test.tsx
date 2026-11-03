@@ -105,8 +105,9 @@ const drawn = (row: Element): Drawn => ({
 });
 
 /**
- * Every rule row a tools view draws, with its words: "Across your Desk"'s, each money band's, and
- * each tool's, a card's by its id and any other (an always-on rule, a money job's own) by its words.
+ * Every rule row a tools view draws, with its words: "Across your Desk"'s, each money band's, each
+ * tool's, a card's by its id and any other (an always-on rule, a money job's own) by its words, and
+ * "Other tools"' rules that cover no tool on the page, by card.
  */
 function drawnRules(root: Element): Map<string, Drawn> {
   const rows = new Map<string, Drawn>();
@@ -119,6 +120,9 @@ function drawnRules(root: Element): Map<string, Drawn> {
     for (const row of tool.querySelectorAll<HTMLElement>('.cd-house-rules__rule')) {
       rows.set(`${tool.dataset.tool}|${row.dataset.ruleId ?? drawn(row).sentence}`, drawn(row));
     }
+  }
+  for (const row of root.querySelectorAll<HTMLElement>('.cd-house-rules__rules--loose > .cd-house-rules__rule')) {
+    rows.set(`loose|${row.dataset.ruleId ?? drawn(row).sentence}`, drawn(row));
   }
   return rows;
 }
@@ -191,25 +195,37 @@ function expectReviewMatches(review: ReturnType<typeof boxRules>, page: Element)
   }
 }
 
-it.each([['Turner Plumbing', false], ['Chen & Co.', true]] as const)('Your rules draws every rule of %s as Rules does', async (_name, isChen) => {
-  const at = isChen ? await chen() : { state: await chenAtTools(), fixture: turner() };
-  const page = drawnRules(await rulesPage(at.fixture));
+/** Payments and Stripe turned off: the draft's money rules that cover no tool left on sit under "Other tools". */
+const paymentsOff = (fixture: Fixture): Fixture => ({
+  ...fixture,
+  tools: fixture.tools.map((tool) => (/^(payments\.|native\.(payment_link|charge_mandate)$)/.test(tool.tool) ? { ...tool, status: 'disabled' } : tool)),
+});
+
+it.each(['Turner Plumbing', 'Chen & Co.', 'Chen & Co. with the payment connectors off'] as const)('Your rules draws every rule of %s as Rules does', async (name) => {
+  const at = name === 'Turner Plumbing' ? { state: await chenAtTools(), fixture: turner() } : await chen();
+  const fixture = name === 'Chen & Co. with the payment connectors off' ? paymentsOff(at.fixture) : at.fixture;
+  const rules = await rulesPage(fixture);
+  const page = drawnRules(rules);
   // Every card Rules draws, by its id.
-  const cards = [...page.keys()].filter((key) => at.fixture.cards.some((card) => key.endsWith(`|${card.card_id}`)));
+  const cards = [...page.keys()].filter((key) => fixture.cards.some((card) => key.endsWith(`|${card.card_id}`)));
   expect(cards.length).toBeGreaterThan(3);
-  const screen = await yourRules(at.state, at.fixture);
-  const setup = drawnRules(screen.container);
-  // Every row Rules draws, setup draws in the same words, for the same people...
-  expect(new Map([...page.keys()].map((key) => [key, setup.get(key)]))).toEqual(page);
-  // ...and the only rows it adds are a money job's own money rules, inline under the job.
-  const added = [...setup].filter(([key]) => !page.has(key));
-  const moneyJobs = at.fixture.tools.filter((tool) => tool.source === 'business' && tool.effects.some((effect) => effect === 'charge' || effect === 'pay_out'));
-  // Chen & Co.'s retainer link is one; Turner Plumbing has none.
-  expect(moneyJobs.length).toBe(isChen ? 1 : 0);
-  expect(added.map(([key, row]) => `${key.split('|')[0]}|${row.sentence}`)).toEqual(moneyJobs.flatMap((job) => [
-    `${job.tool}|${at.fixture.cap > 0 ? `Claude asks you before any payment over $${at.fixture.cap / 100}, whatever the other rules say` : 'Claude asks you before any payment'}`,
-    `${job.tool}|Claude never moves money without your rule or a signed limit`,
-  ]));
+  // Chen & Co.'s retainer link moves money: on both pages its list ends with its own money rules.
+  const moneyJobs = fixture.tools.filter((tool) => tool.source === 'business' && tool.effects.some((effect) => effect === 'charge' || effect === 'pay_out'));
+  expect(moneyJobs.length).toBe(name === 'Turner Plumbing' ? 0 : 1);
+  for (const job of moneyJobs) {
+    const cap = fixture.cap > 0 ? `Claude asks you before any payment over $${fixture.cap / 100}, whatever the other rules say` : 'Claude asks you before any payment';
+    expect(page.get(`${job.tool}|${cap}`), job.tool).toEqual({ sentence: cap, line: '' });
+    expect(page.get(`${job.tool}|Claude never moves money without your rule or a signed limit`), job.tool).toBeDefined();
+    // Neither takes "Change" or Details: the limit changes from the Payments or Stripe band.
+    const own = [...rules.querySelectorAll(`.cd-house-rules__tool[data-tool="${job.tool}"] .cd-house-rules__rule`)].slice(-2);
+    for (const row of own) expect(row.querySelector('button'), job.tool).toBeNull();
+  }
+  // With the payment connectors off, rules that cover no tool left on are listed under "Other tools".
+  const loose = [...page.keys()].filter((key) => key.startsWith('loose|'));
+  expect(loose.length > 0).toBe(name === 'Chen & Co. with the payment connectors off');
+  const screen = await yourRules(at.state, fixture);
+  // Every row, in the same words, for the same people, on both pages.
+  expect(drawnRules(screen.container)).toEqual(page);
 });
 
 it('the Stripe review reads each tool as Rules reads it, on Turner Plumbing and on Chen & Co.', async () => {

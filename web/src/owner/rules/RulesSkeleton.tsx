@@ -422,7 +422,7 @@ export interface ToolRulesShapesProps {
   toolsCaption: string;
   /** The version line under the tools; none in setup, whose draft has no version to name. */
   version: number | null;
-  /** Setup's Your rules: no Details, no "Change", and a money job's own money rules under it. */
+  /** Setup's Your rules: no Details and no "Change". */
   readOnly: boolean;
   /** The class of the shapes' box, which sets the gap between its sections as the page does. */
   className: string;
@@ -483,10 +483,10 @@ export function ToolRulesShapes({ sample, cap, toolsCaption, version, readOnly, 
                       <div className="cd-house-rules__rules">
                         {entry.rules.map((rule) => <RuleShape key={rule.card.card_id} id={`${entry.row.tool}:${rule.card.card_id}`} parts={rule.parts} line={rule.line} end="dot" details={details} />)}
                         {entry.always === undefined ? null : <RuleShape id={`${entry.row.tool}:always`} parts={entry.always.parts} end="always" />}
-                        {/* Setup's money job ends its list with its money rules, as Your rules draws them. */}
-                        {!readOnly || group.money || !entry.row.effects.some((effect) => MONEY_EFFECTS.has(effect)) ? null : (
+                        {/* A money job ends its list with its own money rules, as the tools view draws them. */}
+                        {group.money || !entry.row.effects.some((effect) => MONEY_EFFECTS.has(effect)) ? null : (
                           <>
-                            <RuleShape id={`${entry.row.tool}:cap`} parts={moneyCapSentence(cap)} end="dot" details={false} />
+                            <RuleShape id={`${entry.row.tool}:cap`} parts={moneyCapSentence(cap)} end="dot" details={details} />
                             {neverMovesMoney === undefined ? null : <RuleShape id={`${entry.row.tool}:money`} parts={neverMovesMoney.parts} end="always" />}
                           </>
                         )}

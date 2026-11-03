@@ -27,7 +27,7 @@ import { RouterLink } from '../OwnerLayout.tsx';
 import { JOBS_LINE, OTHER_TOOLS, RULES_FALLBACK } from './copy.ts';
 import { RuleDetails, ToolDetails } from './details.tsx';
 import { governingRules, hubSections } from './hub.ts';
-import { ACROSS_DESK_SENTENCES, ALWAYS_ON_SENTENCES, ruleQualifiers, ruleSentence, type AlwaysOnSentence, type SentenceWords } from './ruleSentence.ts';
+import { ACROSS_DESK_SENTENCES, ALWAYS_ON_SENTENCES, moneyCapSentence, ruleQualifiers, ruleSentence, type AlwaysOnSentence, type SentenceWords } from './ruleSentence.ts';
 
 import './HouseRules.css';
 
@@ -141,6 +141,23 @@ const alwaysOn = (key: AlwaysOnSentence['key']) => ALWAYS_ON_SENTENCES.find((rul
 export function NeverMovesMoney({ titles }: { titles: readonly string[] }) {
   const rule = alwaysOn('money');
   return rule === undefined ? null : <AlwaysOnRule parts={rule.parts} line={listWords(titles)} />;
+}
+
+/**
+ * A money tool's own money rules, at the end of its list in a card no money band leads (the Desk's
+ * jobs, REV-SETUP-3): the payment limit, "Claude asks you before any payment over **$250**, whatever
+ * the other rules say", then "never moves money", always on. Neither names tools, and neither takes
+ * "Change" or Details: the limit changes from the Payments or Stripe band. It says "Updated" when a
+ * change to the limit `landed`.
+ */
+function MoneyToolRules({ cap, landed, detailsPlace }: { cap: number; landed: number | undefined; detailsPlace: boolean }) {
+  const rule = alwaysOn('money');
+  return (
+    <>
+      <ToolRule parts={moneyCapSentence(cap)} status="held" landed={landed} detailsPlace={detailsPlace} data={{ 'data-money-limit': true }} />
+      {rule === undefined ? null : <AlwaysOnRule parts={rule.parts} />}
+    </>
+  );
 }
 
 /**
@@ -361,8 +378,8 @@ export type ToolConnectorsProps = {
   landed?: LandedRules;
   /** The rows a card whose tools move money opens with (Payments, Stripe), on the card's fill. */
   moneyBand?: (group: ToolGroup) => ReactNode;
-  /** A money tool's own money rules, at the end of its list, in a card no band leads (the Desk's jobs). */
-  moneyRules?: (row: ToolRow) => ReactNode;
+  /** The payment limit, in cents, which a money tool in a card no band leads ends its list with (`MoneyToolRules`). */
+  cap?: number;
 } & (
   | { deskId: string; view: RulesView; readOnly?: false }
   /** Setup's Your rules: no Details, and no tool links away from setup. */
@@ -373,13 +390,13 @@ export type ToolConnectorsProps = {
  * Rules' tools, tool by tool (REV-RULES-D, A), as `toolGroups` words them: one card per group, each
  * tool under its title with its rules and the always-on rule that sits with it. Payments and Stripe
  * open with `moneyBand`'s rows, on the card's fill; in a card no band leads, a tool that moves money
- * ends its list with `moneyRules`'. A rule a confirmed change `landed` on says "Updated": a changed
+ * ends its list with its own money rules at the payment limit `cap` (`MoneyToolRules`). A rule a confirmed change `landed` on says "Updated": a changed
  * card's, every rule on a tool the change turned on, and a tool's default ask once a change its
  * review listed leaves the tool no rule of its own. Setup's Your rules draws it `readOnly`, from its
  * draft: the same rows, with no Details and no links (REV-SETUP-3).
  */
 export function ToolConnectors(props: ToolConnectorsProps) {
-  const { view, people, landed = NOTHING_LANDED, moneyBand, moneyRules } = props;
+  const { view, people, landed = NOTHING_LANDED, moneyBand, cap } = props;
   const version = props.readOnly === true ? null : props.view.active;
   const deskId = props.readOnly === true ? null : props.deskId;
   return toolGroups(view, people).map((group) => (
@@ -420,7 +437,7 @@ export function ToolConnectors(props: ToolConnectorsProps) {
                   />
                 ))}
                 {entry.always === undefined ? null : <AlwaysOnRule parts={entry.always.parts} />}
-                {group.money || moneyRules === undefined || !movesMoney(row) ? null : moneyRules(row)}
+                {group.money || cap === undefined || !movesMoney(row) ? null : <MoneyToolRules cap={cap} landed={latest(landed.limit)} detailsPlace={version !== null} />}
               </ul>
             </section>
           );

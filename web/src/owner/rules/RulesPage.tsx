@@ -480,7 +480,7 @@ export function RulesPage() {
         <section className="cd-rules__section" aria-labelledby={toolsId}>
           <SectionHeader id={toolsId} title={RULES_SECTIONS.tools.title} caption={RULES_SECTIONS.tools.caption} />
           <div className="cd-rules__tool-cards">
-            <ToolConnectors deskId={deskId} view={view} people={people.data ?? null} landed={landed} moneyBand={moneyBand} />
+            <ToolConnectors deskId={deskId} view={view} people={people.data ?? null} landed={landed} moneyBand={moneyBand} cap={cap} />
           </div>
           <p className="cd-rules__version cd-type-meta">{rulesVersionLine(active.version)}</p>
         </section>
