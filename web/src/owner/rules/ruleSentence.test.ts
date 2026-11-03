@@ -178,9 +178,11 @@ describe('the always-on rules', () => {
   });
 });
 
-describe('a rule for anyone on a tool that touches private data', () => {
-  // The baseline lets private data go only to its verified owner, so "Anyone" there would read as
-  // if an approval could release it to anyone (REV-SETUP-3 reads "The customer, once verified").
+describe('a rule for anyone on a tool that shows or sends customers their own records', () => {
+  // The baseline lets private data go only to its verified owner, so "Anyone" on Share a document,
+  // See charges or Refund would read as if an approval could release it to anyone (REV-SETUP-3
+  // reads "The customer, once verified"). A tool that only saves what visitors give it, such as a
+  // new-client intake, is used unverified, so its rule for anyone reads "Anyone".
   const tools: readonly Pick<ToolRow, 'tool' | 'effects'>[] = [
     { tool: 'native.quote', effects: ['change'] },
     { tool: 'native.release_document', effects: ['private_data', 'send_message'] },
@@ -190,9 +192,10 @@ describe('a rule for anyone on a tool that touches private data', () => {
   ];
   const onDesk = { business: NO_BUSINESS_TOOLS, tools };
   const anyone = (applies_to: string, mode: RuleCard['mode'] = 'ask') => card({ card_id: applies_to, applies_to, mode, who: 'anyone' });
+  const RECORDS = ['native.release_document', 'payments.list_charges', 'payments.create_refund'];
 
-  it('private_data_tools_read_the_verified_customer_for_anyone', () => {
-    for (const tool of ['native.release_document', 'payments.list_charges', 'payments.create_refund', 'desk.new-client-intake', 'effect:private_data']) {
+  it('record_tools_read_the_verified_customer_for_anyone', () => {
+    for (const tool of RECORDS) {
       for (const mode of ['ask', 'auto'] as const) {
         expect(ruleQualifiers(anyone(tool, mode), onDesk), `${tool} ${mode}`).toBe('The customer, once verified');
         expect(ruleMeta(anyone(tool, mode), onDesk).who, `${tool} ${mode}`).toBe('The customer, once verified');
@@ -202,16 +205,26 @@ describe('a rule for anyone on a tool that touches private data', () => {
     expect(read(ruleSentence(anyone('payments.list_charges'), onDesk))).toBe('Claude asks you before showing customers **their own charges**');
   });
 
-  it('a_shared_rule_reads_the_verified_customer_under_a_private_data_tool_only', () => {
-    const change = anyone('effect:change');
-    expect(ruleQualifiers(change, onDesk, tools[4])).toBe('The customer, once verified');
-    expect(ruleMeta(change, onDesk, tools[4]).who).toBe('The customer, once verified');
-    expect(ruleQualifiers(change, onDesk, tools[0])).toBe('Anyone');
+  it('an_intake_and_the_private_data_group_keep_anyone', () => {
+    // The intake lists the private-data effect only because it saves what new clients give it.
+    expect(ruleQualifiers(anyone('desk.new-client-intake'), onDesk)).toBe('Anyone');
+    expect(ruleMeta(anyone('desk.new-client-intake'), onDesk).who).toBe('Anyone');
+    expect(ruleQualifiers(anyone('effect:private_data'), onDesk)).toBe('Anyone');
+    // See charges' ask on the same Desk still reads its verified owner.
+    expect(ruleQualifiers(anyone('payments.list_charges'), onDesk)).toBe('The customer, once verified');
+  });
+
+  it('a_shared_rule_reads_the_verified_customer_under_a_record_tool_only', () => {
+    const change = anyone('effect:private_data');
+    expect(ruleQualifiers(change, onDesk, tools[2])).toBe('The customer, once verified');
+    expect(ruleMeta(change, onDesk, tools[2]).who).toBe('The customer, once verified');
+    expect(ruleQualifiers(change, onDesk, tools[4])).toBe('Anyone');
+    expect(ruleQualifiers(anyone('effect:change'), onDesk, tools[0])).toBe('Anyone');
   });
 
   it('a_never_rule_keeps_anyone_where_an_ask_on_the_same_tool_reads_the_verified_customer', () => {
     // "Once verified" under a never rule would read as if verifying unlocked it, and it doesn't (owner ruling, 2026-11-02).
-    for (const tool of ['native.release_document', 'payments.list_charges', 'payments.create_refund', 'desk.new-client-intake', 'effect:private_data']) {
+    for (const tool of RECORDS) {
       expect(ruleQualifiers(anyone(tool, 'never'), onDesk), tool).toBe('Anyone');
       expect(ruleMeta(anyone(tool, 'never'), onDesk).who, tool).toBe('Anyone');
       expect(ruleQualifiers(anyone(tool, 'ask'), onDesk), tool).toBe('The customer, once verified');
@@ -226,6 +239,7 @@ describe('a rule for anyone on a tool that touches private data', () => {
     expect(ruleQualifiers(card({ card_id: 'v', applies_to: 'payments.list_charges', mode: 'ask', who: 'verified' }), onDesk)).toBe('The customer, once verified');
   });
 });
+
 
 describe('any tool', () => {
   it('a_business_tool_reads_claude_can_use_its_title', () => {
@@ -402,8 +416,7 @@ describe('an effect rule names only the tools it governs', () => {
   it('with_an_automatic_rule_for_every_effect_it_covers_the_tool', () => {
     const both = { business: NO_BUSINESS_TOOLS, tools: STRIPE_TOOLS, cards: [payOut, privateData] };
     expect(line(ruleMeta(payOut, both))).toBe('Refund · Anyone');
-    // A rule for anyone on the private-data group reads its verified owner (owner ruling, 2026-11-02).
-    expect(line(ruleMeta(privateData, both))).toBe('See charges and Refund · The customer, once verified');
+    expect(line(ruleMeta(privateData, both))).toBe('See charges and Refund · Anyone');
   });
 
   it('an_ask_rule_covers_every_tool_with_its_effect', () => {
