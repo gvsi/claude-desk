@@ -1,0 +1,127 @@
+/* Setup's start transition (SetupStartTransition.tsx): the press of "Start" turns the start page
+   into setup's chat, and the interview, once made, takes the chat's place. Every part of its
+   motion is in this file, in the design system's motion tokens; a different transition drops in
+   here and in SetupStartTransition.tsx alone. Under reduced motion none of it runs, and every part
+   is at its end at once. */
+
+/* The owner's words: their row holds the box that travels behind the message. */
+.cd-setup-start-words {
+  position: relative;
+}
+
+/* The message paints over the box. */
+.cd-setup-start-words > .cd-visitor-message {
+  position: relative;
+}
+
+.cd-setup-start-words__box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: var(--radius-card);
+  background-color: var(--fill-bubble);
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+/* The start page as it leaves: a copy where it was, over the chat coming in. */
+.cd-setup-start-leaving-screen {
+  position: fixed;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* The copy is as the page was: nothing in it moves again (an example's words fading in, say). */
+.cd-setup-start-leaving-screen * {
+  animation: none;
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-setup-start-leaving-screen,
+  .cd-setup-start-words__box {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 1. The start page fades out over motion-fast; the chat's dock fades in over motion-base, and its
+     title over motion-base once the start page has gone, so the two titles never show together. */
+  .cd-setup-start-leaving-screen {
+    animation: cd-setup-start-out var(--motion-fast) var(--motion-ease) both;
+  }
+
+  .cd-setup-start-transition .cd-page-header {
+    animation: cd-setup-start-enter var(--motion-base) var(--motion-ease) var(--motion-fast) both;
+  }
+
+  .cd-setup-start-transition .cd-setup-dock {
+    animation: cd-setup-start-enter var(--motion-base) var(--motion-ease) both;
+  }
+
+  /* 2. The box travels from the description's field to the message over twice motion-base, its edge
+     and fill becoming the message's, with a transform only. The message's words rise in over the
+     travel's last 70%, from 30% of it, so the box never travels empty as the field's words fade
+     with the start page; the message's fill is clear until the box has landed. */
+  .cd-setup-start-words__box--moving {
+    animation: cd-setup-start-move calc(2 * var(--motion-base)) var(--motion-ease-emphasis) both;
+  }
+
+  .cd-setup-start-words--moving .cd-visitor-message__bubble {
+    background-color: transparent;
+    animation: cd-setup-start-rise calc(1.4 * var(--motion-base)) var(--motion-ease) calc(0.6 * var(--motion-base)) both;
+  }
+
+  /* 3. One move at a time: once the box has landed, Claude's writing dots rise in. A chat come back
+     to, or tried again, has them rise at once. */
+  .cd-setup-start-transition {
+    --setup-start-after: calc(0 * var(--motion-base));
+  }
+
+  .cd-setup-start-transition--entering {
+    --setup-start-after: calc(2 * var(--motion-base));
+  }
+
+  .cd-setup-start-transition .cd-setup-start-dots {
+    animation: cd-setup-start-rise var(--motion-base) var(--motion-ease) var(--setup-start-after) both;
+  }
+
+  /* 4. The interview opens: the dots fade out over motion-fast. (The question's rise and the name's
+     fade are run from SetupStartTransition.tsx, on the interview's own parts.) */
+  .cd-setup-start-leaving {
+    animation: cd-setup-start-out var(--motion-fast) var(--motion-ease) both;
+  }
+}
+
+@keyframes cd-setup-start-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes cd-setup-start-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes cd-setup-start-move {
+  from {
+    transform: var(--setup-start-from-transform);
+    border-color: var(--setup-start-from-border);
+    background-color: var(--setup-start-from-fill);
+  }
+
+  to {
+    transform: none;
+    border-color: transparent;
+    background-color: var(--fill-bubble);
+  }
+}
+
+@keyframes cd-setup-start-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-8));
+  }
+}

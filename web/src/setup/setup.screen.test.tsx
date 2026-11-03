@@ -28,7 +28,7 @@ import { hubSections } from '../owner/rules/hub.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, REOPEN_REPLY, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { CONSENT_QUESTION, FOLLOW_UP, MEMORY_LABEL, REOPEN_REPLY, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { SETUP_WORK_GIVE_UP_MS } from './useSetupWork.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -409,7 +409,7 @@ describe('setup', () => {
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
     // The business's name in the bar once it is known, and Claude's question in its serif.
     await expect.element(screen.getByText('Turner Plumbing', { exact: true }).first()).toBeVisible();
-    const consent = screen.getByText(/^Thanks, Mike\. Before I ask anything/);
+    const consent = screen.getByText(CONSENT_QUESTION, { exact: true });
     await expect.element(consent).toBeVisible();
     expect(inSerif(consent.element())).toBe(true);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
@@ -453,7 +453,8 @@ describe('setup', () => {
     expect(new Set(keys).size).toBe(3);
 
     // The API says the key can't start anything again (409 `key_spent`: the first start ended with
-    // its Desk unknown): setup didn't start, "Start" works again, and it sends a new key.
+    // its Desk unknown): setup didn't start, and setup's chat says so with "Try again", which sends
+    // a new key.
     const spent = (await renderRoute('/app/setup')).screen;
     await spent.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
     const end = holdNextStart(mockStore.world);
@@ -462,9 +463,7 @@ describe('setup', () => {
     end('spent');
     await spent.getByRole('button', { name: 'Try again' }).click();
     await expect.element(spent.getByText(setupStartSpentLine(), { exact: true })).toBeVisible();
-    expect(spent.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
-    await expect.element(spent.getByRole('button', { name: 'Start' })).toBeEnabled();
-    await spent.getByRole('button', { name: 'Start' }).click();
+    await spent.getByRole('button', { name: 'Try again' }).click();
     await expect.element(spent.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
     const spentKeys = startKeys().slice(3);
     expect(spentKeys).toHaveLength(3);
@@ -474,9 +473,9 @@ describe('setup', () => {
 
   it('lost_start_is_tried_again_with_its_key', async () => {
     // A start whose answer was lost (no answer, a timeout or a 5xx) may have made a Desk: it is
-    // never called not done, "Start" stays off, and "Try again" sends the same start with the same
-    // key, which goes on to the interview the first made, or makes it now: one Desk either way. Its
-    // line is the design system's retry-safe one, which says so.
+    // never called not done, setup's chat stays with its line, and "Try again" sends the same start
+    // with the same key, which goes on to the interview the first made, or makes it now: one Desk
+    // either way. Its line is the design system's retry-safe one, which says so.
     expect(setupStartLostLine()).toBe(SETUP_START_RETRY_COPY);
     const lost = [{ status: 503 as const }, { status: 'network' as const, afterCommit: true }, { status: 'network' as const }];
     for (const fault of lost) {
@@ -487,12 +486,12 @@ describe('setup', () => {
       mockStore.inject({ route: 'startSetup', ...fault });
       await page.getByRole('button', { name: 'Start' }).click();
       await expect.element(page.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
-      await expect.element(page.getByRole('button', { name: 'Start' })).toBeDisabled();
-      // "Try again" sends the words as they were: until the start is settled, they can't be changed.
-      await expect.element(page.getByRole('textbox', { name: 'Your business' })).toHaveAttribute('readonly');
+      // "Try again" sends the words as they were: until the start is settled, the form is gone.
+      expect(page.getByRole('button', { name: 'Start' }).elements()).toHaveLength(0);
+      expect(page.getByRole('textbox', { name: 'Your business' }).elements()).toHaveLength(0);
       expect(requests('startSetup', mark)).toHaveLength(1);
 
-      // "Try again" goes with its line, so focus moves to the step's heading rather than the page.
+      // "Try again" goes with its line, so focus moves to the chat's heading rather than the page.
       const focused: Element[] = [];
       const onFocus = (event: FocusEvent) => focused.push(event.target as Element);
       document.addEventListener('focusin', onFocus);
@@ -503,7 +502,7 @@ describe('setup', () => {
       document.removeEventListener('focusin', onFocus);
       const heading = focused[focused.indexOf(button) + 1];
       expect(heading?.tagName, JSON.stringify(fault)).toBe('H1');
-      expect(heading?.textContent).toBe('Tell me about your business');
+      expect(heading?.textContent).toBe("Let's set up your Desk");
       const sent = requests('startSetup', mark).map((r) => r.body as Record<string, unknown>);
       expect(sent, JSON.stringify(fault)).toHaveLength(2);
       expect(sent[1]).toEqual(sent[0]);
@@ -587,8 +586,9 @@ describe('setup', () => {
   it('start_left_while_under_way_stays_left', async () => {
     // The owner leaves with "Save and exit" while a retry of a start under way is in flight, and the
     // retry's answer comes before the page they left for has drawn: the router has moved on, but a
-    // navigation draws in a transition, so the start page is still on screen. The retry has made the
-    // interview, and the start page, left, neither keeps it nor takes anybody back into setup.
+    // navigation draws in a transition, so the start page, setup's chat by then, is still on screen.
+    // The retry has made the interview, and the start page, left, neither keeps it nor takes anybody
+    // back into setup.
     const retry = holdStartRetry();
     const firstVisit = holdFirstVisit();
     const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
@@ -597,7 +597,7 @@ describe('setup', () => {
     await expect.poll(retry.posts).toBe(2);
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe('/');
-    const box = screen.getByRole('textbox', { name: 'Your business' });
+    const box = screen.getByRole('log', { name: 'Setup questions' }).getByText(DESCRIPTION, { exact: true });
     expect(box.elements(), 'the start page, still on screen').toHaveLength(1);
 
     const answered = startAnswered();
@@ -619,9 +619,9 @@ describe('setup', () => {
   it('start_left_then_come_back_to_is_tried_again_with_its_key', async () => {
     // The owner leaves with "Save and exit" while a retry of a start under way is in flight, and goes
     // Back before the page they left for has drawn, so the start page never went. The start they
-    // left is never called done or not done: the page says its outcome is unknown, with "Start" off
-    // and "Try again", which sends it again with its key. Its retry's answer, come meanwhile, takes
-    // nobody anywhere. One Desk.
+    // left is never called done or not done: setup's chat says its outcome is unknown, with "Try
+    // again", which sends it again with its key. Its retry's answer, come meanwhile, takes nobody
+    // anywhere. One Desk.
     const retry = holdStartRetry();
     const firstVisit = holdFirstVisit();
     const { screen, router } = await renderRoute('/app/setup', { routes: firstVisit.routes });
@@ -633,8 +633,8 @@ describe('setup', () => {
     await expect.poll(() => router.state.location.pathname).toBe('/');
     await router.navigate(-1);
     expect(router.state.location.pathname).toBe('/app/setup');
-    const box = screen.getByRole('textbox', { name: 'Your business' });
-    expect(box.elements(), 'the start page, never gone').toHaveLength(1);
+    const words = screen.getByRole('log', { name: 'Setup questions' }).getByText(DESCRIPTION, { exact: true });
+    expect(words.elements(), 'the start page, never gone').toHaveLength(1);
 
     const answered = startAnswered();
     const cached = vi.spyOn(QueryClient.prototype, 'setQueryData');
@@ -642,8 +642,7 @@ describe('setup', () => {
     retry.release();
     await answered;
     await expect.element(screen.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
-    await expect.element(box).toHaveAttribute('readonly');
+    await expect.element(words).toBeVisible();
     expect(router.state.location.pathname).toBe('/app/setup');
     await screen.getByRole('button', { name: 'Try again' }).click();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
@@ -658,8 +657,8 @@ describe('setup', () => {
   it('start_under_way_after_its_retries_says_it_is_taking_longer', async () => {
     expect(setupStartSlowLine()).toBe(SETUP_START_SLOW_COPY);
     // A start that runs long: its own answer is lost, "Try again" finds it under way, and after
-    // three more tries the page says it's taking longer, with "Try again" and "Start" still off.
-    // Once it has made the Desk, "Try again" goes on to its interview: one Desk, one key.
+    // three more tries setup's chat says it's taking longer, with "Try again". Once it has made the
+    // Desk, "Try again" goes on to its interview: one Desk, one key.
     const { screen } = await renderRoute('/app/setup');
     const desks = mockStore.world.desks.length;
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
@@ -669,9 +668,8 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Try again' }).click();
     await expect.element(screen.getByText(setupStartSlowLine(), { exact: true })).toBeVisible();
     expect(screen.getByText(setupStartLostLine()).elements()).toHaveLength(0);
-    await expect.element(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
-    await expect.element(screen.getByRole('textbox', { name: 'Your business' })).toHaveAttribute('readonly');
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Tell me about your business' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Start' }).elements()).toHaveLength(0);
+    await expect.element(screen.getByRole('heading', { level: 1, name: "Let's set up your Desk" })).toHaveFocus();
     expect(requests('startSetup')).toHaveLength(5);
 
     end('made');
@@ -1047,10 +1045,10 @@ describe('setup', () => {
     expect(requests('startSetup').map((r) => (r.body as { description: string }).description)).toEqual([typed]);
   });
 
-  it('examples_are_off_while_a_start_is_settled', async () => {
+  it('examples_are_gone_while_a_start_is_settled', async () => {
     // A start in flight, or one whose answer was lost, is sent again with the words as they were:
-    // the box is read-only and the examples are off, so a press changes nothing. A clear refusal
-    // settles it, and they work again.
+    // setup's chat takes the form's place, so neither the box nor the examples are there to change
+    // them. A clear refusal settles it, and the form is back with the words, its examples working.
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -1077,16 +1075,15 @@ describe('setup', () => {
         release();
         await expect.element(screen.getByText(setupStartLostLine(), { exact: true })).toBeVisible();
       }
-      await expect.element(box).toHaveAttribute('readonly');
-      for (const chip of chips) await expect.element(chip).toBeDisabled();
-      // A press where the chip is, as a person's: nothing reaches the page.
-      await chips[0]?.click({ force: true });
-      expect((box.element() as HTMLTextAreaElement).value, phase).toBe(DESCRIPTION);
+      await expect.element(screen.getByRole('log', { name: 'Setup questions' }).getByText(DESCRIPTION, { exact: true })).toBeVisible();
+      expect(box.elements(), phase).toHaveLength(0);
+      for (const chip of chips) expect(chip.elements(), phase).toHaveLength(0);
     }
     expect(requests('startSetup')).toHaveLength(1);
 
     mockStore.inject({ route: 'startSetup', status: 422, body: { error: 'invalid' } });
     await screen.getByRole('button', { name: 'Try again' }).click();
+    await expect.element(box).toHaveValue(DESCRIPTION);
     await expect.element(box).not.toHaveAttribute('readonly');
     for (const chip of chips) await expect.element(chip).toBeEnabled();
     await chips[2]?.click();
@@ -1844,11 +1841,12 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     expect(requests('setupConsent', mark)).toHaveLength(1);
-    // Nothing comes before Claude's consent question: the owner's description isn't a message.
+    // Opened at its address, nothing comes before Claude's consent question: the API doesn't send
+    // the owner's description back, so only the start that made the interview shows it.
     const log = screen.getByRole('log', { name: 'Setup questions' });
     const first = log.element().firstElementChild;
     expect(first?.querySelector('[data-copy="user"]')).toBeNull();
-    expect(first?.textContent).toMatch(/^Thanks, Mike\. Before I ask anything/);
+    expect(first?.textContent).toBe(CONSENT_QUESTION);
   });
 
   it('tool_turns_on_only_after_its_change_is_confirmed', async () => {
