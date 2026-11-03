@@ -341,7 +341,7 @@ export function toolGroups(view: ToolsView, people: PeopleOut | null): ToolGroup
           return {
             card,
             parts: ruleSentence(card, words),
-            line: ruleQualifiers(card, words),
+            line: ruleQualifiers(card, words, row),
             status: status?.tone ?? OUTCOME_TONE[card.mode],
             ...(shared === undefined ? {} : { shared: otherTitles(shared, row), repeated: shared[0] !== row }),
           };

@@ -89,9 +89,10 @@ it.each([1440, 390])('at %i px, Stripe connected in the chat needs review, and R
     'Claude asks you before showing customers their own charges',
     'Claude asks you before any refund',
   ]);
-  // No card covers either yet, so each starts at the ask Rules shows for it, for anyone, in Rules' words.
+  // No card covers either yet, so each starts at the ask Rules shows for it, in Rules' words: for
+  // the verified customer, since private data goes only to its verified owner.
   expect([...rules.element().querySelectorAll('.cd-rule-sentence__meta')].map((el) => el.textContent)).toEqual([
-    'See charges · Anyone', 'Refund · Anyone',
+    'See charges · The customer, once verified', 'Refund · The customer, once verified',
   ]);
   expect(rules.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
   // No effect badges: a tool's effects show only in its Details, on Rules (owner ruling).
@@ -143,7 +144,7 @@ it.each([1440, 390])('at %i px, Your rules starts Stripe with its money rules an
   // See charges: the ask it starts at, as Rules shows a tool no card covers, then private data, always on.
   const charges = stripe.getByRole('region', { name: 'See charges', exact: true });
   expect([...charges.element().querySelectorAll('.cd-house-rules__rule')].map((row) => row.textContent)).toEqual([
-    'Claude asks you before showing customers their own chargesAnyone',
+    'Claude asks you before showing customers their own chargesThe customer, once verified',
     'Claude never shows private data to anyone but its verified ownerAlways on',
   ]);
   await expect.element(stripe.getByRole('region', { name: 'Refund', exact: true })).toBeVisible();

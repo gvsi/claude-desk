@@ -86,7 +86,7 @@ export function startingRule(row: ToolRow, cards: readonly RuleCard[], tools: re
   const outcome = toolOutcome(row, cards);
   const card: RuleCard = outcome.rule ?? { card_id: `starting-${row.tool}`, applies_to: row.tool, mode: outcome.mode, who: 'anyone', reason: '' };
   const words = { business: businessTools(tools.some((other) => other.tool === row.tool) ? tools : [...tools, row]), tools, cards };
-  return { card, parts: ruleSentence(card, words), meta: ruleMeta(card, words), outcome: outcome.mode };
+  return { card, parts: ruleSentence(card, words), meta: ruleMeta(card, words, row), outcome: outcome.mode };
 }
 
 /** Each tool's starting rule, a rule that covers several of them listed once. */

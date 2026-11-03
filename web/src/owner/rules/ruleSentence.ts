@@ -373,13 +373,34 @@ function toolsCovered(card: RuleCard, row: readonly RuleCard[], words: SentenceW
 /** The words every screen uses for a verified customer and for the record's owner, whose code proved it's them. */
 const VERIFIED_CUSTOMER = 'The customer, once verified';
 
+/** The tools that show or send customers their own records, whatever effects their rows list. */
+const PRIVATE_DATA_TOOLS: ReadonlySet<string> = new Set(['native.release_document', 'payments.list_charges', 'payments.create_refund']);
+
+/**
+ * Whether a target touches private data: a tool that shows customers their own records, the
+ * private-data group, or a tool whose row (`effects`, else the Desk's in `words.tools`) lists it.
+ */
+function touchesPrivateData(target: string, words: SentenceWords, effects?: readonly string[]): boolean {
+  if (PRIVATE_DATA_TOOLS.has(target) || target === 'effect:private_data') return true;
+  return (effects ?? words.tools?.find((row) => row.tool === target)?.effects ?? []).includes('private_data');
+}
+
+/** The tool a rule is listed under, when it isn't the rule's own target (a shared rule under one of its tools). */
+export type RuleTool = Pick<ToolRow, 'tool' | 'effects'>;
+
 /**
  * Who a card is for, in one line, the same on every screen (REV-RULES-D, v354): "Anyone", signed
  * agents included; "The customer, once verified" for a verified customer or the record's owner; a
  * person by name, "Dana Whitfield, verified" on private data; an agent by its name, else "One agent".
+ * A rule for anyone on a tool that touches private data, or its default ask, reads "The customer,
+ * once verified", whatever its outcome (owner ruling, 2026-11-02): the baseline gives private data
+ * only to its verified owner, so "Anyone" would read as if an approval could release it to anyone.
  */
-function whoLine(card: RuleCard, words: SentenceWords): string {
-  if (card.who === 'anyone') return 'Anyone';
+function whoLine(card: RuleCard, words: SentenceWords, under?: RuleTool): string {
+  if (card.who === 'anyone') {
+    const reachesPrivateData = touchesPrivateData(card.applies_to, words) || (under !== undefined && touchesPrivateData(under.tool, words, under.effects));
+    return reachesPrivateData ? VERIFIED_CUSTOMER : 'Anyone';
+  }
   if (card.who === 'verified' || card.who === 'record_owner') return VERIFIED_CUSTOMER;
   return whoWords(card, words.people, words.agents)
     .map((word, index) => (index === 0 ? word.text : lowerFirst(word.text)))
@@ -389,12 +410,13 @@ function whoLine(card: RuleCard, words: SentenceWords): string {
 /**
  * The line under a rule's sentence in Rules' rule cell (REV-RULES-D, v354): who it is for, then its
  * qualifiers, "Checked by the reviewer" and, past an automatic rule's amount limit, "Over $300, it
- * asks you first". Never the tools, which head the cell.
+ * asks you first". Never the tools, which head the cell. `under` is the tool the cell is listed
+ * under, when that isn't the rule's own target.
  */
-export function ruleQualifiers(card: RuleCard, words: SentenceWords): string {
+export function ruleQualifiers(card: RuleCard, words: SentenceWords, under?: RuleTool): string {
   const limit = limitOf(card);
   return [
-    whoLine(card, words),
+    whoLine(card, words, under),
     ...(card.mode === 'auto' && card.review ? ['Checked by the reviewer'] : []),
     ...(limit === null ? [] : [`Over ${formatCents(limit)}, it asks you first`]),
   ].join(' · ');
@@ -403,11 +425,11 @@ export function ruleQualifiers(card: RuleCard, words: SentenceWords): string {
 /**
  * The line under a rule's sentence (`RuleMeta`): the tools it covers by their titles, "Find open
  * times and Book a visit", or for a rule on an effect group the Desk's tools with that effect
- * (`words.tools`), else the group in the app's words; then who it is for, as Rules has always said
- * it ("Anyone", "Signed agents", "The record's owner, verified"). Cards that can't read as one
- * rule (`canJoin`) are refused with an error.
+ * (`words.tools`), else the group in the app's words; then who it is for (`whoLine`: "Anyone", "The
+ * customer, once verified"), read for the tool `under` when it's listed under one that isn't its own
+ * target. Cards that can't read as one rule (`canJoin`) are refused with an error.
  */
-export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWords): RuleMeta {
+export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWords, under?: RuleTool): RuleMeta {
   const cards = asCards(card);
   const named: { titles: string[]; words: string }[] = targetsOf(cards).map((target) => {
     const effectCard = target.startsWith('effect:') ? cards.find((c) => c.applies_to === target) : undefined;
@@ -417,7 +439,7 @@ export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWo
     const title = toolDisplayName(target, words.business);
     return { titles: title === null ? [] : [title], words: targetWords(target, words.business) };
   });
-  const who = whoLine(cards[0], words);
+  const who = whoLine(cards[0], words, under);
   if (named.every((target) => target.titles.length > 0)) return { tools: { titles: [...new Set(named.flatMap((target) => target.titles))] }, who };
   return { tools: listWords(named.map((target) => (target.titles.length > 0 ? listWords(target.titles) : target.words))), who };
 }
