@@ -133,8 +133,10 @@ describe('reference boards', () => {
 
   it('agents_pages_run_at_their_own_height', () => {
     // Both agents page boards are pages longer than the window, drawn at their width and the page's
-    // own height: the laptop's 1512 × 1500 and the phone's 390 × 2000, its render that size too.
-    expect(boardViewport('N-R2-Agents-01-Page')).toBe('laptop-1500');
+    // own height: the laptop's 1512 × 1800 with outcome rows and the phone's 390 × 2000.
+    expect(boardViewport('N-R2-Agents-01-Page')).toBe('laptop-1800');
+    expect(renderSizeProblem('N-R2-Agents-01-Page', { width: 1512, height: 1800 })).toBeNull();
+    expect(renderSizeProblem('N-R2-Agents-01-Page', { width: 1512, height: 1500 })).toBe('N-R2-Agents-01-Page: 1512×1500, not 1512×1800');
     expect(boardViewport('N-R2-Agents-06-Phone')).toBe('phone-2000');
     expect(renderSizeProblem('N-R2-Agents-06-Phone', { width: 390, height: 2000 })).toBeNull();
     expect(renderSizeProblem('N-R2-Agents-06-Phone', { width: 390, height: 844 })).toBe('N-R2-Agents-06-Phone: 390×844, not 390×2000');

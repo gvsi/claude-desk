@@ -1,13 +1,26 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import type { AgentOutcome } from '../../api/contracts.ts';
+import { AGENT_CARD_BLOCKS } from '../../mocks/agents.ts';
 import { CodeBlock } from '../components/CodeBlock/CodeBlock.tsx';
 import { CopyField } from '../components/CopyField/CopyField.tsx';
+import { OUTCOME_TONE } from '../components/OutcomeMenu/outcomeWords.ts';
+import { StatusLabel, type StatusTone } from '../components/StatusDot/StatusDot.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { FONT_TIMEOUT, withinDeadline } from '../test/fonts.ts';
 import { AgentsCard, AgentsFrame, brandOf } from './parts.tsx';
 import { SPEC, expectAgentsDisclosure, expectFooter, expectFooterAtFoot, expectTabOrder, one } from './spec.ts';
+
+import '../../public/agents/AgentCardPage.css';
+
+/** The live page's ABILITY_TONE: the rules' dots beside the kernel's outcome words. */
+const ABILITY_TONE = {
+  allowed: OUTCOME_TONE.auto,
+  asks_first: OUTCOME_TONE.ask,
+  never: OUTCOME_TONE.never,
+} as const satisfies Record<AgentOutcome, StatusTone>;
 
 /** The example request, as the board writes it: the A2A contract's endpoint, headers and body. */
 const REQUEST = [
@@ -47,21 +60,38 @@ const ABILITIES = [
   "List a verified customer's own charges",
 ];
 
+/** Keep the board's ten words in order, with each fixture outcome visibly below its ability. */
+async function expectAbilities(region: HTMLElement) {
+  const items = within(region).getAllByRole('listitem');
+  await expect(items.map((item) => one(item, '.cd-agents-page__ability-text').textContent)).toEqual(ABILITIES);
+  await expect(items).toHaveLength(AGENT_CARD_BLOCKS.en.length);
+  for (const [index, block] of AGENT_CARD_BLOCKS.en.entries()) {
+    const item = items[index]!;
+    const words = one(item, '.cd-agents-page__ability-text');
+    const outcome = one(item, '.cd-agents-page__outcome');
+    await expect(outcome.textContent).toBe(block.outcome_text);
+    await expect(outcome).toBeVisible();
+    await expect(outcome.querySelectorAll('.cd-status-dot')).toHaveLength(1);
+    await expect(one(outcome, '.cd-status-dot')).toHaveClass('cd-status-dot--handled');
+    await expect(outcome.getBoundingClientRect().top - words.getBoundingClientRect().bottom).toBe(8);
+  }
+}
+
 function AgentsPage() {
   return (
     <AgentsFrame brand={brandOf(rivera.publicDesk.en)}>
       <AgentsCard title="What agents can do here">
-        <ul className="board-agents__list cd-type-body">
-          <li>Get a quote from the price list</li>
-          <li>Find open times</li>
-          <li>Book a visit</li>
-          <li>Get a payment link for a quote</li>
-          <li>Pay for a quote within a signed limit</li>
-          <li>Leave contact details</li>
-          <li>Ask for a callback</li>
-          <li>Verify a customer with a code sent to their contact on record</li>
-          <li>Receive a verified customer's own documents</li>
-          <li>List a verified customer's own charges</li>
+        <ul className="cd-agents-page__abilities">
+          {AGENT_CARD_BLOCKS.en.map((block, index) => (
+            <li key={index} className="cd-agents-page__ability">
+              <span className="cd-agents-page__ability-text cd-type-body">{block.text}</span>
+              {block.outcome != null && block.outcome_text != null ? (
+                <span className="cd-agents-page__outcome cd-type-meta">
+                  <StatusLabel tone={ABILITY_TONE[block.outcome]}>{block.outcome_text}</StatusLabel>
+                </span>
+              ) : null}
+            </li>
+          ))}
         </ul>
       </AgentsCard>
       <AgentsCard title="How agents prove who they are">
@@ -90,14 +120,14 @@ function AgentsPage() {
 const meta = {
   title: 'Boards/Agents page',
   render: () => <AgentsPage />,
-  // Drawn at a 14-inch laptop's width and the page's own 1500 px, so the play measures it there.
-  globals: { viewport: { value: 'laptop-1500', isRotated: false } },
+  // The outcome rows extend the page: draw it at a 14-inch laptop's width and its own 1800 px.
+  globals: { viewport: { value: 'laptop-1800', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-R2-Agents-01-Page',
     canvasNote: [
       'Built against the board in review; sign-off pending.',
-      'N-R2-Agents-01-Page and N-R2-Agents-06-Phone were redrawn on 2026-11-02 (canvas v326) to match the card’s ten abilities, in the same order and words, the two customer lines with the kernel’s straight apostrophe.',
+      'The story now draws each ability’s outcome under its words, with StatusLabel and the live page’s styles, as the live page has since #948. The ten abilities keep their order and words from the existing mock fixture, the two customer lines with the kernel’s straight apostrophe. N-R2-Agents-01-Page and N-R2-Agents-06-Phone are to be redrawn to match, the laptop page now 1800 px tall to fit its outcome rows.',
       'The page for people’s AI agents, /d/:slug/agents: the public page’s brand header on its own (PublicBrandHeader), the endpoint as a CopyField with “Copy address”, and the example request as a CodeBlock, both in the code type.',
       'The column, its title and the cards’ lists are page layout the web app (plan 04) owns.',
       'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
@@ -111,7 +141,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1500]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1800]);
     await expectAgentsDisclosure(canvasElement);
     await withinDeadline(document.fonts.load('13px "JetBrains Mono"'), FONT_TIMEOUT, 'Agents page JetBrains Mono');
     // The brand header, 76 px with its rule, is the page's banner; the page's title is its one h1.
@@ -124,7 +154,7 @@ export const Board: Story = {
     const column = one(main, '.board-agents__cards');
     await expect([Math.round(column.getBoundingClientRect().left), Math.round(column.getBoundingClientRect().width)]).toEqual([376, 760]);
     const abilities = canvas.getByRole('region', { name: 'What agents can do here' });
-    await expect(within(abilities).getAllByRole('listitem').map((item) => item.textContent)).toEqual(ABILITIES);
+    await expectAbilities(abilities);
 
     // The endpoint on its line with Copy address at the card's right; the request in the code type.
     const connect = canvas.getByRole('region', { name: 'Connect your own agent' });
@@ -133,12 +163,12 @@ export const Board: Story = {
     expectComputed(address, { fontFamily: /^"JetBrains Mono"/, fontSize: '13px' });
     const copy = within(connect).getByRole('button', { name: 'Copy address' });
     await expect(Math.round(copy.getBoundingClientRect().right)).toBe(1119);
-    // The address in its outlined box, below the ten abilities: from 393 px, 32 px tall at 799,
-    // 144 px lower after adding six 20 px lines and their 4 px gaps;
+    // The address in its outlined box, below the ten abilities and their outcomes: from 393 px,
+    // 32 px tall at 1273, 474 px lower with the live page's outcome rows;
     // ending 8 px before the button (603 px wide once the interface font has loaded).
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents page fonts');
     const addressBox = address.getBoundingClientRect();
-    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 799, 32]);
+    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 1273, 32]);
     await expect(Math.round(copy.getBoundingClientRect().left - addressBox.right)).toBe(8);
     expectComputed(address, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderTopLeftRadius: '8px' });
     const request = one(connect, 'pre');
@@ -178,7 +208,7 @@ export const Phone: Story = {
     const column = one(canvas.getByRole('main'), '.board-agents__cards');
     await expect([Math.round(column.getBoundingClientRect().left), Math.round(column.getBoundingClientRect().width)]).toEqual([16, 358]);
     const abilities = canvas.getByRole('region', { name: 'What agents can do here' });
-    await expect(within(abilities).getAllByRole('listitem').map((item) => item.textContent)).toEqual(ABILITIES);
+    await expectAbilities(abilities);
     const connect = canvas.getByRole('region', { name: 'Connect your own agent' });
     const address = one(connect, '.cd-copy-field__value');
     const copy = within(connect).getByRole('button', { name: 'Copy address' });

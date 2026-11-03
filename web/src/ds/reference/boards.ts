@@ -147,7 +147,7 @@ export const BOARD_VIEWPORTS = {
   'laptop-1061': { name: '14-inch laptop, a 1061 px page', width: 1512, height: 1061 },
   'laptop-1100': { name: '14-inch laptop, a 1100 px page', width: 1512, height: 1100 },
   'laptop-1150': { name: '14-inch laptop, a 1150 px page', width: 1512, height: 1150 },
-  'laptop-1500': { name: '14-inch laptop, a 1500 px page', width: 1512, height: 1500 },
+  'laptop-1800': { name: '14-inch laptop, an 1800 px page', width: 1512, height: 1800 },
 } as const;
 
 export type BoardViewport = keyof typeof BOARD_VIEWPORTS;
@@ -170,7 +170,7 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Setup-05-Tools': 'laptop-1100',
   'N-R2-Setup-09-Situations': 'laptop-1100',
   'N-R2-Setup-11-Safety': 'laptop-1150',
-  'N-R2-Agents-01-Page': 'laptop-1500',
+  'N-R2-Agents-01-Page': 'laptop-1800',
   'N-R2-Agents-02-Demo-Key': 'laptop',
   'N-R2-Agents-03-Send': 'laptop',
   'N-R2-Agents-04-Run': 'laptop-1150',
