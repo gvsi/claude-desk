@@ -73,10 +73,10 @@ export const ActionCheckpoint: Story = {
     const time = canvas.getByText('9:52 am');
     const title = canvas.getByText("Asked for Raj Patel's invoice");
     const checkpoint = canvas.getByText('Action checkpoint');
-    expectComputed(time, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)', fontVariantNumeric: 'tabular-nums' });
-    expectComputed(title, { fontSize: '14px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(canvas.getByText('From chat'), { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(checkpoint, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(time, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)', fontVariantNumeric: 'tabular-nums' });
+    expectComputed(title, { fontSize: '15px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(canvas.getByText('From chat'), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(checkpoint, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(time.getBoundingClientRect().right).toBeLessThan(title.getBoundingClientRect().left);
     await expect(title.getBoundingClientRect().right).toBeLessThan(checkpoint.getBoundingClientRect().left);
 
@@ -121,7 +121,7 @@ export const Recorded: Story = {
     const tag = within(link).getByText('Recorded');
     await expect(tag).toHaveTextContent(/^Recorded$/);
     await expect(tag.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(tag, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap' });
+    expectComputed(tag, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', whiteSpace: 'nowrap' });
 
     // On the line of where it came from, 10 px after it, its words on the same baseline.
     const who = within(link).getByText('Recorded by your Desk');
@@ -130,8 +130,8 @@ export const Recorded: Story = {
     await expect(Math.round(tagBox.left - whoBox.right)).toBe(10);
     await expect(tagBox.top).toBe(whoBox.top);
     await expect(tagBox.height).toBe(whoBox.height);
-    // The row keeps its signed height.
-    await expect(Math.round(link.getBoundingClientRect().height)).toBe(50);
+    // The row holds its two lines between its 6 px paddings: 51 px, past its 50 px minimum.
+    await expect(Math.round(link.getBoundingClientRect().height)).toBe(51);
   },
 };
 
@@ -178,9 +178,9 @@ export const TurnedDown: Story = {
     const why = within(link).getByText('Your rule says no');
     const label = why.closest('.cd-status-label') as HTMLElement;
     await expect(label.querySelector('.cd-status-dot--refused')).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(why, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(why, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.92)' });
     const title = within(link).getByText('Asked for 50% off the drain clearing');
-    expectComputed(title, { fontSize: '14px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(title, { fontSize: '15px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(why.getBoundingClientRect().bottom).toBeLessThanOrEqual(title.getBoundingClientRect().top);
     await expect(title.getBoundingClientRect().bottom).toBeLessThanOrEqual(within(link).getByText('Recorded by your Desk').getBoundingClientRect().top);
     // The time stands on the label's line: the same type, its words' tops level.

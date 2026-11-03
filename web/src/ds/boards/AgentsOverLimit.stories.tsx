@@ -50,7 +50,7 @@ const meta = {
       'Signed on 2026-10-30.',
       'The agent sent to pay more than its limit: the signed limit stays above the run (SignedLimitPanel), and the kernel’s refusal is the receipt under Claude’s words, in the refused tone.',
       'The cards, the column and the run’s order are the web app’s page layout (plan 04).',
-      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 19 px where the renders draw an earlier 17 px line, and the title above it is larger too, so everything under it sits lower than the render.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -65,15 +65,15 @@ export const Board: Story = {
     await expectAgentsDisclosure(canvasElement);
     const box = (el: Element) => el.getBoundingClientRect();
     const send = canvas.getByRole('region', { name: 'Send an agent' });
-    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([226, 331]);
-    // The limit above the run, 63 px, 10 px under the card's line; the request 35 px under it.
+    await expect([Math.round(box(send).top), Math.round(box(send).height)]).toEqual([230, 342]);
+    // The limit above the run, 65 px, 10 px under the card's line; the request 35 px under it.
     const limit = within(send).getByRole('region', { name: 'Signed limit' });
-    await expect([Math.round(box(limit).top), Math.round(box(limit).height)]).toEqual([293, 63]);
+    await expect([Math.round(box(limit).top), Math.round(box(limit).height)]).toEqual([299, 65]);
     const run = within(send).getByRole('log', { name: 'Agent run' });
     expectConversationType(run);
     await expect(await expectReceiptsUnderMessages(run)).toBe(1);
     const request = run.querySelector('.cd-agent-message__bubble') as HTMLElement;
-    await expect([Math.round(box(request).top), Math.round(box(request).height)]).toEqual([390, 57]);
+    await expect([Math.round(box(request).top), Math.round(box(request).height)]).toEqual([398, 59]);
     // over_limit_shows_the_kernel_line: the refusal is the kernel's line, beside the refused dot.
     const receipt = within(run).getByText(REFUSED);
     await expect(receipt.closest('.cd-margin-line')?.querySelector('.cd-status-dot--refused')).not.toBeNull();

@@ -25,12 +25,12 @@ export const SPEC = {
     height: '36px',
     backgroundColor: 'rgb(60, 57, 47)',
     borderTopLeftRadius: '8px',
-    fontSize: '14px',
-    lineHeight: '20px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
-  pageTitle: { fontFamily: SERIF, fontSize: '24px', lineHeight: '32px', fontWeight: '460' },
-  greeting: { fontFamily: SERIF, fontSize: '36px', lineHeight: '44px', fontWeight: '300' },
+  pageTitle: { fontFamily: SERIF, fontSize: '26px', lineHeight: '34px', fontWeight: '460' },
+  greeting: { fontFamily: SERIF, fontSize: '40px', lineHeight: '48px', fontWeight: '300' },
   /** Today's "Last 7 days" (N-Today-Run1): the booked total, then the smaller stopped count, with tabular figures. */
   figure: { fontFamily: SANS, fontSize: '32px', lineHeight: '40px', fontWeight: '500', letterSpacing: '-0.3px', fontVariantNumeric: 'tabular-nums' },
   figureSmall: { fontFamily: SANS, fontSize: '24px', lineHeight: '32px', fontWeight: '420', letterSpacing: 'normal', fontVariantNumeric: 'tabular-nums' },
@@ -39,7 +39,7 @@ export const SPEC = {
   /** The conversation boards: the page fills the main area, so its list starts at the sidebar's seam. */
   mainFilled: { paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', paddingLeft: '0px' },
   contentFilled: { maxWidth: 'none' },
-  reply: { fontFamily: SERIF, fontSize: '15px', lineHeight: '23px', fontWeight: '360', color: 'rgba(250, 249, 245, 0.92)' },
+  reply: { fontFamily: SERIF, fontSize: '17px', lineHeight: '26px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' },
   bubble: {
     backgroundColor: 'rgba(250, 249, 245, 0.06)',
     borderTopLeftRadius: '12px',
@@ -47,10 +47,10 @@ export const SPEC = {
     paddingRight: '14px',
     paddingBottom: '8px',
     paddingLeft: '14px',
-    fontSize: '15px',
-    lineHeight: '21px',
+    fontSize: '16px',
+    lineHeight: '22px',
   },
-  receipt: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+  receipt: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' },
   dot: { width: '6px', height: '6px' },
   /** Share's More channels: four rows in one card, separated by hairlines. */
   shareChannelRow: { paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' },
@@ -66,8 +66,8 @@ export const SPEC = {
     height: '40px',
     borderTopLeftRadius: '8px',
     backgroundColor: 'rgba(250, 249, 245, 0.1)',
-    fontSize: '14px',
-    lineHeight: '20px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
   dangerMain: {
@@ -75,21 +75,21 @@ export const SPEC = {
     borderTopLeftRadius: '8px',
     backgroundColor: 'rgba(220, 130, 144, 0.16)',
     color: 'rgb(235, 163, 174)',
-    fontSize: '14px',
-    lineHeight: '20px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
   primary: { backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' },
   composer: { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '16px', boxShadow: /0px 4px 20px/ },
-  footer: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+  footer: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' },
   /** The Recorded tag (RecordedTag): caption type in secondary ink, the icon 4 px before the word, on one line. */
-  recordedTag: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '4px', whiteSpace: 'nowrap' },
+  recordedTag: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '4px', whiteSpace: 'nowrap' },
   /** The line on an opened replayed item (RecordedNote): caption type in secondary ink, the words 6 px after the icon. */
-  recordedNote: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' },
+  recordedNote: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' },
   /** "Includes recorded history" (RecordedHistoryLink): caption type in secondary ink, underlined in line-control 3 px down. */
   recordedLink: {
-    fontSize: '12px',
-    lineHeight: '17px',
+    fontSize: '13px',
+    lineHeight: '18px',
     color: 'rgba(250, 249, 245, 0.64)',
     textDecorationLine: 'underline',
     textDecorationColor: 'rgba(250, 249, 245, 0.22)',
@@ -476,7 +476,7 @@ export async function expectAgentsDisclosure(root: HTMLElement): Promise<void> {
   const line = one(root, '.cd-disclosure-line');
   await expect(line.textContent).toBe('Turner Plumbing answers with Claude, an AI.');
   await expect(line).toHaveAttribute('lang', 'en');
-  expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   const title = within(root).getByRole('heading', { level: 1 });
   await expect(Math.round(line.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(16);
 }
@@ -518,7 +518,7 @@ export async function expectVisionBar(root: HTMLElement, backHref: string): Prom
  */
 export async function expectChannelsContent(content: HTMLElement, lead: string): Promise<void> {
   const line = within(content).getByText(lead);
-  expectComputed(line, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.64)' });
   const channels = within(content).getByRole('region', { name: 'Channels' });
   await expect(Math.round(channels.getBoundingClientRect().top - line.getBoundingClientRect().bottom)).toBe(20);
   await expect(Math.round(channels.getBoundingClientRect().width)).toBe(720);
@@ -533,9 +533,9 @@ export async function expectChannelsContent(content: HTMLElement, lead: string):
   ]);
   await expect(within(rows[0] as HTMLElement).getByText('On')).toBeVisible();
   await expect(within(channels).getAllByText('Coming later')).toHaveLength(5);
-  // The board's rows: 68 px for one line under the name, 86 px where it wraps (Email, WhatsApp), and
-  // a 1 px hairline over every row but the first.
-  await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([68, 87, 69, 87, 69, 69]);
+  // The board's rows: 70 px for one line under the name, 89 px where it wraps (Email, WhatsApp, and
+  // Slack, whose line takes two lines in the larger type), and a 1 px hairline over every row but the first.
+  await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([70, 90, 71, 90, 90, 71]);
   await expect(within(content).queryByRole('button')).toBeNull();
   await expect(within(content).queryByRole('switch')).toBeNull();
 }

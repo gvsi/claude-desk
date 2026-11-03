@@ -50,7 +50,6 @@ import {
   Notice,
   RELOAD_PAGE_LABEL,
   SignedLimitPanel,
-  Skeleton,
   SuggestionChips,
   SystemLine,
   Transcript,
@@ -63,6 +62,7 @@ import { paymentLinkMemory } from '../paymentLinks.ts';
 import { usePaymentLinks } from '../usePaymentLinks.ts';
 import type { AgentSession } from './agentSession.ts';
 import { AgentsCardContent } from './AgentsCard.tsx';
+import { TaskChipShapes } from './AgentsSkeleton.tsx';
 import { PUBLIC_COPY } from '../copy.ts';
 import {
   AGENTS_COPY,
@@ -435,17 +435,13 @@ export function SendAgentPanel({ slug, business, ownerName, session, language }:
       </Notice>
     );
   }
-  // Each kind wraps on its own. Until the set is read, the same rows hold the chips' places.
-  const chips = !OFFERS_TASKS.has(status) ? null : (
+  // Each kind wraps on its own. Until the set is read, the same rows hold the chips' places, as the
+  // page's skeleton draws them.
+  const chips = !OFFERS_TASKS.has(status) ? null : taskSet === null ? (
+    <TaskChipShapes language={language} loading />
+  ) : (
     <div className="cd-agents-card__tasks">
       {DEMO_TASK_ROWS.map((row) => {
-        if (taskSet === null) return (
-          <div key={row[0]} className="cd-suggestion-chips" aria-hidden="true" data-loading="task-chips">
-            {row.map((t) => (
-              <Skeleton key={t} shape="block" measure={{ label: DEMO_TASK_COPY[language].rivera[t], className: 'cd-chip cd-type-pill' }} height="var(--space-28)" radius="full" />
-            ))}
-          </div>
-        );
         const tasks = row.filter((t) => (choices?.tasks ?? DEMO_TASKS).includes(t));
         return tasks.length === 0 ? null : (
           <SuggestionChips key={row[0]} label={copy.tasksLabel} suggestions={tasks.map((t) => words[t])} onPick={pick} />

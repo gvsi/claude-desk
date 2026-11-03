@@ -59,20 +59,20 @@ export const General: Story = {
       borderTopLeftRadius: '12px',
       paddingTop: '0px',
     });
-    // Each row padded 12 px by 16 px, a hairline over every row but the first: 64 px, 65 with its hairline.
+    // Each row padded 12 px by 16 px, a hairline over every row but the first: 66 px, 67 with its hairline.
     const rows = terms.map((term) => term.parentElement as HTMLElement);
     for (const [index, row] of rows.entries()) {
       expectComputed(row, { paddingTop: '12px', paddingRight: '16px', paddingBottom: '12px', paddingLeft: '16px' });
       expectComputed(row, index === 0 ? { borderTopWidth: '0px' } : { borderTopWidth: '1px', borderTopColor: HAIRLINE });
-      await expect(Math.round(row.getBoundingClientRect().height)).toBe(index === 0 ? 64 : 65);
+      await expect(Math.round(row.getBoundingClientRect().height)).toBe(index === 0 ? 66 : 67);
     }
     // The label in meta type, secondary; the value 2 px under it in body type, primary, from the same edge.
     const [label, value] = [terms[0]!, values[0]!];
-    expectComputed(label, { fontSize: '13px', lineHeight: '18px', color: SECONDARY, marginTop: '0px', marginLeft: '0px' });
-    expectComputed(value, { fontSize: '14px', lineHeight: '20px', color: PRIMARY, marginLeft: '0px' });
+    expectComputed(label, { fontSize: '14px', lineHeight: '19px', color: SECONDARY, marginTop: '0px', marginLeft: '0px' });
+    expectComputed(value, { fontSize: '15px', lineHeight: '21px', color: PRIMARY, marginLeft: '0px' });
     await expect(Math.round(value.getBoundingClientRect().top - label.getBoundingClientRect().bottom)).toBe(2);
     await expect(Math.round(value.getBoundingClientRect().left)).toBe(Math.round(label.getBoundingClientRect().left));
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(326);
+    await expect(Math.round(card.getBoundingClientRect().height)).toBe(336);
     await expect(within(card).queryByText('Change')).toBeNull();
   },
 };
@@ -93,7 +93,7 @@ export const Phone: Story = {
     await expect(window.innerWidth).toBe(390);
     const hours = canvas.getByText(DETAILS[4]!.value);
     // Two lines of body type: the row grows, and the page never scrolls sideways.
-    await expect(Math.round(hours.getBoundingClientRect().height)).toBe(40);
+    await expect(Math.round(hours.getBoundingClientRect().height)).toBe(42);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },
 };

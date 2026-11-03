@@ -417,7 +417,7 @@ export const AboutThisPrototype: Story = {
     // The group: its own navigation, named by its caption title, with one row per link.
     const nav = canvas.getByRole('navigation', { name: 'About this prototype' });
     const title = within(nav).getByText('About this prototype');
-    expectComputed(title, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(title, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     const rows = aboutRows(canvasElement);
     await expect(rows.map((row) => row.text)).toEqual(['Product proposal', 'Capability prediction']);
     await expect(rows.map((row) => row.link.getAttribute('href'))).toEqual(ABOUT.links.map((link) => link.href));
@@ -427,7 +427,7 @@ export const AboutThisPrototype: Story = {
     for (const { link } of rows) {
       await expect(link).toHaveClass('cd-sidebar__row');
       await expect(link).not.toHaveAttribute('aria-current');
-      expectComputed(link, { height: '36px', fontSize: '14px', lineHeight: '20px', fontWeight: '420', backgroundColor: 'rgba(0, 0, 0, 0)' });
+      expectComputed(link, { height: '36px', fontSize: '15px', lineHeight: '21px', fontWeight: '420', backgroundColor: 'rgba(0, 0, 0, 0)' });
       const icon = link.querySelector('svg');
       await expect(icon).toHaveAttribute('aria-hidden', 'true');
       await expect(icon?.getBoundingClientRect().width).toBe(20);

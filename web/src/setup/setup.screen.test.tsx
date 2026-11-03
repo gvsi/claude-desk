@@ -718,7 +718,7 @@ describe('setup', () => {
     expect(Math.round(chips.top - said.bottom)).toBe(8);
     expect(Math.round(start.top - chips.bottom)).toBe(20);
     // In the secondary meta type, as the board sets it.
-    expect(getComputedStyle(line.element())).toMatchObject({ fontSize: '13px', lineHeight: '18px', color: tokenColor('--text-secondary') });
+    expect(getComputedStyle(line.element())).toMatchObject({ fontSize: '14px', lineHeight: '19px', color: tokenColor('--text-secondary') });
     expect(line.element().classList.contains('cd-type-meta')).toBe(true);
   });
 
@@ -1269,7 +1269,7 @@ describe('setup', () => {
     await expect.element(box).toHaveFocus();
   });
 
-  it.each([1440, 390])('at %i px, the setup chat reads at 16/24, Claude and the owner alike, and the dock keeps its own type', async (width) => {
+  it.each([1440, 390])('at %i px, the setup chat reads in the design system\'s chat type, Claude at 17/26 and the owner at 16/22, and the dock keeps its own type', async (width) => {
     const { interview_id: id } = await startInterview();
     await mockStore.dispatch('setupAnswer', { params: { id }, body: { question: SETUP_QUESTIONS[0]?.key, text: 'Leaks, drains and water heaters.' } });
     const { screen } = await renderRoute(`/app/setup/${id}`, { viewport: { width, height: width === 390 ? 844 : 900 } });
@@ -1278,9 +1278,10 @@ describe('setup', () => {
     const bubble = log.element().querySelector('.cd-visitor-message__bubble');
     const prose = log.element().querySelector('.cd-type-reply');
     if (!bubble || !prose) throw new Error('the chat has the owner\'s words and Claude\'s');
-    for (const el of [bubble, prose]) expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['16px', '24px']);
+    expect([getComputedStyle(prose).fontSize, getComputedStyle(prose).lineHeight]).toEqual(['17px', '26px']);
+    expect([getComputedStyle(bubble).fontSize, getComputedStyle(bubble).lineHeight]).toEqual(['16px', '22px']);
     for (const el of document.querySelectorAll('.cd-setup-q3__question, .cd-setup-q3__question .cd-type-reply')) {
-      expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['17px', '25px']);
+      expect([getComputedStyle(el).fontSize, getComputedStyle(el).lineHeight]).toEqual(['19px', '28px']);
     }
     expectNoHorizontalScroll();
   });
@@ -3970,10 +3971,11 @@ describe('setup', () => {
   });
 
   it('preview_fills_the_height_on_a_shorter_phone', async () => {
-    // 390 x 700 still has room for the frame's 300 px: it fills down to the launch bar and "Go live"
-    // stays on the first screen.
+    // 390 x 740 still has room for the frame's 300 px: it fills down to the launch bar and "Go live"
+    // stays on the first screen. At 390 px wide the step needs 737 px in all, its title and the
+    // launch bar's line each on two lines.
     const state = await interviewAtPreview();
-    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 700 } });
+    const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: { width: 390, height: 740 } });
     await expect.element(screen.getByRole('textbox', { name: 'Message Turner Plumbing' })).toBeEnabled();
     const { preview } = previewParts(screen);
     expect(preview.getBoundingClientRect().height).toBeGreaterThanOrEqual(300);
@@ -4580,7 +4582,7 @@ describe('consultant setup', () => {
     expect([...shown.querySelectorAll('strong')].map((el) => el.textContent)).toEqual(['Which work comes in most']);
     expect([...shown.querySelectorAll('li')].map((el) => el.textContent)).toEqual(['Returns for individuals', 'Books for small businesses']);
     const second = getComputedStyle(shown.querySelectorAll('p')[1] as HTMLElement);
-    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['17px', '25px', '12px']);
+    expect([second.fontSize, second.lineHeight, second.marginTop]).toEqual(['19px', '28px', '12px']);
 
     // The dock is named by the question as it reads, with none of the Markdown's marks.
     await expect(dock).toHaveAccessibleName('Got it. Which work comes in most during tax season? Returns for individuals Books for small businesses');
@@ -4615,7 +4617,7 @@ describe('consultant setup', () => {
     const hint = panel.element().querySelector('.cd-setup-q3__hint')!;
     expect(getComputedStyle(hint).display).toBe(viewport === 'phone' ? 'none' : 'flex');
     const questionStyle = getComputedStyle(panel.element().querySelector('.cd-setup-q3__question')!);
-    expect([questionStyle.fontSize, questionStyle.lineHeight]).toEqual(['17px', '25px']);
+    expect([questionStyle.fontSize, questionStyle.lineHeight]).toEqual(['19px', '28px']);
     const key = panel.element().querySelector('kbd')!.getBoundingClientRect();
     expect([key.width, key.height]).toEqual([22, 22]);
     expect(box.elements()).toHaveLength(0);
@@ -5367,7 +5369,10 @@ describe('consultant setup', () => {
     const rect = card.element().getBoundingClientRect();
     const bounds = pane.getBoundingClientRect();
     expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + 1);
-    expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    // The card shows whole where it fits; taller than the pane (545 px in a 520 px pane on this
+    // phone), it shows its end, with its buttons, and its title scrolls up.
+    if (rect.height <= bounds.height) expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    else expect(rect.top).toBeLessThan(bounds.top);
     expectNoHorizontalScroll();
     // Reading earlier messages cancels pinning, including across another resize.
     pane.scrollTop = 0;

@@ -71,7 +71,7 @@ export const Board: Story = {
     // The group: its caption title in secondary ink, behind a hairline, just above the foot.
     const about = canvas.getByRole('navigation', { name: 'About this prototype' });
     const group = about.closest('.cd-sidebar__about') as HTMLElement;
-    expectComputed(within(about).getByText('About this prototype'), { fontSize: '12px', lineHeight: '17px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(about).getByText('About this prototype'), { fontSize: '13px', lineHeight: '18px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
     expectComputed(group, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '14px' });
     const concept = one(column, '.cd-sidebar__concept-footer');
     await expect(Math.round(concept.getBoundingClientRect().top - group.getBoundingClientRect().bottom)).toBe(4);

@@ -32,9 +32,9 @@ export const PaymentLink: Story = {
   play: async ({ args, canvas, userEvent }) => {
     // The reason, then the words that say what it enforces, joined by " · " in secondary meta.
     const reason = canvas.getByText(link.reason);
-    expectComputed(reason, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(reason, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     const words = canvas.getByText('Anyone · Up to $300 · Checked by the reviewer');
-    expectComputed(words, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(words, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     // The outcome at the right, with the card's amount limit.
     const button = canvas.getByRole('button', {
       name: `Allow. Change the outcome of: ${link.reason}`,
@@ -70,7 +70,7 @@ export const Shared: Story = {
     if (line === null) throw new Error('No shared line');
     await expect(line).toHaveTextContent(`Shared rule. ${SHARED_APPLIES_TO}`);
     await expect(line).toBeVisible();
-    expectComputed(line, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     // Each tool's title is its own user-text item, set off on a line of its own under the app's words.
     for (const title of rivera.sharedChargeShared.titles) expectUserText(line, title);
     const titles = [...line.querySelectorAll<HTMLElement>('[data-copy="user"]')];

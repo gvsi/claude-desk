@@ -121,7 +121,7 @@ const meta = {
       'Safety with this week’s attempts: “Includes recorded history” (RecordedHistoryLink) on the summary’s baseline, 14 px after it; each replayed attempt with the Recorded tag 10 px after where it came from (AttemptRow recorded); and the opened one with the line under its status (RecordedNote), 10 px down.',
       'At this window the page fills the main area with its own 24/40/20 padding, the opened attempt is 400 px wide and 32 px from the list, and the footer sits at the window’s foot: page layout the web app (plan 04) owns, composed from the Safety board’s parts, AttemptRow, CheckpointMeter, Card, StatusLabel, TextLink and the tokens.',
       'The parts it shares with the Safety board (N-Safety-Run1) are kept as that board’s story draws them: the header 4 px higher than both renders, the attempts 2 px apart where the renders draw 4, and the opened attempt’s disclosures closer together.',
-      'The render draws a replayed row’s tag 2 px above the words before it and that row 1 px taller; here the tag shares their baseline and the row keeps its 50 px.',
+      'The render draws a replayed row’s tag 2 px above the words before it and that row 1 px taller; here the tag shares their baseline and the row keeps its 51 px.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -173,7 +173,7 @@ export const Board: Story = {
       const from = within(row).getByText(FROM);
       await expect(Math.round(tag.getBoundingClientRect().left - from.getBoundingClientRect().right)).toBe(10);
       await expect(tag.getBoundingClientRect().top).toBe(from.getBoundingClientRect().top);
-      await expect(Math.round(row.getBoundingClientRect().height)).toBe(50);
+      await expect(Math.round(row.getBoundingClientRect().height)).toBe(51);
     }
     const open = within(list).getByRole('link', { current: true });
     await expect(open).toHaveAccessibleName(`Yesterday, 10:10 pm ${OPEN_TITLE} ${FROM} Recorded Stopped by: Reply checkpoint`);
@@ -182,7 +182,7 @@ export const Board: Story = {
     const note = await expectRecordedNote(detail);
     const status = one(detail, '.board-attempt__top');
     await expect(Math.round(note.getBoundingClientRect().top - status.getBoundingClientRect().bottom)).toBe(10);
-    await expect(Math.round(note.getBoundingClientRect().height)).toBe(34);
+    await expect(Math.round(note.getBoundingClientRect().height)).toBe(36);
     await expect(within(detail).getByText('Reply checkpoint')).toBeVisible();
 
     await expectFooter(canvasElement);

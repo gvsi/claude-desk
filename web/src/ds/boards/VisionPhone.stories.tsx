@@ -47,7 +47,7 @@ export const Board: Story = {
     const [ownerScreen, visitorScreen] = [one(owner, '.cd-phone-frame__screen'), one(visitor, '.cd-phone-frame__screen')];
     await expect(Math.round(visitorScreen.getBoundingClientRect().left - ownerScreen.getBoundingClientRect().right)).toBe(64);
     await expect(Math.round(ownerScreen.getBoundingClientRect().left)).toBe(334);
-    await expect(Math.round(ownerScreen.getBoundingClientRect().top - bar.getBoundingClientRect().bottom)).toBe(106);
+    await expect(Math.round(ownerScreen.getBoundingClientRect().top - bar.getBoundingClientRect().bottom)).toBe(109);
 
     // The owner's phone: the greeting, the held quote and Live now, over the five tabs, Today current.
     await expect(within(owner).getByRole('heading', { level: 2, name: 'Good morning, Mike' })).toBeVisible();
@@ -114,7 +114,7 @@ export const Board: Story = {
     // The first press says why nothing was sent: one quiet line, announced, 8 px under the composer.
     const line = within(visitor).getByText(VISION_INERT_LINE);
     await expect(line).toHaveAttribute('role', 'status');
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     const box = composer.closest('.cd-composer__box') as HTMLElement;
     await expect(Math.round(line.getBoundingClientRect().top - box.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.click(composer);

@@ -91,8 +91,8 @@ body {
   background: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 15px;
+  line-height: 21px;
   font-weight: 380;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

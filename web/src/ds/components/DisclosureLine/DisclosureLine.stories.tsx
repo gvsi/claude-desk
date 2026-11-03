@@ -34,7 +34,7 @@ async function expectDisclosure(root: HTMLElement, words: string, language: 'en'
   await expect(line.closest('[aria-hidden="true"]')).toBeNull();
   await expect(line.querySelector('button, a')).toBeNull();
   // Meta type in the secondary ink, with no icon and no dot: a statement, not a status.
-  expectComputed(line, { fontSize: '13px', lineHeight: '18px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '14px', lineHeight: '19px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
   expectComputed(line, { marginTop: '0px', marginBottom: '0px' });
   await expect(line.querySelector('svg, .cd-status-dot')).toBeNull();
   // The business's name is the owner's own words, set apart from the line's.

@@ -1359,7 +1359,7 @@ describe('Today', () => {
     const el = line.element();
     expect(el.tagName).toBe('P');
     expect(el).toHaveClass('cd-type-summary');
-    expectComputed(el, { fontSize: '18px', lineHeight: '27px', marginTop: '0px', marginBottom: '0px' });
+    expectComputed(el, { fontSize: '20px', lineHeight: '30px', marginTop: '0px', marginBottom: '0px' });
     expect(getComputedStyle(el).fontFamily).toContain('Source Serif 4');
     const first = since.getByRole('listitem').first().element();
     expect(el.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1908,7 +1908,7 @@ describe('Today', () => {
     expect(watch.drawn()).toBe(false);
   });
 
-  it('since_last_night_keeps_its_night_while_its_read_fails', { timeout: 15_000 }, async () => {
+  it.each([[1280, 800], [1440, 900], [1512, 982]])('since_last_night_keeps_its_night_while_its_read_fails_at_%sx%s', { timeout: 15_000 }, async (width, height) => {
     // A night with things in it is read, then Today's refreshes fail. The card says so first, with
     // "Try again", over what it read: the night's line, its rows and "See all" stay, as Last 7
     // days' figures above zero do. Once a read works, the failure's line goes and the night stays.
@@ -1916,7 +1916,7 @@ describe('Today', () => {
       ...t,
       briefing: { ...t.briefing, total: 4, turned_down: 1, newest: { turned_down: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } },
     }));
-    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const { screen } = await renderRoute(TODAY, { retryScale: 0, viewport: { width, height } });
     const since = region(screen, 'Since last night');
     const night = since.getByText(
       '3 conversations since last night, all inside your rules. I booked one visit, answered one question and stopped one attempt.',
@@ -1936,8 +1936,7 @@ describe('Today', () => {
     expect(rows.elements()).toHaveLength(3);
     await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
     // The failure's line comes first in the card, 16 px over the night's line, as Last 7 days' is
-    // over its parts, and inset to the night's edge: its dot starts where the night's words do, and
-    // "Try again" ends where they may.
+    // over its parts, and inset to the night's edge: its dot starts where the night's words do.
     const notice = since.getByRole('alert').element();
     expect(notice.parentElement).toHaveClass('cd-card');
     expect(notice.parentElement?.firstElementChild).toBe(notice);
@@ -1946,10 +1945,16 @@ describe('Today', () => {
     words.selectNodeContents(night.element());
     const dot = notice.querySelector('.cd-status-dot');
     expect(Math.abs((dot?.getBoundingClientRect().left ?? -1) - words.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    // At these widths the failure's words and "Try again" don't fit on one line in the card, so, as
+    // a Notice does, "Try again" drops 8 px under the words, starting where they do, and stays inside
+    // the night's edge.
     const nightBox = night.element().getBoundingClientRect();
     const nightEnd = nightBox.right - Number.parseFloat(getComputedStyle(night.element()).paddingRight);
+    const message = notice.querySelector('.cd-notice__message')!.getBoundingClientRect();
     const retry = since.getByRole('button', { name: 'Try again' }).element().getBoundingClientRect();
-    expect(Math.abs(retry.right - nightEnd)).toBeLessThanOrEqual(1);
+    expect(Math.round(retry.top - message.bottom)).toBe(8);
+    expect(Math.abs(retry.left - (dot?.getBoundingClientRect().left ?? -1))).toBeLessThanOrEqual(1);
+    expect(retry.right).toBeLessThanOrEqual(nightEnd);
 
     failing.stop();
     await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();
