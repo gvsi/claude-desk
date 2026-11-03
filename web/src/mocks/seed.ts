@@ -418,6 +418,14 @@ function seedDanasEarlierChats(world: MockWorld, desk: DeskRecord, opened: numbe
 
 /** Fills a new copy's world for `seed`, with everything dated before `world.now()`. */
 export function seedWorld(world: MockWorld): void {
+  seedContents(world);
+  const unread = new Set([world.scoped('ses-visitor-web'), world.scoped('ses-alex-agent')]);
+  for (const session of world.sessions.values()) {
+    if (!unread.has(session.state.session_id)) world.markRead(session, Number.MAX_SAFE_INTEGER);
+  }
+}
+
+function seedContents(world: MockWorld): void {
   const { ids, seed } = world;
   const opened = world.now();
   const main = world.addDesk({

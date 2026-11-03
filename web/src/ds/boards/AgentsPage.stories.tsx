@@ -30,15 +30,38 @@ const SIGNING = [
   'Time window: 5 minutes',
 ];
 
+/**
+ * The card’s ten abilities, in the order redrawn on 2026-11-02, the two customer lines with the
+ * kernel’s straight apostrophe (canvas v326).
+ */
+const ABILITIES = [
+  'Get a quote from the price list',
+  'Find open times',
+  'Book a visit',
+  'Get a payment link for a quote',
+  'Pay for a quote within a signed limit',
+  'Leave contact details',
+  'Ask for a callback',
+  'Verify a customer with a code sent to their contact on record',
+  "Receive a verified customer's own documents",
+  "List a verified customer's own charges",
+];
+
 function AgentsPage() {
   return (
     <AgentsFrame brand={brandOf(rivera.publicDesk.en)}>
       <AgentsCard title="What agents can do here">
         <ul className="board-agents__list cd-type-body">
           <li>Get a quote from the price list</li>
-          <li>Find open times and book a visit</li>
-          <li>Pay the service call deposit within a signed limit</li>
-          <li>Ask Mike for a callback</li>
+          <li>Find open times</li>
+          <li>Book a visit</li>
+          <li>Get a payment link for a quote</li>
+          <li>Pay for a quote within a signed limit</li>
+          <li>Leave contact details</li>
+          <li>Ask for a callback</li>
+          <li>Verify a customer with a code sent to their contact on record</li>
+          <li>Receive a verified customer's own documents</li>
+          <li>List a verified customer's own charges</li>
         </ul>
       </AgentsCard>
       <AgentsCard title="How agents prove who they are">
@@ -74,6 +97,7 @@ const meta = {
     canvas: 'N-R2-Agents-01-Page',
     canvasNote: [
       'Built against the board in review; sign-off pending.',
+      'N-R2-Agents-01-Page and N-R2-Agents-06-Phone were redrawn on 2026-11-02 (canvas v326) to match the card’s ten abilities, in the same order and words, the two customer lines with the kernel’s straight apostrophe.',
       'The page for people’s AI agents, /d/:slug/agents: the public page’s brand header on its own (PublicBrandHeader), the endpoint as a CopyField with “Copy address”, and the example request as a CodeBlock, both in the code type.',
       'The column, its title and the cards’ lists are page layout the web app (plan 04) owns.',
       'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
@@ -99,6 +123,8 @@ export const Board: Story = {
     const main = canvas.getByRole('main');
     const column = one(main, '.board-agents__cards');
     await expect([Math.round(column.getBoundingClientRect().left), Math.round(column.getBoundingClientRect().width)]).toEqual([376, 760]);
+    const abilities = canvas.getByRole('region', { name: 'What agents can do here' });
+    await expect(within(abilities).getAllByRole('listitem').map((item) => item.textContent)).toEqual(ABILITIES);
 
     // The endpoint on its line with Copy address at the card's right; the request in the code type.
     const connect = canvas.getByRole('region', { name: 'Connect your own agent' });
@@ -107,12 +133,12 @@ export const Board: Story = {
     expectComputed(address, { fontFamily: /^"JetBrains Mono"/, fontSize: '13px' });
     const copy = within(connect).getByRole('button', { name: 'Copy address' });
     await expect(Math.round(copy.getBoundingClientRect().right)).toBe(1119);
-    // The address in its outlined box, where the render draws it: from 393 px, 32 px tall at 655 (the
-    // render's 654, under the 1 px taller disclosure),
+    // The address in its outlined box, below the ten abilities: from 393 px, 32 px tall at 799,
+    // 144 px lower after adding six 20 px lines and their 4 px gaps;
     // ending 8 px before the button (603 px wide once the interface font has loaded).
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents page fonts');
     const addressBox = address.getBoundingClientRect();
-    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 655, 32]);
+    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 799, 32]);
     await expect(Math.round(copy.getBoundingClientRect().left - addressBox.right)).toBe(8);
     expectComputed(address, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderTopLeftRadius: '8px' });
     const request = one(connect, 'pre');
@@ -135,6 +161,33 @@ export const Board: Story = {
     await expect(lines).toBeGreaterThanOrEqual(REQUEST.split('\n').length);
     await expect(request.scrollWidth).toBeLessThanOrEqual(request.clientWidth);
 
+    await expectFooter(canvasElement);
+    await expectFooterAtFoot(canvasElement);
+    await expectTabOrder(userEvent, [canvas.getByRole('link', { name: 'Back to the chat' }), copy]);
+  },
+};
+
+export const Phone: Story = {
+  // Drawn at a phone's width and the page's own 2000 px, its footer at the foot, as the board draws it.
+  globals: { viewport: { value: 'phone-2000', isRotated: false } },
+  parameters: { canvas: 'N-R2-Agents-06-Phone' },
+  play: async ({ canvas, canvasElement, userEvent }) => {
+    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 2000]);
+    await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents phone fonts');
+    await expectAgentsDisclosure(canvasElement);
+    const column = one(canvas.getByRole('main'), '.board-agents__cards');
+    await expect([Math.round(column.getBoundingClientRect().left), Math.round(column.getBoundingClientRect().width)]).toEqual([16, 358]);
+    const abilities = canvas.getByRole('region', { name: 'What agents can do here' });
+    await expect(within(abilities).getAllByRole('listitem').map((item) => item.textContent)).toEqual(ABILITIES);
+    const connect = canvas.getByRole('region', { name: 'Connect your own agent' });
+    const address = one(connect, '.cd-copy-field__value');
+    const copy = within(connect).getByRole('button', { name: 'Copy address' });
+    await expect(address).toHaveTextContent('https://desk.example/api/a2a/rivera');
+    await expect(Math.round(copy.getBoundingClientRect().top - address.getBoundingClientRect().bottom)).toBe(8);
+    const request = one(connect, 'pre');
+    await expect(request.textContent).toBe(REQUEST);
+    await expect(request.scrollWidth).toBeLessThanOrEqual(request.clientWidth);
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
     await expectTabOrder(userEvent, [canvas.getByRole('link', { name: 'Back to the chat' }), copy]);

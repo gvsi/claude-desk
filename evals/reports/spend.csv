@@ -46,6 +46,9 @@ calibration-soft-promise-urgent-offer-approved-20261101-115430,2026-11-01,anthro
 20261102-193659-72c3a2,2026-11-02,anthropic,262,15.9708,3.4856,19.4564,19.4564,0.158
 20261102-201426-beaf26,2026-11-02,anthropic,24,1.2704,0.1338,1.4042,1.4042,0.0
 20261102-201826-a45c6b,2026-11-02,anthropic,60,0.0,0.0,0.79,0.79,0.0
+20261102-221455-c74e16,2026-11-02,anthropic,261,15.7486,3.4623,19.2109,19.2109,0.0
+20261102-225203-594870,2026-11-02,anthropic,24,1.3827,0.1271,1.5098,1.5098,0.0
+calibration-soft-promise-address-pairs-20261102-215515,2026-11-02,anthropic,18,0.036588,0.0,0.036588,0.036588,0.0
 calibration-soft-promise-approved-names-baseline-20261102-153831,2026-11-02,anthropic,48,0.079812,0.0,0.079812,0.079812,0.0
 calibration-soft-promise-approved-names-drift-20261102-154454,2026-11-02,anthropic,75,0.141948,0.0,0.141948,0.141948,0.0
 calibration-soft-promise-approved-names-drift-baseline-20261102-154657,2026-11-02,anthropic,6,0.010518,0.0,0.010518,0.010518,0.0
@@ -54,6 +57,7 @@ calibration-soft-promise-approved-names-filtered-20261102-161324,2026-11-02,anth
 calibration-soft-promise-approved-names-new-cases-20261102-161234,2026-11-02,anthropic,18,0.035452,0.0,0.035452,0.035452,0.0
 calibration-soft-promise-approved-names-new-cases-before-20261102-161306,2026-11-02,anthropic,18,0.028854,0.0,0.028854,0.028854,0.0
 calibration-soft-promise-held-wording-ab-20261102-082204,2026-11-02,anthropic,40,0.06554,0.0,0.06554,0.06554,0.0
+calibration-soft-promise-live-replay-20261102-215431,2026-11-02,anthropic,42,0.086412,0.0,0.086412,0.086412,0.0
 calibration-soft-promise-receipts-baseline-20261102-082245,2026-11-02,anthropic,60,0.103562,0.0,0.103562,0.103562,0.0
 calibration-soft-promise-receipts-baseline-20261102-090505,2026-11-02,anthropic,108,0.18502,0.0,0.18502,0.18502,0.0
 calibration-soft-promise-receipts-changed-final-20261102-155805,2026-11-02,anthropic,30,0.055284,0.0,0.055284,0.055284,0.0
@@ -75,5 +79,7 @@ calibration-soft-promise-receipts-v2-prompt-line-20261102-154546,2026-11-02,anth
 calibration-soft-promise-receipts-v3-callback-es-20261102-155637,2026-11-02,anthropic,4,0.006888,0.0,0.006888,0.006888,0.0
 calibration-soft-promise-receipts-v3-drift-20261102-155601,2026-11-02,anthropic,66,0.125068,0.0,0.125068,0.125068,0.0
 calibration-soft-promise-receipts-v3-status-shows-20261102-155423,2026-11-02,anthropic,9,0.016566,0.0,0.016566,0.016566,0.0
+calibration-soft-promise-street-pairs-20261102-215657,2026-11-02,anthropic,21,0.042576,0.0,0.042576,0.042576,0.0
 latency-20261102-071522-4c3b0c,2026-11-02,anthropic,0,0.8689,0.0,0.8689,0.8689,0.0
 latency-20261102-201826-a45c6b,2026-11-02,anthropic,0,0.785,0.0,0.785,0.785,0.0
+latency-20261102-225713-890d8a,2026-11-02,anthropic,0,0.8033,0.0,0.8033,0.8033,0.0

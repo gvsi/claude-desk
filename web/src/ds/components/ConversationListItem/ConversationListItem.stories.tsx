@@ -43,6 +43,10 @@ export const Live: Story = {
 
     // The open conversation is marked current, on the selected fill.
     await expect(link).toHaveAttribute('aria-current', 'true');
+    await expect(link).not.toHaveClass('cd-conversation-item--unread');
+    await expect(link.querySelector('.cd-conversation-item__unread-dot')).toBeNull();
+    await expect(canvas.queryByText('Unread:')).toBeNull();
+    expectComputed(link, { paddingLeft: '26px' });
     expectComputed(link, { backgroundColor: 'rgb(60, 57, 47)', borderTopLeftRadius: '8px', minHeight: '48px' });
 
     // The name is someone's own, in control type; the time and status in caption type, secondary.
@@ -74,6 +78,28 @@ export const NeedsYou: Story = {
     expectComputed(link, { backgroundColor: 'rgba(0, 0, 0, 0)' });
     const dot = canvas.getByText('Needs you').parentElement?.querySelector('.cd-status-dot');
     await expect(dot).toHaveClass('cd-status-dot--held');
+  },
+};
+
+export const Unread: Story = {
+  args: {
+    name: 'Visitor', time: '10:58 am', unread: true,
+    status: { tone: 'held', text: 'Needs you' },
+    quote: 'How much to clear a clogged drain? Can I get 15% off if I pay cash?',
+  },
+  play: async ({ canvas }) => {
+    const link = canvas.getByRole('link', { name: /^Unread: Visitor/ });
+    await expect(link).toHaveClass('cd-conversation-item--unread');
+    await expect(link.querySelector('.cd-conversation-item__unread-dot')).toHaveAttribute('aria-hidden', 'true');
+    await expect(canvas.getByText('Unread:')).toHaveClass('cd-sr-only');
+    expectComputed(link, { paddingLeft: '26px', position: 'relative', backgroundColor: 'rgba(250, 249, 245, 0.06)' });
+    expectComputed(link.querySelector('.cd-conversation-item__unread-dot')!, {
+      width: '10px', height: '10px', borderRadius: '50%', left: '10px', top: '13px',
+      backgroundColor: 'rgb(126, 174, 218)',
+    });
+    expectComputed(canvas.getByText('Visitor'), { fontWeight: '600', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(canvas.getByText('10:58 am'), { fontWeight: '520', color: 'rgb(126, 174, 218)' });
+    expectComputed(link.querySelector('.cd-conversation-item__quote')!, { color: 'rgba(250, 249, 245, 0.92)' });
   },
 };
 

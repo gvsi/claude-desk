@@ -303,10 +303,12 @@ def refused_summary(refused: Sequence[Any], desk_replies: Mapping[tuple[str, int
             return _ref(r)
         n = desk_replies.get((r.scenario_id, r.rep))
         replies = ("Desk model calls before the refusal unknown" if n is None
-                   else f"{n} Desk model calls before the refusal")
+                   else f"{n} Desk model call{'' if n == 1 else 's'} before the refusal")
         return f"{_ref(r)} ({replies})"
-    return (f"{len(refused)} runs the visitor simulator refused don't fail the gate, since another run of each "
-            f"scenario scored: " + _first([named(r) for r in refused]))
+    one = len(refused) == 1
+    return (f"{len(refused)} run{'' if one else 's'} the visitor simulator refused {'doesn' if one else 'don'}'t fail "
+            f"the gate, since another run of {'its' if one else 'each'} scenario scored: "
+            + _first([named(r) for r in refused]))
 
 
 def gate(p: Any, rates: RecordedRates, *, final: bool = False, target: Target | None = None,
