@@ -32,6 +32,8 @@ const PAGES = {
     route: '/about/proposal',
     title: 'Product proposal',
     summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
+    // The meta line above the title, as the Vision article's: the kind, the date and the reading time.
+    meta: ['Proposal', 'November 2, 2026', '2026-11-02', '8 min read'],
     sections: [
       'The product',
       'Who it’s for and the problem',
@@ -47,6 +49,7 @@ const PAGES = {
     title: 'Capability prediction',
     summary:
       'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
+    meta: ['Prediction', 'November 2, 2026', '2026-11-02', '9 min read'],
     sections: ['Capability', 'Why it matters', 'How it’s measured', 'Why it’s coming', 'Why the limits stay in code', 'Readiness'],
   },
 } as const;
@@ -230,9 +233,26 @@ describe('ReaderPage', () => {
         const hero = screen.container.querySelector('[data-hero]');
         expect(flat(hero?.querySelector('[data-summary]')?.textContent), where).toBe(expected.summary);
         expect(
-          flat((hero as HTMLElement | null)?.innerText).startsWith(`About this prototype ${expected.title} ${expected.summary}`),
+          flat((hero as HTMLElement | null)?.innerText).startsWith(`${expected.meta[0]} ${expected.meta[1]} ${expected.meta[3]} ${expected.title} ${expected.summary}`),
           where,
         ).toBe(true);
+        // The meta line opens the page, as on the Vision article: the kind in the ink and its weight, then the date,
+        // a time a machine can read, and the reading time, in the secondary ink, spaced apart on one line.
+        const meta = hero?.querySelector<HTMLElement>('[data-meta]');
+        if (!meta) throw new Error(`${where}: no meta line`);
+        expect(hero?.textContent?.includes('About this prototype'), where).toBe(false);
+        expect([...meta.children].map((part) => flat(part.textContent)), where).toEqual([expected.meta[0], expected.meta[1], expected.meta[3]]);
+        const [kind, date, time] = [...meta.children] as HTMLElement[];
+        expect(kind?.localName, where).toBe('strong');
+        expect(getComputedStyle(kind as Element).color, where).toBe(tokenColor('--text-primary', meta));
+        expect(Number(getComputedStyle(kind as Element).fontWeight), where).toBeGreaterThan(Number(getComputedStyle(date as Element).fontWeight));
+        expect(date?.localName, where).toBe('time');
+        expect(date?.getAttribute('datetime'), where).toBe(expected.meta[2]);
+        for (const part of [date, time]) expect(getComputedStyle(part as Element).color, where).toBe(tokenColor('--text-secondary', meta));
+        const [k, d, t] = [kind, date, time].map((part) => (part as Element).getBoundingClientRect()) as [DOMRect, DOMRect, DOMRect];
+        expect([k.top, d.top], where).toEqual([t.top, t.top]);
+        expect(d.left - k.right, where).toBeGreaterThanOrEqual(12);
+        expect(t.left - d.right, where).toBeGreaterThanOrEqual(12);
 
         // Every section in the contents list, in the document's order, each link named by its section and
         // numbered on the page (the list itself numbers them for a screen reader).
@@ -363,8 +383,8 @@ describe('ReaderPage', () => {
 
   it('article_opens_with_the_app_icon', async () => {
     // The mark on its white tile is the proposal's app icon (owner, 2026-10-30): a clay field with
-    // corners a quarter of its size and the tiled bell at two thirds of it, centred above "About
-    // this prototype" and the title. 120 px on the desktop layout, 88 px on the phone's. The prediction
+    // corners a quarter of its size and the tiled bell at two thirds of it, centred above the meta
+    // line and the title. 120 px on the desktop layout, 88 px on the phone's. The prediction
     // opens without it, in its reading column (prediction_opens_in_the_reading_column).
     for (const [size, field, radius, bell, gap, top] of [
       [DESKTOP, 120, '30px', '80', 36, '88px'],
@@ -406,8 +426,8 @@ describe('ReaderPage', () => {
   });
 
   it('prediction_opens_in_the_reading_column', async () => {
-    // The prediction's own opening (owner, 2026-11-02): no app icon and no centred hero. On a laptop, "About this
-    // prototype", the title and the summary open the article's column, left-aligned on the article's edge, level
+    // The prediction's own opening (owner, 2026-11-02): no app icon and no centred hero. On a laptop, the meta line,
+    // the title and the summary open the article's column, left-aligned on the article's edge, level
     // with the contents list and the details, 80 px under the top bar; 14 px from the kicker to the title, 20 px to
     // the summary and 40 px to the first section. On a phone they keep their place above the folded contents,
     // left-aligned on the article's edge with the byline. The proposal keeps its centred hero.

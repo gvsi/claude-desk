@@ -856,7 +856,7 @@
   scroll-margin-top: calc(var(--about-top) + var(--space-24));
 }
 
-/* The hero: the Claude Desk app icon, "About this prototype" 36 px under it, the title, the summary
+/* The hero: the Claude Desk app icon, the meta line 36 px under it, the title, the summary
    and the lead figure, centered (N-Docs-Hero-Proposal). */
 
 .cd-about-hero {
@@ -870,6 +870,24 @@
 .cd-about-hero__kicker {
   margin: calc(var(--space-18) * 2) 0 0;
   color: var(--text-secondary);
+}
+
+/* The meta line, as the Vision article's: the document's kind in the ink and a heavier weight, then its date and
+   reading time, spaced apart on one line, centred in the hero and on the article's edge in the column. */
+.cd-about-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-6) var(--space-18);
+}
+
+.cd-about-hero--column .cd-about-hero__meta {
+  justify-content: flex-start;
+}
+
+.cd-about-page .cd-about-hero__meta strong {
+  font-weight: 560;
+  color: var(--text-primary);
 }
 
 .cd-about-page .cd-about-hero__title {
@@ -893,7 +911,7 @@
 }
 
 /* The capability prediction's opening (ReaderPage's `column` layout): no app icon and no lead figure, and
-   "About this prototype", the title and the summary left-aligned on the article's edge. On a laptop they open the
+   the meta line, the title and the summary left-aligned on the article's edge. On a laptop they open the
    article's column, level with the contents list and the details, 80 px under the top bar: 14 px from the kicker
    to the title, 20 px to the summary and 40 px to the first section. On a phone they keep the hero's place above
    the folded contents. */

@@ -45,8 +45,8 @@ export interface AboutDocument {
   /** The one line under the title (`links.ts`). */
   summary: string;
   /**
-   * How the page opens. `hero`: the app icon, then "About this prototype", the title and the summary centred
-   * above the lead figure, `hero`. `column`: "About this prototype", the title and the summary left-aligned at the
+   * How the page opens. `hero`: the app icon, then the meta line, the title and the summary centred
+   * above the lead figure, `hero`. `column`: the meta line, the title and the summary left-aligned at the
    * top of the article's column, with no icon and no lead figure.
    */
   layout: 'hero' | 'column';

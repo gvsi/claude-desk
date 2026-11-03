@@ -34,16 +34,23 @@ import './reader.css';
 
 type Heading = Extract<Block, { kind: 'heading' }>;
 
-/** The byline, "Name · Month D, YYYY", as the author, the date as the boards print it, and the date's day. */
-function bylineOf(blocks: Block[]): { author: string; date: string; day?: string } {
+/** Each document's kind, which its meta line names first, as the Vision article's names "Vision". */
+const KINDS: Record<AboutId, string> = { prediction: 'Prediction', proposal: 'Proposal' };
+
+/**
+ * The byline, "Name · Month D, YYYY", as the author, the date as the boards print it, the date as the byline writes
+ * it, and the date's day.
+ */
+function bylineOf(blocks: Block[]): { author: string; date: string; written: string; day?: string } {
   const text = blocks.find((block) => block.kind === 'byline')?.text ?? '';
   const [author = '', written = ''] = text.split(' · ');
   const [, month = '', date = '', year = ''] = /^(\w+) (\d{1,2}), (\d{4})$/.exec(written) ?? [];
   const index = MONTHS.findIndex((name) => name === month);
-  if (index < 0) return { author, date: written };
+  if (index < 0) return { author, date: written, written };
   return {
     author,
     date: `${month.slice(0, 3)} ${date}, ${year}`,
+    written,
     day: `${year}-${String(index + 1).padStart(2, '0')}-${date.padStart(2, '0')}`,
   };
 }
@@ -185,16 +192,30 @@ function Article({ document, compact }: { document: AboutDocument; compact: bool
 }
 
 /**
- * How the page opens: "About this prototype", the title, the summary and, on a phone, the byline. In the `hero`
- * layout, centred, with the app icon above and the lead figure below; in the `column` layout, left-aligned on the
- * article's edge, with neither.
+ * The meta line above the title, as the Vision article opens: the document's kind, then its date and reading time,
+ * the same as the details beside the article say, spaced apart by the line's gaps so they read as three.
  */
-function Opening({ document, compact }: { document: AboutDocument; compact: boolean }) {
+function MetaLine({ document, kind }: { document: AboutDocument; kind: string }) {
+  const { written, day } = bylineOf(document.blocks);
+  return (
+    <p className="cd-about-hero__kicker cd-about-hero__meta cd-type-meta" data-meta="">
+      <strong>{kind}</strong> {day ? <time dateTime={day}>{written}</time> : <span>{written}</span>}{' '}
+      <span>{`${readingMinutes(document.blocks)} min read`}</span>
+    </p>
+  );
+}
+
+/**
+ * How the page opens: the meta line, the title, the summary and, on a phone, the byline. In the `hero` layout,
+ * centred, with the app icon above and the lead figure below; in the `column` layout, left-aligned on the article's
+ * edge, with neither.
+ */
+function Opening({ document, kind, compact }: { document: AboutDocument; kind: string; compact: boolean }) {
   const hero = document.layout === 'hero';
   return (
     <div className={`cd-about-hero${hero ? '' : ' cd-about-hero--column'}`} data-hero="">
       {hero ? <MarkAppIcon size={compact ? 'compact' : 'large'} /> : null}
-      <p className="cd-about-hero__kicker cd-type-meta">About this prototype</p>
+      <MetaLine document={document} kind={kind} />
       <h1 className={`cd-about-hero__title ${compact ? 'cd-type-greeting' : 'cd-type-article-title'}`}>{document.title}</h1>
       <p
         className={`cd-about-hero__summary ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}
@@ -311,11 +332,11 @@ export function ReaderPage({ id }: ReaderPageProps) {
     >
       <AboutBar current={id} />
       <main className="cd-about-main">
-        {inColumn ? null : <Opening document={about} compact={compact} />}
+        {inColumn ? null : <Opening document={about} kind={KINDS[id]} compact={compact} />}
         <div className="cd-about-body">
           <Contents sections={sections} compact={compact} />
           <div className="cd-about-column">
-            {inColumn ? <Opening document={about} compact={compact} /> : null}
+            {inColumn ? <Opening document={about} kind={KINDS[id]} compact={compact} /> : null}
             <Article document={about} compact={compact} />
             <ReadNext next={readNext(id)} compact={compact} />
           </div>
