@@ -8,3 +8,40 @@
   gap: var(--space-14);
   min-width: 0;
 }
+
+/* The owner's variant (board REV-FLIP), only in the owner app's conversation view: the sides flip
+   from the visitor's own chat, so each side reads its own words on the right.
+
+   The other side on the left: a visitor's bubble (the same fill-bubble and 85% cap), a visiting
+   agent's request, and a visitor's typing bubble start at the log's left edge, and what is attached
+   under them starts where they start, no wider than a bubble can be. */
+.cd-transcript--owner .cd-visitor-message,
+.cd-transcript--owner .cd-agent-message {
+  align-items: flex-start;
+}
+
+.cd-transcript--owner .cd-agent-message__who,
+.cd-transcript--owner .cd-writing-indicator--bubble {
+  justify-content: flex-start;
+}
+
+.cd-transcript--owner .cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-visitor-message, .cd-agent-message)) > .cd-transcript-row__margin {
+  align-self: flex-start;
+}
+
+/* The Desk's side on the right: a row holding Claude's reply, the owner's whisper or the owner's own
+   message takes one column min(520px, 88%) of the log wide, flush with its right edge (about 315 px
+   of a phone's 358 px log), and what is attached under it takes the same column. Inside it
+   everything starts at its left edge, so prose, cards and receipts share one edge, and a reply's
+   cards take its full width. 520 px is the reply card's own cap; no size token is it. Anything that
+   isn't a message, such as a held request's card or a full trace, keeps the log's full width. */
+.cd-transcript--owner .cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper, .cd-person-message)) > :is(.cd-transcript-row__main, .cd-transcript-row__margin) {
+  box-sizing: border-box;
+  width: min(520px, 88%);
+  max-width: min(520px, 88%);
+  margin-left: auto;
+}
+
+.cd-transcript--owner .cd-claude-message .cd-reply-card {
+  max-width: 100%;
+}
