@@ -43,7 +43,7 @@ function msOf(value: string): number {
 }
 
 /** The page's animation clock now, in ms: the time a motion that starts now is counted from. */
-function clockNow(): number {
+export function clockNow(): number {
   const time = document.timeline?.currentTime;
   return typeof time === 'number' ? time : performance.now();
 }
@@ -54,7 +54,7 @@ function clockNow(): number {
  * given theirs: one not yet started starts with the next frame, as one given its beat `now` does,
  * so it is counted from `now`.
  */
-function comingInUntil(row: HTMLElement, now: number, unplaced: readonly Element[]): number {
+function comingInUntil(row: Element, now: number, unplaced: readonly Element[]): number {
   if (typeof row.getAnimations !== 'function') return now;
   return row
     .getAnimations({ subtree: true })
@@ -67,6 +67,17 @@ function comingInUntil(row: HTMLElement, now: number, unplaced: readonly Element
       const start = animation.startTime === null ? now : Number(animation.startTime);
       return Math.max(until, start + Number(animation.effect?.getComputedTiming().endTime ?? 0));
     }, now);
+}
+
+/**
+ * Whether anything in the row `row` is still coming in: a revealed message's words, while the row
+ * waits for them, or its cards and the lines that follow them, playing or waiting for their beat.
+ * What comes after the row can wait on it: the owner's held request card, say.
+ */
+export function rowComingIn(row: Element): boolean {
+  if (row.classList.contains('cd-transcript-row--waiting') || row.querySelector('.cd-claude-message--revealing') !== null) return true;
+  const now = clockNow();
+  return comingInUntil(row, now, []) > now;
 }
 
 /** Whether anything in `row` is still landing: playing, or waiting for its beat. */

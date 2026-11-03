@@ -47,7 +47,7 @@ import { ConversationSkeleton } from './ConversationsSkeleton.tsx';
 import { DemoVisitorNote, useDemoVisitorRun } from './DemoVisitorNote.tsx';
 import { latestOf } from './latest.ts';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
-import { OwnerTranscript } from './OwnerTranscript.tsx';
+import { OwnerTranscript, type HeldSlot } from './OwnerTranscript.tsx';
 import { nameOf, whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
@@ -294,16 +294,28 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   // A request address takes its landing after useEndInView's initial end-of-chat scroll and the
   // ordinary phone/handoff arrival. Card refs exist once the loaded transcript has committed.
   // Spend each history arrival once, so polling never takes focus back after the owner moves on.
+  // A card still waiting its turn after a reply coming in (OwnerTranscript's HeldAfter) is unseen
+  // and can't take focus: the address waits for it to show, as long as the owner is still at it.
   const requestArrival = useRef<string | null>(null);
   const { cardFor } = answeredFocus;
   useEffect(() => {
-    if (loading || chat.data === undefined || !ready || requestArrival.current === location.key) return;
-    requestArrival.current = location.key;
+    if (loading || chat.data === undefined || !ready || requestArrival.current === location.key) return undefined;
+    const arrival = location.key;
     const decisionId = requestInHash(location.hash);
-    const card = decisionId === null ? undefined : cardFor(decisionId);
-    if (card === undefined) return;
-    card.focus();
-    card.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    const land = (): boolean => {
+      const card = decisionId === null ? undefined : cardFor(decisionId);
+      if (card?.closest('.cd-conversation__held')?.getAttribute('aria-busy') === 'true') return false;
+      requestArrival.current = arrival;
+      card?.focus();
+      card?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      return true;
+    };
+    if (land()) return undefined;
+    const waiting = new MutationObserver(() => {
+      if (land()) waiting.disconnect();
+    });
+    waiting.observe(transcriptRef.current ?? document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['aria-busy'] });
+    return () => waiting.disconnect();
   }, [loading, chat.data, ready, location.key, location.hash, cardFor]);
   const pane = (content: ReactNode) => (
     <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
@@ -352,12 +364,13 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
 
   // Each held request answered in place, as Today answers it: one card from held to answered, so the
   // answer lands in its slot, and once answered it stays with its final line.
-  const renderHeld = (decisionId: string) => {
+  // Its slot takes what the transcript gives it (`HeldSlot`), so after a reply arriving live the card comes in last.
+  const renderHeld = (decisionId: string, slot: HeldSlot) => {
     const item =
       answers.answered.get(decisionId)?.item ?? held.find((h) => h.decision.decision_id === decisionId) ?? answers.kept.get(decisionId);
     if (item === undefined) return null;
     return (
-      <div className="cd-conversation__held">
+      <div ref={slot.ref} className={`cd-conversation__held${slot.className}`} aria-busy={slot['aria-busy']}>
         <HeldRequest item={item} answers={answers} readAt={readAt} now={now} rules={rules.rules} registerCard={answeredFocus.register} />
       </div>
     );

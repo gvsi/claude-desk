@@ -125,6 +125,9 @@ export const REFERENCE_BOARDS = [
   'N-Live-REV-DEMO-whisper-1512',
   'N-Live-REV-DEMO-takeover-1512',
   'N-Live-REV-DEMO-ended-1512',
+  // Today's Things to try, approved option A: three of six done.
+  'REV-THINGS-A-1512',
+  'REV-THINGS-A-390',
 ] as const;
 
 export type ReferenceBoard = (typeof REFERENCE_BOARDS)[number];
@@ -202,6 +205,8 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Live-REV-DEMO-whisper-1512': 'laptop',
   'N-Live-REV-DEMO-takeover-1512': 'laptop',
   'N-Live-REV-DEMO-ended-1512': 'laptop',
+  'REV-THINGS-A-1512': 'laptop',
+  'REV-THINGS-A-390': 'phone',
 };
 
 /** The window `board`'s story runs at, and its render's size unless `RENDER_SIZES` gives its own. */
@@ -220,6 +225,7 @@ const FULL_HEIGHT: ReadonlySet<ReferenceBoard> = new Set<ReferenceBoard>(['N-R2-
 const RENDER_SIZES: Readonly<Partial<Record<ReferenceBoard, { width: number; height: number }>>> = {
   'N-R2-Vision-TeamDesk': { width: 1512, height: 1022 },
   'N-R2-Vision-ClaudeAccount': { width: 1512, height: 1013 },
+  'REV-THINGS-A-390': { width: 390, height: 1369 },
 };
 
 /** The size `board`'s render is drawn at: its own (`RENDER_SIZES`), or its story's window. */

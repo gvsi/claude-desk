@@ -73,24 +73,6 @@ export const TODAY_COPY = {
 export const handledCount = (count: number) => `Claude handled ${count}`;
 export const steppedInCount = (count: number) => `You stepped in ${count} ${count === 1 ? 'time' : 'times'}`;
 
-/**
- * "How your Desk works" on Today, as the signed board writes it: three numbered steps, each its
- * title and one line, the second naming the business as the Desk has it.
- */
-export const HOW_IT_WORKS_TITLE = 'How your Desk works';
-
-/** "Step 1" over each step's title. */
-export const stepLabel = (n: number) => `Step ${n}`;
-
-/** The three steps, in order. */
-export function howItWorksSteps(business: string): readonly { title: string; line: string }[] {
-  return [
-    { title: 'Someone asks', line: 'A customer on your page, or their AI agent' },
-    { title: 'Claude answers', line: `As ${business}, and says it's an AI` },
-    { title: 'Your rules decide', line: 'Bookings, quotes, payments and documents are checked first' },
-  ];
-}
-
 /** Today's outcomes: handled and refused since last night, requests still held now. */
 export interface TodayCounts {
   /** What Claude did on its own: the answers and the bookings. */

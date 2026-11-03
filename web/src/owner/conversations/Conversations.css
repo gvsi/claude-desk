@@ -495,6 +495,31 @@
   min-width: 0;
 }
 
+/* A held request's card after a reply that comes in live comes in last (OwnerTranscript's
+   HeldAfter): while the reply's words, cards and lines come in (--waiting), it waits unseen in its
+   place, so nothing below it moves when it comes. Then (--landing) it fades and rises space-4 in,
+   over motion-base, once the last of them has come in. Under reduced motion it shows at once. */
+.cd-conversation__held--waiting {
+  visibility: hidden;
+}
+
+.cd-conversation__held--landing {
+  animation: cd-conversation-held-follow var(--motion-base) var(--motion-ease);
+}
+
+@keyframes cd-conversation-held-follow {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-4));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cd-conversation__held--landing {
+    animation: none;
+  }
+}
+
 .cd-conversation__trace-missing {
   margin: 0;
 }

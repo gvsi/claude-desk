@@ -16,7 +16,7 @@ import { useRequestRules } from '../rules/useRequestRules.ts';
 import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
-import { HowItWorks } from './HowItWorks.tsx';
+import { TodayOutcomes } from './TodayOutcomes.tsx';
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
@@ -59,7 +59,7 @@ export { COPIED_FOR_MS } from '../../ds/index.ts';
 /**
  * `/app/:deskId/today`: a band across the page with the greeting, who is here now, the Desk's public
  * link to copy and "Chat as a customer" (the public page a new tab away), then "Not live yet" while
- * the Desk's setup hasn't gone live, "How your Desk works" with what Claude did today under it, and
+ * the Desk's setup hasn't gone live, what Claude did today under the greeting, and
  * "Things to try"; under it two columns: in this order "Needs
  * you" and "Live now" when they have something, and "Since last night" always; at the right the last
  * 7 days. Today has no inline visitor chat; its request links open the conversation page, and it
@@ -294,7 +294,15 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                     Chat as a customer
                   </Button>
                 }
-              />
+              >
+                <TodayOutcomes
+                  deskId={deskId}
+                  today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
+                  heldCount={readWorked ? listed.length : undefined}
+                  callbackCount={callbacks.length}
+                  firstHeld={firstHeld}
+                />
+              </Greeting>
               <p className="cd-sr-only" role="status">
                 {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
               </p>
@@ -302,14 +310,6 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
             {setup !== null ? (
               <ContinueSetup business={desk.business_name} interviewId={setup.interview_id} step={setup.step} answering={desk.answering} />
             ) : null}
-            <HowItWorks
-              deskId={deskId}
-              business={desk.business_name}
-              today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
-              heldCount={readWorked ? listed.length : undefined}
-              callbackCount={callbacks.length}
-              firstHeld={firstHeld}
-            />
             <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} />
           </div>
           <div className="cd-today__main">
