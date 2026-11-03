@@ -48,6 +48,16 @@ def test_public_desk_starters_are_optional_with_an_empty_default():
         "default": [], "items": {"type": "string"}, "title": "Starters", "type": "array"}
 
 
+def test_each_agent_card_ability_carries_a_closed_outcome_key_and_its_words():
+    schemas = export_openapi()["components"]["schemas"]
+    assert schemas["PublicDesk"]["properties"]["agent_card"]["items"] == {"$ref": "#/components/schemas/AgentAbility"}
+    ability = schemas["AgentAbility"]
+    assert {"kind", "text", "outcome", "outcome_text"} <= set(ability["required"])     # always sent, None or not
+    assert ability["properties"]["outcome"]["anyOf"] == [
+        {"enum": ["allowed", "asks_first", "never"], "type": "string"}, {"type": "null"}]
+    assert ability["properties"]["outcome_text"]["anyOf"] == [{"type": "string"}, {"type": "null"}]
+
+
 def test_business_definition_and_setup_proposals_have_distinct_config_schemas():
     schemas = export_openapi()["components"]["schemas"]
     mapping = schemas["BusinessToolDef"]["properties"]["config"]["discriminator"]["mapping"]

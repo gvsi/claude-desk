@@ -381,7 +381,7 @@ class _Run:
 
     def nothing_sent(self) -> tuple[RunErrorKind, str]:
         """The error of a run in which no visitor message reached the Desk: the simulator stopped first
-        (`simulator_refused`, never retried), the API turned the first message down or the session ended
+        (`simulator_refused`, retried once), the API turned the first message down or the session ended
         first (`infra`)."""
         unscored = "a run that never reached the Desk isn't scored"
         if self.visitor_done:

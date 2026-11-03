@@ -318,10 +318,14 @@ AGENT_TOOLS: dict[str, str] = {
     "native.find_slots": "Find open times",
     "native.book": "Book a visit",
     "native.payment_link": "Get a payment link for a quote",
-    "native.charge_mandate": "Pay for a quote within the limit of a signed mandate",
+    "native.charge_mandate": "Pay for a quote within a signed limit",
     "native.capture_lead": "Leave contact details",
     "native.request_callback": "Ask for a callback",
     "native.start_verification": "Verify a customer with a code sent to their contact on record",
     "native.release_document": "Receive a verified customer's own documents",
     "payments.list_charges": "List a verified customer's own charges",
 }
+
+# What happens when an agent asks for each ability on the Agent Card (`render.agent_card`), shown beside it: its
+# outcome by the Desk's rules for anyone, in words for the visitor or their agent. They name no one.
+AGENT_OUTCOMES: dict[str, str] = {"allowed": "Allowed", "asks_first": "Asks first", "never": "Never"}

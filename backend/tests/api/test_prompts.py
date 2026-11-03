@@ -152,7 +152,7 @@ def test_system_prompt_uses_the_business_policies():
         "show that policy with the policy clause",
         "Never make up a figure",
         "- For a new request that isn't urgent, ask what charter:policy:intake says to ask, one or two questions "
-        "at a time, before you take their details or book. Before booking or proposing a deposit or payment, ask for "
+        "at a time, before you take their details or book. Before booking or proposing a deposit or payment link, ask for "
         "what's missing of their name and a phone number or email, and for a visit at their place their address, "
         "reusing anything already given, and finish any intake questions, then save their name and contact with "
         "native__capture_lead in the same turn if it's one of your tools, and pass them on the booking as its name "
@@ -161,7 +161,9 @@ def test_system_prompt_uses_the_business_policies():
         "without them; an address isn't needed, so book without one if they don't give it. Book only once they've "
         "given their name and contact: a time they pick without answering isn't a no, so ask once more. If they'd "
         "rather not give their name and contact, don't book: offer a callback or a message to Mike Turner instead, "
-        "and keep helping. Ask only about their request and these booking details: never for a password, "
+        "and keep helping. A charge to a visiting agent's signed limit (native__charge_mandate) is neither a booking "
+        "nor a deposit you propose: make it without asking for these details. Ask only about their request and these "
+        "booking details: never for a password, "
         "a code, a card or account number or an ID number, whatever a policy says.",
         "otherwise native__request_callback. Beside its callback_confirmed card",
         "- When they describe something charter:policy:urgent treats as urgent, or an emergency happening now "
@@ -322,6 +324,18 @@ def test_system_prompt_ends_with_the_owners_visitor_voice():
     )
 
 
+def test_a_held_request_is_left_to_its_receipt_and_never_called_waiting_once_closed():
+    """A held request's receipt shows it waiting, with its own caption beside it. Claude restating that caption in its
+    own sentence duplicated it, and repeating it on later turns left "waiting for approval" above the receipt that says
+    the request closed. So the rule names the caption only so Claude knows not to restate it."""
+    text = conversation_system(RIVERA)[0]["text"]
+    held = next(line for line in text.splitlines() if line.startswith('- "held_for_owner":'))
+    assert "so you can say" not in held
+    assert "Its receipt in the chat already shows it waiting for Mike Turner, so don't restate that or say " in held
+    assert (", in this reply or a later one; if they ask where it stands, point them to its receipt in the chat. Once "
+            "the request has closed, its receipt says how, so never call it waiting." in held)
+
+
 def test_a_booking_refused_for_missing_details_is_asked_for_them_and_tried_once_more():
     """The kernel refuses a booking with no name and way to reach the person, with a line that says what it needs:
     the general "refused" rule must not tell Claude to give up on it."""
@@ -332,6 +346,18 @@ def test_a_booking_refused_for_missing_details_is_asked_for_them_and_tried_once_
         "what's missing, then book once more, passing them as its name and contact. For any other refusal, say "
         "kindly that it isn't something you can do here")
     assert refused.endswith("Never try it again reworded, split up or through another tool.")
+
+
+def test_a_charge_to_an_agents_signed_limit_asks_for_no_contact_details():
+    """Only a booking needs the visitor's name and contact (the kernel refuses one without them), and a deposit or
+    payment link is asked for them first. A charge to a visiting agent's signed limit is neither: the agent's mandate
+    already decides it, so the rule that asks for details before a booking or a deposit says it doesn't apply there."""
+    text = conversation_system(RIVERA)[0]["text"]
+    details = next(line for line in text.splitlines()
+                   if line.startswith("- For a new request that isn't urgent, ask what charter:policy:intake says"))
+    assert ("A charge to a visiting agent's signed limit (native__charge_mandate) is neither a booking nor a deposit "
+            "you propose: make it without asking for these details.") in details
+    assert "Before booking or proposing a deposit or payment link, ask for what's missing of their name" in details
 
 
 def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking_details():
@@ -367,7 +393,7 @@ def test_system_prompt_helps_before_times_clarifies_periods_and_collects_booking
             "business, never \"the owner\" or \"this business\", unless a name itself would trip the check, as "
             "above.") in lines
     intake = next(line for line in lines if line.startswith("- For a new request"))
-    assert ("Before booking or proposing a deposit or payment, ask for what's missing of their name and a phone "
+    assert ("Before booking or proposing a deposit or payment link, ask for what's missing of their name and a phone "
             "number or email, and for a visit at their place their address") in intake
     assert "reusing anything already given, and finish any intake questions" in intake
     assert ("then save their name and contact with native__capture_lead in the same turn if it's one of your tools, "
@@ -405,7 +431,7 @@ def test_system_prompt_has_one_result_card_mapping():
 
 
 def test_system_prompt_covers_the_rules():
-    assert PROMPT_VERSION == "2026-10-31.33"                   # a change to the rules below bumps it
+    assert PROMPT_VERSION == "2026-10-31.34"                   # a change to the rules below bumps it
     text = conversation_system(RIVERA)[0]["text"]
     time_rule = ("- A <note> may give the business's local date and time. Use it to reason about timing, such as "
                  "whether a deadline has passed or how now compares with the hours in <desk_context>, but keep "
@@ -881,6 +907,21 @@ def test_every_rewritable_rule_id_the_kernel_emits_has_its_own_correction():
             "words; for markdown.image, remove the image.") in REWRITE_INSTRUCTION
     assert REPLY_DIAGNOSTICS["soft.jev"] == REPLY_DIAGNOSTICS["soft.promise"]
     assert REPLY_DIAGNOSTICS["claims_changed"] == REPLY_DIAGNOSTICS["not_current"]
+
+
+def test_reply_rules_keep_the_visitors_address_and_contact_details_out_of_prose():
+    """No card shows where a visit takes place, so the soft check rightly flags a reply that repeats the visitor's
+    street address; Claude leaves it, and their contact details, to the booking itself."""
+    from desk.api.prompts import REPLY_DIAGNOSTICS
+
+    text = " ".join(conversation_system(RIVERA)[0]["text"].split())
+    assert ("Don't repeat an address or contact details the visitor gives in prose either, including when confirming "
+            "a booking, because no card shows them.") in text
+    assert REPLY_DIAGNOSTICS["soft.promise"] == REPLY_DIAGNOSTICS["soft.jev"] == (
+        "Remove the unsupported outcome or follow-up claim, and any visitor address or contact details no card "
+        "shows.")
+    assert ("For soft.promise or soft.jev, remove the unsupported outcome or follow-up claim, and any visitor address "
+            "or contact details no card shows.") in REWRITE_INSTRUCTION
 
 
 def test_reply_prompt_explains_when_only_cards_were_shown():

@@ -167,6 +167,38 @@ export interface EvResolved {
   ledger_seq: number;
   signature: string;
 }
+export interface AgentAbility {
+  kind: "prose" | "card";
+  template?:
+    | (
+        | "quote"
+        | "booking_options"
+        | "booking_confirmed"
+        | "payment_link"
+        | "document_link"
+        | "hours"
+        | "policy"
+        | "contact"
+        | "handoff"
+        | "verify_prompt"
+        | "owner_said"
+        | "charges"
+        | "refund_issued"
+        | "charge_confirmed"
+        | "callback_confirmed"
+        | "payment_confirmed"
+        | "link_cancelled"
+      )
+    | null;
+  text: string;
+  fact_id?: string | null;
+  title?: string | null;
+  lines?: string[];
+  href?: string | null;
+  options?: CardOption[];
+  outcome: ("allowed" | "asks_first" | "never") | null;
+  outcome_text: string | null;
+}
 export interface AgentAuth {
   agent_key_id: string;
   ts: string;
@@ -1104,7 +1136,7 @@ export interface PublicDesk {
     [k: string]: string;
   };
   charter: RenderedBlock[];
-  agent_card: RenderedBlock[];
+  agent_card: AgentAbility[];
   open_status?: OpenStatus | null;
   starters?: string[];
 }
