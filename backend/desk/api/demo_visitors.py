@@ -11,8 +11,11 @@ record, a log or a model request. So the kernel, the reply check, the visitor li
 any visitor; a loopback peer with no forwarded address is exempt from the per-address limits only (`deps.client_ip`),
 and its own caps keep it small: one running per copy, three starts a copy an hour.
 
-It keeps the session's event stream (`GET .../events`) open for the whole run, since an owner's whisper or hand-back
-wakes Claude only while the visitor's credential is present. Each step:
+It opens the session, marks it as a demo, and sends its task set's fixed opening (`OPENING_LINES`) at once, with no
+model call or typing pause. The start response waits until that message is stored. The opening counts as one of the
+ten messages, and is the model's own earlier assistant turn after its brief. It keeps the session's event stream
+(`GET .../events`) open for the whole run, since an owner's whisper or hand-back wakes Claude only while the visitor's
+credential is present. After the opening, each step:
 
 1. Wait for the Desk: until Claude's turn ends (`turn_end`), or, once the owner has taken the chat over, until the
    owner says something or hands it back (waiting for Claude when work resumes). While the owner stays quiet, it sends its one fixed nudge
@@ -26,8 +29,9 @@ wakes Claude only while the visitor's credential is present. Each step:
 3. One structured model call (route `demo_visitor`, low effort, `VisitorStep`), recorded against the copy and the
    owner's session that started it. In production, today's model budget is checked first, and once it is spent the
    run ends `budget` with no further call.
-4. A human pause: reading (two seconds, plus a little for each character it read, at most four), then a typing
-   signal (`POST .../typing`, so the owner sees its dots) and typing time; six seconds at most together.
+4. A read pause after the reply (two seconds plus 0.02 seconds per character, at most four), then typing time
+   (three seconds plus 0.05 seconds per character written, at most eight). A typing signal (`POST .../typing`)
+   starts the dots and refreshes every four seconds, before their five-second lifetime ends.
 5. It sends the message (`POST .../messages`).
 
 Its persona is the fixed line of the Desk's set (`prompts.DEMO_VISITORS`, chosen by the caller with
@@ -81,9 +85,9 @@ from desk.events import SseEvent
 logger = logging.getLogger(__name__)
 
 ROUTE = "demo_visitor"
-MAX_MESSAGES = 10               # messages a run sends the Desk, its one nudge included
+MAX_MESSAGES = 10               # messages a run sends the Desk, its fixed opening and one nudge included
 MAX_MODEL_CALLS = 12
-RUN_LIMIT = timedelta(minutes=15)
+RUN_LIMIT = timedelta(minutes=15)  # nine paced follow-ups take at most 108 s, leaving over 13 min for model/Desk work
 MAX_TOKENS = 1024               # one short message as JSON
 MAX_RUNS = 50                   # ended runs kept, the newest; running ones are always kept
 RUN_LIFE = timedelta(hours=1)   # how long an ended run's record, and a start, count
@@ -91,10 +95,18 @@ STARTS_PER_HOUR = 3             # a copy's starts
 NUDGE_AFTER_S = 90.0            # the owner quiet this long after taking the chat over: one "Are you still there?"
 OWNER_SILENT_S = 240.0          # and this long: the run ends
 READING_MIN_S, READING_MAX_S, READING_PER_CHAR_S = 2.0, 4.0, 0.02
-TYPING_PER_CHAR_S = 0.04
-PAUSE_MAX_S = 6.0               # reading and typing together
+TYPING_MIN_S, TYPING_MAX_S, TYPING_PER_CHAR_S = 3.0, 8.0, 0.05
+TYPING_REFRESH_S = 4.0          # refresh before presence.TYPING_SHOWS_FOR's five-second lifetime
 STOP_WAIT_S = 10.0              # how long `stop` waits for the run to end
 HTTP_TIMEOUT = httpx.Timeout(60.0)    # the stream's reads too: the API pings it every 15 seconds
+
+OPENING_LINES: dict[DemoTaskSet, str] = {
+    "rivera": "Hi, my kitchen sink is leaking under the cabinet. Can you fix that?",
+    "trade": "Hi, I need some work done at home. What kind of jobs do you take on?",
+    "office": "Hi, I'd like some professional advice. What do you help with?",
+    "landlord": "Hi, I'm looking for a place to rent. Which units are open?",
+    "other": "Hi, what do you offer?",
+}
 
 # How each way of ending leaves the run.
 STATES: dict[DemoVisitorEnded, str] = {
@@ -420,8 +432,12 @@ class _Chat:
         typing itself."""
         reading = min(READING_MAX_S, READING_MIN_S + READING_PER_CHAR_S * read)
         await self.sleep(reading)
-        await self.request("POST", "/typing", ok=204)
-        await self.sleep(min(TYPING_PER_CHAR_S * len(message), PAUSE_MAX_S - reading))
+        remaining = min(TYPING_MAX_S, TYPING_MIN_S + TYPING_PER_CHAR_S * len(message))
+        while remaining > 0:
+            await self.request("POST", "/typing", ok=204)
+            pause = min(remaining, TYPING_REFRESH_S)
+            await self.sleep(pause)
+            remaining -= pause
         return await self.send(message)
 
     async def send(self, message: str) -> int:
@@ -504,13 +520,14 @@ async def _open_session(http: httpx.AsyncClient, path: str, run: DemoVisitorRun)
 
 async def run_demo_visitor(slug: str, task_set: DemoTaskSet, http: httpx.AsyncClient, model: ModelClient,
                            run: DemoVisitorRun, *, clock: Callable[[], datetime], sleep: Sleep, record: Record,
-                           spent: Spent | None = None, opened: Opened | None = None,
+                           spent: Spent | None = None, opened: Opened | None = None, ready: Opened | None = None,
                            stopping: asyncio.Event | None = None) -> None:
     """Play the persona of the Desk's `task_set` in a new visitor chat on the slug's Desk through `http`, the public
     visitor endpoints' client, filling in `run` as it goes and ending it as the module docstring says. Each model call
     is recorded with `record`; `sleep` makes the human pauses and the timers. With `spent` (production: whether today's
-    model budget is spent), it is asked before each step. `opened`, when given, runs once the session is open, before
-    the run reads or writes anything else; it raising ends the run `failed`. A cancellation ends it `stopped_by_owner`
+    model budget is spent), it is asked before the opening and each model step. `opened`, when given, runs once the
+    session is open, before the run reads or writes anything else; it raising ends the run `failed`. `ready` runs
+    once the fixed opening is stored. A cancellation ends it `stopped_by_owner`
     once `stopping` is set (the owner pressed Stop), else `failed` (the process is stopping)."""
     started = clock()
     path = f"/api/public/desks/{quote(slug, safe='')}"
@@ -522,11 +539,17 @@ async def run_demo_visitor(slug: str, task_set: DemoTaskSet, http: httpx.AsyncCl
             async with _listening(http, path, cookie, clock) as feed:
                 chat = _Chat(http=http, path=path, cookie=cookie, feed=feed, run=run, clock=clock, sleep=sleep,
                              deadline=started + RUN_LIMIT)
-                await _converse(chat, model, task_set, record=record, spent=spent)
+                await _converse(chat, model, task_set, record=record, spent=spent, ready=ready)
     except _Ended as ended:
-        _end(run, ended.how)
+        if run.messages_sent == 0 and ended.how in ("chat_ended", "limit"):
+            _fail(run, "the opening could not be sent")
+        else:
+            _end(run, ended.how)
     except TimeoutError:
-        _end(run, "limit")
+        if run.messages_sent == 0:
+            _fail(run, "the opening could not be sent before the deadline")
+        else:
+            _end(run, "limit")
     except ModelUnavailable:
         _fail(run, "the model was unavailable")
     except RunFailed as failed:
@@ -542,10 +565,20 @@ async def run_demo_visitor(slug: str, task_set: DemoTaskSet, http: httpx.AsyncCl
 
 
 async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, record: Record,
-                    spent: Spent | None) -> None:
+                    spent: Spent | None, ready: Opened | None) -> None:
     """The run's steps (module docstring), until one of them ends it."""
-    messages = [_user(demo_visitor_brief(task_set))]
-    shown, read, calls = 0, 0, 0
+    opening = VisitorStep(message=OPENING_LINES[task_set], done=False)
+    messages = [_user(demo_visitor_brief(task_set)),
+                {"role": "assistant", "content": [{"type": "text", "text": opening.model_dump_json()}]}]
+    if spent is not None and await chat.active(spent()):
+        raise _Ended("budget")
+    mark = await chat.active(chat.send(opening.message))
+    if ready is not None:
+        await ready(chat.run)
+    nudged = await chat.answered(mark, chat.clock())
+    lines = _lines(chat.feed.events, 0)
+    messages.append(_shown(lines, nudged=nudged))
+    shown, read, calls = len(chat.feed.events), sum(len(line) for line in lines), 0
     while True:
         if chat.run.messages_sent >= MAX_MESSAGES or calls >= MAX_MODEL_CALLS or chat.clock() >= chat.deadline:
             raise _Ended("limit")
@@ -594,14 +627,14 @@ def visitor_client(settings: Settings, transport: httpx.AsyncBaseTransport | Non
 @dataclass
 class _Held:
     """A run as this process holds it: its record, the copy that started it, the idempotency key it started with,
-    when, and its task. `opened` is set once its session is open or it has ended; `stopping` once the owner asked
+    when, and its task. `ready` is set once its opening is stored or it has ended; `stopping` once the owner asked
     it to stop."""
 
     run: DemoVisitorRun
     copy_id: str
     key: str | None
     started_at: datetime
-    opened: asyncio.Event = field(default_factory=asyncio.Event)
+    ready: asyncio.Event = field(default_factory=asyncio.Event)
     stopping: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task | None = None
 
@@ -611,8 +644,8 @@ class DemoVisitors:
     with a client of its own from `client`, its record kept for an hour once it has ended (the 50 newest), and read
     only by its copy. One runs at a time in a copy, and a copy starts at most three an hour. In `production`, each
     step first checks today's model budget (`metrics.over_daily_budget`). `on_open`, when given, runs once a run's
-    session is open, with the session's IDs, before `start` answers and before the run writes; it raising ends the run
-    `failed`."""
+    session is open, with the session's IDs, before the run writes; it raising ends the run `failed`. `start` answers
+    once the opening is stored or the run has ended."""
 
     def __init__(self, model: ModelClient, *, client: Callable[[], httpx.AsyncClient], engine: AsyncEngine,
                  clock: Callable[[], datetime], production: bool, sleep: Sleep = asyncio.sleep,
@@ -626,7 +659,7 @@ class DemoVisitors:
     async def start(self, copy_id: str, owner_session_id: str, desk_id: str, slug: str, task_set: DemoTaskSet, *,
                     key: str | None = None) -> DemoVisitorRun:
         """Start a demo visitor on the copy's Desk (`desk_id`, whose public slug is `slug`) playing the persona of its
-        `task_set`, for the owner's session, and answer it once its session is open (`session_id` set) or it has
+        `task_set`, for the owner's session, and answer it once its fixed opening is stored or it has
         ended. The copy's run already going answers instead, and so does the run `key` started in the copy within the
         hour, however it ended (`KeyReused` when that run is on another Desk); neither counts as a start.
         `TooManyStarts` once the copy has started three within the hour. The checks and the start happen with no
@@ -639,7 +672,7 @@ class DemoVisitors:
             if wait is not None:
                 raise TooManyStarts(wait)
             held = self._launch(copy_id, owner_session_id, desk_id, slug, task_set, key, now)
-        await held.opened.wait()
+        await held.ready.wait()
         return held.run.model_copy(deep=True)
 
     def existing(self, copy_id: str, key: str | None, desk_id: str) -> DemoVisitorRun | None:
@@ -728,18 +761,18 @@ class DemoVisitors:
                 return await over_daily_budget(conn, self._clock)
 
         async def opened(run: DemoVisitorRun) -> None:
-            try:
-                if self._on_open is not None and run.session_id is not None:
-                    await self._on_open(Ids(copy_id=held.copy_id, desk_id=run.desk_id, session_id=run.session_id),
-                                        run.model_copy(deep=True))
-            finally:
-                held.opened.set()
+            if self._on_open is not None and run.session_id is not None:
+                await self._on_open(Ids(copy_id=held.copy_id, desk_id=run.desk_id, session_id=run.session_id),
+                                    run.model_copy(deep=True))
+
+        async def ready(run: DemoVisitorRun) -> None:
+            held.ready.set()
 
         try:
             async with self._client() as http:
                 await run_demo_visitor(slug, task_set, http, self._model, held.run, clock=self._clock,
                                        sleep=self._sleep, record=record,
-                                       spent=spent if self._production else None, opened=opened,
+                                       spent=spent if self._production else None, opened=opened, ready=ready,
                                        stopping=held.stopping)
         except Exception as error:                  # its client, made or closed: logged by type only
             if held.run.state == "running":
@@ -759,7 +792,7 @@ class DemoVisitors:
             starts = self._starts.get(held.copy_id, [])
             if held.started_at in starts:
                 starts.remove(held.started_at)
-        held.opened.set()
+        held.ready.set()
 
     def _forget(self, now: datetime) -> None:
         """Drop the ended runs older than an hour, then the oldest ended ones past the 50 newest, and the starts
