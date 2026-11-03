@@ -168,9 +168,10 @@ async def test_rules_view_lists_each_tools_covering_cards(app, browser, fake, ke
                                          covering("card-change", shared=True)]
     assert covering("card-change", shared=True) in rows["native.quote"].cards
     assert not any(each.card_id == "card-change" for each in rows["native.find_slots"].cards)   # read, not change
-    # A tool no card covers lists the compiler's default ask.
-    assert rows["payments.list_charges"].cards == [CoveringCard(card_id="default-payments.list_charges", mode="ask",
-                                                                reason=DEFAULT_REASON, shared=False)]
+    # A tool that only the record owners' card covers lists it, then the compiler's default ask for everyone else.
+    assert rows["payments.list_charges"].cards == [
+        covering("rv-charges", shared=False),
+        CoveringCard(card_id="default-payments.list_charges", mode="ask", reason=DEFAULT_REASON, shared=False)]
     # Statuses pass through as the kernel has them.
     assert rows["payments.create_refund"].status == "needs_review" and rows["payments.create_refund"].pending_sha256
     assert rows["native.fetch_website"].status == "disabled" and rows["native.book"].status == "enabled"

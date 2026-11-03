@@ -22,7 +22,7 @@ import type {
   SessionState,
   ToolProfile,
 } from './contracts.ts';
-import type { AgentTasks } from './openapi.gen.ts';
+import type { AgentTasks, ReadThroughIn } from './openapi.gen.ts';
 import type {
   AgentCardOut,
   AgentRunStarted,
@@ -120,6 +120,7 @@ export const ROUTES = {
   // Conversations
   conversations: { method: 'GET', path: '/api/owner/desks/{desk_id}/conversations', owner: true },
   conversation: { method: 'GET', path: '/api/owner/conversations/{session_id}', owner: true },
+  markConversationRead: { method: 'POST', path: '/api/owner/conversations/{session_id}/read', owner: true },
   takeover: { method: 'POST', path: '/api/owner/conversations/{session_id}/takeover', owner: true },
   handback: { method: 'POST', path: '/api/owner/conversations/{session_id}/handback', owner: true },
   resume: { method: 'POST', path: '/api/owner/conversations/{session_id}/resume', owner: true },
@@ -221,6 +222,7 @@ interface RouteShapes {
 
   conversations: { body: undefined; response: ConversationSummary[] };
   conversation: { body: undefined; response: OwnerTranscript };
+  markConversationRead: { body: ReadThroughIn; response: undefined };
   takeover: { body: GenerationBody; response: SessionState };
   handback: { body: GenerationBody; response: SessionState };
   resume: { body: GenerationBody; response: SessionState };

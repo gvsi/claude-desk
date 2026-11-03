@@ -80,7 +80,11 @@ export const Phone: Story = {
     </div>
   ),
   globals: { viewport: { value: 'phone', isRotated: false } },
-  parameters: { canvas: 'none', canvasNote: 'N-R2-Agents-06-Phone draws the request in a narrow card: long lines wrap inside the block, and nothing scrolls sideways.' },
+  parameters: {
+    canvas: 'N-R2-Agents-06-Phone',
+    canvasNote:
+      'The example request alone, at the phone card’s inner width, 324 px, as the board draws it under “Connect your own agent”: long lines wrap inside the block, and nothing scrolls sideways. The card, its signing lines and the rest of the board’s 390 × 2000 page aren’t drawn, and the story runs at the 390 × 844 phone window.',
+  },
   play: async ({ canvasElement }) => {
     await withinDeadline(document.fonts.load('13px "JetBrains Mono"'), FONT_TIMEOUT, 'Code block JetBrains Mono');
     const block = canvasElement.querySelector('pre')!;
