@@ -7,19 +7,19 @@ description: Use when executing a written implementation plan from docs/plans/ â
 
 The plan runner for this repo. Adapted from obra/superpowers 6.4.1 (MIT, `LICENSE-superpowers`); use it in place of that project's subagent-driven-development and executing-plans skills.
 
-**Core principle:** a fresh implementer per task, one task review per task, at most two fix rounds, then one pull request per part plan with the review panel (two seats, three for critical work) as the final gate. You coordinate; you never write task code yourself.
+**Core principle:** a fresh implementer per task, one task review per task, at most two fix rounds, then one pull request per part plan with the review panel (two seats for critical work, one otherwise) as the final gate. You coordinate; you never write task code yourself.
 
 ## Seats
 
 | Seat | Model | How |
 |---|---|---|
-| Implementer | Opus 5.5; Fable 5.1 at `xhigh` for a very complex or critical task (the kernel, the kernel/API trust boundary, money, verification, the evals gate, the master plan) | the `plan-implementer` agent via the Agent tool with `model: opus` (`model: fable` for those), a fresh agent per task; fix rounds resume the same agent (SendMessage). |
+| Implementer | Opus 5.5 | the `plan-implementer` agent via the Agent tool with `model: opus`, a fresh agent per task; fix rounds resume the same agent (SendMessage). |
 | Task reviewer and re-reviewer | GPT-6.1 Sol at `xhigh` | `codex exec`, launched and checked as in `orchestrating-review-subagents`, a fresh run each time; fallback: the `plan-task-reviewer` agent with `model: opus` |
-| PR gate | Opus 5.5 and GPT-6.1 Sol at `xhigh`, plus Fable 5.1 at `xhigh` for critical work | the panel in `orchestrating-review-subagents` |
+| PR gate | Opus 5.5 and GPT-6.1 Sol at `xhigh` for critical work; GPT-6.1 Sol alone otherwise | the panel in `orchestrating-review-subagents` |
 
 - Always pass `model` explicitly; an omitted model inherits the session's. Run the coordinating session at `xhigh`, since native subagents inherit its effort.
 - The task review is a cross-vendor check on the Claude implementer. Its status line is `Task quality:` (re-review: `Fix round:`). If Codex is unavailable, run that review on a fresh `plan-task-reviewer` seat with the same prompt and ledger the substitution; the PR gate still needs every panel seat.
-- From a Codex session, the implementer runs as `claude -p --model opus` (`--model fable --effort xhigh` for critical work) from the repo root (fix rounds: `claude -p --resume <session_id>`), and Sol reviews natively.
+- From a Codex session, the implementer runs as `claude -p --model opus` from the repo root (fix rounds: `claude -p --resume <session_id>`), and Sol reviews natively.
 - Implementers and reviewers never dispatch subagents of their own.
 
 ## Workspace
@@ -71,7 +71,7 @@ When every task is complete, set aside or skipped, run the test suites the plan 
 
 1. Push the branch: `git push -u origin plan/<plan-slug>`.
 2. Open the PR with `gh pr create`: a conventional-commit title; a body with the summary, the test commands with their results, the plan's Review Ledger and any parked P3s, and any task set aside with its branch. The body ends with the line `ðŸ¤– Generated with [Claude Code](https://claude.com/claude-code)`.
-3. Load `orchestrating-review-subagents` and run the code-review panel (two seats, three for critical work) on `origin/main...HEAD`. Put every parked P3 and every `Ruling:` line from the run ledger verbatim in the dispatch.
+3. Load `orchestrating-review-subagents` and run the code-review panel (two seats for critical work, one otherwise) on `origin/main...HEAD`. Put every parked P3 and every `Ruling:` line from the run ledger verbatim in the dispatch.
 4. Validated findings go to a fresh `plan-implementer` with the findings verbatim; commit, rerun the covering tests and push. Rounds follow that skill's cap.
 5. Merge (squash) once the panel is clean and CI checks are green.
 6. Remove the worktree and `.plan-runs/<plan-slug>/`, and delete the plan branch. Branches of tasks set aside stay.
