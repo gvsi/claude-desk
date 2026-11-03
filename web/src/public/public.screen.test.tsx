@@ -1141,8 +1141,10 @@ describe('public chat page', () => {
     const { screen } = await renderRoute(PAGE, { viewport });
     await ready(screen);
     const composer = screen.container.querySelector<HTMLElement>('.cd-composer__box')!;
+    // Heights are compared to within 0.05 px: layout can land a few millionths of a pixel apart
+    // between reads, while a changed line or padding moves the box by whole pixels.
     const height = composer.getBoundingClientRect().height;
-    expect(height).toBe(52);
+    expect(height).toBeCloseTo(52, 1);
     // The send fails on the server's side without being kept: the chat checks, then says so.
     mockStore.inject({ route: 'sendMessage', status: 500 });
     await type(screen, 'How much is drain clearing?');
@@ -1150,7 +1152,7 @@ describe('public chat page', () => {
     await expect.element(failed.getByText("That didn't send. Your message is still here.", { exact: true })).toBeVisible();
     await expect.element(screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
     expect(requests('sendMessage')).toHaveLength(1);
-    expect(composer.getBoundingClientRect().height).toBe(height);
+    expect(composer.getBoundingClientRect().height).toBeCloseTo(height, 1);
     expect(screen.container.querySelector('.cd-composer__kept')).toBeNull();
     expect(requests('visitorSession')).toHaveLength(2);
 
