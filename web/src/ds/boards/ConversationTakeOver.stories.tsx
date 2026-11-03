@@ -3,6 +3,7 @@ import { expect, fn, within } from 'storybook/test';
 
 import { Button } from '../components/Button/Button.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { ConversationListItem } from '../components/ConversationListItem/ConversationListItem.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
@@ -85,7 +86,7 @@ function ConversationTakeOver() {
             </Transcript>
             <TakeOverBar mode="owner" visitorName={lucia.name} ownerName={OWNER} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
             <Composer variant="owner" label={`Message ${lucia.name}`} placeholder="Write to Lucía" onSend={fn()} />
-            <ConceptFooter />
+            <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
           </div>
         </div>
       </div>

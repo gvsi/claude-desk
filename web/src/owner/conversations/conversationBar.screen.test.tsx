@@ -508,7 +508,10 @@ describe('the open conversation bar', () => {
     [430, 980, false],
     [1024, 740, true],
     [1024, 830, false],
-    [1280, 700, true],
+    // The desktop's concept footer lives in the sidebar, so at 1280 x 700 the pane is tall enough for
+    // the transcript's own region; a little shorter, it still scrolls as one.
+    [1280, 660, true],
+    [1280, 700, false],
     [1440, 650, true],
     [1440, 760, false],
     [1440, 900, false],

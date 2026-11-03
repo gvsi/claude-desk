@@ -13,7 +13,7 @@ const TITLE = 'A Claude front desk for your business';
 function IntroArrival() {
   return (
     <>
-      <TodayNeedsYou reviewer={false} />
+      <TodayNeedsYou reviewer={false} conceptFooterInSidebar={false} />
       <IntroDialog
         title={TITLE}
         intro="You’re Mike Turner today, owner of Turner Plumbing. His Desk answers customers and their agents under his rules. Try it, then try to break it."
@@ -55,6 +55,9 @@ export const Board: Story = {
     const dialog = canvas.getByRole('dialog', { name: TITLE });
     await expect(dialog.matches(':modal')).toBe(true);
     await expect(canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike', hidden: true })).toBeInTheDocument();
+    // The inert landing preview keeps its original page-bottom line.
+    await expect(canvasElement.querySelector('.cd-app-shell__content [data-ds="concept-footer"]')).not.toBeNull();
+    await expect(canvasElement.querySelector('.cd-sidebar [data-ds="concept-footer"]')).toBeNull();
     expectComputed(within(dialog).getByRole('heading', { name: TITLE }), {
       fontFamily: /^"Source Serif 4"/,
       fontSize: '28px',
@@ -64,7 +67,7 @@ export const Board: Story = {
 
     // The brand row: the mark and the Wordmark with its Preview badge, as in the sidebar's lockup
     // (owner, 2026-10-30), where the board draws a "Demo" pill.
-    await expect(one(dialog, '.cd-intro__brand').textContent).toBe('Claude DeskPreview');
+    await expect(one(dialog, '.cd-intro__brand').textContent).toBe('Claude Desk Preview');
 
     // At this width the illustration fills the dialog's right side, 400 px of its 880, once the
     // panel has arrived and the illustration has played.

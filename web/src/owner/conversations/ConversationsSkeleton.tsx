@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
+import { AppShellOnly, CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { HeldRuleShape } from '../approvals/HeldRuleShape.tsx';
@@ -391,9 +391,11 @@ export function ConversationsSkeleton({ withHeader, open, recordedHistory = true
           </>
         ) : null}
       </div>
-      <div className="cd-conversations__footer">
-        <ConceptFooter skeleton />
-      </div>
+      <AppShellOnly layout="compact">
+        <div className="cd-conversations__footer" data-skeleton-anchor="owner-footer" data-owner-footer>
+          <ConceptFooter skeleton />
+        </div>
+      </AppShellOnly>
     </div>
   );
 }

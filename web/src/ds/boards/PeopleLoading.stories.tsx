@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, waitFor } from 'storybook/test';
 
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { Skeleton } from '../components/Skeleton/Skeleton.tsx';
@@ -55,7 +56,7 @@ function PeopleLoading() {
         <div className="board-people">
           <PageHeader title="Customers" subtitle="Leads and customers on this Desk. Verified means a code reached their contact on record." />
           <SkeletonScreen loading status="Loading your customers" skeleton={<CustomersShapes />} />
-          <ConceptFooter />
+          <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
         </div>
       </div>
     </RiveraFrame>

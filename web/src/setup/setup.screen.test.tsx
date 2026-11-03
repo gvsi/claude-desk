@@ -3549,7 +3549,7 @@ describe('setup', () => {
       const bar = screen.container.querySelector<HTMLElement>('.cd-setup__bar');
       if (!bar) throw new Error('the setup bar renders');
       const where = `at ${width}`;
-      await expect.poll(() => bar.querySelector('.cd-wordmark')?.textContent, { message: where }).toBe(badge ? 'Claude DeskPreview' : 'Claude Desk');
+      await expect.poll(() => bar.querySelector('.cd-wordmark')?.textContent, { message: where }).toBe(badge ? 'Claude Desk Preview' : 'Claude Desk');
       const mark = bar.querySelector('svg.cd-mark');
       expect(mark?.getAttribute('width'), where).toBe('20');
       // No tile: the bell alone draws no rectangle behind it.

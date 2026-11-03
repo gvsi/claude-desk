@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
 import { RecordedHistoryLink } from '../components/RecordedHistoryLink/RecordedHistoryLink.tsx';
@@ -125,7 +126,7 @@ function HistoryConversations() {
             <TurnRows turns={TURNS} onOpenTrace={fn()} notes={{ 0: UNVERIFIED_NOTE, 5: DRAFT_NOTE }} />
           </Transcript>
         </div>
-        <ConceptFooter />
+        <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
       </ConversationsPage>
     </RiveraFrame>
   );

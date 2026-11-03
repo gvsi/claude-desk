@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router';
 
 import { ConceptFooter, Mark, Wordmark } from '../ds/index.ts';
 
@@ -14,6 +15,8 @@ export interface StandalonePageProps {
    * paper, where the bell keeps the drawing's dark ink.
    */
   ground?: 'dark' | 'light';
+  /** Owner-facing pages link the lockup home; visitor pages leave it unlinked. */
+  homeHref?: string;
   children: ReactNode;
 }
 
@@ -21,12 +24,16 @@ export interface StandalonePageProps {
  * A page outside the owner app and the public page, such as an unknown path or a page that broke:
  * the product's name at the top, one state in the middle of the window, and the concept footer.
  */
-export function StandalonePage({ labelledBy, lang, ground = 'dark', children }: StandalonePageProps) {
+export function StandalonePage({ labelledBy, lang, ground = 'dark', homeHref, children }: StandalonePageProps) {
+  const brand = <><Mark ground={ground} /><Wordmark /></>;
   return (
     <div className="cd-standalone-page" lang={lang}>
       <header className="cd-standalone-page__brand">
-        <Mark ground={ground} />
-        <Wordmark />
+        {homeHref === undefined ? brand : (
+          <Link to={homeHref} className="cd-standalone-page__home" aria-label="Claude Desk, home">
+            {brand}
+          </Link>
+        )}
       </header>
       <main className="cd-standalone-page__main" aria-labelledby={labelledBy}>
         {children}

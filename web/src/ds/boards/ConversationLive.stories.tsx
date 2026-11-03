@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
 import { Composer } from '../components/Composer/Composer.tsx';
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
 import { TakeOverBar } from '../components/TakeOverBar/TakeOverBar.tsx';
@@ -53,7 +54,7 @@ function ConversationLive() {
           </Transcript>
           <TakeOverBar mode="ai" visitorName={DANA} ownerName={rivera.business.ownerName} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
           <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude. Dana won’t see it." onSend={fn()} />
-          <ConceptFooter />
+          <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
         </div>
       </ConversationsPage>
     </RiveraFrame>

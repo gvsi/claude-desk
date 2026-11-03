@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
 import { Composer } from '../components/Composer/Composer.tsx';
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
 import { SignedLimitPanel } from '../components/SignedLimitPanel/SignedLimitPanel.tsx';
@@ -55,7 +56,7 @@ function ConversationAgent() {
           </Transcript>
           <TakeOverBar mode="ai" agent visitorName={alex.name} ownerName={rivera.business.ownerName} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
           <Composer variant="whisper" label="Whisper to Claude" placeholder="Whisper to Claude. The agent won’t see it." onSend={fn()} />
-          <ConceptFooter />
+          <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
         </div>
       </ConversationsPage>
     </RiveraFrame>

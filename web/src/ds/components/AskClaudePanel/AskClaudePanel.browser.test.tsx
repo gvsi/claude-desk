@@ -426,6 +426,7 @@ it('standalone_sheet_keeps_focus_inside', async () => {
 function CompactScreen() {
   return (
     <AppShell
+      todayHref="#today"
       layout="compact"
       business={chen.business.name}
       sidebar={
@@ -501,6 +502,7 @@ function SafariScreen({ shell, opened }: { shell: boolean; opened: { focus: Elem
   }
   return (
     <AppShell
+      todayHref="#today"
       business={chen.business.name}
       sidebar={
         <nav aria-label="Main">
