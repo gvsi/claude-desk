@@ -271,6 +271,7 @@ export function IntroDialog({
                   className="cd-intro__field cd-type-message"
                   type="password"
                   autoComplete="off"
+                  placeholder="Enter the passcode"
                   value={passcode}
                   aria-invalid={shownError !== undefined || undefined}
                   aria-describedby={shownError !== undefined ? errorId : undefined}

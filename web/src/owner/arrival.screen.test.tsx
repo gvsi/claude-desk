@@ -1234,10 +1234,10 @@ describe('OwnerLayout', () => {
     expect(links.map((a) => a.textContent?.replace(/\d+.*$/, '').trim())).toEqual([
       'Today',
       'Conversations',
-      'Customers',
       'Rules',
       'Safety',
       'Notifications',
+      'Customers',
       'Profile',
       'Share',
       'Knowledge',
@@ -1245,7 +1245,7 @@ describe('OwnerLayout', () => {
     ]);
     const base = `/app/${RIVERA.deskId}`;
     expect(links.map((a) => a.getAttribute('href'))).toEqual(
-      ['today', 'conversations', 'people', 'rules', 'safety', 'notifications', 'profile', 'share', 'knowledge', 'settings'].map((page) => `${base}/${page}`),
+      ['today', 'conversations', 'rules', 'safety', 'notifications', 'people', 'profile', 'share', 'knowledge', 'settings'].map((page) => `${base}/${page}`),
     );
     await expect.element(nav.getByRole('link', { name: 'Today' })).toHaveAttribute('aria-current', 'page');
 
