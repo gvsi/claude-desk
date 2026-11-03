@@ -51,6 +51,9 @@ SHIPPED_DOCS = (
 # not prose such as "the AWS CLI reads ~/.aws").
 PRIVATE_ANYWHERE = (".plan-runs/", "claude.ai/artifact", "claude.ai/code/artifact", "claude.ai/share", "/Users/", "/home/")
 PRIVATE_IN_PATHS = ("~/",)
+# Links the project owner published on purpose: these exact URLs pass, and every other link to the same
+# hosts stays private.
+PUBLISHED = ("https://claude.ai/artifact/M46eP5Mtsoi15ruVMZ1uUx?sk=bbGjca_v34tZ2PPYoF0OVA",)   # the design canvas
 DENY_LIST = ".local/docs-deny.txt"
 IMAGES = "docs/images"   # its SVGs are scanned like the shipped docs, line by line
 
@@ -220,6 +223,8 @@ def deny_terms(root: Path) -> list[tuple[int, str]]:
 
 def _private_anywhere(line: str, terms: list[tuple[int, str]]) -> set[str]:
     """What in the line is private wherever it appears: a PRIVATE_ANYWHERE pattern or a deny-list term."""
+    for url in PUBLISHED:
+        line = line.replace(url, "")
     folded = line.casefold()
     return ({p for p in PRIVATE_ANYWHERE if p in line}
             | {f"a term from {DENY_LIST}, line {at}" for at, term in terms if term in folded})
