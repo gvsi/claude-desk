@@ -234,6 +234,33 @@ def test_flags_private_paths_in_code_nested_in_a_list(tmp_path):
     assert "docs/deploy.md:11: private reference (~/ in a link or code)" in out
 
 
+CANVAS = "https://claude.ai/artifact/M46eP5Mtsoi15ruVMZ1uUx?sk=bbGjca_v34tZ2PPYoF0OVA"
+
+
+def test_the_published_design_canvas_passes(tmp_path):
+    root = passing_tree(tmp_path)
+    write(root, "docs/deploy.md", f"# Deploying\n\nThe boards are on the [design canvas]({CANVAS}).\n")
+
+    code, out = run(root)
+
+    assert code == 0, out
+
+
+@pytest.mark.parametrize("url", [
+    "https://claude.ai/artifact/M46eP5Mtsoi15ruVMZ1uUx",
+    "https://claude.ai/artifact/M46eP5Mtsoi15ruVMZ1uUx?sk=another",
+    "https://claude.ai/artifact/abc123?sk=bbGjca_v34tZ2PPYoF0OVA",
+])
+def test_other_artifact_links_stay_private(tmp_path, url):
+    root = passing_tree(tmp_path)
+    write(root, "docs/deploy.md", f"# Deploying\n\nSee [the canvas]({CANVAS}) and [this one]({url}).\n")
+
+    code, out = run(root)
+
+    assert code == 1
+    assert "docs/deploy.md:3: private reference (claude.ai/artifact)" in out
+
+
 def test_private_references_in_prose_and_unshipped_docs_pass(tmp_path):
     root = passing_tree(tmp_path)
     write(root, "docs/deploy.md", "# Deploying\n\nThe AWS CLI reads its profile from ~/.aws, as usual.\n")

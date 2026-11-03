@@ -1,5 +1,7 @@
 Claude Desk is a public, always-on Claude for a person or small business: strangers and their agents talk to it, and it answers, books, quotes and takes payments under the owner's rules. The interface is warm and quiet, in a warm dark theme and a light one on warm paper, so that the one thing that stands out is what Claude did and why: the receipts attached under each message. Build every surface (the owner app, the public page and setup) from these tokens and rules.
 
+The [design canvas](https://claude.ai/artifact/M46eP5Mtsoi15ruVMZ1uUx?sk=bbGjca_v34tZ2PPYoF0OVA) holds the signed board for every screen, and the explorations behind them; the boards are reproduced as stories in [`boards/`](boards/).
+
 ## Content
 
 - Write in sentence case everywhere: page titles, buttons, labels and menus. Never set words in all caps; acronyms such as AI, PDF and SMS stay as they are.
