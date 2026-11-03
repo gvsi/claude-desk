@@ -2,8 +2,8 @@
    takes the height the main area gives it, never its content's, so the main area doesn't scroll:
    the list and the open conversation each scroll on their own. From 1024 px the list is its own
    column at the sidebar's edge, 24% of the window between 280 and 400 px wide, with a hairline at its right that runs to the bottom of
-   the window, and the open conversation sits beside it, its content no wider than the reading
-   column, with the concept footer under it. In the open conversation its bar stays at the top
+   the window, and the open conversation sits beside it, its content spanning the pane inside its
+   gutters, with the concept footer under it. In the open conversation its bar stays at the top
    and the owner's controls at the foot, and the transcript between them scrolls; in a window too
    short for that, the open conversation scrolls as a whole instead, under the bar, which stays
    pinned to the top. Under 1024 px the list and an open conversation each take the page, the
@@ -193,9 +193,11 @@
   min-width: 0;
 }
 
-/* The open conversation's pane keeps a minimum side gutter. Its bar and its transcript reach across
-   that gutter to the pane's edges, while its content is a centred size-conversation column. This
-   size container lets a short pane scroll the whole conversation instead of nesting scroll regions. */
+/* The open conversation's pane keeps a side gutter. Its bar and its transcript's region reach across
+   that gutter to the pane's edges, while their content, and the rest of the conversation, spans the
+   pane inside it: one set of edges at every width, so in a wide window the Desk's column at the
+   transcript's right ends where Take over and the composer end. This size container lets a short
+   pane scroll the whole conversation instead of nesting scroll regions. */
 .cd-conversations__open {
   --cd-open-gutter: var(--space-28);
   /* The pane's top padding, which the conversation's bar reaches over to sit at the pane's top. */
@@ -211,9 +213,8 @@
   padding: var(--cd-open-top) var(--cd-open-gutter) var(--space-20);
 }
 
-/* Keep the pane and conversation full width for the transcript's edge-to-edge scroll region.
-   Everything else, including loading shapes and unavailable states, shares the centred column.
-   Rows fill that column; Claude's prose retains the narrower reading measure. */
+/* The pane and the conversation take the pane's full width, for the transcript's edge-to-edge
+   scroll region. Rows fill the transcript; Claude's prose keeps the narrower reading measure. */
 .cd-conversation-pane {
   --cd-row-max: 100%;
 }
@@ -232,10 +233,10 @@
   min-width: 0;
 }
 
-/* Direct conversation parts and the pane's unavailable states use the same column, all but the bar
-   and the transcript's region. Keep the skeleton's layer full width so its transcript has the same
-   containing block as the real one. */
-.cd-conversation > :not(.cd-conversation__scroll, .cd-conversation__bar),
+/* When no conversation can open in the pane, what it says instead (a chat that isn't in this copy,
+   or a read that failed) sits in a centred size-conversation column. The conversation's own parts
+   and the skeleton's layer aren't in it: they take the pane's full width, so the loading shapes'
+   transcript has the same containing block as the real one. */
 .cd-conversation-pane > .cd-skeleton-screen__body > :not(.cd-conversation, .cd-skeleton-screen__layer) {
   width: min(100%, var(--size-conversation));
   margin-inline: auto;
@@ -312,11 +313,11 @@
 }
 
 /* The transcript's scroll region: the height left between the head and the controls, at least
-   about four lines of the chat, reaching across the gutter to the pane's edges. Percentage padding
-   resolves against the full-width conversation (the pane less its gutters), so adding the gutter
-   to half its excess over size-conversation centres the content exactly. The scroll bar stays at
-   the pane's right edge, with at least a gutter for side focus rings. 4 px above and below, given
-   back by the margins, keep the ring clear at its top and foot. */
+   about four lines of the chat, reaching across the gutter to the pane's edges, with the gutter
+   back as its padding, so the transcript spans the pane inside its gutters, edge to edge with the
+   bar's content and the owner's controls. The scroll bar stays at the pane's right edge, with a
+   gutter for side focus rings. 4 px above and below, given back by the margins, keep the ring
+   clear at its top and foot. */
 .cd-conversation__scroll {
   position: relative;
   flex: 1 1 0;
@@ -324,7 +325,7 @@
   overflow-y: auto;
   margin: calc(-1 * var(--space-4)) calc(-1 * var(--cd-open-gutter));
   padding-block: var(--space-4);
-  padding-inline: calc(var(--cd-open-gutter) + max(0px, (100% - var(--size-conversation)) / 2));
+  padding-inline: var(--cd-open-gutter);
   scroll-padding-block: var(--space-4);
 }
 
@@ -381,8 +382,9 @@
 }
 
 /* The bar (board REV-720 C): who the chat is with, their level, what happened last and Take over,
-   pinned to the top of the pane across its whole width, outside the conversation's column, with
-   the pane's gutter at its sides. The chat scrolls under it. From 1024 px it is one line, 56 px
+   pinned to the top of the pane across its whole width, with the pane's gutter at its sides, so
+   the name starts where the transcript starts and Take over ends where it ends. The chat scrolls
+   under it. From 1024 px it is one line, 56 px
    tall (Take over with 12 px above and below it), the first thing in the pane, reaching over the
    pane's top padding. A sticky box keeps clear of its scroller's padding, so its top gives that
    padding back and it pins to the pane's very top. It sits over the transcript's positioned parts
@@ -521,7 +523,7 @@
   margin-bottom: var(--space-16);
 }
 
-/* A held request's card, and a receipt's full trace, in the conversation's column. */
+/* A held request's card, and a receipt's full trace: not messages, so across the transcript. */
 .cd-conversation__held,
 .cd-conversation__trace {
   display: flex;
@@ -577,7 +579,7 @@
   min-width: 0;
 }
 
-/* Take over and its note stay under the lead at the column's left edge at every width. */
+/* Take over and its note stay under the lead at the conversation's left edge at every width. */
 .cd-conversation__controls .cd-take-over__action {
   flex-basis: 100%;
 }
@@ -612,11 +614,11 @@
 }
 
 /* The visitor's bubble at the left, as the owner's view draws it (board REV-FLIP), no wider than a
-   bubble can be (85 % of the row). */
+   bubble can be there: the Desk's column, min(520px, 88%) of the row (Transcript.css). */
 .cd-conversation-skeleton__bubble {
   display: flex;
   justify-content: flex-start;
-  width: 85%;
+  width: min(520px, 88%);
 }
 
 /* In a narrow card, Allow and Deny share the line. Their heights are measured in the real CSS. */

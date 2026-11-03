@@ -74,8 +74,8 @@ function MeasuredLines({
 
 /**
  * The visitor's message: their bubble at the left, as the owner's view draws it, as wide as its
- * words on one line, never wider than the bubble's 85 %, and as tall as they wrap to there, padding
- * included.
+ * words on one line, never wider than the bubble's cap there (the Desk's column, min(520 px, 88%) of
+ * the row), and as tall as they wrap to there, padding included.
  */
 function VisitorShape({ words, anchor }: { words: string; anchor?: string }) {
   const box = useRef<HTMLDivElement>(null);

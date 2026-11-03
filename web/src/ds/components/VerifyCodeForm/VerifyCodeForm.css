@@ -1,5 +1,6 @@
 /* VerifyCodeForm: under the verify card, no wider than a reply card. The label above a main-height
-   field in TextField's look, Confirm beside it on the same line, any failed try's line under them,
+   field in TextField's look, Confirm beside it on the same line, an optional line under the field
+   saying where the code arrives, any failed try's line under them,
    and "I can't get the code" as a ghost button at the bottom. The field's outline stays the same on
    hover, as TextField's does; the buttons follow Button. */
 
@@ -45,6 +46,13 @@
 
 .cd-verify-code__row > .cd-button {
   flex: none;
+}
+
+/* Where the code arrives, as TextField's hint sits under its field: 6 px under, in the secondary
+   text. */
+.cd-verify-code__hint {
+  margin: var(--space-6) 0 0;
+  color: var(--text-secondary);
 }
 
 /* The ghost button keeps its own padding, so its words sit a little in from the field's edge, as

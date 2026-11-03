@@ -2435,6 +2435,32 @@ describe('Things to try ticks off', () => {
     expect(animated()).toEqual([]);
   });
 
+  it('chat_as_a_customer_ticks_after_a_preview_reply_with_an_existing_visitor_chat', async () => {
+    await mockStore.dispatch('openSession', { params: { slug: RIVERA.slug } });
+    const visitor = mockStore.visitorSession(RIVERA.slug);
+    expect(visitor?.ownerPreview).toBe(false);
+
+    const today = await renderRoute(TODAY);
+    const link = thingRow(today.screen, 'Chat as a customer').getByRole('link', { name: 'Open your public page' });
+    await expect.element(link).toBeVisible();
+    const path = link.element().getAttribute('href');
+    expect(path).toBe(`${PUBLIC_PAGE}?preview=${RIVERA.deskId}`);
+
+    // Open the new tab's link in this test's page, then use the preview's way back to Today.
+    const { screen } = await renderRoute(path!);
+    const box = screen.getByRole('textbox', { name: 'Message Turner Plumbing' });
+    await expect.element(box).toBeEnabled();
+    await box.fill('Do you work weekends?');
+    await screen.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect.poll(() => mockStore.visitorSession(RIVERA.slug)?.items.some((item) => item.kind === 'delivered')).toBe(true);
+    await screen.getByRole('link', { name: 'Back to your Desk', exact: true }).click();
+
+    await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true })).toBeVisible();
+    const preview = mockStore.visitorSession(RIVERA.slug);
+    expect(preview?.ownerPreview).toBe(true);
+    expect(preview?.state.session_id).not.toBe(visitor?.state.session_id);
+  });
+
   it('stopped_attempt_in_the_preview_ticks_try_to_break_it', async () => {
     const { screen } = await renderRoute(TODAY);
     const things = thingsToTry(screen);

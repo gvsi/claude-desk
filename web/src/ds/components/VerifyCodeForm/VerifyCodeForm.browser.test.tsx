@@ -57,3 +57,33 @@ it('enter_after_a_whole_code_sends_it', async () => {
   await expect.poll(() => onSubmit.mock.calls).toEqual([['482913']]);
   expect([field.value, field.selectionStart, field.selectionEnd]).toEqual(['482913', 6, 6]);
 });
+
+it.each([
+  ['en', 'Enter the 6-digit code'],
+  ['es', 'Escribe el código de 6 dígitos'],
+] as const)('the_field_asks_for_the_code_in_%s', async (language, placeholder) => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  mounted = { root, container };
+  root.render(<VerifyCodeForm state="idle" language={language} onSubmit={vi.fn()} onAskForOwner={vi.fn()} hint="Your code arrives in the Demo inbox." />);
+  await expect.poll(() => container.querySelector('input')).not.toBeNull();
+  const field = container.querySelector('input') as HTMLInputElement;
+  expect(field.placeholder).toBe(placeholder);
+  // The line under the field describes it, so a screen reader hears where the code arrives.
+  const hint = container.querySelector('.cd-verify-code__hint');
+  expect(hint?.textContent).toBe('Your code arrives in the Demo inbox.');
+  expect(field.getAttribute('aria-describedby')).toBe(hint?.id);
+  expect(field.closest('.cd-verify-code__entry')?.contains(hint ?? null)).toBe(true);
+});
+
+it('without_a_hint_no_line_shows', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  mounted = { root, container };
+  root.render(<VerifyCodeForm state="idle" language="en" onSubmit={vi.fn()} onAskForOwner={vi.fn()} />);
+  await expect.poll(() => container.querySelector('input')).not.toBeNull();
+  expect(container.querySelector('.cd-verify-code__hint')).toBeNull();
+  expect(container.querySelector('input')?.hasAttribute('aria-describedby')).toBe(false);
+});
