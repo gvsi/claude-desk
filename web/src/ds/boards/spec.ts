@@ -244,16 +244,19 @@ const OWNER_LOG = '.cd-transcript--owner';
 /** The other side's parts in the owner's view: a visitor's bubble, an agent's request, a visitor typing. */
 const THEIR_SIDE = '.cd-visitor-message__bubble, .cd-agent-message__who, .cd-agent-message__bubble, .cd-writing-indicator__bubble';
 
+/** The other side's words: a visitor's bubble and an agent's request, capped at the Desk's column's width. */
+const THEIR_BUBBLES = '.cd-visitor-message__bubble, .cd-agent-message__bubble';
+
 /** A row from the Desk's side: Claude's reply, the owner's whisper, or the owner's own message. */
 const OUR_SIDE = ':scope > .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper, .cd-person-message)';
 
 /**
  * The owner's own conversation view (board REV-FLIP), the sides flipped from the visitor's chat, so
  * each side reads its own words on the right: the other side's bubbles start at the log's left
- * edge, and every row from the Desk's side sits in one column min(520 px, 88%) of the log wide, flush
- * with its right edge, its receipts with it. Inside the column each message, its first part and each
- * receipt start at the column's left edge, and a reply's cards fill it. Returns how many rows sit in
- * the column.
+ * edge, no wider than the Desk's column, and every row from the Desk's side sits in one column
+ * min(520 px, 88%) of the log wide, flush with its right edge, its receipts with it. Inside the
+ * column each message, its first part and each receipt start at the column's left edge, and a
+ * reply's cards fill it. Returns how many rows sit in the column.
  */
 export async function expectOwnerSides(log: HTMLElement): Promise<number> {
   await expect(log.matches(OWNER_LOG), "the log is the owner's variant").toBe(true);
@@ -261,6 +264,9 @@ export async function expectOwnerSides(log: HTMLElement): Promise<number> {
   const column = Math.min(520, box.width * 0.88);
   for (const part of log.querySelectorAll(THEIR_SIDE)) {
     await expect(Math.abs(part.getBoundingClientRect().left - box.left), `${part.className} starts at the log's left edge`).toBeLessThanOrEqual(1);
+  }
+  for (const bubble of log.querySelectorAll(THEIR_BUBBLES)) {
+    await expect(bubble.getBoundingClientRect().width, `${bubble.className} is no wider than the Desk's column`).toBeLessThanOrEqual(column + 1);
   }
   const ours = [...log.querySelectorAll<HTMLElement>('.cd-transcript-row')].filter((row) => row.querySelector(OUR_SIDE) !== null);
   for (const row of ours) {

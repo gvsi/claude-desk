@@ -20,7 +20,7 @@
 ## Look
 
 - On the right, like a visitor's message, and on the left with it in the owner's conversation view (`Transcript`'s `variant="owner"`). The agent glyph, the name (in `text-primary`, weight 520) and the status pill sit above the bubble on a secondary caption line.
-- The bubble has a 1 px `line-card` border at the control radius and no fill, so it reads as a structured request rather than someone typing. It is at most 85% of the column wide and at least 300 px, or the column's width when that is narrower.
+- The bubble has a 1 px `line-card` border at the control radius and no fill, so it reads as a structured request rather than someone typing. It is at most 85% of the column wide (in the owner's conversation view, at most the Desk's column, `min(520px, 88%)` of the log) and at least 300 px, or the column's width when that is narrower.
 - The title and text are in the body type; the text is a `blockquote` with a 2 px `line-control` rule at its left, `space-10` in from it. The meta line is a secondary caption with the time in tabular figures.
 
 ## Props

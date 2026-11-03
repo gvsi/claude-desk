@@ -200,10 +200,11 @@ function AgentForTheOwner() {
 
 /**
  * The owner's variant (board REV-FLIP), the sides flipped from the visitor's own chat: the other
- * side's bubbles (a visitor's, an agent's, a visitor typing) start at the log's left edge, and every
- * row from the Desk's side (Claude's reply, a whisper, the owner's own message) sits in one column
- * min(520 px, 88%) of the log wide, at its right edge, with its receipts. Inside the column each
- * message, its first part and each receipt start at its left edge, and a reply's cards fill it.
+ * side's bubbles (a visitor's, an agent's, a visitor typing) start at the log's left edge, no wider
+ * than the Desk's column, and every row from the Desk's side (Claude's reply, a whisper, the owner's
+ * own message) sits in one column min(520 px, 88%) of the log wide, at its right edge, with its
+ * receipts. Inside the column each message, its first part and each receipt start at its left edge,
+ * and a reply's cards fill it.
  */
 async function expectOwnerSides(canvasElement: HTMLElement, rowsOnOurSide: number) {
   const log = canvasElement.querySelector<HTMLElement>('[role="log"]');
@@ -224,7 +225,10 @@ async function expectOwnerSides(canvasElement: HTMLElement, rowsOnOurSide: numbe
   probe.remove();
   for (const bubble of log.querySelectorAll<HTMLElement>('.cd-visitor-message__bubble')) {
     expectComputed(bubble, { backgroundColor: fill });
-    await expect(bubble.getBoundingClientRect().width).toBeLessThanOrEqual(box.width * 0.85 + 0.5);
+  }
+  // The other side's words take at most the Desk's column's width, mirrored at the left.
+  for (const bubble of log.querySelectorAll<HTMLElement>('.cd-visitor-message__bubble, .cd-agent-message__bubble')) {
+    await expect(bubble.getBoundingClientRect().width, `${bubble.className} is no wider than the Desk's column`).toBeLessThanOrEqual(column + 0.5);
   }
   const ours = [...log.querySelectorAll<HTMLElement>('.cd-transcript-row')].filter(
     (row) => row.querySelector(':scope > .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper, .cd-person-message)') !== null,

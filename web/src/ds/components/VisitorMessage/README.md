@@ -15,7 +15,7 @@
 ## Look
 
 - Sans in the message type (15/21), on `fill-bubble`, at the card radius, padded 8 by 14 px.
-- At most 85% of the column wide. A long unbroken word wraps inside the bubble (`overflow-wrap: anywhere`), so nothing reaches past a phone's line.
+- At most 85% of the column wide; in the owner's conversation view (`Transcript`'s `variant="owner"`), at most the Desk's column, `min(520px, 88%)` of the log, so in a wide window it never reaches far past the middle. A long unbroken word wraps inside the bubble (`overflow-wrap: anywhere`), so nothing reaches past a phone's line.
 
 ## Props
 

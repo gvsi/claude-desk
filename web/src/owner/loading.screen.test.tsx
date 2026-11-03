@@ -1749,27 +1749,33 @@ it.each([[1440, 900], [1800, 1009], [390, 844]])('conversation_loading_column_ma
   const shape = '.cd-conversation-pane .cd-conversation-skeleton';
   await vi.waitFor(() => expect(document.querySelector(shape)).not.toBeNull());
   const pane = document.querySelector('.cd-conversations__open')!.getBoundingClientRect();
-  const expectedWidth = Math.min(768, pane.width - (width >= 1024 ? 56 : 32));
+  const gutter = width >= 1024 ? 28 : 16;
+  const edges = { left: pane.left + gutter, right: pane.right - gutter };
   const bounds = (selector: string) => {
     const rect = document.querySelector(selector)!.getBoundingClientRect();
     return { left: rect.left, right: rect.right, width: rect.width };
   };
-  // The bar runs across the whole pane; the transcript's rows and the controls fill the column.
+  // The bar runs across the whole pane; the transcript's rows and the controls span it inside its
+  // gutters, and the visitor's bubble is capped at the Desk's column, min(520 px, 88%) of the log.
   const shapeBar = bounds(`${shape} .cd-conversation__bar`);
   expect(Math.abs(shapeBar.left - pane.left), 'bar shape left').toBeLessThanOrEqual(1);
   expect(Math.abs(shapeBar.width - pane.width), 'bar shape width').toBeLessThanOrEqual(1);
-  const before = ['.cd-transcript-row', '.cd-conversation__controls'].map(part => {
+  const parts = ['.cd-transcript-row', '.cd-conversation__controls'];
+  const before = parts.map(part => {
     const rect = bounds(`${shape} ${part}`);
-    expect(Math.abs(rect.width - expectedWidth), `${part} shape width`).toBeLessThanOrEqual(1);
-    expect(Math.abs((rect.left - pane.left) - (pane.right - rect.right)), `${part} shape centred`).toBeLessThanOrEqual(1);
+    expect(Math.abs(rect.left - edges.left), `${part} shape left`).toBeLessThanOrEqual(1);
+    expect(Math.abs(rect.right - edges.right), `${part} shape right`).toBeLessThanOrEqual(1);
     return rect;
   });
+  const cap = Math.min(520, (edges.right - edges.left) * 0.88);
+  const shapeBubble = bounds(`${shape} .cd-conversation-skeleton__bubble`);
+  expect(Math.abs(shapeBubble.width - cap), 'bubble shape cap').toBeLessThanOrEqual(1);
   chat.release();
   await expect.element(screen.getByRole('button', { name: 'Take over' })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector(shape)).toBeNull());
   const bar = bounds('.cd-conversation-pane .cd-conversation__bar');
   for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(bar[edge] - shapeBar[edge]), `bar ${edge}`).toBeLessThanOrEqual(1);
-  ['.cd-transcript-row', '.cd-conversation__controls'].forEach((part, i) => {
+  parts.forEach((part, i) => {
     const rect = bounds(`.cd-conversation-pane ${part}`);
     for (const edge of ['left', 'right', 'width'] as const) expect(Math.abs(rect[edge] - before[i]![edge]), `${part} ${edge}`).toBeLessThanOrEqual(1);
   });
