@@ -29,7 +29,7 @@ import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
 import { withAnswering } from '../owner/useDesks.ts';
 import { Arrival } from '../owner/Arrival.tsx';
 import { worker } from '../mocks/browser.ts';
-import { FOLLOW_UP, MEMORY_LABEL, REOPEN_REPLY, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
+import { CONSENT_QUESTION, FOLLOW_UP, MEMORY_LABEL, REOPEN_REPLY, SETUP_QUESTIONS, TEST_CLIENT_ADDED, TEST_CLIENT_OFFER, TEST_CLIENT_YES, holdNextDecision, holdNextAnswer, holdNextConsent, holdNextStart } from '../mocks/setup.ts';
 import { SETUP_WORK_GIVE_UP_MS } from './useSetupWork.ts';
 import { rulesView } from '../mocks/readModels.ts';
 import { mockStore } from '../mocks/store.ts';
@@ -410,7 +410,7 @@ describe('setup', () => {
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
     // The business's name in the bar once it is known, and Claude's question in its serif.
     await expect.element(screen.getByText('Turner Plumbing', { exact: true }).first()).toBeVisible();
-    const consent = screen.getByText(/^Thanks, Mike\. Before I ask anything/);
+    const consent = screen.getByText(CONSENT_QUESTION, { exact: true });
     await expect.element(consent).toBeVisible();
     expect(inSerif(consent.element())).toBe(true);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
@@ -1844,11 +1844,11 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     expect(requests('setupConsent', mark)).toHaveLength(1);
-    // Nothing comes before Claude's consent question: the owner's description isn't a message.
+    // Nothing comes before Claude's consent question: the API doesn't send the owner's description back.
     const log = screen.getByRole('log', { name: 'Setup questions' });
     const first = log.element().firstElementChild;
     expect(first?.querySelector('[data-copy="user"]')).toBeNull();
-    expect(first?.textContent).toMatch(/^Thanks, Mike\. Before I ask anything/);
+    expect(first?.textContent).toBe(CONSENT_QUESTION);
   });
 
   it('tool_turns_on_only_after_its_change_is_confirmed', async () => {

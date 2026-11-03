@@ -38,7 +38,6 @@ import type {
 import { SETUP_STEPS } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
 import { formatHours } from '../lib/format.ts';
-import { afterName } from '../lib/names.ts';
 import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { pickedAnswer } from '../setup/pickedAnswer.ts';
 import { replaceBusinessTools } from './businessTools.ts';
@@ -1478,10 +1477,12 @@ function connectPayments(desk: DeskRecord): void {
   }
 }
 
-/** How Claude's first words thank the owner: by the name they gave, if any, with one stop after it ("Bob Smith Jr."). */
-export function thanksTo(ownerName: string | null): string {
-  return ownerName === null ? 'Thanks.' : `Thanks, ${ownerName}${afterName(ownerName, '.')}`;
-}
+/**
+ * Claude's first words after "Start", the memory question, word for word as the API composes it
+ * (`CONSENT_QUESTION`): no greeting before it, and its two answers are `SETUP_COPY.questions`'
+ * "Yes, use it" and "No, I'll type it".
+ */
+export const CONSENT_QUESTION = "Can I look at your Claude memory and your website to fill in what I can? If you'd rather not, you can type it all in.";
 
 /** A new interview and its Desk, made with Answering off from the owner's description. */
 function newInterview(world: MockWorld, text: string, timezone: string): Interview {
@@ -1503,7 +1504,6 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
     suggestions: [],
   };
   world.desks.push(desk);
-  const greeting = thanksTo(ownerName);
   const interview: Interview = {
     consultant: CPA_FIRM.test(text),
     words: situationWordsOf(text),
@@ -1527,7 +1527,7 @@ function newInterview(world: MockWorld, text: string, timezone: string): Intervi
       messages: [
         {
           role: 'claude',
-          text: `${greeting} Before I ask anything: can I look at what you've told Claude before about ${business}? I'll only use it to suggest answers here, and you can change any of them.`,
+          text: CONSENT_QUESTION,
           choices: [],
           card: null,
         },

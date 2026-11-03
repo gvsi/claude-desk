@@ -10,6 +10,7 @@ import type { PublicDesk, RenderedBlock, SseEvent } from '../api/contracts.ts';
 import type { RouteKey } from '../api/routes.ts';
 import type { BusinessOut, CopyOut, DemoAgentRun, RulesDraft, SetupState, SetupTools, SituationResult, Today, ToolConfirmedOut, VisitorSession } from '../api/views.ts';
 import { cardBlock, rivera } from '../ds/fixtures/index.ts';
+import { OWNER_NAME_FALLBACK } from '../public/brand.ts';
 import { PUBLIC_COPY } from '../public/copy.ts';
 import { START_EXAMPLES } from '../setup/copy.ts';
 import { AGENT_TURN_GAP_MS } from './agents.ts';
@@ -18,7 +19,7 @@ import { EVENT_GAP_MS } from './script.ts';
 import { RIVERA } from './seed.ts';
 import {
   holdNextDecision, holdNextConsent, holdNextAnswer, MEMORY_LABEL, QUESTIONS_DONE, SALON_TIME, SETUP_QUESTIONS, setupPublicDesk, setupTaskSet,
-  thanksTo, TEST_CLIENT_ADDED, TEST_CLIENT_NO, TEST_CLIENT_OFFER, TEST_CLIENT_YES,
+  CONSENT_QUESTION, TEST_CLIENT_ADDED, TEST_CLIENT_NO, TEST_CLIENT_OFFER, TEST_CLIENT_YES,
 } from './setup.ts';
 import { MockStore, mockStore, type MockAnswer } from './store.ts';
 
@@ -27,6 +28,8 @@ interface Started {
   slug: string;
   /** Claude's first words. */
   first: string | undefined;
+  /** The owner's name, as customers will see it. */
+  owner: string | undefined;
   /** The line about the business on its public page, or null when it has none. */
   about: string | null;
 }
@@ -43,7 +46,7 @@ async function started(description: string): Promise<Started> {
   const desk = mockStore.world.desks.find((d) => d.summary.desk_id === state.desk_id);
   const charter = desk === undefined ? [] : (setupPublicDesk(mockStore.world, desk, 'en')?.charter ?? []);
   const about = charter.map((block) => ('title' in block ? block.title : null))[0] ?? null;
-  return { business: desk?.summary.business_name, slug: state.slug, first: state.messages[0]?.text, about };
+  return { business: desk?.summary.business_name, slug: state.slug, first: state.messages[0]?.text, owner: desk?.ownerName, about };
 }
 
 beforeEach(() => {
@@ -716,7 +719,7 @@ describe("the business's name, from the description", () => {
     const ana = await started("I'm Ana. I run Ana's Bakery in Oakland. Sourdough and cakes to order.");
     expect(ana.business).toBe("Ana's Bakery");
     expect(ana.slug).toBe('ana-s-bakery-setup1');
-    expect(ana.first).toMatch(/^Thanks, Ana\. .* about Ana's Bakery\?/);
+    expect(ana.owner).toBe('Ana');
 
     // "We run" and "I own" name it too, up to a comma, " on " or the sentence's end.
     expect((await started("We run Turner Plumbing, a two-van crew. I'm Mike.")).business).toBe('Turner Plumbing');
@@ -772,7 +775,7 @@ describe("the business's name, from the description", () => {
     const ana = await started("Hi, I'm Ana. Ana's Bakery is my shop in Oakland.");
     expect(ana.business).toBe("Ana's Bakery");
     expect(ana.slug).toBe('ana-s-bakery-setup1');
-    expect(ana.first).toMatch(/^Thanks, Ana\. .* about Ana's Bakery\?/);
+    expect(ana.owner).toBe('Ana');
     // Any of the words for a business, mine or ours; a curly apostrophe stays the owner's.
     expect((await started('My name is Mike. Turner Plumbing is our business.')).business).toBe('Turner Plumbing');
     expect((await started('I’m Lee. Lee’s Café is my café, on Main Street.')).business).toBe('Lee’s Café');
@@ -784,7 +787,9 @@ describe("the business's name, from the description", () => {
     const rivera = await started("Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters.");
     expect(rivera.business).toBe('Turner Plumbing');
     expect(rivera.slug).toBe('turner-plumbing-setup1');
-    expect(rivera.first).toMatch(/^Thanks, Mike\. .* about Turner Plumbing\?/);
+    expect(rivera.owner).toBe('Mike');
+    // Claude's first words are the API's memory question, word for word, with no greeting.
+    expect(rivera.first).toBe(CONSENT_QUESTION);
     // "We run a small crew", "Monday to Friday" or "3 vans" is no name, so the first sentence still is.
     expect((await started("Turner Plumbing. I'm Mike. We run a small crew in Oakland.")).business).toBe('Turner Plumbing');
     expect((await started('Turner Plumbing. We run Monday to Friday, and I own 3 vans.')).business).toBe('Turner Plumbing');
@@ -799,8 +804,8 @@ describe("the business's name, from the description", () => {
     const ana = await started("I'm Ana.");
     expect(ana.business).toBe('Your business');
     expect(ana.slug).toBe('your-business-setup1');
-    // The owner is still greeted by name.
-    expect(ana.first).toMatch(/^Thanks, Ana\. .* about Your business\?/);
+    // The owner is still named.
+    expect(ana.owner).toBe('Ana');
     expect((await started("Hi! I'm Ana")).business).toBe('Your business');
   });
 
@@ -887,21 +892,12 @@ describe("the business's name, from the description", () => {
 describe('the owner and the line about the business, from the description', () => {
   it('every_introduction_names_the_owner', async () => {
     const cases: [string, string][] = [
-      ['My name is Mike. Turner Plumbing is our business.', 'Thanks, Mike.'],
-      ['I am Sam and I own Kernel Plumbing.', 'Thanks, Sam.'],
-      ["Hi, I'm Ana and Ana's Bakery is my shop in Oakland.", 'Thanks, Ana.'],
-      ['Turner Plumbing. We fix leaks and clear drains.', 'Thanks.'],
+      ['My name is Mike. Turner Plumbing is our business.', 'Mike'],
+      ['I am Sam and I own Kernel Plumbing.', 'Sam'],
+      ["Hi, I'm Ana and Ana's Bakery is my shop in Oakland.", 'Ana'],
+      ['Turner Plumbing. We fix leaks and clear drains.', OWNER_NAME_FALLBACK],
     ];
-    for (const [description, greeting] of cases) {
-      expect((await started(description)).first?.slice(0, greeting.length + ' Before'.length), description).toBe(`${greeting} Before`);
-    }
-  });
-
-  it('a_name_that_ends_in_a_stop_is_thanked_with_one', () => {
-    // The description's reading never gives such a name, but the thanks mustn't add a second stop.
-    expect(thanksTo('Bob Smith Jr.')).toBe('Thanks, Bob Smith Jr.');
-    expect(thanksTo('Mike')).toBe('Thanks, Mike.');
-    expect(thanksTo(null)).toBe('Thanks.');
+    for (const [description, owner] of cases) expect((await started(description)).owner, description).toBe(owner);
   });
 
   it('the_about_line_leaves_out_the_introduction_and_the_name', async () => {
@@ -965,25 +961,25 @@ describe('the owner and the line about the business, from the description', () =
 describe('a description in Spanish', () => {
   it('spanish_introductions_and_phrases_are_read', async () => {
     const cases: [string, string, string][] = [
-      ['Soy Ana. Tengo la Panadería Ana en Oakland. Pan de masa madre.', 'Panadería Ana', 'Thanks, Ana.'],
-      ['Me llamo Ana. Panadería Ana es mi negocio.', 'Panadería Ana', 'Thanks, Ana.'],
-      ['Hola, soy Ana. Panadería Ana. Pan y pasteles por encargo.', 'Panadería Ana', 'Thanks, Ana.'],
-      ['Mi nombre es Inés. Tenemos Óptica Inés con dos tiendas.', 'Óptica Inés', 'Thanks, Inés.'],
-      ['Soy Inés y Café Inés es nuestra tienda.', 'Café Inés', 'Thanks, Inés.'],
-      ['Hola, soy Ana. Tengo una panadería en Oakland.', 'Your business', 'Thanks, Ana.'],
+      ['Soy Ana. Tengo la Panadería Ana en Oakland. Pan de masa madre.', 'Panadería Ana', 'Ana'],
+      ['Me llamo Ana. Panadería Ana es mi negocio.', 'Panadería Ana', 'Ana'],
+      ['Hola, soy Ana. Panadería Ana. Pan y pasteles por encargo.', 'Panadería Ana', 'Ana'],
+      ['Mi nombre es Inés. Tenemos Óptica Inés con dos tiendas.', 'Óptica Inés', 'Inés'],
+      ['Soy Inés y Café Inés es nuestra tienda.', 'Café Inés', 'Inés'],
+      ['Hola, soy Ana. Tengo una panadería en Oakland.', 'Your business', 'Ana'],
       // The UI tester's case: the name has accents and a "y" of its own, and the owner is still Inés.
       [
         "I'm Inés, and I run Panadería Inés y Compañía de Repostería Artesanal in Oakland.",
         'Panadería Inés y Compañía de Repostería Artesanal',
-        'Thanks, Inés.',
+        'Inés',
       ],
       // Up to the API's 80 characters, so this one is whole.
-      ['Soy Inés. Tengo Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco.', 'Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco', 'Thanks, Inés.'],
+      ['Soy Inés. Tengo Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco.', 'Panadería Inés y Compañía de Repostería Artesanal de la Bahía de San Francisco', 'Inés'],
     ];
-    for (const [description, business, greeting] of cases) {
-      const { business: named, first } = await started(description);
+    for (const [description, business, owner] of cases) {
+      const { business: named, owner: ownerNamed } = await started(description);
       expect(named, description).toBe(business);
-      expect(first?.slice(0, greeting.length), description).toBe(greeting);
+      expect(ownerNamed, description).toBe(owner);
     }
   });
 });
@@ -991,7 +987,7 @@ describe('a description in Spanish', () => {
 describe("setup's examples", () => {
   it('each_example_gives_its_business_owner_slug_and_line', async () => {
     // The start step's examples, in English and in Spanish, read as an owner's own description: the
-    // business's name from its description, the owner greeted by the first name they give, a
+    // business's name from its description, the owner named by the first name they give, a
     // slug from the business's name, and the work as the line on its public page. Each starter's
     // work names a price, so its line stays private before public lines are seeded.
     const expected = {
@@ -1017,8 +1013,8 @@ describe("setup's examples", () => {
         const [business, owner, slug, about] = expected[language][at] ?? [];
         const desk = await started(description);
         expect(desk.business, chip).toBe(business);
-        expect(desk.first?.startsWith(`Thanks, ${owner ?? ''}. Before`), chip).toBe(true);
-        expect(desk.first, chip).toContain(`about ${business ?? ''}?`);
+        expect(desk.owner, chip).toBe(owner);
+        expect(desk.first, chip).toBe(CONSENT_QUESTION);
         expect(desk.slug, chip).toBe(slug);
         expect(desk.about, chip).toBe(about);
       }
