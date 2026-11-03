@@ -45,7 +45,9 @@ it('reviewer_shape_measures_the_control_with_different_font_metrics', async () =
 });
 
 it('reviewer_shape_remeasures_when_its_font_loads_after_mount', { timeout: 15_000 }, async () => {
-  await page.viewport(480, 900);
+  // A phone width where the bar fits on one line in the real face (from 485 px) but wraps in the
+  // monospace fallback (up to 510 px), so the font's arrival changes the bar's height.
+  await page.viewport(500, 900);
   const sheet = await (await fetch(FONT_SHEET_URL)).text();
   const rule = sheet.match(/@font-face\s*\{[^}]*font-family:\s*['"]Hanken Grotesk['"][^}]*unicode-range:\s*U\+0000-00FF[^}]*\}/)?.[0];
   const source = rule?.match(/url\(([^)]+)\)/)?.[1];

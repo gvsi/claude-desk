@@ -56,9 +56,9 @@ export const Refund: Story = {
     const row = args.rows[0];
     if (!row) throw new Error('No rows');
     expectComputed(first, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
-    expectComputed(within(first).getByText(row.when), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(within(first).getByText(row.why), { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(within(first).getByRole('link'), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(within(first).getByText(row.when), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(first).getByText(row.why), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(first).getByRole('link'), { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     // The whole row opens the record: the link's overlay covers it.
     const overlay = getComputedStyle(within(first).getByRole('link'), '::after');
     await expect([overlay.position, overlay.top, overlay.bottom]).toEqual(['absolute', '0px', '0px']);

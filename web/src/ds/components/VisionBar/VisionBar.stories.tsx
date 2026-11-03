@@ -36,14 +36,14 @@ export const Default: Story = {
     const pill = within(bar).getByText('Vision');
     await expect(pill).toHaveClass('cd-pill');
     const line = within(bar).getByText(LINE);
-    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(line.getBoundingClientRect().left - pill.getBoundingClientRect().right)).toBe(12);
     await expect(bar).toHaveTextContent(`Vision${LINE}Back to Vision`);
 
     // "Back to Vision" is a link at the right edge, 24 px in, in meta, and the bar's one tab stop.
     const back = within(bar).getByRole('link', { name: 'Back to Vision' });
     await expect(back).toHaveAttribute('href', '#vision');
-    expectComputed(back, { fontSize: '13px', color: 'rgb(126, 174, 218)' });
+    expectComputed(back, { fontSize: '14px', color: 'rgb(126, 174, 218)' });
     await expect(Math.round(bar.getBoundingClientRect().right - back.getBoundingClientRect().right)).toBe(24);
     await userEvent.tab();
     await expect(back).toHaveFocus();

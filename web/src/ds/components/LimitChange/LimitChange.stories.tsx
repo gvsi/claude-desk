@@ -35,8 +35,8 @@ export const Raise: Story = {
     const now = within(card).getByText(args.now);
     const was = within(card).getByText(args.was);
     // The new limit in Claude's serif, the old one in secondary meta at the right, on one baseline.
-    expectComputed(now, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '18px', lineHeight: '27px', color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(was, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(now, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '20px', lineHeight: '30px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(was, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     const row = now.parentElement;
     if (row === null || row !== was.parentElement) throw new Error('The amounts are not on one row');
     expectComputed(row, { alignItems: 'baseline' });

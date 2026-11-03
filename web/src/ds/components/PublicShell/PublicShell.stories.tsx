@@ -426,11 +426,11 @@ export const InertAsk: Story = {
     // caption on a row of its own in the pinned head, 8 px under the title and Ask, above the
     // head's hairline, the column's width.
     await expect(status).toHaveTextContent(VISION_INERT_LINE);
-    expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(status, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(status.getBoundingClientRect().top - rowBottom())).toBe(8);
     await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(head.getBoundingClientRect().bottom);
     await expect(Math.round(status.getBoundingClientRect().width)).toBe(Math.round(head.getBoundingClientRect().width));
-    await expect(Math.round(head.getBoundingClientRect().height - headHeight)).toBe(8 + 17);
+    await expect(Math.round(head.getBoundingClientRect().height - headHeight)).toBe(8 + 18);
     // Enter on it sends nothing either, and a second press changes nothing: still the one line.
     await userEvent.keyboard('{Enter}');
     await expect(args.onAskForOwner).not.toHaveBeenCalled();
@@ -556,8 +556,8 @@ async function openStatusIn(header: HTMLElement, text: string): Promise<{ status
   if (!status || !dot) throw new Error(`no open status with a dot around "${text}"`);
   await expect(dot).toHaveAttribute('aria-hidden', 'true');
   expectComputed(line, {
-    fontSize: '13px',
-    lineHeight: '18px',
+    fontSize: '14px',
+    lineHeight: '19px',
     color: getComputedStyle(partOf(header, '.cd-public-shell__brand-name, .cd-public-shell__heading')).color,
   });
   // The words keep 4.5:1 over the field, the dot 3:1.
@@ -566,7 +566,7 @@ async function openStatusIn(header: HTMLElement, text: string): Promise<{ status
   const dotColor = dotStyle.backgroundColor === 'rgba(0, 0, 0, 0)' ? dotStyle.borderTopColor : dotStyle.backgroundColor;
   await expect(contrastRatio(dotColor, groundOf(status))).toBeGreaterThanOrEqual(3);
   const dotBox = dot.getBoundingClientRect();
-  await expect(dotBox.top + dotBox.height / 2 - line.getBoundingClientRect().top).toBe(9);
+  await expect(dotBox.top + dotBox.height / 2 - line.getBoundingClientRect().top).toBe(19 / 2);
   return { status, line, dot };
 }
 
@@ -587,8 +587,8 @@ async function expectClosed(header: HTMLElement, status: HTMLElement, line: HTML
   const helpLine = lineReading(status, help);
   await expect(helpLine).not.toHaveAttribute('data-copy');
   expectComputed(helpLine, {
-    fontSize: '12px',
-    lineHeight: '17px',
+    fontSize: '13px',
+    lineHeight: '18px',
     color: header.matches('.cd-public-shell__about') ? getComputedStyle(dot).borderTopColor : getComputedStyle(partOf(header, '.cd-public-shell__tagline')).color,
   });
   await expect(contrastRatio(getComputedStyle(helpLine).color, groundOf(helpLine))).toBeGreaterThanOrEqual(4.5);
@@ -609,9 +609,10 @@ async function expectInAbout(header: HTMLElement, about: HTMLElement, status: HT
 
 /**
  * On a phone: the status on its own line under the monogram and the name, 8 px below them and from
- * the left gutter, each of its lines on one line, and nothing reaching past the phone's width.
+ * the left gutter, the kernel's words on `wordLines` meta lines (one unless given) and the closed
+ * line on one, and nothing reaching past the phone's width.
  */
-async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, status: HTMLElement): Promise<void> {
+async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, status: HTMLElement, wordLines = 1): Promise<void> {
   await expect(phone.scrollWidth).toBeLessThanOrEqual(PHONE);
   const edge = phone.getBoundingClientRect().right;
   for (const el of header.querySelectorAll('*')) await expect(el.getBoundingClientRect().right).toBeLessThanOrEqual(edge + 0.5);
@@ -621,10 +622,10 @@ async function expectOwnLineOnAPhone(phone: HTMLElement, header: HTMLElement, st
   await expect(box.top).toBeCloseTo(Math.max(monogram.bottom, brandText.bottom) + 8, 1);
   await expect(box.left).toBe(monogram.left);
   await expect(box.left).toBe(header.getBoundingClientRect().left + 16);
-  // The kernel's words on one meta line, and the closed line on one caption line.
+  // The kernel's words on their meta lines, and the closed line on one caption line.
   for (const line of status.querySelectorAll('p')) {
     const caption = line.classList.contains('cd-public-shell__still-helps');
-    await expect(line.getBoundingClientRect().height).toBe(caption ? 17 : 18);
+    await expect(line.getBoundingClientRect().height).toBe(caption ? 18 : wordLines * 19);
   }
 }
 
@@ -718,13 +719,14 @@ export const ClosedNowEsLongestPhone: Story = {
   parameters: {
     canvas: 'none',
     canvasNote:
-      'The "Open now" sign-off board\'s phone header with the longest Spanish status: N-Public-Rivera-Run1 at 390 px, closed until next Wednesday at 13:00 with "Claude puede ayudarte igual." under it, on their own lines under the name. Each still fits on one line, and nothing reaches past the phone\'s edge.',
+      'The "Open now" sign-off board\'s phone header with the longest Spanish status: N-Public-Rivera-Run1 at 390 px, closed until next Wednesday at 13:00 with "Claude puede ayudarte igual." under it, on their own lines under the name. In the raised type scale the kernel\'s words take two lines, the dot on the middle of the first, and the closed line one; nothing reaches past the phone\'s edge.',
   },
   play: async ({ canvas }) => {
     const header = canvas.getByRole('banner');
     const { status, line, dot } = await openStatusIn(header, CLOSED_ES_LONGEST.text);
     await expectClosed(header, status, line, dot, STILL_HELPS.es);
-    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status);
+    // At 14 px the kernel's longest words are wider than the 344 px beside the dot, so they wrap.
+    await expectOwnLineOnAPhone(canvas.getByTestId('phone'), header, status, 2);
   },
 };
 
@@ -896,7 +898,7 @@ async function expectOwnerInChat(root: HTMLElement, language: 'en' | 'es'): Prom
   if (!head) throw new Error('no chat head');
   const line = lineReading(head, OWNER_IN_CHAT[language]);
   await expect(line).toHaveClass('cd-public-shell__disclosure', 'cd-type-meta');
-  expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   await expect([...line.querySelectorAll('[data-copy="user"]')].map((name) => name.textContent)).toEqual([ownerName, ownerName]);
   await expect(root).not.toHaveTextContent(DISCLOSURE[language]);
   await expect(head.querySelectorAll('button')).toHaveLength(0);

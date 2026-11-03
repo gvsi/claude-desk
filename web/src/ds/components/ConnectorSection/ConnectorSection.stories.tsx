@@ -55,9 +55,9 @@ export const Quotes: Story = {
     await expect([overlay.position, overlay.top, overlay.bottom]).toEqual(['absolute', '0px', '0px']);
     await expect(header).toHaveTextContent('1 tool');
     // The tool's name in weight 520, its line in secondary meta, the summary and the outcome at the right.
-    expectComputed(canvas.getByText('Quote'), { fontWeight: '520', fontSize: '14px' });
+    expectComputed(canvas.getByText('Quote'), { fontWeight: '520', fontSize: '15px' });
     expectComputed(canvas.getByText('Prices a job from your price list. Changes something. Can be undone.'), {
-      fontSize: '13px',
+      fontSize: '14px',
       color: 'rgba(250, 249, 245, 0.64)',
     });
     await expect(canvas.getByText('Anyone · No discounts')).toBeVisible();
@@ -94,7 +94,7 @@ export const WithoutLinks: Story = {
     await expect(header).toHaveTextContent('1 tool');
     // The tool's name in the linked row's type and weight, plain, with no overlay over the row.
     const name = canvas.getByText('Quote');
-    expectComputed(name, { fontWeight: '520', fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(name, { fontWeight: '520', fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(getComputedStyle(name, '::after').content).toBe('none');
     // The words and the outcome still at the row's right edge, where the chevron no longer is.
     const item = name.closest('li');
@@ -201,7 +201,7 @@ export const AddedJustNow: Story = {
   },
   play: async ({ canvas }) => {
     const note = canvas.getByText('Added just now');
-    expectComputed(note, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(note, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(canvas.getByRole('link', { name: /^Payments Lets clients .* Added just now 2 tools$/ })).toBeVisible();
     const [link, mandate] = addedPayments.tools;
     if (!link || !mandate) throw new Error('Expected two tools');

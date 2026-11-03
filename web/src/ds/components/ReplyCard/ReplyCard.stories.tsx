@@ -49,9 +49,9 @@ export const Quote: Story = {
     await expect(card.getBoundingClientRect().width).toBeLessThanOrEqual(520);
     await expect(canvasElement.getBoundingClientRect().width).toBeGreaterThan(520);
     // The label is a secondary caption; the headline is the section style; details are secondary meta.
-    expectComputed(canvas.getByText('Quote'), { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(canvas.getByText('$180.00'), { fontSize: '15px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(canvas.getByText('Drain clearing'), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(canvas.getByText('Quote'), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(canvas.getByText('$180.00'), { fontSize: '16px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(canvas.getByText('Drain clearing'), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(canvas.getByText('Good until Tuesday, November 3, 2:00 pm')).toBeVisible();
     // A quote carries no link and no button.
     await expect(canvas.queryByRole('link')).toBeNull();
@@ -255,8 +255,8 @@ export const LinkCancelled: Story = {
     const card = canvas.getByRole('article', { name: 'Payment link cancelled' });
     const { title, lines = [] } = blocks.link_cancelled.en;
     await expect(card.textContent).toBe(['Payment link cancelled', title, ...lines].join(''));
-    expectComputed(canvas.getByText('$20.00'), { fontSize: '15px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
-    for (const line of lines) expectComputed(canvas.getByText(line), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(canvas.getByText('$20.00'), { fontSize: '16px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    for (const line of lines) expectComputed(canvas.getByText(line), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     // The payment link's card icon beside the label, 16 px and hidden from screen readers.
     const icon = canvasElement.querySelector<SVGSVGElement>('.cd-reply-card__label svg')!;
     await expect(icon).toHaveAttribute('aria-hidden', 'true');
@@ -417,7 +417,7 @@ export const DocumentInertDownload: Story = {
     // 8 px under the button's row, and a second press changes nothing.
     const line = canvas.getByText(VISION_INERT_LINE);
     await expect(line).toHaveAttribute('role', 'status');
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     const row = canvasElement.querySelector<HTMLElement>('.cd-reply-card__action')!;
     await expect(Math.round(line.getBoundingClientRect().top - row.getBoundingClientRect().bottom)).toBe(8);
     await userEvent.click(download);

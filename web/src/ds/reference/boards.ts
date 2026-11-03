@@ -144,8 +144,8 @@ export const BOARD_VIEWPORTS = {
   'phone-900': { name: 'Phone, a 900 px page', width: 390, height: 900 },
   'phone-2000': { name: 'Phone, a 2000 px page', width: 390, height: 2000 },
   'laptop-994': { name: '14-inch laptop, a 994 px page', width: 1512, height: 994 },
-  'laptop-1061': { name: '14-inch laptop, a 1061 px page', width: 1512, height: 1061 },
   'laptop-1100': { name: '14-inch laptop, a 1100 px page', width: 1512, height: 1100 },
+  'laptop-1142': { name: '14-inch laptop, a 1142 px page', width: 1512, height: 1142 },
   'laptop-1150': { name: '14-inch laptop, a 1150 px page', width: 1512, height: 1150 },
   'laptop-1500': { name: '14-inch laptop, a 1500 px page', width: 1512, height: 1500 },
 } as const;
@@ -191,7 +191,7 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-Run2-Settings-Phone': 'phone-900',
   'N-Run2-Settings-Channels': 'laptop',
   'N-R2-Vision-Channels': 'laptop',
-  'N-R2-Vision-TeamDesk': 'laptop-1061',
+  'N-R2-Vision-TeamDesk': 'laptop-1142',
   'N-R2-Vision-ClaudeAccount': 'laptop-994',
   'N-R2-Vision-Phone': 'laptop',
   'N-R2-Vision-CityOffice-Resident': 'laptop',

@@ -119,8 +119,8 @@ async function expectLeadLook(receipt: HTMLElement): Promise<void> {
   expectComputed(leadIn(receipt), {
     color: TEXT_PRIMARY,
     fontFamily: line.fontFamily,
-    fontSize: '12px',
-    lineHeight: '17px',
+    fontSize: '13px',
+    lineHeight: '18px',
     fontWeight: line.fontWeight,
   });
   const text = receipt.querySelector('.cd-margin-line__text');
@@ -160,7 +160,7 @@ export const Executed: Story = {
     await expect(receipt).toHaveTextContent(executed.plain);
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     // The line is a secondary caption.
-    expectComputed(receipt, { fontFamily: /Hanken Grotesk/, fontSize: '12px', lineHeight: '17px', color: await restingColor(receipt) });
+    expectComputed(receipt, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px', color: await restingColor(receipt) });
 
     // receipt_opens_trace_by_keyboard: Tab reaches it, Enter opens the trace for its entry, once.
     await userEvent.tab();
@@ -441,7 +441,7 @@ export const RulesConfirmed: Story = {
     await expect(line.tagName).toBe('P');
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     expectComputed(line.querySelector('.cd-margin-line__lead') ?? line, { color: TEXT_PRIMARY });
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: TEXT_SECONDARY });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: TEXT_SECONDARY });
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       for (const el of [line, dotIn(canvasElement)]) expectComputed(el, { animationName: 'none' });
     } else {

@@ -1299,6 +1299,8 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until });
     const connectorTops = watchTop(() => pagePart('.cd-rules__tool-cards'));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, viewport });
+    // The page's first reads finish about a second after it opens on a phone in the test browser,
+    // past the poll's default 1 s; the file's other waits allow more.
     await expect.poll(() => finished.has('needsYou'), { timeout: 4_000 }).toBe(true);
     await expect.poll(() => finished.has('rules'), { timeout: 4_000 }).toBe(true);
     await settled(screen.container);

@@ -156,7 +156,7 @@ export const BuiltInAddedBack: Story = {
     const payments = within(builtIn.section).getByRole('link', { name: /^Payments .* Added just now 2 tools$/ });
     const line = within(payments).getByText(/^Payment links and charges/);
     const added = within(payments).getByText('Added just now');
-    expectComputed(added, { color: 'rgba(250, 249, 245, 0.64)', fontSize: '13px' });
+    expectComputed(added, { color: 'rgba(250, 249, 245, 0.64)', fontSize: '14px' });
     await expect(added.getBoundingClientRect().top).toBeGreaterThanOrEqual(line.getBoundingClientRect().bottom - 1);
     await expect(payments.querySelectorAll('.cd-status-dot')).toHaveLength(0);
     await expect(canvas.getAllByText(/Added just now/)).toHaveLength(1);

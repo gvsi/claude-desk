@@ -25,7 +25,7 @@ export const Default: Story = {
     const caption = canvasElement.querySelector('.cd-whisper__caption') as HTMLElement;
     await expect(caption).toHaveTextContent(/^Your whisper, 12:08\. Only Claude sees this\.$/);
     await expect(caption.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(caption, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(caption, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     // The owner's words in a dashed bubble that hugs them, marked as their own words.
     const bubble = canvas.getByText(whisperText);
     await expect(bubble).toHaveAttribute('data-copy', 'user');
@@ -34,7 +34,7 @@ export const Default: Story = {
       borderTopWidth: '1px',
       borderTopColor: 'rgba(250, 249, 245, 0.22)',
       borderTopLeftRadius: '12px',
-      fontSize: '14px',
+      fontSize: '15px',
       backgroundColor: 'rgba(0, 0, 0, 0)',
     });
     await expect(bubble.getBoundingClientRect().width).toBeLessThan(canvasElement.getBoundingClientRect().width / 2);

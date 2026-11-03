@@ -46,7 +46,7 @@ export const Info: Story = {
     const link = canvas.getByRole('link', { name: 'See the briefing' });
     await expect(link).toBeVisible();
     // The link reads at the line's size, as on the board.
-    expectComputed(link, { fontSize: '13px', lineHeight: '18px' });
+    expectComputed(link, { fontSize: '14px', lineHeight: '19px' });
     const dot = await dotOf(canvasElement);
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
     await expect(dot).toHaveClass('cd-status-dot--info');

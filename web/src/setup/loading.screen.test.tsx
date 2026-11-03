@@ -166,15 +166,15 @@ const linesRows: Part[] = Array.from({ length: 6 }, (_, i) => ({ name: `public-l
 
 /**
  * The most an estimated part may differ from its shape: one line of the words it holds (body and
- * control lines are 20 px, the tallest it uses). An estimate draws a fresh copy's own words at the
+ * control lines are 21 px, the tallest it uses). An estimate draws a fresh copy's own words at the
  * lines one platform's fonts give them; another platform's fonts wrap a part's words at most one line
  * differently (macOS and Linux differ by one line at most where they differ at all), so a part that
  * is off by more is drawn wrong, not wrapped differently.
  */
-const ONE_LINE_PX = 20;
+const ONE_LINE_PX = 21;
 
 /** The line heights the estimated words are set in: caption, meta, and body or control. */
-const LINE_HEIGHTS_PX = [17, 18, 20] as const;
+const LINE_HEIGHTS_PX = [18, 19, 21] as const;
 
 /**
  * Each step's load. The tools' words are the app's own, so their shapes take the lines those words

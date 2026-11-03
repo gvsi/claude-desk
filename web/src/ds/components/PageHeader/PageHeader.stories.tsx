@@ -49,8 +49,8 @@ export const WithAction: Story = {
     const title = canvas.getByRole('heading', { level: 1, name: 'Safety' });
     expectComputed(title, {
       fontFamily: /Source Serif 4/,
-      fontSize: '24px',
-      lineHeight: '32px',
+      fontSize: '26px',
+      lineHeight: '34px',
       fontWeight: '460',
       textAlign: 'start',
       color: 'rgba(250, 249, 245, 0.92)',
@@ -61,7 +61,7 @@ export const WithAction: Story = {
     await expect(title).not.toHaveAttribute('tabindex');
 
     const subtitle = canvas.getByText('Every attempt to get around your rules, and what stopped it.');
-    expectComputed(subtitle, { fontFamily: /Hanken Grotesk/, fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(subtitle, { fontFamily: /Hanken Grotesk/, fontSize: '15px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(subtitle.getBoundingClientRect().top).toBeGreaterThanOrEqual(title.getBoundingClientRect().bottom);
 
     // The action sits at the right end of the title's line.
@@ -129,8 +129,8 @@ export const WithABadge: Story = {
     await expect(title).toHaveAccessibleName('Knowledge');
     await expect(Math.round(pill.getBoundingClientRect().left - title.getBoundingClientRect().right)).toBe(8);
     await expect(Math.round(middle(pill))).toBe(Math.round(middle(title)));
-    // The title keeps its 32 px line, and the subtitle its place 4 px under it.
-    await expect(title.getBoundingClientRect().height).toBe(32);
+    // The title keeps its 34 px line, and the subtitle its place 4 px under it.
+    await expect(title.getBoundingClientRect().height).toBe(34);
     const subtitle = canvas.getByText(knowledgeHeader.subtitle);
     await expect(Math.round(subtitle.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(4);
   },
@@ -173,7 +173,7 @@ export const WithNote: Story = {
     const subtitle = canvas.getByText(allRulesHeader.subtitle);
     const note = canvas.getByText(allRulesHeader.note);
     // Meta type in the subtitle's secondary color, 12 px under it (the text's 4 px gap and its own 8 px).
-    expectComputed(note, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px', color: getComputedStyle(subtitle).color, marginTop: '8px' });
+    expectComputed(note, { fontFamily: /Hanken Grotesk/, fontSize: '14px', lineHeight: '19px', color: getComputedStyle(subtitle).color, marginTop: '8px' });
     await expect(Math.round(note.getBoundingClientRect().top - subtitle.getBoundingClientRect().bottom)).toBe(12);
     // At a reading measure: no wider than 68 of its own characters.
     await expect(note.getBoundingClientRect().width).toBeLessThanOrEqual(parseFloat(getComputedStyle(note).maxWidth) + 0.5);
@@ -279,7 +279,7 @@ const setupColumn: NonNullable<Story['decorators']> = [
  */
 async function expectBalancedTitle(title: HTMLElement, lines: number): Promise<void> {
   await expectBalancedLines(title, `${LONG_NAME} is live`, lines);
-  await expect(title.getBoundingClientRect().height).toBe(lines * 32);
+  await expect(title.getBoundingClientRect().height).toBe(lines * 34);
 }
 
 export const LongTitle: Story = {

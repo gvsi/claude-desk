@@ -75,8 +75,8 @@ export const Board: Story = {
 
     // The question 20 px under the header, the line 20 px under it, then 20 px under that the
     // composer's box, 720 px wide in the column and 56 px high, as the board draws them. (The
-    // header's subtitle sits 4 px under its title, PageHeader's gap, where the board draws 6 px, so
-    // all of this sits 2 px higher than the render: the box at 285 px, not 287.)
+    // header's subtitle sits 4 px under its title, PageHeader's gap, where the board draws 6 px, and
+    // the larger type sets every line taller than the render: the box at 295 px, not 287.)
     const log = canvas.getByRole('log', { name: 'Setup questions' });
     const alert = canvas.getByRole('alert');
     await expect(alert).toHaveTextContent(FAILED_LINE);
@@ -87,7 +87,7 @@ export const Board: Story = {
     const rect = box.getBoundingClientRect();
     const header = canvas.getByRole('heading', { level: 1 }).closest('header')!;
     await expect(Math.round(log.getBoundingClientRect().top - header.getBoundingClientRect().bottom)).toBe(20);
-    await expect([Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height)]).toEqual([396, 285, 720, 56]);
+    await expect([Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height)]).toEqual([396, 295, 720, 56]);
     await expect(Math.round(rect.top - alert.getBoundingClientRect().bottom)).toBe(20);
     await expect(box.contains(kept)).toBe(true);
 

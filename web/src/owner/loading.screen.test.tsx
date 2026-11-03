@@ -22,7 +22,7 @@ import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
-import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
+import { conversationAtTop, expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { DESKS_KEY, needsYouKey, todayKey } from './useDesks.ts';
@@ -64,7 +64,7 @@ it('text_measurement_keeps_fractional_content_width_and_requests_its_font', asyn
   }
   flushSync(() => root.render(<Measured />));
   await nextFrames();
-  expect(host.querySelector('p')!.getBoundingClientRect().height).toBe(20);
+  expect(host.querySelector('p')!.getBoundingClientRect().height).toBe(21);
   expect(host.querySelector('output')!.textContent).toBe('1');
   expect(load.mock.calls.some(([, text]) => text === words)).toBe(true);
   expect(load.mock.calls.some(([, text]) => text === 'A measured serif summary'), 'request the serif face even when variation settings prevent font shorthand serialization').toBe(true);
@@ -314,7 +314,7 @@ it.each([
   const first = await renderRoute(today, { viewport: { width, height } });
   await expect.element(first.screen.getByRole('region', { name: 'Finish setting up Okafor Plumbing', exact: true })).toBeVisible();
   expect(JSON.parse(readLocal('todaySetup') ?? '{}'), 'only the unfinished Desk is remembered').toEqual({
-    [state.desk_id]: { step: 'rules', answering: expect.any(Boolean), business: 'Okafor Plumbing' },
+    [state.desk_id]: { step: 'rules', answering: expect.any(Boolean), business: 'Okafor Plumbing', owner: expect.any(String), timezone: expect.any(String) },
   });
   await cleanup();
 
@@ -518,11 +518,47 @@ it.each([320, 620, 820, 1024, 1279, 1512])('today_content_reload_lands_in_place 
   expectNoWindowScroll();
 });
 
+it.each([
+  { hour: 9, now: '2026-10-29T16:59:45Z' },
+  { hour: 12, now: '2026-10-29T19:59:45Z' },
+])('today_time_column_matches_its_shape_at_$hour', async ({ hour, now }) => {
+  // Only Date is faked: both a one-digit and a two-digit clock keep the rows at their shapes.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(now));
+  onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const desks = holdReads(ROUTES.desks.path);
+  onTestFinished(desks.release);
+  let times: DOMRect[] = [];
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: TODAY_WIDTH_ANCHORS,
+    open: async () => { await renderRoute(TODAY, { seed: 'rivera', pollScale: 100 }); },
+    release: () => {
+      times = [...document.querySelectorAll('.cd-briefing-row > .cd-skeleton-line--caption')].map((el) => el.getBoundingClientRect());
+      desks.release();
+    },
+  });
+  const landed = [...document.querySelectorAll('.cd-briefing-row__when')];
+  expect(landed).toHaveLength(2);
+  for (const [i, time] of landed.entries()) {
+    expect(time.textContent).toMatch(new RegExp(`^Today, ${hour}:`));
+    expect(getComputedStyle(time).fontSize).toBe('13px');
+    expect(getComputedStyle(time).lineHeight).toBe('18px');
+    expect(times[i]!.width).toBe(96);
+    expect(time.getBoundingClientRect().width).toBe(times[i]!.width);
+    const words = document.createRange();
+    words.selectNodeContents(time);
+    expect(words.getBoundingClientRect().width).toBeLessThanOrEqual(times[i]!.width);
+  }
+});
+
 it('today_night_line_lands_in_place_near_its_wrap', async () => {
-  // At 829 px the fresh copy's night line fits its card on two lines, and 16 px narrower it would
+  // At 880 px the fresh copy's night line fits its card on two lines, and 16 px narrower it would
   // need three: the shape measures the line at the paragraph's own width, so it reserves two lines,
   // and the card lands where it was drawn.
-  const width = 829;
+  const width = 880;
   const reads = [ROUTES.desks.path, ROUTES.today.path.replace('{desk_id}', RIVERA.deskId), ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId)].map(holdReads);
   onTestFinished(() => reads.forEach((read) => read.release()));
   let before: DOMRect[] = [];
@@ -578,13 +614,13 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
       if (height !== undefined) expect(rect.height).toBe(height);
     });
   };
-  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 44);
+  lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 48);
   lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__text', ['80%'], 22);
   expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
   // Each card's line wraps in its third of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 2, 3, 1, 3] : [2, 2, 2, 1, 2]).forEach((count, i) => {
+  (viewport === 'phone' ? [2, 3, 3, 1, 3] : [2, 2, 3, 1, 3]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -599,10 +635,11 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   const ruleBox = today.querySelector('[data-skeleton-anchor="held-card"] .cd-approval-card__rule');
   expect(ruleBox, 'the held card draws its rule box').not.toBeNull();
   expect(ruleBox!.querySelectorAll('.cd-skeleton').length).toBeGreaterThanOrEqual(4);
-  lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', ['100%', '100%', '75%']);
-  lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', ['75%']);
+  lines('.cd-briefing__item:first-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:first-child .cd-briefing-row__words', viewport === 'phone' ? ['100%', '100%', '75%'] : ['100%', '100%', '100%', '75%']);
+  lines('.cd-briefing__item:last-child .cd-briefing-row__words .cd-skeleton-line', '.cd-briefing__item:last-child .cd-briefing-row__words', viewport === 'phone' ? ['75%'] : ['100%', '75%']);
   for (const child of [1, 2]) {
-    lines(`.cd-briefing__item:nth-child(${child}) .cd-skeleton-line--caption`, `.cd-briefing__item:nth-child(${child}) .cd-briefing-row`, [86]);
+    // The time column's width, which fits the widest time today.
+    lines(`.cd-briefing__item:nth-child(${child}) .cd-skeleton-line--caption`, `.cd-briefing__item:nth-child(${child}) .cd-briefing-row`, [96]);
     lines(`.cd-briefing__item:nth-child(${child}) .cd-status-label .cd-skeleton-line`, `.cd-briefing__item:nth-child(${child}) .cd-status-label`, [58]);
   }
   lines('.cd-live .cd-skeleton-line--control', '.cd-conversation-item__top', ['55%']);
@@ -662,17 +699,18 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
  * Decision 15's accepted move on a Desk switch. A copy with two Desks has made a Desk of its own, so
  * Things to try's last row lands ticked ("Create your own Desk", one done line) where the skeleton
  * draws a fresh copy's row. The card keeps its top, left and width and lands one row's change
- * shorter; what Today draws under it in its column, the aside stacked under that on a phone and the
- * frame's footer each land once, by exactly that change. Everything else lands where its shape was.
+ * shorter; what Today draws under the band (its column, and the aside beside or under it) and the
+ * frame's footer each land once, by exactly that change. From 640 px the ticked card shares its row
+ * with "Answer a held request", whose step at the card's foot moves with the row: its fresh line
+ * ("Describe a business…") takes a line more than the held request's room. Everything else lands
+ * where its shape was.
  */
-const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card'];
-const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'week-title', 'week-bar-0'];
+const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card', 'week-title', 'week-bar-0'];
+const MOVED_FROM_640 = ['thing-action-3', ...UNDER_THINGS];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
   const ticked = ['thing-tile-4', 'thing-action-4', 'thing-go-4'];
-  // From 640 px the cards of a row share its height, so the ticked card moves nothing.
-  if (!phone) return TODAY_CONTENT_ANCHORS.filter(({ name }) => !ticked.includes(name));
-  const under = new Set(UNDER_THINGS_ON_A_PHONE);
+  const under = new Set(phone ? UNDER_THINGS : MOVED_FROM_640);
   return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && !ticked.includes(name)).map((anchor) =>
     anchor.name === 'things-card' ? { name: anchor.name, page: anchor.page, dimensions: ['width'] as const } : anchor,
   );
@@ -691,7 +729,7 @@ function boundsFromRect({ top, left, width, height }: DOMRect) {
 
 /** Sample the landed geometry from its first commit, even while the shapes fade over it. */
 function watchTheTickedRow(phone: boolean) {
-  const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS_ON_A_PHONE : UNDER_THINGS).includes(name));
+  const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS : MOVED_FROM_640).includes(name));
   const shape = (name: string) => document.querySelector(`.cd-today-opening [data-skeleton-anchor="${name}"]`)!.getBoundingClientRect();
   let before: { card: DOMRect; under: DOMRect[]; footer: DOMRect } | undefined;
   const snapshot = () => {
@@ -750,8 +788,11 @@ function watchTheTickedRow(phone: boolean) {
           expect(Math.abs(real[dimension] - before!.under[i]![dimension]), `${name} ${dimension}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
         }
       });
+      // From 1024 px the concept footer sits in the sidebar, beside the page, so it stays put; on a
+      // narrower screen it closes the page, under the card, and moves with it.
       const footer = landedRect('[data-owner-footer]');
-      expect(Math.abs(footer.top - before!.footer.top - change), "the footer moves by the card's change").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+      const footerMoves = document.querySelector('[data-owner-footer]')?.closest('.cd-sidebar') ? 0 : change;
+      expect(Math.abs(footer.top - before!.footer.top - footerMoves), "the footer moves by the card's change, or stays in the sidebar").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     },
   };
 }
@@ -775,6 +816,7 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const reads = [ROUTES.today.path, ROUTES.needsYou.path].map((path) => holdReads(path.replace('{desk_id}', RIVERA.deskId)));
+  const ticked = watchTheTickedRow(false);
   await expectSkeletonLoad({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
@@ -783,11 +825,13 @@ it('switching_desks_opens_on_todays_shape at 1440', async () => {
       await screen.getByRole('button', { name: 'Switch Desk, current: Emergencies' }).click();
       await screen.getByRole('button', { name: 'Main line', exact: true }).click();
     },
-    release: () => reads.forEach((read) => read.release()),
+    release: () => {
+      ticked.record();
+      reads.forEach((read) => read.release());
+    },
   });
-  // The last card lands ticked in the shape's place: its row of cards keeps its height.
-  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
-  expect(last?.textContent).toContain('Done. Your new Desk is live.');
+  // The last card lands ticked, and its row of cards moves once, by the line its fresh words took.
+  await ticked.expectOneMove();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
   await expectScreenBasics(document.body, { owner: true });
@@ -919,15 +963,18 @@ it('todays_hold_still_under_reduced_motion', async () => {
   await expect.element(screen.getByRole('heading', { name: 'Since last night', exact: true })).toBeVisible();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+  const ticked = watchTheTickedRow(false);
   await expectSkeletonStill({
     status: 'Opening your Desk',
     anchors: switchedAnchors(false),
     open: async () => { await router.navigate(TODAY); },
-    release: () => needsYou.release(),
+    release: () => {
+      ticked.record();
+      needsYou.release();
+    },
   });
-  // From 640 px the ticked card keeps its row's height, so everything lands in its shape's place.
-  const last = [...document.querySelectorAll('.cd-things__item:last-child')].find((el) => el.closest('.cd-skeleton-screen__layer') === null);
-  expect(last?.textContent).toContain('Done. Your new Desk is live.');
+  // The ticked card's row moves once, with no fade; everything else lands in its shape's place.
+  await ticked.expectOneMove();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -1036,11 +1083,14 @@ it('today_link_actions_measure_inherited_font_metrics', async () => {
   await expect.poll(() => Math.abs(shape.getBoundingClientRect().width - real.getBoundingClientRect().width)).toBeLessThanOrEqual(2);
 });
 
-it('reload_changes_only_the_link_pills_width_once', async () => {
+it.each([1280, 1440, 1512])('reload_changes_only_the_link_pills_width_once_at_%s', async (width) => {
   // The slug comes from the held read, so its width differs from the fresh-copy placeholder.
-  mockStore.world.desk(RIVERA.deskId)!.summary.slug = 'turner-plumbing-a-new-random-slug';
+  const slug = 'turner-plumbing-a-new-random-slug';
+  mockStore.world.desk(RIVERA.deskId)!.summary.slug = slug;
+  const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined);
   const desks = holdReads(ROUTES.desks.path);
-  const { screen } = await renderRoute(TODAY, { pollScale: 100 });
+  onTestFinished(desks.release);
+  const { screen } = await renderRoute(TODAY, { viewport: { width, height: 900 }, pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
   const shape = document.querySelector('[data-skeleton-anchor="link-pill"]')!.getBoundingClientRect();
   const bounds = (element: Element) => {
@@ -1093,6 +1143,19 @@ it('reload_changes_only_the_link_pills_width_once', async () => {
     expect(landedState).toBe('leaving');
     expect(firstLanded).toEqual(bounds(document.querySelector('.cd-greeting__link')!));
     expect(changes).toEqual([boundsFromRect(shape), boundsFromRect(real)]);
+    const label = document.querySelector<HTMLElement>('.cd-greeting__link-label')!;
+    expect(label.textContent).toBe(publicLink(slug));
+    expect(label.title).toBe(publicLink(slug));
+    expect(getComputedStyle(label).textOverflow).toBe('ellipsis');
+    expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
+    expect(real.width).toBe(380);
+    const title = document.querySelector('.cd-greeting__title')!.getBoundingClientRect();
+    const chat = document.querySelector('.cd-greeting__actions > .cd-button')!.getBoundingClientRect();
+    expect(real.top - title.top).toBe(4);
+    expect(chat.top).toBe(real.top);
+    expectNoHorizontalScroll();
+    await screen.getByRole('button', { name: 'Copy your Desk link' }).click();
+    expect(writeText).toHaveBeenCalledWith(publicLink(slug));
   } finally {
     observer.disconnect();
     cancelAnimationFrame(frame);
@@ -1675,6 +1738,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await inView.expectStill();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -1860,6 +1924,7 @@ it('conversation_reload_hands_off at 390', async () => {
   expect(gaps()).toBe(0);
   expect(headings(), 'one top heading through the reload, the hand-off and the landing').toEqual([1]);
   expectNoHorizontalScroll();
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -1937,6 +2002,7 @@ it.each(['desktop', 'phone'] as const)('opening_a_conversation_keeps_one_heading
   await nextFrames();
   // Waiting, shown, fading and landed: one top heading each time, never none and never two.
   expect(headings()).toEqual([1]);
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 

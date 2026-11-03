@@ -171,6 +171,20 @@ export async function nextFrames(): Promise<void> {
 }
 
 /**
+ * Scrolls an open conversation to its top, for a screen check after it has landed. Opened at the
+ * chat's end, a phone can rest a receipt mostly under the pinned bar, where axe counts only its
+ * visible sliver as the button and finds it too close to the receipt under it; at the top every line
+ * is whole. Whatever scrolls the log is scrolled: the transcript, or the column scrolled as one.
+ */
+export async function conversationAtTop(): Promise<void> {
+  for (let node = document.querySelector('[role="log"]'); node !== null; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) node.scrollTop = 0;
+  }
+  await nextFrames();
+}
+
+/**
  * Counts the reads of the owner's notifications the app sends from now on while `shown` (the
  * Notifications page's heading) isn't on the page, each as it is sent: a read sent while the page
  * was open isn't one, however late the mock gets it.

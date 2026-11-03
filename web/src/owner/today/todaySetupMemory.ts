@@ -30,9 +30,12 @@ function isStep(value: unknown): value is UnfinishedSetupStep {
 export function rememberedSetup(deskId: string): SkeletonSetup | undefined {
   const entry: unknown = read()[deskId];
   if (typeof entry !== 'object' || entry === null) return undefined;
-  const { step, answering, business } = entry as Partial<SkeletonSetup>;
+  const { step, answering, business, owner, timezone } = entry as Partial<SkeletonSetup>;
   if (!isStep(step) || typeof answering !== 'boolean' || typeof business !== 'string') return undefined;
-  return { step, answering, business };
+  // The greeting's name and time of day; an entry remembered without them draws no card until the
+  // Desks are read.
+  if (typeof owner !== 'string' || typeof timezone !== 'string') return undefined;
+  return { step, answering, business, owner, timezone };
 }
 
 /**
@@ -43,8 +46,8 @@ export function rememberSetups(businesses: readonly BusinessOut[]): void {
   const all: Remembered = {};
   for (const business of businesses) {
     for (const desk of business.desks) {
-      const setup = skeletonSetupOf(desk);
-      if (setup !== undefined) all[desk.desk_id] = { step: setup.step, answering: setup.answering, business: setup.business };
+      const setup = skeletonSetupOf(desk, business);
+      if (setup !== undefined) all[desk.desk_id] = setup;
     }
   }
   const next = Object.keys(all).length === 0 ? null : JSON.stringify(all);

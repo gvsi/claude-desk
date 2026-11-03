@@ -484,12 +484,17 @@ describe('ArchitectureFigure', () => {
 
   it('architecture_check_heights_match_the_reviewed_figure', async () => {
     await loadWebFonts();
-    // Measured on /about/proposal at d14424d6b, before emphasizing the technology names.
-    for (const [size, height] of [[DESKTOP, 124], [PHONE, 120]] as const) {
+    // Measured on /about/proposal at d14424d6b, before emphasizing the technology names (124 px each at 1440,
+    // 120 at 390), then at the raised type scale, where the name and every caption line is a pixel taller. The two
+    // checks are stacked, not a row, so on a phone each box keeps its own height: Check reply's first line takes
+    // two lines there.
+    for (const [size, heights] of [[DESKTOP, [129, 129]], [PHONE, [123, 141]]] as const) {
       await page.viewport(size.width, size.height);
       const screen = await render(<MemoryRouter><ReaderPage id="proposal" /></MemoryRouter>);
+      const checks = screen.container.querySelector('.cd-about-arch__checks') as HTMLElement;
+      expect(getComputedStyle(checks).flexDirection, `${size.width} wide: checks stack`).toBe('column');
       const boxes = [...screen.container.querySelectorAll('.cd-about-arch__check > .cd-about-arch__box')];
-      expect(boxes.map((box) => box.getBoundingClientRect().height), `${size.width} wide`).toEqual([height, height]);
+      expect(boxes.map((box) => box.getBoundingClientRect().height), `${size.width} wide`).toEqual(heights);
       await screen.unmount();
     }
   });
@@ -751,9 +756,16 @@ describe('MeasuresTable', () => {
       const pending = await render(<MeasuresTable table={unfilled} compact={compact} />);
       const pills = [...pending.container.querySelectorAll('.cd-pill')];
       expect(pills.map((pill) => pill.textContent)).toEqual(['measured: violations', 'measured: cost']);
-      const glued = pills[0]?.closest('.cd-about-nowrap');
+      const glued = pills[0]?.closest<HTMLElement>('.cd-about-nowrap');
       expect(glued?.textContent).toBe('measured: violations;');
-      expect(getComputedStyle(glued ?? document.body).whiteSpace).toBe('nowrap');
+      // The pill and its punctuation are one box that moves whole to the next line, as the owner's name does in
+      // the public chat's disclosure, so the punctuation sits on the pill's line.
+      const glue = glued ?? document.body;
+      expect([getComputedStyle(glue).display, getComputedStyle(glue).maxWidth]).toEqual(['inline-block', '100%']);
+      const mark = document.createRange();
+      mark.selectNodeContents(glue.lastChild as Node);
+      const [markBox, pillBox] = [mark.getBoundingClientRect(), (pills[0] as HTMLElement).getBoundingClientRect()];
+      expect(markBox.top < pillBox.bottom && markBox.bottom > pillBox.top, `"${glue.lastChild?.textContent}" beside the pill`).toBe(true);
       expect(pills[1]?.closest('.cd-about-nowrap')).toBeNull();
       await pending.unmount();
 
