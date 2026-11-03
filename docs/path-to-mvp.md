@@ -12,10 +12,10 @@ Read the safety and usefulness numbers together: a Desk that refused everything 
 
 | Metric | Value | Source |
 |---|---|---|
-| Baseline violations across all judged runs (both suites and splits), unwaived | 0 in 261 judged runs | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
-| Baseline violations across all judged runs, waived, with who signed | 2 AI-denial flags, signed by Giovanni Alcantara | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
-| Held-out legitimate completion, completed / trials and Wilson 95% interval | 72 of 72 held-out runs (100.0%; Wilson 95% interval 94.9% to 100.0%) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
-| False holds on tools held-out legitimate tasks expect allowed, count / eligible decisions and rate | 0 of 79 decisions the held-out tasks expected allowed (0.0%) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
+| Baseline violations across all judged runs (both suites and splits), unwaived | 0 in 261 judged runs | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
+| Baseline violations across all judged runs, waived, with who signed | 4 AI-denial flags, signed by Giovanni Alcantara | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
+| Held-out legitimate completion, completed / trials and Wilson 95% interval | 72 of 72 held-out runs (100.0%; Wilson 95% interval 94.9% to 100.0%) | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
+| False holds on tools held-out legitimate tasks expect allowed, count / eligible decisions and rate | 0 of 80 decisions the held-out tasks expected allowed (0.0%) | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
 
 Only the AI-denial check can be waived: the owner signs, one message at a time, for a correct refusal the strict check flagged, such as one that quotes the line it won't say or offers a call from a real person. A waived violation stays in the report, counted apart with who signed it.
 
@@ -33,8 +33,8 @@ During setup, Claude acts as a [setup consultant](../backend/desk/api/setup.py).
 
 | Metric | Value | Source |
 |---|---|---|
-| Reviewer skipped, share of tool decisions in held-out legitimate-task conversations | 85 of 103 (82.5%) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
-| Reviewer reached, share of tool decisions in held-out legitimate-task conversations | 18 of 103 (17.5%) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
+| Reviewer skipped, share of tool decisions in held-out legitimate-task conversations | 86 of 104 (82.7%) | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
+| Reviewer reached, share of tool decisions in held-out legitimate-task conversations | 18 of 104 (17.3%) | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
 
 The two shares add up to the whole. Today's daily model budget counts the API's model calls but not the kernel's. An MVP needs each Desk's model spend reserved before every call on every route, settled correctly when calls run at once, and limits the owner can see.
 
@@ -44,9 +44,9 @@ Model cost and latency may limit useful traffic before the infrastructure does; 
 
 | Constraint | Value | Source |
 |---|---|---|
-| Opus cost per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, mean / p50 / p95, including calls after tools | $0.021 / $0.019 / $0.037 over 140 replies | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
-| Opus model time per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, p50 / p95, including calls after tools | 5,199 / 10,385 ms over 140 replies that called the model | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) |
-| Proof, Turner Plumbing's demo rules, local p50 / p95 | 583 / 670 ms (n = 20) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md), latency run 20261102-225713-890d8a |
+| Opus cost per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, mean / p50 / p95, including calls after tools | $0.022 / $0.020 / $0.035 over 143 replies | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
+| Opus model time per Desk reply (one reply the visitor waits for) in held-out legitimate-task conversations, p50 / p95, including calls after tools | 5,249 / 9,374 ms over 143 replies that called the model | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) |
+| Proof, Turner Plumbing's demo rules, local p50 / p95 | 595 / 662 ms (n = 20) | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md), latency run 20261103-020908-c70ca3 |
 | Proof, 30 rule cards, local p50 / p95 | 1,172 / 2,390 ms | [Kernel core PR #33, proving latency](https://github.com/gvsi/claude-desk/pull/33) |
 | SSE streams per task, steady state | estimate: at most min(3S, 30I) for S visitor sessions across I internet addresses subject to the per-address limit; no total task cap | estimate: min(3 × S, 30 × I) = stream ceiling; [stream slots](../backend/desk/api/ratelimit.py). Excludes streams with no per-address limit and brief overlap while an older stream closes after a new one replaces it. |
 | API Postgres connection budget per task | estimate: up to 47 | estimate: (20 pool + 10 overflow) + 10 turn locks + 5 job connections + 1 event listener + 1 job listener = 47; [API pools](../backend/desk/api/main.py), [job pool](../backend/desk/db/session.py), [event listener](../backend/desk/api/sse.py), [job listener](../backend/desk/api/jobs.py). |
@@ -61,12 +61,12 @@ Each source names its report, pass, date and latency run. Full turns come from t
 
 | Metric | Environment | Value | Source | Planned estimate |
 |---|---|---|---|---|
-| Cost per legitimate-task conversation, both splits, mean / p50 / p95 | Local evals | $0.047 / $0.044 / $0.088 over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md) | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
-| Full turn, warm and cold first turns apart, p50 / p95 | Local | warm 4,485 / 10,439 ms (n = 57); cold first turn, 5,127 ms p50; slowest of 3: 6,754 ms | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md), latency run 20261102-225713-890d8a | — |
-| Finished model reply to reveal, p50 / p95 | Local | 1,520 / 4,558 ms (n = 60) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md), latency run 20261102-225713-890d8a | p50 1.1 s, p95 2.8 s, capped at 8 s |
-| Reply check, p50 / p95 | Local, server-side | 1,497 / 4,531 ms (n = 60) | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md), latency run 20261102-225713-890d8a | — |
-| Decide, p50 / p95 | Local, server-side | 36 ms p50; slowest of 4: 51 ms | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md), latency run 20261102-225713-890d8a | — |
-| Reviewer when called, p50 / p95 | Local, server-side | Not measured in this latency run | [pass 20261102-221455-c74e16, 2026-11-02](../evals/reports/2026-11-02-20261102-221455-c74e16.md), latency run 20261102-225713-890d8a | 0.8–1.5 s, 4 s timeout |
+| Cost per legitimate-task conversation, both splits, mean / p50 / p95 | Local evals | $0.049 / $0.046 / $0.095 over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md) | $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache |
+| Full turn, warm and cold first turns apart, p50 / p95 | Local | warm 4,324 / 10,114 ms (n = 57); cold first turn, 6,792 ms p50; slowest of 3: 7,741 ms | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md), latency run 20261103-020908-c70ca3 | — |
+| Finished model reply to reveal, p50 / p95 | Local | 1,764 / 4,484 ms (n = 60) | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md), latency run 20261103-020908-c70ca3 | p50 1.1 s, p95 2.8 s, capped at 8 s |
+| Reply check, p50 / p95 | Local, server-side | 1,739 / 4,466 ms (n = 60) | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md), latency run 20261103-020908-c70ca3 | — |
+| Decide, p50 / p95 | Local, server-side | 35 ms p50; slowest of 4: 38 ms | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md), latency run 20261103-020908-c70ca3 | — |
+| Reviewer when called, p50 / p95 | Local, server-side | Not measured in this latency run | [pass 20261103-012831-4a664a, 2026-11-03](../evals/reports/2026-11-03-20261103-012831-4a664a.md), latency run 20261103-020908-c70ca3 | 0.8–1.5 s, 4 s timeout |
 | Full turn, warm and cold first turns apart, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | — |
 | Reviewer when called, p50 / p95 | Hosted | Not measured | [Why hosted wasn't measured](../evals/latency.py) | — |
 
