@@ -26,6 +26,8 @@ import {
   TranscriptRow,
   VisitorMessage,
   Whisper,
+  clockNow,
+  rowComingIn,
 } from '../../ds/index.ts';
 import { POLL_MS } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
@@ -213,18 +215,6 @@ function cardsAfter(rows: readonly (readonly OwnerReceiptSource[])[], heldIds: r
 }
 
 /**
- * What brings a revealed reply in, and a held request's card after it: its words settling, its
- * cards, the lines under it, and a held card before this one.
- */
-const COMING_IN: ReadonlySet<string> = new Set([
-  'cd-md-settle',
-  'cd-md-settle-marker',
-  'cd-claude-message-follow',
-  'cd-transcript-row-follow',
-  'cd-conversation-held-follow',
-]);
-
-/**
  * The longest a held card waits for the reply before it: longer than any reply takes to come in
  * (its words in at most about 3 s, then its cards and lines), so a reveal that never finishes
  * can't keep a request unseen.
@@ -236,12 +226,6 @@ const LONGEST_WAIT_MS = 8_000;
  * conversation poll, the time the next read takes to bring it (owner, 2026-11-02).
  */
 const REPLY_WAIT_MS = POLL_MS.conversation;
-
-/** The page's animation clock now, in ms. */
-function clockNow(): number {
-  const time = document.timeline?.currentTime;
-  return typeof time === 'number' ? time : performance.now();
-}
 
 /** The row a held card's slot follows, and the held cards' slots between them; null when no row is before it. */
 function partsBefore(slot: Element): { row: Element; held: Element[] } | null {
@@ -255,18 +239,19 @@ function partsBefore(slot: Element): { row: Element; held: Element[] } | null {
 
 /**
  * Whether what comes before a held card's slot is still coming in: the reply's words, its cards
- * and the lines under it, playing or waiting for their beat, or a held card before this one.
+ * and the lines under it, playing or waiting for their beat (as its row says), or a held card
+ * before this one, waiting or coming in (cd-conversation-held-follow, Conversations.css).
  */
 function comingIn(slot: Element): boolean {
   const parts = partsBefore(slot);
   if (parts === null) return false;
   const { row, held } = parts;
-  if (row.classList.contains('cd-transcript-row--waiting') || row.querySelector('.cd-claude-message--revealing') !== null) return true;
+  if (rowComingIn(row)) return true;
   if (held.some((el) => el.classList.contains('cd-conversation__held--waiting'))) return true;
   const now = clockNow();
-  return [row, ...held].some((el) =>
-    el.getAnimations({ subtree: true }).some((animation) => {
-      if (!(animation instanceof CSSAnimation) || !COMING_IN.has(animation.animationName) || animation.playState === 'finished') return false;
+  return held.some((el) =>
+    el.getAnimations().some((animation) => {
+      if (!(animation instanceof CSSAnimation) || animation.animationName !== 'cd-conversation-held-follow' || animation.playState === 'finished') return false;
       const start = animation.startTime === null ? now : Number(animation.startTime);
       return start + Number(animation.effect?.getComputedTiming().endTime ?? 0) > now;
     }),

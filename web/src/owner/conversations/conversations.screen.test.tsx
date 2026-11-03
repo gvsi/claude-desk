@@ -2683,6 +2683,74 @@ describe('Conversations', () => {
     expect(heldSlots().at(-1)?.contains(document.activeElement)).toBe(true);
   });
 
+  it('a_held_card_whose_reply_never_finishes_coming_in_shows_within_8_s', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    // The reply's lines wait a minute for their beat, so its reveal doesn't finish in the test.
+    document.documentElement.style.setProperty('--motion-follow', '60s');
+    onTestFinished(() => {
+      document.documentElement.style.removeProperty('--motion-follow');
+    });
+    const replies = () => document.querySelectorAll('[role="log"] .cd-claude-message').length;
+    const before = { replies: replies(), held: heldSlots().length };
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    discountTurn(chat, 'Could I get 10% off as a returning customer?');
+    await expect.poll(replies).toBe(before.replies + 1);
+    needsYou.release();
+    await expect.poll(() => heldSlots().length).toBe(before.held + 1);
+    const drawn = performance.now();
+    expect(heldSlots().at(-1)?.getAttribute('aria-busy')).toBe('true');
+
+    // Whatever happens to the reveal, the card shows within 8 s of being drawn, its answers there to press.
+    const seen = () => {
+      const slot = heldSlots().at(-1);
+      return slot !== undefined && slot.getAttribute('aria-busy') === null && getComputedStyle(slot).visibility === 'visible';
+    };
+    await expect.poll(seen, { timeout: 10_000 }).toBe(true);
+    expect(performance.now() - drawn).toBeLessThan(8_500);
+    await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
+  }, 20_000);
+
+  it('a_held_card_whose_reply_goes_while_it_waits_shows_within_a_poll', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    // The reply's reveal would keep the card waiting until its 8 s cap.
+    document.documentElement.style.setProperty('--motion-follow', '60s');
+    onTestFinished(() => {
+      document.documentElement.style.removeProperty('--motion-follow');
+    });
+    const replies = () => document.querySelectorAll('[role="log"] .cd-claude-message').length;
+    const before = { replies: replies(), held: heldSlots().length };
+    const needsYou = holdReads(ROUTES.needsYou.path.replace('{desk_id}', RIVERA.deskId));
+    discountTurn(chat, 'Could I get 10% off as a returning customer?');
+    await expect.poll(replies).toBe(before.replies + 1);
+    needsYou.release();
+    await expect.poll(() => heldSlots().length).toBe(before.held + 1);
+    expect(heldSlots().at(-1)?.getAttribute('aria-busy')).toBe('true');
+
+    // The reads stop bringing the reply while the card waits after it: with nothing before it coming
+    // in, the card shows within one conversation poll (2 s) of being drawn, after her question.
+    const read = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    const reply = read.items.filter((item) => item.kind === 'delivered').at(-1);
+    mockStore.inject({ route: 'conversation', status: 200, times: 100, body: { ...read, items: read.items.filter((item) => item !== reply) } });
+    const gone = performance.now();
+    await expect.poll(replies).toBe(before.replies);
+    const seen = () => {
+      const slot = heldSlots().at(-1);
+      return slot !== undefined && slot.getAttribute('aria-busy') === null && getComputedStyle(slot).visibility === 'visible';
+    };
+    await expect.poll(seen, { timeout: 4_000 }).toBe(true);
+    expect(performance.now() - gone).toBeLessThan(2_500);
+    expect(heldSlots().at(-1)?.previousElementSibling?.textContent).toContain('Could I get 10% off as a returning customer?');
+    await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
+  });
+
   it('a_held_requests_card_from_history_or_under_reduced_motion_shows_at_once', async () => {
     // Opening a chat with a request already held draws its card at once, never waiting.
     const waited = watchHeldWaits();
