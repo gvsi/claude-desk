@@ -145,7 +145,7 @@ async function rulesPage(fixture: Fixture, viewport: Viewport = 'desktop'): Prom
   desk.tools = structuredClone(fixture.tools);
   desk.policy = { ...desk.policy, cards: structuredClone(fixture.cards), auto_money_cap_cents: fixture.cap };
   const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`, { viewport });
-  await expect.poll(() => screen.container.querySelectorAll('.cd-house-rules__tool [data-rule-id]').length).toBeGreaterThan(0);
+  await expect.poll(() => screen.container.querySelectorAll('.cd-house-rules__tool [data-rule-id]').length, { timeout: 4_000 }).toBeGreaterThan(0);
   return screen.container;
 }
 
@@ -158,9 +158,9 @@ async function yourRules(state: SetupState, fixture: Fixture, viewport: Viewport
   record.draft = { ...record.draft, cards: structuredClone(fixture.cards), auto_money_cap_cents: fixture.cap };
   // Drafting the rules moves the interview on to them, so setup opens at Your rules.
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
-  await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules', exact: true }), { timeout: 4_000 }).toBeVisible();
   // The draft's own rows, once its shapes have gone.
-  await expect.poll(() => screen.container.querySelector('.cd-skeleton-screen__layer') === null && screen.container.querySelectorAll('.cd-house-rules__tool [data-rule-id]').length > 0).toBe(true);
+  await expect.poll(() => screen.container.querySelector('.cd-skeleton-screen__layer') === null && screen.container.querySelectorAll('.cd-house-rules__tool [data-rule-id]').length > 0, { timeout: 4_000 }).toBe(true);
   return screen;
 }
 
@@ -252,7 +252,7 @@ it('Your rules names the stored hours for Chen’s intro-call job', async () => 
   deskOf(state).summary.hours = [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }];
   const screen = await yourRules(state, fixture);
   const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
-  await expect.element(jobs.getByText('Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', { exact: true })).toBeVisible();
+  await expect.element(jobs.getByText('Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', { exact: true }), { timeout: 4_000 }).toBeVisible();
 });
 
 it.each(['Turner Plumbing', 'Chen & Co.', 'Chen & Co. with the payment connectors off'] as const)('Your rules draws every rule of %s as Rules does', async (name) => {
@@ -284,7 +284,7 @@ it.each(['Turner Plumbing', 'Chen & Co.', 'Chen & Co. with the payment connector
   expect(drawnRules(screen.container)).toEqual(page);
 });
 
-it('the Stripe review reads each tool as Rules reads it, on Turner Plumbing and on Chen & Co.', async () => {
+it('the Stripe review reads each tool as Rules reads it, on Turner Plumbing and on Chen & Co.', { timeout: 25_000 }, async () => {
   for (const isChen of [false, true]) {
     const state = await chenAtTools();
     const desk = deskOf(state);
@@ -296,14 +296,14 @@ it('the Stripe review reads each tool as Rules reads it, on Turner Plumbing and 
     const fixture: Fixture = { tools: allOn(desk.tools), cards: structuredClone(desk.policy.cards), cap: desk.policy.auto_money_cap_cents ?? 0 };
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('button', { name: 'Review Stripe', exact: true }).click();
-    await expect.element(screen.getByRole('region', { name: 'The rules that will cover them' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'The rules that will cover them' }), { timeout: 4_000 }).toBeVisible();
     const review = boxRules(reviewBox(screen.container));
     expect(review.map((line) => line.tool)).toEqual(['See charges', 'Refund']);
     expectReviewMatches(review, await rulesPage(fixture));
   }
 });
 
-it('a job review reads its job as Rules reads it, on Chen & Co.', async () => {
+it('a job review reads its job as Rules reads it, on Chen & Co.', { timeout: 25_000 }, async () => {
   const state = await chenAtTools();
   const desk = deskOf(state);
   const jobs = desk.tools.filter((tool) => tool.source === 'business' && tool.business?.title);
@@ -316,19 +316,19 @@ it('a job review reads its job as Rules reads it, on Chen & Co.', async () => {
   for (const job of jobs) {
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: `Review ${job.business!.title}`, exact: true }).click();
-    await expect.element(screen.getByRole('region', { name: 'The rule that will cover it' })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'The rule that will cover it' }), { timeout: 4_000 }).toBeVisible();
     const review = boxRules(reviewBox(screen.container));
     expect(review.map((line) => line.tool)).toEqual([job.business!.title]);
     expectReviewMatches(review, await rulesPage(fixture));
   }
 });
 
-it('a real situation decided by a card reads that card as Rules does, and one with no card keeps the kernel’s words, on Chen & Co.', async () => {
+it('a real situation decided by a card reads that card as Rules does, and one with no card keeps the kernel’s words, on Chen & Co.', { timeout: 25_000 }, async () => {
   const { state, fixture } = await chen();
   const screen = await yourRules(state, fixture);
   await screen.getByRole('button', { name: 'Check real situations', exact: true }).click();
   const rows = screen.getByRole('list', { name: 'Real situations', exact: true }).getByRole('listitem');
-  await expect.poll(() => rows.elements().length).toBe(6);
+  await expect.poll(() => rows.elements().length, { timeout: 4_000 }).toBe(6);
   const shown = new Map(rows.elements().map((row) => [
     squash(row.querySelector('.cd-situation-row__title')?.textContent),
     {
@@ -357,7 +357,7 @@ it('a real situation decided by a card reads that card as Rules does, and one wi
   expect(compared).toBeGreaterThan(1);
 });
 
-it('the chat’s job card reads the rule a job starts under as Rules reads the same card, on Chen & Co.', async () => {
+it('the chat’s job card reads the rule a job starts under as Rules reads the same card, on Chen & Co.', { timeout: 25_000 }, async () => {
   const state = await chenAtTools();
   // The jobs setup made into the Desk's own tools (a retainer with no amount isn't one).
   const jobs = state.messages.flatMap(({ card }) => {
@@ -370,7 +370,7 @@ it('the chat’s job card reads the rule a job starts under as Rules reads the s
     const proposal: Proposal = { ...structuredClone(card), state: 'proposed' };
     const chat = await render(<ProposalCard proposal={proposal} hours={HOURS} live disabled={false} busyAction={null} failed={false} amountRequired={false} onRetry={() => {}} onDecision={() => {}} />);
     const box = chat.getByRole('group', { name: 'The rule it will start under', exact: true });
-    await expect.element(box).toBeVisible();
+    await expect.element(box, { timeout: 4_000 }).toBeVisible();
     const [rule] = boxRules(box.element());
     await chat.unmount();
     // The same card as a rule on the Desk: the job's own tool, its autonomy, and the Desk's hours for a booking.

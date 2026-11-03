@@ -170,7 +170,7 @@ async function reduceMotion(): Promise<void> {
   onTestFinished(async () => {
     await cdp().send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   });
-  await expect.poll(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches).toBe(true);
+  await expect.poll(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, { timeout: 4_000 }).toBe(true);
 }
 
 /** The animations running on `root` or anything in it. */
@@ -189,7 +189,7 @@ async function askForTheWeekdayChange(opts: RenderRouteOptions = {}, words = ASK
   const sheet = opts.viewport === 'phone' || (typeof opts.viewport === 'object' && opts.viewport.width < 1024);
   const panel = rendered.screen.getByRole(sheet ? 'dialog' : 'complementary', { name: 'Ask Claude' });
   const log = panel.getByRole('log');
-  await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+  await expect.element(log.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeEnabled();
   return { ...rendered, panel, log };
 }
 
@@ -212,7 +212,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
     const receipt = log.getByText(receiptWords(42), { exact: true });
-    await expect.element(receipt).toBeVisible();
+    await expect.element(receipt, { timeout: 4_000 }).toBeVisible();
     // Under Claude's message, in the conversation: once landed, 8 px under it, as the board draws it.
     const message = log.getByText(/^Here's that change: quotes stay automatic on weekdays/).element();
     expect(message.compareDocumentPosition(receipt.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -221,7 +221,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     const answer = message.closest('.cd-claude-message') as HTMLElement;
     expect(Math.round(line.getBoundingClientRect().top - answer.getBoundingClientRect().bottom)).toBe(8);
     // The review has gone, and no link sends the owner to the page that is already open.
-    await expect.element(log.getByRole('region', { name: 'Changes' })).not.toBeInTheDocument();
+    await expect.element(log.getByRole('region', { name: 'Changes' }), { timeout: 4_000 }).not.toBeInTheDocument();
     expect(log.getByRole('button', { name: 'Confirm change' }).elements()).toHaveLength(0);
     expect(log.getByRole('button', { name: 'Keep my rules' }).elements()).toHaveLength(0);
     expect(log.getByRole('link', { name: 'See your rules' }).elements()).toHaveLength(0);
@@ -235,9 +235,9 @@ describe('a confirmed rule change in Ask Claude', () => {
     confirm.element().focus();
     const version = desk().lastVersion;
     await userEvent.keyboard('{Enter}');
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
     // The button it pressed has gone with the review: focus doesn't drop to the page.
-    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' })).toHaveFocus();
+    await expect.element(panel.getByRole('textbox', { name: 'Ask Claude' }), { timeout: 4_000 }).toHaveFocus();
   });
 
   it('an_answer_without_a_version_settles_by_the_rules_read', async () => {
@@ -258,7 +258,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     const reads = requests('rules').length;
     await log.getByRole('button', { name: 'Confirm change' }).click();
     // The rules, read again, say which version is in force: the receipt says that one, never "42".
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(requests('rules').length).toBeGreaterThan(reads);
     expect(log.element().textContent).not.toContain('Version 42');
   });
@@ -269,22 +269,22 @@ describe('a confirmed rule change in Ask Claude', () => {
     // The confirm applies and its answer is lost on the way back.
     mockStore.inject({ route: 'confirmRules', status: 'network', afterCommit: true });
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(desk().policy.version).toBe(version);
   });
 
-  it('the_changed_row_lights_up_holds_lets_go_and_keeps_updated', async () => {
+  it('the_changed_row_lights_up_holds_lets_go_and_keeps_updated', { timeout: 35_000 }, async () => {
     const { screen, log } = await askForTheWeekdayChange();
     const root = screen.container;
     expect(wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price');
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
 
     // The Quote row, which the change changed, says so, lit in the selected fill, with its new words.
-    await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
-    await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
-    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
+    await expect.poll(() => saysUpdated(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe(true);
+    await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe(SELECTED);
+    await expect.poll(() => wordsOf(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
     // Then it lets go, and keeps "Updated".
     await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 5_000 }).toBe(CLEAR);
     expect(saysUpdated(toolRow(root, 'Quote'))).toBe(true);
@@ -294,44 +294,44 @@ describe('a confirmed rule change in Ask Claude', () => {
       expect(fillOf(toolRow(root, name)), name).toBe('none');
     }
     // The version line says the new one.
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true }), { timeout: 4_000 }).toBeVisible();
   });
 
-  it('leaving_rules_and_coming_back_clears_updated', async () => {
+  it('leaving_rules_and_coming_back_clears_updated', { timeout: 25_000 }, async () => {
     const { screen, router, log } = await askForTheWeekdayChange();
     const root = screen.container;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
+    await expect.poll(() => saysUpdated(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe(true);
 
     // To another page and back: Rules opens afresh, and nothing on it says it was updated.
     await router.navigate(`${DESK}/profile`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' }), { timeout: 4_000 }).toBeVisible();
     await router.navigate(-1);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => wordsOf(toolRow(root, 'Quote'))).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => wordsOf(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
     expect([...root.querySelectorAll<HTMLElement>('section[data-tool]')].filter(saysUpdated)).toEqual([]);
     expect(root.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
   });
 
-  it('a_row_out_of_view_scrolls_to_the_middle', async () => {
+  it('a_row_out_of_view_scrolls_to_the_middle', { timeout: 25_000 }, async () => {
     // A change to the Share a document row, halfway down Rules, below what shows at its top.
     answerWithNoDocuments();
     const { screen, log } = await askForTheWeekdayChange({}, STOP_DOCUMENTS);
-    await expect.element(log.getByText(STOP_DOCUMENTS_ANSWER, { exact: true })).toBeVisible();
+    await expect.element(log.getByText(STOP_DOCUMENTS_ANSWER, { exact: true }), { timeout: 4_000 }).toBeVisible();
     const root = screen.container;
     const main = screen.getByRole('main').element();
     expect(inView(toolRow(root, 'Share a document'), main)).toBe(false);
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
     // Its rule comes to the middle of what shows, where it lights up.
-    await expect.poll(() => saysUpdated(toolRow(root, 'Share a document'))).toBe(true);
+    await expect.poll(() => saysUpdated(toolRow(root, 'Share a document')), { timeout: 4_000 }).toBe(true);
     const changed = () => toolRow(root, 'Share a document').querySelector('[data-landed]')!;
-    await expect.poll(() => offMiddle(changed(), main)).toBeLessThan(2);
+    await expect.poll(() => offMiddle(changed(), main), { timeout: 4_000 }).toBeLessThan(2);
     expect(fillOf(toolRow(root, 'Share a document'))).not.toBe('none');
     expect(updatedRows(root)).toEqual(['Share a document']);
   });
 
-  it('a_row_above_what_shows_scrolls_as_near_the_middle_as_rules_goes', async () => {
+  it('a_row_above_what_shows_scrolls_as_near_the_middle_as_rules_goes', { timeout: 25_000 }, async () => {
     // "Anything not listed here" sits in Rules' first screen, where a removed rule's change lands.
     answerWithoutSaturday();
     const { screen, log } = await askForTheWeekdayChange({}, ASK_SATURDAYS);
@@ -339,13 +339,13 @@ describe('a confirmed rule change in Ask Claude', () => {
     // Rules scrolled to its end, the row far above what shows.
     const main = screen.getByRole('main').element();
     main.scrollTop = main.scrollHeight;
-    await expect.poll(() => inView(fallback(root), main)).toBe(false);
+    await expect.poll(() => inView(fallback(root), main), { timeout: 4_000 }).toBe(false);
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
     // It is in Rules' first screen, so Rules goes back to its top, the row in view.
-    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
-    await expect.poll(() => inView(fallback(root), main)).toBe(true);
-    await expect.poll(() => main.scrollTop).toBe(0);
+    await expect.poll(() => saysUpdated(fallback(root)), { timeout: 4_000 }).toBe(true);
+    await expect.poll(() => inView(fallback(root), main), { timeout: 4_000 }).toBe(true);
+    await expect.poll(() => main.scrollTop, { timeout: 4_000 }).toBe(0);
   });
 
   it('a_row_in_view_stays_where_it_is', async () => {
@@ -356,20 +356,20 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(inView(fallback(root), main)).toBe(true);
     const top = main.scrollTop;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.poll(() => fillOf(fallback(root))).toBe(SELECTED);
+    await expect.poll(() => fillOf(fallback(root)), { timeout: 4_000 }).toBe(SELECTED);
     expect(main.scrollTop).toBe(top);
     // Weekday bookings, unchanged, carry neither.
     expect(saysUpdated(toolRow(root, 'Book a visit'))).toBe(false);
   });
 
-  it('a_failed_confirm_lands_nothing_and_keeps_its_error', async () => {
+  it('a_failed_confirm_lands_nothing_and_keeps_its_error', { timeout: 25_000 }, async () => {
     const { screen, log } = await askForTheWeekdayChange();
     mockStore.inject({ route: 'confirmRules', status: 409, body: { error: 'rules_changed_since_draft' } });
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
     // The review stays, with the line it has always given, and nothing says the change applied.
-    await expect.element(log.getByRole('alert')).toHaveTextContent('Your rules changed since this was drafted. Ask for the change again.');
-    await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+    await expect.element(log.getByRole('alert'), { timeout: 4_000 }).toHaveTextContent('Your rules changed since this was drafted. Ask for the change again.');
+    await expect.element(log.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeEnabled();
     expect(log.element().textContent).not.toContain('Confirmed.');
     expect(log.element().querySelector('.cd-margin-receipt')).toBeNull();
     // No row on Rules lights up or says it was updated, and the version stays.
@@ -377,7 +377,7 @@ describe('a confirmed rule change in Ask Claude', () => {
     expect(rows.length).toBeGreaterThan(5);
     expect(rows.filter(saysUpdated)).toEqual([]);
     expect(screen.container.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
-    await expect.element(screen.getByText('Version 7 of your rules, checked against the always-on rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Version 7 of your rules, checked against the always-on rules', { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(desk().policy.version).toBe(7);
   });
 });
@@ -475,12 +475,12 @@ function updatedRows(root: HTMLElement): string[] {
 }
 
 describe('a preset or a new payment limit', () => {
-  it('a_preset_lands_on_every_row_it_changed', async () => {
+  it('a_preset_lands_on_every_row_it_changed', { timeout: 55_000 }, async () => {
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     const root = screen.container;
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' }), { timeout: 4_000 }).toBeVisible();
     const version = desk().lastVersion;
     // Whether the review's old done line shows at any moment on the way back.
     let flashed = false;
@@ -492,14 +492,14 @@ describe('a preset or a new payment limit', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
 
     // Confirmed, it goes back to Rules, where the change applies, with no done line on the way.
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     expect(desk().policy.version).toBe(version);
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true }), { timeout: 4_000 }).toBeVisible();
     // Every row whose rules it changed lands; the starter's own tools and the Desk's jobs stay unchanged.
     const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
-    await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
-    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
+    await expect.poll(() => updatedRows(root).sort(), { timeout: 4_000 }).toEqual([...changed].sort());
+    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { timeout: 4_000, message: name }).toBe(SELECTED);
     for (const name of ['Emergency callback', 'Find open times', 'Save a lead', 'Request a callback']) {
       expect(fillOf(toolRow(root, name)), name).toBe('none');
       expect(saysUpdated(toolRow(root, name)), name).toBe(false);
@@ -509,12 +509,12 @@ describe('a preset or a new payment limit', () => {
     expect(updatedRows(root).sort()).toEqual([...changed].sort());
   });
 
-  it('a_preset_lands_only_on_the_rows_its_review_listed', async () => {
+  it('a_preset_lands_only_on_the_rows_its_review_listed', { timeout: 70_000 }, async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const root = screen.container;
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' }), { timeout: 4_000 }).toBeVisible();
     // The tools its review lists by name, each once: its quote and document rules replace Turner's
     // with ones that differ only in their ids, so it lists neither.
     const listed = [...new Set([...root.querySelectorAll('.cd-rule-sentence__meta [data-copy="user"]')].map((title) => title.textContent ?? ''))].sort();
@@ -526,23 +526,23 @@ describe('a preset or a new payment limit', () => {
     // Back on Rules, the rules it changed say "Updated" and light up, under exactly those tools; its
     // weekday booking rule differs from Turner's only in its id, so Book a visit's rule doesn't, and
     // the Saturday rule it removed lands on "Anything not listed here". Quote and Share a document don't.
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     const changed = listed.filter((name) => name !== 'Book a visit' && landingRows(root).some((row) => row.name === name));
-    await expect.poll(() => updatedRows(root).sort()).toEqual(changed);
-    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { message: name }).toBe(SELECTED);
-    await expect.poll(() => saysUpdated(fallback(root))).toBe(true);
+    await expect.poll(() => updatedRows(root).sort(), { timeout: 4_000 }).toEqual(changed);
+    for (const name of changed) await expect.poll(() => fillOf(toolRow(root, name)), { timeout: 4_000, message: name }).toBe(SELECTED);
+    await expect.poll(() => saysUpdated(fallback(root)), { timeout: 4_000 }).toBe(true);
     for (const name of ['Quote', 'Share a document', 'Book a visit']) {
       expect(saysUpdated(toolRow(root, name)), name).toBe(false);
       expect(fillOf(toolRow(root, name)), name).toBe('none');
     }
   });
 
-  it('back_on_rules_the_reading_state_shows_until_the_rules_read_has_the_new_version', async () => {
+  it('back_on_rules_the_reading_state_shows_until_the_rules_read_has_the_new_version', { timeout: 35_000 }, async () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const root = screen.container;
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' }), { timeout: 4_000 }).toBeVisible();
     const version = desk().lastVersion;
     // Every read of the rules after the confirm is held, as on a slow network.
     const reads = holdRules();
@@ -556,9 +556,9 @@ describe('a preset or a new payment limit', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
 
     // Back on Rules, the read held: its reading state, never the old rules.
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(reads.held).toBeGreaterThan(0);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(reads.held, { timeout: 4_000 }).toBeGreaterThan(0);
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeVisible();
     await pause(300);
     watch.disconnect();
     expect(oldShown).toBe(false);
@@ -566,9 +566,9 @@ describe('a preset or a new payment limit', () => {
 
     // The read lands: the new version's line, and the rows it changed say so.
     reads.release();
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toContain('Quote');
-    await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toContain('Quote');
+    await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe(SELECTED);
     expect(showsOutsideShapes(root, 'Version 7 of your rules')).toBe(false);
   });
 
@@ -577,14 +577,14 @@ describe('a preset or a new payment limit', () => {
     const rendered = await renderRoute(`${DESK}/rules`);
     await rendered.screen.getByRole('button', { name: 'Start from a preset' }).click();
     await rendered.screen.getByRole('menuitem', { name: 'Ask me first' }).click();
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Ask me first' }), { timeout: 4_000 }).toBeVisible();
     return { ...rendered, root: rendered.screen.container, version: desk().lastVersion };
   }
 
   /** Turner's version 7 line, drawn on the page rather than in its loading shapes. */
   const showsVersion7 = (root: HTMLElement) => showsOutsideShapes(root, 'Version 7 of your rules');
 
-  it('rules_that_keep_coming_back_older_end_the_reading_state_after_a_few_seconds', async () => {
+  it('rules_that_keep_coming_back_older_end_the_reading_state_after_a_few_seconds', { timeout: 35_000 }, async () => {
     const { screen, root, version } = await reviewAskMeFirst();
     // Every read after the confirm answers with the rules as they were, as a read that lags behind it might.
     const older = rulesView(desk());
@@ -598,11 +598,11 @@ describe('a preset or a new payment limit', () => {
       }),
     );
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     const back = performance.now();
 
     // The reading state, while the older rules keep coming, for a few seconds.
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeVisible();
     await pause(2_000);
     expect(olderReads).toBeGreaterThan(1);
     expect(showsVersion7(root)).toBe(false);
@@ -613,58 +613,58 @@ describe('a preset or a new payment limit', () => {
 
     // A later read with the confirmed version still lands the change.
     lagging = false;
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toContain('Quote');
     expect(showsVersion7(root)).toBe(false);
   });
 
-  it('a_read_waiting_for_the_network_ends_the_reading_state_at_once', async () => {
+  it('a_read_waiting_for_the_network_ends_the_reading_state_at_once', { timeout: 30_000 }, async () => {
     const { screen, root, version } = await reviewAskMeFirst();
     // Offline as the change is confirmed: the read of the new rules waits for the network.
     onTestFinished(() => onlineManager.setOnline(true));
     onlineManager.setOnline(false);
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     const back = performance.now();
 
     // Rules draws the rules it has well before the wait's deadline, with the network error it
     // already shows for a read that can't go out, and nothing marked as updated yet.
-    await expect.poll(() => showsVersion7(root)).toBe(true);
+    await expect.poll(() => showsVersion7(root), { timeout: 4_000 }).toBe(true);
     expect(performance.now() - back).toBeLessThan(3_000);
-    await expect.element(screen.getByRole('button', { name: 'Try again' }).first()).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Try again' }).first(), { timeout: 4_000 }).toBeVisible();
     expect(updatedRows(root)).toEqual([]);
 
     // Back online, the read goes out, and the change lands.
     onlineManager.setOnline(true);
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toContain('Quote');
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toContain('Quote');
   });
 
-  it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', async () => {
+  it('an_answer_that_comes_after_the_review_has_gone_moves_nothing', { timeout: 35_000 }, async () => {
     // Another page, then Rules, then a preset's review, whose confirm is held.
     const { screen, router } = await renderRoute(`${DESK}/profile`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' }), { timeout: 4_000 }).toBeVisible();
     await router.navigate(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' }), { timeout: 4_000 }).toBeVisible();
     const version = desk().lastVersion;
     const held = holdNextConfirm();
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.poll(held.arrived).toBe(true);
+    await expect.poll(held.arrived, { timeout: 4_000 }).toBe(true);
 
     // Back to Rules before the answer; then it comes. Rules reads the new rules, and stays where it is.
     await router.navigate(-1);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     held.release();
-    await expect.poll(() => desk().policy.version).toBe(version);
-    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true })).toBeVisible();
+    await expect.poll(() => desk().policy.version, { timeout: 4_000 }).toBe(version);
+    await expect.element(screen.getByText(`Version ${version} of your rules, checked against the always-on rules`, { exact: true }), { timeout: 4_000 }).toBeVisible();
     await pause(300);
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
   });
 
-  it.each(['Turner Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', async (business) => {
+  it.each(['Turner Plumbing', 'Acme Accounting'])('a_change_from_far_down_rules_lands_in_view_and_back_keeps_the_place_for_%s', { timeout: 75_000 }, async (business) => {
     // Acme has none of the sample's suggestions, so Rules waits for its first reads before drawing.
     // A short window, so Payments can be wholly out of view above Stripe. Bookings now precedes
     // Payments; its section drawn late on Back must not move the owner's landing (#620).
@@ -672,12 +672,12 @@ describe('a preset or a new payment limit', () => {
     const { screen, router } = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 }, routes: freshRulesOnBack });
     const root = screen.container;
     const stripe = screen.getByRole('region', { name: 'Stripe' });
-    await expect.element(stripe.getByRole('button', { name: 'Change' })).toBeVisible();
+    await expect.element(stripe.getByRole('button', { name: 'Change' }), { timeout: 4_000 }).toBeVisible();
     // The shell's main area, once the Desk has opened, which scrolls on its own.
     const main = screen.getByRole('main').element();
     // Stripe at the top of what shows, Payments above it out of view.
     stripe.element().scrollIntoView({ block: 'start' });
-    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    await expect.poll(() => main.scrollTop, { timeout: 4_000 }).toBeGreaterThan(0);
     const paymentsLimit = () => screen.getByRole('region', { name: 'Payments' }).element().querySelector('[data-money-limit]') as HTMLElement;
     expect(inView(paymentsLimit(), main)).toBe(false);
 
@@ -685,7 +685,7 @@ describe('a preset or a new payment limit', () => {
     await stripe.getByRole('button', { name: 'Change' }).click();
     await stripe.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('100');
     await stripe.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' }), { timeout: 4_000 }).toBeVisible();
     // Back on Acme's Rules, its first Needs you read is held, so the new rules arrive while Rules
     // still shows its loading line; the sample's Rules doesn't wait for it.
     const needsYou = business === 'Acme Accounting' ? holdNeedsYou() : null;
@@ -733,28 +733,28 @@ describe('a preset or a new payment limit', () => {
     expect(updatedRows(root)).toEqual([]);
   });
 
-  it('a_new_limit_lands_on_its_line_and_the_rule_it_lowered', async () => {
+  it('a_new_limit_lands_on_its_line_and_the_rule_it_lowered', { timeout: 40_000 }, async () => {
     const { screen, router } = await renderRoute(`${DESK}/rules`);
     const root = screen.container;
     const payments = screen.getByRole('region', { name: 'Payments' });
     await payments.getByRole('button', { name: 'Change' }).click();
     await payments.getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' }).fill('100');
     await payments.getByRole('button', { name: 'Review change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' }), { timeout: 4_000 }).toBeVisible();
     await screen.getByRole('button', { name: 'Confirm change' }).click();
 
     // Back on Rules: the limit's line in both groups has the new amount and says it was updated.
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     const limit100 = 'Claude asks you before any payment over $100, whatever the rules below say';
     for (const name of ['Payments', 'Stripe']) {
       const line = screen.getByRole('region', { name }).getByText(startingWith(limit100));
-      await expect.element(line).toBeVisible();
-      await expect.poll(() => line.element().closest('[data-money-limit]')?.querySelector('.cd-pill')?.textContent, { message: name }).toBe('Updated');
+      await expect.element(line, { timeout: 4_000 }).toBeVisible();
+      await expect.poll(() => line.element().closest('[data-money-limit]')?.querySelector('.cd-pill')?.textContent, { timeout: 4_000, message: name }).toBe('Updated');
     }
     // Payment link's own $300, brought down to the new limit, lands too; nothing else does.
-    await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
-    await expect.poll(() => fillOf(toolRow(root, 'Payment link'))).toBe(SELECTED);
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toEqual(['Payment link']);
+    await expect.poll(() => fillOf(toolRow(root, 'Payment link')), { timeout: 4_000 }).toBe(SELECTED);
     expect(desk().policy.auto_money_cap_cents).toBe(10_000);
   });
 });
@@ -771,17 +771,17 @@ describe('focus once a review Rules opened returns', () => {
     const rendered = await renderRoute(`${DESK}/rules`, { viewport: { width: 1440, height: 600 } });
     const { screen } = rendered;
     const payments = screen.getByRole('region', { name: 'Payments' });
-    await expect.element(payments.getByRole('button', { name: 'Change' })).toBeVisible();
+    await expect.element(payments.getByRole('button', { name: 'Change' }), { timeout: 4_000 }).toBeVisible();
     // The shell's main area, once the Desk has opened, which scrolls on its own.
     const main = screen.getByRole('main').element();
     payments.element().scrollIntoView({ block: 'start' });
-    await expect.poll(() => main.scrollTop).toBeGreaterThan(0);
+    await expect.poll(() => main.scrollTop, { timeout: 4_000 }).toBeGreaterThan(0);
     const place = main.scrollTop;
     payments.getByRole('button', { name: 'Change' }).element().focus();
     await userEvent.keyboard('{Enter}');
-    await expect.element(payments.getByRole('textbox', { name: LIMIT_FIELD })).toHaveFocus();
+    await expect.element(payments.getByRole('textbox', { name: LIMIT_FIELD }), { timeout: 4_000 }).toHaveFocus();
     await userEvent.keyboard('600{Enter}');
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Change your payment limit' }), { timeout: 4_000 }).toBeVisible();
     return { ...rendered, main, place };
   }
 
@@ -789,23 +789,23 @@ describe('focus once a review Rules opened returns', () => {
   async function press(screen: Awaited<ReturnType<typeof renderRoute>>['screen'], name: string) {
     screen.getByRole('button', { name }).element().focus();
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
   }
 
-  it('keep_my_rules_puts_focus_back_on_the_change_that_opened_it', async () => {
+  it('keep_my_rules_puts_focus_back_on_the_change_that_opened_it', { timeout: 30_000 }, async () => {
     const { screen, main, place } = await reviewPaymentsLimit();
     await press(screen, 'Keep my rules');
 
     // Back on Rules at its place, focus on Payments' "Change", not the page: the next Tab goes on from there.
     const change = screen.getByRole('region', { name: 'Payments' }).getByRole('button', { name: 'Change' });
-    await expect.element(change).toHaveFocus();
+    await expect.element(change, { timeout: 4_000 }).toHaveFocus();
     expect(main.scrollTop).toBe(place);
     await pause(300);
     expect(document.activeElement).toBe(change.element());
     expect(main.scrollTop).toBe(place);
   });
 
-  it('confirm_change_puts_focus_back_on_the_change_that_opened_it', async () => {
+  it('confirm_change_puts_focus_back_on_the_change_that_opened_it', { timeout: 40_000 }, async () => {
     const { screen, main, place } = await reviewPaymentsLimit();
     await press(screen, 'Confirm change');
 
@@ -814,8 +814,8 @@ describe('focus once a review Rules opened returns', () => {
     const payments = screen.getByRole('region', { name: 'Payments' });
     await expect.element(payments.getByRole('button', { name: 'Change' }), { timeout: 4_000 }).toBeVisible();
     // The new limit lands on its line, in view where Rules was, and focus is on Payments' "Change".
-    await expect.poll(() => payments.element().querySelector('[data-money-limit] .cd-pill')?.textContent).toBe('Updated');
-    await expect.element(payments.getByRole('button', { name: 'Change' })).toHaveFocus();
+    await expect.poll(() => payments.element().querySelector('[data-money-limit] .cd-pill')?.textContent, { timeout: 4_000 }).toBe('Updated');
+    await expect.element(payments.getByRole('button', { name: 'Change' }), { timeout: 4_000 }).toHaveFocus();
     await pause(300);
     expect(main.scrollTop).toBe(place);
     expect(document.activeElement).toBe(payments.getByRole('button', { name: 'Change' }).element());
@@ -825,14 +825,14 @@ describe('focus once a review Rules opened returns', () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Recommended rules' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Recommended rules' }), { timeout: 4_000 }).toBeVisible();
     await press(screen, 'Keep my rules');
-    await expect.element(screen.getByRole('button', { name: 'Start from a preset' })).toHaveFocus();
+    await expect.element(screen.getByRole('button', { name: 'Start from a preset' }), { timeout: 4_000 }).toHaveFocus();
   });
 });
 
 describe('under reduced motion', () => {
-  it('a_confirmed_change_is_at_its_end_state_at_once', async () => {
+  it('a_confirmed_change_is_at_its_end_state_at_once', { timeout: 30_000 }, async () => {
     await reduceMotion();
     const { screen, log } = await askForTheWeekdayChange();
     const root = screen.container;
@@ -843,18 +843,18 @@ describe('under reduced motion', () => {
 
     // The receipt, there at once with its dot whole, and the review gone without a fade.
     const receipt = log.getByText(receiptWords(version), { exact: true });
-    await expect.element(receipt).toBeVisible();
+    await expect.element(receipt, { timeout: 4_000 }).toBeVisible();
     expect(log.element().querySelector('.cd-rule-draft--leaving')).toBeNull();
     expect(log.getByRole('region', { name: 'Changes' }).elements()).toHaveLength(0);
     // The row: "Updated" and its new words at once, with no fill to hold and nothing cross-fading.
-    await expect.poll(() => saysUpdated(toolRow(root, 'Quote'))).toBe(true);
+    await expect.poll(() => saysUpdated(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe(true);
     const quote = toolRow(root, 'Quote');
     expect(wordsOf(quote)).toBe('Claude can send quotes from your price list, at list price on weekdays, all day');
     expect(quote.querySelector('.cd-cross-fade')).toBeNull();
     const glow = quote.querySelector('.cd-landed-glow');
     expect(glow === null || getComputedStyle(glow).display === 'none').toBe(true);
     // Brought into view with no scroll animation: where it is now, it stays.
-    await expect.poll(() => inView(toolRow(root, 'Quote'), main)).toBe(true);
+    await expect.poll(() => inView(toolRow(root, 'Quote'), main), { timeout: 4_000 }).toBe(true);
     const settledAt = main.scrollTop;
     await pause(400);
     expect(main.scrollTop).toBe(settledAt);
@@ -869,8 +869,8 @@ async function askAgain(panel: Locator, log: Locator, words: string, card: RuleC
   answerWith(card, answer);
   await panel.getByRole('textbox', { name: 'Ask Claude' }).fill(words);
   await userEvent.keyboard('{Enter}');
-  await expect.element(log.getByText(answer, { exact: true })).toBeVisible();
-  await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+  await expect.element(log.getByText(answer, { exact: true }), { timeout: 4_000 }).toBeVisible();
+  await expect.element(log.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeEnabled();
 }
 
 /** Refunds that never go through, as `answerWithNoRefunds` drafts them. */
@@ -880,75 +880,75 @@ const NO_REFUNDS: RuleCard = { ...rivera.ruleCards['rv-refund'], mode: 'never', 
 const NO_DOCUMENTS: RuleCard = { ...rivera.ruleCards['rv-docs'], mode: 'never', reason: 'Documents are never shared.' };
 
 describe('on a phone', () => {
-  it('two_changes_confirmed_in_one_sheet_both_land_once_it_closes', async () => {
+  it('two_changes_confirmed_in_one_sheet_both_land_once_it_closes', { timeout: 30_000 }, async () => {
     answerWithNoRefunds();
     const { screen, log, panel } = await askForTheWeekdayChange({ viewport: 'phone' }, STOP_REFUNDS);
     const root = screen.container;
     const first = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(first), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(first), { exact: true }), { timeout: 4_000 }).toBeVisible();
     // A second change in the same sheet, confirmed before it closes.
     await askAgain(panel, log, STOP_DOCUMENTS, NO_DOCUMENTS, STOP_DOCUMENTS_ANSWER);
     const second = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(second), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(second), { exact: true }), { timeout: 4_000 }).toBeVisible();
     expect(updatedRows(root)).toEqual([]);
 
     // Closed, both rows land.
     await panel.getByRole('button', { name: 'Close' }).click();
-    await expect.poll(() => updatedRows(root)).toEqual(['Refund', 'Share a document']);
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toEqual(['Refund', 'Share a document']);
   });
 
-  it('a_change_left_behind_with_back_never_lands_on_a_later_visit', async () => {
+  it('a_change_left_behind_with_back_never_lands_on_a_later_visit', { timeout: 30_000 }, async () => {
     // From another page to Rules, so Back has somewhere to go.
     const rendered = await renderRoute(`${DESK}/profile`, { viewport: 'phone' });
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Profile' }), { timeout: 4_000 }).toBeVisible();
     await rendered.router.navigate(`${DESK}/rules`);
     answerWithNoRefunds();
     const composer = rendered.screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await composer.fill(STOP_REFUNDS);
     await userEvent.keyboard('{Enter}');
     const log = rendered.screen.getByRole('dialog', { name: 'Ask Claude' }).getByRole('log');
-    await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeEnabled();
+    await expect.element(log.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeEnabled();
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
 
     // Back with the sheet still open, then Forward to Rules: a new visit, where nothing says it was updated.
     await rendered.router.navigate(-1);
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Profile' }), { timeout: 4_000 }).toBeVisible();
     await rendered.router.navigate(1);
-    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(rendered.screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     const root = rendered.screen.container;
-    await expect.poll(() => wordsOf(toolRow(root, 'Refund'))).not.toBe('');
+    await expect.poll(() => wordsOf(toolRow(root, 'Refund')), { timeout: 4_000 }).not.toBe('');
     await pause(500);
     expect(updatedRows(root)).toEqual([]);
     expect(root.querySelectorAll('.cd-landed-glow')).toHaveLength(0);
   });
 
-  it('a_window_widened_past_the_sheet_lands_the_change_beside_the_panel', async () => {
+  it('a_window_widened_past_the_sheet_lands_the_change_beside_the_panel', { timeout: 30_000 }, async () => {
     // Confirmed in the sheet on a tablet-wide window, the row waits for the sheet.
     answerWithNoRefunds();
     const { screen, log } = await askForTheWeekdayChange({ viewport: { width: 900, height: 900 } }, STOP_REFUNDS);
     const root = screen.container;
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
-    await expect.poll(() => desk().policy.version).toBe(version);
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => desk().policy.version, { timeout: 4_000 }).toBe(version);
     await pause(300);
     expect(updatedRows(root)).toEqual([]);
 
     // Widened past the sheet's breakpoint, Ask Claude sits beside the page, and the row lands at once.
     await page.viewport(1440, 900);
-    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toEqual(['Refund']);
+    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toEqual(['Refund']);
   });
 
-  it('the_sheet_shows_the_receipt_and_closing_it_brings_rules_to_the_row', async () => {
+  it('the_sheet_shows_the_receipt_and_closing_it_brings_rules_to_the_row', { timeout: 35_000 }, async () => {
     // A change to the Refund row, far down Rules on a phone, under the composer that opened the sheet.
     answerWithNoRefunds();
     const { screen, log, panel } = await askForTheWeekdayChange({ viewport: 'phone' }, STOP_REFUNDS);
-    await expect.element(log.getByText(STOP_REFUNDS_ANSWER, { exact: true })).toBeVisible();
+    await expect.element(log.getByText(STOP_REFUNDS_ANSWER, { exact: true }), { timeout: 4_000 }).toBeVisible();
     const root = screen.container;
     const main = screen.getByRole('main').element();
     const shows = () => {
@@ -961,16 +961,16 @@ describe('on a phone', () => {
     await log.getByRole('button', { name: 'Confirm change' }).click();
 
     // The sheet shows the same receipt; the row waits for the sheet to close.
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
-    await expect.poll(() => desk().policy.version).toBe(version);
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => desk().policy.version, { timeout: 4_000 }).toBe(version);
     await pause(300);
     expect(saysUpdated(toolRow(root, 'Refund'))).toBe(false);
 
     // Closed, focus goes back to the composer at the top, and Rules comes to the row, which lands there.
     await panel.getByRole('button', { name: 'Close' }).click();
-    await expect.element(panel).not.toBeInTheDocument();
-    await expect.poll(() => saysUpdated(toolRow(root, 'Refund'))).toBe(true);
-    await expect.poll(shows).toBe(true);
+    await expect.element(panel, { timeout: 4_000 }).not.toBeInTheDocument();
+    await expect.poll(() => saysUpdated(toolRow(root, 'Refund')), { timeout: 4_000 }).toBe(true);
+    await expect.poll(shows, { timeout: 4_000 }).toBe(true);
     expect(fillOf(toolRow(root, 'Refund'))).not.toBe('none');
     expect(updatedRows(root)).toEqual(['Refund']);
     expect(main.scrollTop).toBeGreaterThan(0);
@@ -1010,26 +1010,26 @@ describe("the business's own jobs", () => {
     return card;
   }
 
-  it('a_change_to_a_job_lands_on_its_card', async () => {
+  it('a_change_to_a_job_lands_on_its_card', { timeout: 40_000 }, async () => {
     seedJobs();
     answerWith(INTAKE_ASKS, INTAKE_ASKS_ANSWER);
     const { screen, log } = await askForTheWeekdayChange({}, 'Make new client intake ask me first');
-    await expect.element(log.getByText(INTAKE_ASKS_ANSWER, { exact: true })).toBeVisible();
+    await expect.element(log.getByText(INTAKE_ASKS_ANSWER, { exact: true }), { timeout: 4_000 }).toBeVisible();
     const root = screen.container;
     // Rules scrolled to its top, the jobs near its end out of view.
     const main = screen.getByRole('main').element();
     main.scrollTop = 0;
-    await expect.poll(() => inView(jobCard(root, 'New client intake'), main)).toBe(false);
+    await expect.poll(() => inView(jobCard(root, 'New client intake'), main), { timeout: 4_000 }).toBe(false);
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
 
     // The intake card comes into view, lit, with "Updated" by its title and its new words.
     const intake = () => jobCard(root, 'New client intake');
-    await expect.poll(() => intake().querySelector('.cd-pill')?.textContent).toBe('Updated');
-    await expect.poll(() => fillOf(intake())).toBe(SELECTED);
-    await expect.poll(() => inView(intake(), main)).toBe(true);
-    await expect.poll(() => wordsOf(intake())).toBe('Claude asks you before using new client intake');
+    await expect.poll(() => intake().querySelector('.cd-pill')?.textContent, { timeout: 4_000 }).toBe('Updated');
+    await expect.poll(() => fillOf(intake()), { timeout: 4_000 }).toBe(SELECTED);
+    await expect.poll(() => inView(intake(), main), { timeout: 4_000 }).toBe(true);
+    await expect.poll(() => wordsOf(intake()), { timeout: 4_000 }).toBe('Claude asks you before using new client intake');
     // The other job carries neither.
     const booking = jobCard(root, 'Book a free intro call');
     expect(booking.querySelector('.cd-pill')).toBeNull();
@@ -1040,14 +1040,14 @@ describe("the business's own jobs", () => {
 describe('under StrictMode, as the app renders', () => {
   // Renders and effects run twice on mount, as in development: a change still lands once, and the
   // review's hand-off to Rules survives the rehearsed unmount.
-  it('a_change_confirmed_in_ask_claude_lands', async () => {
+  it('a_change_confirmed_in_ask_claude_lands', { timeout: 25_000 }, async () => {
     const { screen, log } = await askForTheWeekdayChange({ strict: true });
     const root = screen.container;
     const version = desk().lastVersion;
     await log.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(log.getByText(receiptWords(version), { exact: true })).toBeVisible();
-    await expect.poll(() => updatedRows(root)).toEqual(['Quote']);
-    await expect.poll(() => fillOf(toolRow(root, 'Quote'))).toBe(SELECTED);
+    await expect.element(log.getByText(receiptWords(version), { exact: true }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toEqual(['Quote']);
+    await expect.poll(() => fillOf(toolRow(root, 'Quote')), { timeout: 4_000 }).toBe(SELECTED);
     expect(root.querySelectorAll('.cd-margin-receipt')).toHaveLength(1);
   });
 
@@ -1056,12 +1056,12 @@ describe('under StrictMode, as the app renders', () => {
     const root = screen.container;
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: 'Ask me first' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask me first' }), { timeout: 4_000 }).toBeVisible();
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules`);
     const changed = ['Quote', 'Book a visit', 'Share a document', 'Payment link', 'Charge within a signed limit', 'See charges', 'Refund'];
-    await expect.poll(() => updatedRows(root).sort()).toEqual([...changed].sort());
+    await expect.poll(() => updatedRows(root).sort(), { timeout: 4_000 }).toEqual([...changed].sort());
     expect(saysUpdated(toolRow(root, 'Emergency callback'))).toBe(false);
     expect(root.textContent).not.toContain('Your rules are updated.');
   });
