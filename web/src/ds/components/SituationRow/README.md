@@ -11,6 +11,7 @@
 
 - `title` and `who` as the check describes the situation: "A visitor asks for 10% off if they pay cash", "A visitor, not verified".
 - `outcome`, `dependsOnReview` and `reason` from the probe's result: `outcome`, `depends_on_review` and the kernel's `reason_plain`, as written.
+- `sentence`: the `SentencePart`s of the draft card that decided the situation (its one card ID), read as Rules reads that card and rendered by `RuleSentence` in body type with key values at weight 520 and tabular figures. A situation no single card decided has none, and keeps the kernel’s reason.
 - `matches`: false when the outcome isn't the one the setup interview planned.
 - `index`, the row's place in the list from 0, and `live`, for situations the owner just had tried: they land one by one, as the safety check's tricks do. Leave `live` off for results the owner didn't just ask for, such as a step opened by a reload (its situations are tried again, but drawn still), and clear it once the rows have landed, so nothing replays them.
 - Put each row in a list item, in a list named by the step ("Real situations"), inside a card padded 16 px.
@@ -23,16 +24,16 @@
 
 | `outcome` | Words | Dot |
 | --- | --- | --- |
-| `allow` | Does it | `status-handled` |
-| `hold` | Asks you | `status-held` |
+| `allow` | Allow | `status-handled` |
+| `hold` | Ask me first | `status-held` |
 | `refuse` | Never | `status-refused` |
-| any, with `dependsOnReview` | Does it if Claude’s second look agrees | `status-handled` |
+| any, with `dependsOnReview` | Allow | `status-handled` |
 
-- `dependsOnReview` alone decides the second-look row, whatever `outcome` says: the kernel reports a planned situation that waits on Claude's second look (`allow_if_reviewed`) as `outcome: 'hold'` with `depends_on_review: true`, and the signed board draws it as "Does it if Claude’s second look agrees" beside a handled dot.
+- A reviewer-dependent hold reads its rule’s outcome, Allow, with the handled dot. Reviewer details belong in the rule’s details disclosure. The probe result and mismatch flag are unchanged.
 
 - When `matches` is false, "Not what we planned" in `caption`, `text-primary`, 6 px under who is asking, beside a 2 px `status-held` bar, 8 px from it. The words carry it; the bar only echoes them.
 - Below 560 px of row width, as on a phone, the outcome and reason drop under who is asking, 8 px under it, from the same edge.
-- One line on each side: 68 px for the first row, 69 px for later rows with the hairline.
+- Rows grow to fit the sentence at both desktop and phone widths.
 
 ## Motion
 
@@ -53,8 +54,9 @@
 | `title` | `string` | Required. The situation. |
 | `who` | `string` | Required. Who is asking in it. |
 | `outcome` | `'allow' \| 'hold' \| 'refuse'` | Required. The probe's outcome. |
-| `dependsOnReview` | `boolean` | Required. The probe's `depends_on_review`; it sets the second-look words and dot, whatever `outcome` is. |
+| `dependsOnReview` | `boolean` | Required. The probe's `depends_on_review`; it reads the automatic rule as Allow with its handled dot. |
 | `reason` | `string` | Required. The kernel's `reason_plain`. |
+| `sentence` | `readonly SentencePart[]` | The deciding card’s rule sentence, when one card decided it. |
 | `matches` | `boolean` | Required. False adds "Not what we planned". |
 | `index` | `number` | The row's place, from 0, which sets when a live row lands. Default `0`. |
 | `live` | `boolean` | The situation was just tried: the row lands. Default `false`, drawn still. |

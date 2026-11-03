@@ -361,6 +361,16 @@
 .cd-setup-c3__decision { display: inline-flex; align-items: center; gap: var(--space-4); margin: 0; color: var(--text-secondary); }
 .cd-setup-c3__decision--accepted { color: var(--text-primary); }
 .cd-setup-c3__amount { max-width: calc(var(--space-40) * 7); }
+.cd-setup-c3__rule {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  min-width: 0;
+}
+.cd-setup-c3__rule-label { margin: 0 0 var(--space-6); color: var(--text-secondary); }
+.cd-setup-c3__rule .cd-rule-sentence__layout { flex-direction: row; align-items: flex-start; }
 .cd-setup-c3__failed { display: flex; flex-direction: column; gap: var(--space-12); }
 .cd-setup-c3__error { margin: 0; color: var(--status-refused); }
 .cd-setup-c3--declined .cd-setup-c3__title, .cd-setup-c3--declined dd { color: var(--text-secondary); }

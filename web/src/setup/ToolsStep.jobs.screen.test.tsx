@@ -84,7 +84,6 @@ async function interviewWithBooking(booking: 'auto' | 'ask') {
 }
 
 const CHOSE_ON_ITS_OWN = 'You chose to let it run on its own. Until you confirm your rules in the next step, it asks you first.';
-const NO_RULE_YET = 'No rule of yours covers this yet, so it starts at Ask me first.';
 
 /** The lines under each tool of the open review that say what covers it. */
 const coverage = (region: { element: () => Element }) =>
@@ -97,6 +96,9 @@ it.each([1440, 390])('at %i px, a job the owner let run on its own says so, and 
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
   const tools = screen.getByRole('region', { name: 'Tools', exact: true });
   expect(coverage(tools)).toEqual([CHOSE_ON_ITS_OWN]);
+  const rule = screen.getByRole('region', { name: 'The rule that will cover it' });
+  await expect.element(rule.getByText('Claude asks you before booking a free intro call', { exact: true })).toBeVisible();
+  expect(rule.element().querySelector('.cd-rule-sentence__meta')?.textContent).toBe('Book a free intro call · Anyone');
   // Both still true at this step: it starts at Ask me first, and the owner approves each request.
   await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
   await expect.element(screen.getByRole('region', { name: 'How it’s set up' }).getByText('You approve each request in Needs you')).toBeVisible();
@@ -148,17 +150,34 @@ it.each([
   await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
 });
 
-it("keeps today's line for a job the owner accepted as asking first", async () => {
+it('a money job’s review shows its starting rule and no effect badges', async () => {
+  const { state, desk } = await interviewAtTools();
+  seedBusinessTools(desk, businessToolRows([{
+    title: 'Send a retainer link',
+    how: 'Clients you’ve priced get a secure link to pay a retainer before you start.',
+    config: { block: 'purpose_payment', purpose: 'Engagement retainer', amount_cents: 50_000 },
+  }], desk.tools.map(({ tool }) => tool)));
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Send a retainer link' }).click();
+  const rule = screen.getByRole('region', { name: 'The rule that will cover it' });
+  await expect.element(rule.getByText('Claude asks you before sending a retainer link', { exact: true })).toBeVisible();
+  // No effect badges: a tool's effects show only in its Details, on Rules (owner ruling).
+  const tools = screen.getByRole('region', { name: 'Tools', exact: true });
+  expect(screen.container.querySelector('.cd-effect-tags')).toBeNull();
+  for (const tag of ['Money', "Can't be undone"]) expect(tools.getByText(tag, { exact: true }).elements()).toHaveLength(0);
+});
+
+it("shows the starting rule for a job the owner accepted as asking first", async () => {
   const { state } = await interviewWithBooking('ask');
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
   const tools = screen.getByRole('region', { name: 'Tools', exact: true });
-  expect(coverage(tools)).toEqual([NO_RULE_YET]);
+  expect(coverage(tools)).toEqual([]);
   await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
 });
 
-it("keeps today's line for a booking job that Use your suggestions accepted for the owner", async () => {
+it("shows the starting rule for a booking job that Use your suggestions accepted for the owner", async () => {
   const { state, card } = await interviewAtTheBookingCard();
   expect(card.job?.autonomy).toBe('auto');
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
@@ -168,11 +187,11 @@ it("keeps today's line for a booking job that Use your suggestions accepted for 
   await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Book a free intro call' }).click();
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Book a free intro call' })).toBeVisible();
   const tools = screen.getByRole('region', { name: 'Tools', exact: true });
-  expect(coverage(tools)).toEqual([NO_RULE_YET]);
+  expect(coverage(tools)).toEqual([]);
   await expect.element(tools.getByText('Ask me first', { exact: true })).toBeVisible();
 });
 
-it("keeps today's line for a job whose card never showed the owner its autonomy, such as an intake", async () => {
+it("shows the starting rule for a job whose card never showed the owner its autonomy, such as an intake", async () => {
   const { state } = await interviewWithBooking('auto');
   const intake = state.messages.find((message) => message.card?.job?.job === 'intake');
   // The owner accepted the intake card themselves, and it runs on its own, but only a booking card shows that choice.
@@ -180,7 +199,7 @@ it("keeps today's line for a job whose card never showed the owner its autonomy,
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('region', { name: 'Your Desk’s jobs' }).getByRole('button', { name: 'Review Ask new clients three questions' }).click();
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Ask new clients three questions' })).toBeVisible();
-  expect(coverage(screen.getByRole('region', { name: 'Tools', exact: true }))).toEqual([NO_RULE_YET]);
+  expect(coverage(screen.getByRole('region', { name: 'Tools', exact: true }))).toEqual([]);
 });
 
 it('turns on a job the owner let run on its own with the request every job sends: its tool at its hash, and no outcome', async () => {
@@ -199,14 +218,14 @@ it('turns on a job the owner let run on its own with the request every job sends
   expect(desk.tools.find((row) => row.tool === booked.tool)?.status).toBe('needs_review');
 });
 
-it("leaves a built-in connector's review as it was beside a job the owner let run on its own", async () => {
+it("shows a built-in connector's own starting rules beside a job the owner let run on its own", async () => {
   const { state } = await interviewWithBooking('auto');
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
   await screen.getByRole('button', { name: 'Add Payments', exact: true }).click();
   await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
   const tools = screen.getByRole('region', { name: 'Tools', exact: true });
-  await expect.element(tools.getByText('Payment link', { exact: true })).toBeVisible();
-  expect(coverage(tools)).toEqual([NO_RULE_YET, NO_RULE_YET]);
+  await expect.element(tools.getByRole('list').getByText('Payment link', { exact: true })).toBeVisible();
+  expect(coverage(tools)).toEqual([]);
   expect(tools.getByText('Ask me first', { exact: true }).elements()).toHaveLength(2);
 });
 

@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useLayoutEffect, useRef } from 'react';
 
-import type { RuleCard } from '../api/contracts.ts';
+import { MONEY_EFFECTS, type RuleCard } from '../api/contracts.ts';
 import { ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessToolDef, SetupMessage, SetupState, ToolRow } from '../api/views.ts';
 import {
@@ -13,7 +13,6 @@ import {
   PageHeader,
   SetupToolsList,
   SkeletonScreen,
-  describeEffects,
   rulesForTool,
   type ReviewToolView,
   type RuleMode,
@@ -22,6 +21,7 @@ import {
 } from '../ds/index.ts';
 import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOn, isBusinessToolName, isCatalogTool, toolDisplayName, toolState, type CatalogConnector, type ConnectorKey } from '../owner/connectors/catalog.ts';
 import { businessGlyph, businessLine, businessOwnerLine, businessRows, isBusinessDef } from '../owner/connectors/businessWords.ts';
+import { ruleMeta, ruleSentence } from '../owner/rules/ruleSentence.ts';
 import { toolOutcome } from '../owner/rules/outcome.ts';
 import { RuleDraftReview, rulesQuery } from '../owner/rules/RuleDraftReview.tsx';
 import { MOCK_PAYMENTS, useConnectorFlow } from './connectorFlow.ts';
@@ -70,10 +70,30 @@ export function reviewTool(row: ToolRow, cards: readonly RuleCard[]): ReviewTool
   return {
     key: row.tool,
     name,
-    description: [line, describeEffects(row.effects, row.reversible)].filter(Boolean).join(' '),
+    description: line ?? '',
     mode: startingMode(row, cards),
     coveredBy: covering.map((card) => ({ text: card.reason, mode: card.mode })),
   };
+}
+
+/**
+ * The rule a tool starts under: the card that gives it the outcome Rules shows (`toolOutcome`), else
+ * the ask it falls back to, read as Rules reads that card (`ruleSentence`, `ruleMeta`) among the
+ * Desk's tools (`tools`, the reviewed one by default). Its card is kept so a review lists a rule
+ * that covers several of its tools once.
+ */
+export function startingRule(row: ToolRow, cards: readonly RuleCard[], tools: readonly ToolRow[] = [row]) {
+  const outcome = toolOutcome(row, cards);
+  const card: RuleCard = outcome.rule ?? { card_id: `starting-${row.tool}`, applies_to: row.tool, mode: outcome.mode, who: 'anyone', reason: '' };
+  const words = { business: businessTools(tools.some((other) => other.tool === row.tool) ? tools : [...tools, row]), tools, cards };
+  return { card, parts: ruleSentence(card, words), meta: ruleMeta(card, words, row), outcome: outcome.mode };
+}
+
+/** Each tool's starting rule, a rule that covers several of them listed once. */
+function startingRules(rows: readonly ToolRow[], cards: readonly RuleCard[], tools: readonly ToolRow[]) {
+  const rules = rows.map((row) => startingRule(row, cards, tools));
+  return rules.filter((rule, index) => rules.findIndex((other) => other.card.card_id === rule.card.card_id) === index)
+    .map(({ parts, meta, outcome }) => ({ parts, meta, outcome }));
 }
 
 /** Whether two values from the API hold the same data, whatever order an object's keys come in. */
@@ -260,6 +280,8 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
           titleRef={titleRef}
           job={{ title: tool.name, glyph, rows: businessRows(job.business, tool.mode) }}
           tools={[shown]}
+          startingRules={startingRules([job], cards, tools.data.tools)}
+          moneyHint={job.effects.some((effect) => MONEY_EFFECTS.has(effect)) && tool.mode === 'ask'}
           onTurnOn={() => void flow.turnOn(view.key, [job])}
           onCancel={flow.cancel}
           pending={turningOn}
@@ -278,6 +300,8 @@ export function ToolsStep({ state, business, onContinue }: ToolsStepProps) {
         connector={connector.view}
         {...(app ? { connection: flow.mustConnect ? 'not_connected' : 'connected', onConnect: () => void flow.connect() } as const : {})}
         tools={turnedOn.map((row) => reviewTool(row, cards))}
+        startingRules={startingRules(turnedOn, cards, tools.data.tools)}
+        moneyHint={turnedOn.some((row) => row.effects.some((effect) => MONEY_EFFECTS.has(effect))) && turnedOn.every((row) => startingMode(row, cards) === 'ask')}
         onTurnOn={() => void flow.turnOn(view.key, turnedOn)}
         onCancel={flow.cancel}
         pending={turningOn || connecting}

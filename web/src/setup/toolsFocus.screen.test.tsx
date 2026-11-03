@@ -8,6 +8,13 @@ import { mockStore } from '../mocks/store.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll } from '../test/screen.ts';
 
+/**
+ * A phone with little of its height left for the page (its browser bars and keyboard take the
+ * rest), so the tools list and each review scroll: a review draws each tool's line and the rules
+ * it starts under, which fit a full 844 px phone.
+ */
+const SHORT_PHONE = { width: 390, height: 560 };
+
 /** Reach each control with Tab and activate it with Enter. */
 async function press(button: Element): Promise<void> {
   for (let i = 0; i < 40 && document.activeElement !== button; i += 1) await userEvent.keyboard('{Tab}');
@@ -30,14 +37,7 @@ it.each([
   for (const question of SETUP_QUESTIONS) await mockStore.dispatch('setupAnswer', { params, body: {
     question: question.key, text: question.key === 'money_limit' ? '$500 is fine.' : 'Yes, that works.',
   } });
-  const desk = mockStore.world.desk(state.desk_id);
-  if (!desk) throw new Error('setup has a Desk');
-  // A long covering rule keeps the review scrollable even after the list has been replaced.
-  desk.policy.cards.push({
-    card_id: 'long-tool-review', applies_to: name === 'Payments' ? 'native.payment_link' : 'payments.create_refund',
-    mode: 'ask', who: 'anyone', reason: 'Ask me before taking a payment for a new customer. '.repeat(20),
-  });
-  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: viewport === 'phone' ? SHORT_PHONE : viewport });
   const opening = screen.getByRole('button', { name: `${verb} ${name}`, exact: true });
   await expect.element(opening).toBeVisible();
   if (viewport === 'phone') {

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 
+import type { HoursWindow } from '../api/contracts.ts';
 import { ApiError, isUncertain, newIdempotencyKey, ownerErrorCopy, request } from '../api/http.ts';
 import type { Choice, SetupAnswerBody, SetupMessage, SetupQuestion, SetupState } from '../api/views.ts';
 import { Button, ClaudeMessage, Composer, ConceptFooter, Notice, PageHeader, ToolLabel, Transcript, VisitorMessage, WritingIndicator } from '../ds/index.ts';
@@ -26,6 +27,7 @@ const ACTIVE_CHOICE = '.cd-setup-q3__list button[aria-current="true"]:not(:disab
 
 export interface QuestionsStepProps {
   state: SetupState;
+  hours?: HoursWindow | null;
   onContinue: () => void;
   /** The API answered with the interview as it stands. */
   onState: (state: SetupState) => void;
@@ -102,7 +104,7 @@ function Line({ message }: { message: SetupMessage }) {
  * each answer goes to the API, which asks the next question, docked with its choices while the
  * message box is hidden. An answer that didn't go through stays in the composer.
  */
-export function QuestionsStep({ state, onState, reread, onContinue, changing: changingHere = false }: QuestionsStepProps) {
+export function QuestionsStep({ state, hours, onState, reread, onContinue, changing: changingHere = false }: QuestionsStepProps) {
   const step = useRef<HTMLDivElement>(null);
   const scroll = useRef<HTMLDivElement>(null);
   // Messages fade where they scroll under the bar, once the conversation is scrolled from its top.
@@ -510,7 +512,7 @@ export function QuestionsStep({ state, onState, reread, onContinue, changing: ch
       <Transcript label={copy.conversation}>
         {state.messages.map((message, index) => (
           <Fragment key={`${index}-${message.role}`}>
-            {panel?.index === index || consentPanel === index ? null : isCard(message) ? <ProposalCard proposal={message.card!}
+            {panel?.index === index || consentPanel === index ? null : isCard(message) ? <ProposalCard proposal={message.card!} hours={hours}
               amountRequired={amountRequired === message.card!.proposal_id}
               failed={decisionFailed?.proposal_id === message.card!.proposal_id}
               onRetry={() => { if (decisionFailed) void decide(decisionFailed); }}
