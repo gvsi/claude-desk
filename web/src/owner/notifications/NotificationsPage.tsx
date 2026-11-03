@@ -67,6 +67,9 @@ interface Row {
   time: string;
   unread: boolean;
   requestHref: string | undefined;
+  /** The latest known ending, retained in query data through loading and failed refreshes. */
+  knownEnded: Decision | undefined;
+  /** The status line is drawn only once the latest read has settled successfully. */
   ended: Decision | undefined;
 }
 
@@ -159,9 +162,13 @@ export function NotificationsPage() {
     })),
   });
   const ended = new Map<string, Decision>();
+  const knownEnded = new Map<string, Decision>();
   decisions.forEach(({ data, isSuccess, isFetching }, index) => {
     const id = decisionIds[index];
-    if (id !== undefined && isSuccess && !isFetching && data?.decision_id === id && data.state !== 'held') ended.set(id, data);
+    if (id !== undefined && data?.decision_id === id && data.state !== 'held') {
+      knownEnded.set(id, data);
+      if (isSuccess && !isFetching) ended.set(id, data);
+    }
   });
   const deskOf = new Map<string, string>();
   const heldDecisions = new Set<string>();
@@ -211,6 +218,7 @@ export function NotificationsPage() {
     // The held request the kernel's alert names, by its id, never by anything the entry says. Only
     // an alert links.
     requestHref: entry.kind === 'alert' ? hrefFor(entry.decision_id) : undefined,
+    knownEnded: entry.kind === 'alert' ? knownEnded.get(entry.decision_id ?? '') : undefined,
     ended: entry.kind === 'alert' ? ended.get(entry.decision_id ?? '') : undefined,
   }));
   const days = daysOf(rows, business.timezone, new Date());
@@ -284,15 +292,15 @@ function headingOf(entry: DemoInboxEntry, ended: Decision | undefined): string {
  * at the right. An alert whose request
  * still waits is a link as a whole, "Open the request" under its body.
  */
-function NotificationRow({ entry, time, unread: unreadAtOpen, requestHref, ended }: Row) {
-  const unread = unreadAtOpen && ended === undefined;
+function NotificationRow({ entry, time, unread: unreadAtOpen, requestHref, knownEnded, ended }: Row) {
+  const unread = unreadAtOpen && knownEnded === undefined;
   const content = (
     <>
       <span className={unread ? 'cd-notifications__dot cd-notifications__dot--unread' : 'cd-notifications__dot'} aria-hidden="true" />
       <div className="cd-notifications__text">
-        <p className={`cd-notifications__kind cd-type-body${ended === undefined ? '' : ' cd-notifications__kind--ended'}`}>
+        <p className={`cd-notifications__kind cd-type-body${knownEnded === undefined ? '' : ' cd-notifications__kind--ended'}`}>
           {unread ? <span className="cd-sr-only">Unread: </span> : null}
-          {headingOf(entry, ended)}
+          {headingOf(entry, knownEnded)}
           {entry.to === OWNER_RECIPIENT ? null : <span className="cd-notifications__to cd-type-meta">{` · ${COPY.to} ${entry.to}`}</span>}
         </p>
         {/* A ledger checkpoint is a signed record, so it reads in the trace's monospace. */}

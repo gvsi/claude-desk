@@ -10,11 +10,21 @@ import { decisionQuery } from '../conversations/ownerReceipt.ts';
  * read dropping one starts its decision read; keep the same card, with no answers, meanwhile.
  * These endings are presentation state, separate from answers actually given on Today.
  */
-export function useClosedRequests(held: readonly HeldItem[], answers: UseAnswer, shown: boolean, readWorked: boolean) {
+export function useClosedRequests(
+  held: readonly HeldItem[], answers: UseAnswer, shown: boolean, readWorked: boolean, listedIds: ReadonlySet<string>,
+) {
   const seen = useRef(new Map<string, HeldItem>());
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
   useLayoutEffect(() => {
-    if (shown) for (const item of held) seen.current.set(item.decision.decision_id, item);
+    if (shown) for (const item of held) {
+      const id = item.decision.decision_id;
+      if (!dismissed.has(id)) seen.current.set(id, item);
+    }
+    // A cached hold can survive Dismiss. Keep only its small marker until a successful list read
+    // no longer lists it, using the raw list before Today's locally answered cards are filtered out.
+    if (readWorked && [...dismissed].some((id) => !listedIds.has(id))) {
+      setDismissed(new Set([...dismissed].filter((id) => listedIds.has(id))));
+    }
   });
   const listed = new Set(held.map((item) => item.decision.decision_id));
   const missing = [...seen.current.values()].filter(({ decision: { decision_id: id } }) =>
@@ -40,6 +50,9 @@ export function useClosedRequests(held: readonly HeldItem[], answers: UseAnswer,
       closed.set(decision.decision_id, { item, decision, card_diff: null });
     } else reading.push({ ...item, decision: { ...item.decision, answers: [] } });
   });
-  const dismiss = (id: string) => setDismissed((previous) => new Set([...previous, id]));
+  const dismiss = (id: string) => {
+    seen.current.delete(id);
+    setDismissed((previous) => new Set([...previous, id]));
+  };
   return { closed, reading, dismiss };
 }

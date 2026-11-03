@@ -10,6 +10,7 @@ import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
 import { observeRequests } from '../../api/http.ts';
 import { ROUTES, type RouteKey } from '../../api/routes.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { DECISIONS } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -136,16 +137,30 @@ describe('Notifications request link', () => {
     expect(page.element().querySelector('.cd-status-dot--refused')).not.toBeNull();
   });
 
-  it('an_answered_request_keeps_no_link_while_its_next_read_is_loading', async () => {
+  it.each([
+    ['approved', 'You allowed this.'],
+    ['unknown', 'You allowed this. Still confirming whether it went through.'],
+  ] as const)('an_answered_request_keeps_no_link_while_its_next_read_is_loading_%s', async (state, status) => {
     const held = seededHold();
     const needs = await mockStore.dispatch('needsYou', { params: { desk_id: RIVERA.deskId } });
     if ('network' in needs) throw new Error('the mock reads Needs you');
-    mockStore.world.decisions.get(held.decision_id)!.decision = { ...held, state: 'approved' };
+    mockStore.world.decisions.get(held.decision_id)!.decision = { ...held, state };
     // A stale Needs you still lists the hold; the decision has already answered it.
     mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: needs.body });
     const { screen } = await renderRoute(`/app/${RIVERA.deskId}/notifications`);
     const page = screen.getByRole('main');
-    await expect.element(page.getByText('You allowed this.', { exact: true })).toBeVisible();
+    await expect.element(page.getByText(status, { exact: true })).toBeVisible();
+    const row = page.getByText(alertFor(held.decision_id).body).element().closest<HTMLElement>('.cd-notifications__item')!;
+    const expectAnswered = () => {
+      expect(row.querySelector('.cd-notifications__kind')?.textContent).toBe('Answered: you allowed it');
+      expect(row.querySelector('.cd-notifications__dot')).not.toBeNull();
+      expect(row.querySelector('.cd-notifications__dot--unread')).toBeNull();
+      expect(row.textContent).not.toContain('Unread:');
+      expectComputed(row.querySelector<HTMLElement>('.cd-notifications__kind')!, { color: 'rgba(250, 249, 245, 0.64)', fontWeight: '520' });
+      expectComputed(row.querySelector<HTMLElement>('.cd-notifications__entry')!, { color: 'rgba(250, 249, 245, 0.64)' });
+      expect(requestRows(page).elements()).toHaveLength(0);
+    };
+    expectAnswered();
     let release!: () => void;
     const until = new Promise<void>((resolve) => { release = resolve; });
     onTestFinished(release);
@@ -154,7 +169,28 @@ describe('Notifications request link', () => {
     await expect.poll(() => mockStore.requests.filter((r) => r.key === 'decision').length).toBeGreaterThan(before);
     await nextFrames();
     expect(page.element().querySelector('.cd-approval-card__status')).toBeNull();
-    expect(requestRows(page).elements()).toHaveLength(0);
+    expectAnswered();
+    const refreshed = readsAnswered({ decision: 1 });
+    release();
+    await refreshed;
+    await expect.element(page.getByText(status, { exact: true })).toBeVisible();
+    expectAnswered();
+
+    // The next poll fails after being held open: its stale data still says the owner allowed it.
+    let fail!: () => void;
+    const failing = new Promise<void>((resolve) => { fail = resolve; });
+    onTestFinished(fail);
+    const beforeFailure = mockStore.requests.filter((r) => r.key === 'decision').length;
+    mockStore.inject({ route: 'decision', status: 503, until: failing, times: 10_000 });
+    await expect.poll(() => mockStore.requests.filter((r) => r.key === 'decision').length).toBeGreaterThan(beforeFailure);
+    await nextFrames();
+    expect(page.element().querySelector('.cd-approval-card__status')).toBeNull();
+    expectAnswered();
+    const failed = readsAnswered({ decision: 1 });
+    fail();
+    await failed;
+    expect(page.element().querySelector('.cd-approval-card__status')).toBeNull();
+    expectAnswered();
   });
 
   it.each([[1440, 900], [390, 844]])('a_booking_closes_the_open_alert_and_wraps_its_ending_at_%sx%s', async (width, height) => {

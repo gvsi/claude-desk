@@ -122,7 +122,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const listedIds = new Set(listed.map((item) => item.decision.decision_id));
   const kept = [...answers.kept.values()].filter((item) => !listedIds.has(item.decision.decision_id));
   const held: HeldItem[] = heldOldestFirst([...listed, ...kept]).filter((item) => !answers.answered.has(item.decision.decision_id));
-  const elsewhere = useClosedRequests(held, answers, !opening, needsYou.isSuccess);
+  const elsewhere = useClosedRequests(held, answers, !opening, needsYou.isSuccess, listedIds);
   // Share the existing card, Dismiss and focus behaviour, while Things to try below receives only
   // answers actually given here. A booking or expiry must never become an answer on this screen.
   const cardAnswers = { ...answers, answered: new Map([...elsewhere.closed, ...answers.answered]) };
