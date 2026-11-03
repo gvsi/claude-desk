@@ -44,7 +44,16 @@ import './NotificationsPage.css';
 const TITLE = 'Notifications';
 /** Under the title: the entries are the owner's and their customers' codes (owner, 2026-11-02). */
 const SUBTITLE = 'What Claude would have sent you and your customers by text or email. Nothing is really sent.';
-const COPY = INBOX_COPY.en;
+const COPY = {
+  ...INBOX_COPY.en,
+  endedRequest: {
+    booked: 'Closed: the visitor booked first',
+    expired: 'Closed: it expired before you answered',
+    cancelled: 'Closed: the visitor cancelled',
+    allowed: 'Answered: you allowed it',
+    denied: 'Answered: you denied it',
+  },
+};
 /** The empty state's title and line: the inbox's one empty line, split at its first full stop. */
 const [EMPTY_TITLE = '', ...EMPTY_REST] = COPY.empty.split('. ');
 const EMPTY_BODY = EMPTY_REST.join('. ');
@@ -258,7 +267,14 @@ export function NotificationsPage() {
  * the body ("A request needs your answer"), as the Demo inbox panel heads an owner's alert. This
  * page is the owner's and in English, so every title it reads is shown.
  */
-function headingOf(entry: DemoInboxEntry): string {
+function headingOf(entry: DemoInboxEntry, ended: Decision | undefined): string {
+  if (ended !== undefined) {
+    // Decision has no closure-reason field: ApprovalStatus uses this same kernel owner line.
+    if (ended.state === 'cancelled') return ended.owner_plain != null ? COPY.endedRequest.booked : COPY.endedRequest.cancelled;
+    if (ended.state === 'expired') return COPY.endedRequest.expired;
+    if (ended.state === 'denied') return COPY.endedRequest.denied;
+    return COPY.endedRequest.allowed;
+  }
   return entry.title?.trim() || COPY.kinds[entry.kind];
 }
 
@@ -268,14 +284,15 @@ function headingOf(entry: DemoInboxEntry): string {
  * at the right. An alert whose request
  * still waits is a link as a whole, "Open the request" under its body.
  */
-function NotificationRow({ entry, time, unread, requestHref, ended }: Row) {
+function NotificationRow({ entry, time, unread: unreadAtOpen, requestHref, ended }: Row) {
+  const unread = unreadAtOpen && ended === undefined;
   const content = (
     <>
       <span className={unread ? 'cd-notifications__dot cd-notifications__dot--unread' : 'cd-notifications__dot'} aria-hidden="true" />
       <div className="cd-notifications__text">
-        <p className="cd-notifications__kind cd-type-body">
+        <p className={`cd-notifications__kind cd-type-body${ended === undefined ? '' : ' cd-notifications__kind--ended'}`}>
           {unread ? <span className="cd-sr-only">Unread: </span> : null}
-          {headingOf(entry)}
+          {headingOf(entry, ended)}
           {entry.to === OWNER_RECIPIENT ? null : <span className="cd-notifications__to cd-type-meta">{` · ${COPY.to} ${entry.to}`}</span>}
         </p>
         {/* A ledger checkpoint is a signed record, so it reads in the trace's monospace. */}

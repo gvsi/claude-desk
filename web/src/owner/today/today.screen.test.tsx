@@ -22,7 +22,7 @@ import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { writeLocal } from '../../lib/storage.ts';
 import { worker } from '../../mocks/browser.ts';
-import { CALLBACK_REASON } from '../../mocks/script.ts';
+import { CALLBACK_REASON, DECISIONS } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -432,6 +432,64 @@ afterEach(() => {
 });
 
 describe('Today', () => {
+  it.each([
+    ['booking', 'The visitor booked before you answered, so this request closed.'],
+    ['expired', 'This request expired before you answered. Nothing was done.'],
+    ['cancelled', 'The visitor cancelled before you answered. Nothing was done.'],
+    ['allow_once', "You allowed this. It's done."],
+    ['deny_once', 'You denied this.'],
+  ] as const)('a_request_closed_elsewhere_by_%s_stays_only_for_this_view', async (ending, line) => {
+    const { screen } = await renderRoute(TODAY, { strict: true });
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const element = card.element();
+    const record = mockStore.world.decisions.get(seededHold().decision_id)!;
+    if (ending === 'booking') {
+      const { world } = mockStore;
+      const session = world.sessions.get(record.decision.session_id)!;
+      world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+    } else if (ending === 'cancelled') mockStore.world.cancel(record);
+    else if (ending === 'expired') record.decision = { ...record.decision, state: 'expired', answers: [] };
+    else {
+      const reply = await mockStore.dispatch('answer', { params: { decision_id: record.decision.decision_id }, body: { answer: ending } });
+      expect(reply).toMatchObject({ status: 200 });
+    }
+    await expect.element(card.getByText(line, { exact: true })).toBeVisible();
+    expect(card.element()).toBe(element);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+
+    // A fresh app reads only open requests; the undismissed closed card belongs to the old view.
+    const { screen: reloaded } = await renderRoute(TODAY);
+    await expect.element(region(reloaded, 'Since last night')).toBeVisible();
+    expect(heldCard(reloaded, SEEDED_REASON).elements()).toHaveLength(0);
+    expect(region(reloaded, 'Needs you').elements()).toHaveLength(0);
+  });
+
+  it('a_booking_elsewhere_keeps_the_held_card_until_dismissed', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const element = card.element();
+    const slot = element.closest('li');
+    const { world } = mockStore;
+    const session = world.sessions.get(seededHold().session_id)!;
+    world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+
+    await expect.element(card.getByText('The visitor booked before you answered, so this request closed.', { exact: true })).toBeVisible();
+    expect(card.element()).toBe(element);
+    expect(card.element().closest('li')).toBe(slot);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+    expect(card.getByRole('button', { name: 'Allow this time' }).elements()).toHaveLength(0);
+    await dismissFromTheKeyboard(screen);
+    await expect.element(card).not.toBeInTheDocument();
+    await expect.poll(() => focusIsOn(region(screen, 'Live now').element())).toBe(true);
+    await aPollPasses();
+    expect(card.elements()).toHaveLength(0);
+  });
+
   it('sections_show_in_order', async () => {
     const { screen } = await renderRoute(TODAY);
     const needs = region(screen, 'Needs you');
