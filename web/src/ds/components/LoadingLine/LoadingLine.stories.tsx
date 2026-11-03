@@ -29,7 +29,7 @@ export const Default: Story = {
     // loading_line_says_what_is_loading: a status that names what is on its way, in meta type.
     const line = canvas.getByRole('status');
     await expect(line).toHaveTextContent(/^Loading this customer$/);
-    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
 
     // The busy button's spinner, hidden from screen readers, 10 px before the words and centered on them.
     const spinner = canvasElement.querySelector('svg');

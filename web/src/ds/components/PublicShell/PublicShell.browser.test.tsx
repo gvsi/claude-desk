@@ -1065,8 +1065,10 @@ it('a_shell_too_full_for_its_height_turns_short', async () => {
 it('short_mode_leaves_only_with_room_to_spare', async () => {
   // A draft growing past the point where the conversation would get less than 120 px turns the
   // shell short; taking one line back off doesn't turn it back, so the page can't flap between the
-  // two as the visitor types at the edge. Clearing the draft does.
-  await renderLongChat([320, 568], { language: 'es' });
+  // two as the visitor types at the edge. Clearing the draft does. A 320 px phone 586 px tall leaves
+  // the Spanish page's empty draft 150 px of conversation: enough to turn tall again, and each 22 px
+  // line of draft lands the room clear of both edges.
+  await renderLongChat([320, 586], { language: 'es' });
   expect(isShort()).toBe(false);
   const input = one<HTMLTextAreaElement>('.cd-composer__input');
   const lines: string[] = [];

@@ -62,12 +62,12 @@ export const List760: Story = {
     const dana = people[1] as HTMLElement;
     await expect(dana).toHaveAccessibleName('Dana Whitfield Contact on record: d•••@example.com');
     await expect(userText(dana).map((el) => el.textContent)).toEqual(['Dana Whitfield']);
-    expectComputed(userText(dana)[0]!, { fontSize: '14px', lineHeight: '20px', fontWeight: '420', color: PRIMARY });
+    expectComputed(userText(dana)[0]!, { fontSize: '15px', lineHeight: '21px', fontWeight: '420', color: PRIMARY });
     const contact = within(dana).getByText('Contact on record: d•••@example.com');
-    expectComputed(contact, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
-    // Padded 6 px by 10 px, 2 px between its lines: 51 px tall, as on the board.
+    expectComputed(contact, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
+    // Padded 6 px by 10 px, 2 px between its lines: 53 px tall, as on the board.
     expectComputed(dana, { paddingTop: '6px', paddingLeft: '10px', borderTopLeftRadius: '8px' });
-    await expect(dana.getBoundingClientRect().height).toBe(51);
+    await expect(dana.getBoundingClientRect().height).toBe(53);
     // A row that links is quiet at rest, with no fill (the hover fill is fill-hover).
     expectComputed(dana, { backgroundColor: 'rgba(0, 0, 0, 0)', textDecorationLine: 'none' });
 
@@ -78,17 +78,17 @@ export const List760: Story = {
     for (const row of leads) {
       const time = row.querySelector<HTMLElement>('.cd-lead-row__time')!;
       const name = userText(row)[0]!;
-      expectComputed(time, { fontSize: '12px', lineHeight: '17px', color: SECONDARY });
+      expectComputed(time, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
       await expect(Math.round(time.getBoundingClientRect().right)).toBe(Math.round(row.getBoundingClientRect().right) - 10);
-      // On the name's baseline: both are aligned by it, so the 17 px caption sits inside the name's
-      // 20 px line, a little lower (2 px with the brand fonts, 3 px with the fallback ones).
+      // On the name's baseline: both are aligned by it, so the 18 px caption sits inside the name's
+      // 21 px line, a little lower (2 px with the brand fonts, 3 px with the fallback ones).
       expectComputed(time, { alignSelf: 'baseline' });
       expectComputed(name, { alignSelf: 'baseline' });
       await expect(time.getBoundingClientRect().top).toBeGreaterThan(name.getBoundingClientRect().top);
       await expect(time.getBoundingClientRect().bottom).toBeLessThanOrEqual(name.getBoundingClientRect().bottom + 1);
       // Not a link without an href.
       await expect(row.tagName).toBe('DIV');
-      await expect(row.getBoundingClientRect().height).toBe(51);
+      await expect(row.getBoundingClientRect().height).toBe(53);
     }
     const [live, replayed] = leads as [HTMLElement, HTMLElement];
     await expect(live.querySelector('.cd-recorded-tag')).toBeNull();

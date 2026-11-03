@@ -39,14 +39,14 @@ async function expectBilling(root: HTMLElement, phone = false) {
   await expect(parts.slice(1).map((part, i) => gap(parts[i]!, part))).toEqual([24, 24, 24, 24]);
   await expect(page.getByText('Nothing is billed in this prototype. The usage and invoices below are samples.')).toBeVisible();
   for (const heading of page.getAllByRole('heading')) {
-    expectComputed(heading, { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+    expectComputed(heading, { fontSize: '16px', lineHeight: '21px', fontWeight: '520' });
     await expect(heading.tagName).toBe('H2');
   }
   for (const line of content.querySelectorAll('.cd-type-body')) {
-    expectComputed(line, { fontFamily: /^"Hanken Grotesk"/, fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(line, { fontFamily: /^"Hanken Grotesk"/, fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.92)' });
   }
   for (const line of content.querySelectorAll('.cd-type-meta')) {
-    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   }
   for (const section of content.querySelectorAll('.cd-billing__section')) {
     await expect(gap(one(section, '.cd-section-header'), one(section, '.cd-card'))).toBe(12);
@@ -57,7 +57,7 @@ async function expectBilling(root: HTMLElement, phone = false) {
   const offer = page.getByText('One business, up to three Desks.', { exact: true });
   const free = page.getByText('Free while Claude Desk is a prototype.');
   await expect([gap(name, offer), gap(offer, free)]).toEqual([8, 8]);
-  await expect(Math.round(plan.getBoundingClientRect().height)).toBe(108);
+  await expect(Math.round(plan.getBoundingClientRect().height)).toBe(111);
   for (const row of content.querySelectorAll('.cd-billing__row')) expectComputed(row, { padding: '16px' });
   for (const line of content.querySelectorAll('.cd-billing__number')) expectComputed(line, { fontVariantNumeric: 'tabular-nums' });
   const usage = one(content, '.cd-billing__usage');

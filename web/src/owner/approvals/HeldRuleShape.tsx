@@ -52,9 +52,14 @@ export function HeldRuleShape() {
             <Lines words={SENTENCE} className="cd-rule-sentence__sentence" text="body" lastWidth="70%" />
             <Lines words={META} className="cd-rule-sentence__meta" text="meta" lastWidth="40%" />
           </div>
-          <div className="cd-rule-sentence__outcome">
-            <Skeleton shape="line" text="meta" width={84} />
-          </div>
+          {/* The outcome as `RuleSentence` draws it: a dot and its word in an inline status label, whose
+              baseline (the dot's foot) sets the line's height when the outcome takes its own line on a phone. */}
+          <span className="cd-rule-sentence__outcome cd-type-meta">
+            <span className="cd-status-label">
+              <Skeleton shape="circle" size={6} />
+              <Skeleton shape="line" text="meta" width={70} />
+            </span>
+          </span>
         </div>
       </div>
     </div>

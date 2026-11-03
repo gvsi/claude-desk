@@ -69,8 +69,8 @@ export const Open: Story = {
     expectComputed(menu, { backgroundColor: 'rgb(42, 41, 39)', borderTopColor: 'rgba(250, 249, 245, 0.14)', borderTopLeftRadius: '12px' });
     const title = within(items[1] as HTMLElement).getByText(PRESET_WORDS[1].label);
     const line = within(items[1] as HTMLElement).getByText(PRESET_WORDS[1].description);
-    expectComputed(title, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(title, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(args.onPick).not.toHaveBeenCalled();
   },
 };

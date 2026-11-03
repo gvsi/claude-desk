@@ -30,7 +30,7 @@ async function expectToolLabel(root: HTMLElement, text: string) {
   const icon = label.querySelector('svg');
   await expect(icon).not.toBeNull();
   await expect(icon).toHaveAttribute('aria-hidden', 'true');
-  expectComputed(label, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(label, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
 }
 
 export const Memory: Story = {

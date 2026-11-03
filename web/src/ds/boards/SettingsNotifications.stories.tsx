@@ -62,12 +62,12 @@ export const Board: Story = {
     const pill = one(vision, '.cd-pill');
     await expect(pill).toHaveTextContent(/^Mock$/);
     const note = page.getByText('In this prototype, alerts arrive in Notifications.');
-    expectComputed(note, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(note, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(note.getBoundingClientRect().left - pill.getBoundingClientRect().right)).toBe(12);
 
     // The lead 20 px under it, then the alerts' heading 20 px under that, with its caption at the right.
     const lead = page.getByText(LEAD);
-    expectComputed(lead, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(lead, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(Math.round(lead.getBoundingClientRect().top - vision.getBoundingClientRect().bottom)).toBe(20);
     const alerts = page.getByRole('region', { name: 'Set for a plumber' });
     await expect(Math.round(alerts.getBoundingClientRect().top - lead.getBoundingClientRect().bottom)).toBe(20);
@@ -79,7 +79,7 @@ export const Board: Story = {
     await expect(rows.map((row) => row.textContent)).toEqual(PLUMBER.map(({ when, what, how }) => `${when}${what}${how ?? ''}`));
     const card = one(alerts, '.cd-card');
     await expect(Math.round(card.getBoundingClientRect().top - one(alerts, 'h2').getBoundingClientRect().bottom)).toBe(8);
-    await expect(Math.round(card.getBoundingClientRect().height)).toBe(196);
+    await expect(Math.round(card.getBoundingClientRect().height)).toBe(202);
     await expect(within(content).queryByRole('button')).toBeNull();
 
     await expectFooter(canvasElement);

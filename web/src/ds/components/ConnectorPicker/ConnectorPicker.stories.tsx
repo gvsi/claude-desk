@@ -63,7 +63,7 @@ export const ChenComingSoon: Story = {
     // picker_by_keyboard: a modal dialog named by its serif title, with focus on Payments' "Add".
     const dialog = canvas.getByRole('dialog', { name: 'Add a connector' });
     await expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expectComputed(within(dialog).getByRole('heading', { name: 'Add a connector' }), { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '24px' });
+    expectComputed(within(dialog).getByRole('heading', { name: 'Add a connector' }), { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '26px' });
     expectComputed(dialog, { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '12px' });
     await expect(getComputedStyle(dialog).boxShadow).not.toBe('none');
     await expect(getComputedStyle(dialog, '::backdrop').backgroundColor).toBe('rgba(0, 0, 0, 0.5)');

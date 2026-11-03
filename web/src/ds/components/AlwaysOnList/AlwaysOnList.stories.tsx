@@ -42,7 +42,7 @@ export const Default: Story = {
     for (const item of items) {
       const lock = item.querySelector('svg');
       await expect(lock).toHaveAttribute('aria-hidden', 'true');
-      expectComputed(item, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+      expectComputed(item, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     }
     // always_on_has_no_controls
     await expect(region.querySelectorAll('button, input, select, textarea, a, [role="switch"]')).toHaveLength(0);

@@ -34,7 +34,7 @@ export const LeadSaved: Story = {
     if (!dot) throw new Error('no dot on the note');
     await expect(dot).toHaveClass('cd-status-dot--info');
     expectComputed(dot, { backgroundColor: 'rgba(0, 0, 0, 0)', borderTopWidth: '1px', borderTopStyle: 'solid' });
-    expectComputed(note, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(note, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await userEvent.click(note);
     await expect(args.onOpen).toHaveBeenCalledTimes(1);
   },

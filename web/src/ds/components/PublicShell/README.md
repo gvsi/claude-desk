@@ -191,18 +191,18 @@ main landmark outside the layer on a standalone loading page.
 The brand shape uses `bg-panel` until the business's colours arrive, its real monogram size and
 name/tagline line boxes, and one open-hours line when `hours` is true. In the wide shell with an About column, that line moves into the column, as the real status does. It follows the header's own
 container rules: the status wraps below the name under 640 px. A fresh copy's open header matches;
-at 390 px, closed and no-hours headers change height once (19 px taller and 16 px shorter).
+at 390 px, closed and no-hours headers change height once (20 px taller and 18 px shorter).
 The agents page passes `hours={false}` because its real header has no hours.
 
 The shell shape shares the shell's layout and visual-viewport measurement hooks, including short
 windows and embedded panels. History is unknown until the page lands, so every load draws the first
-view, placed by the same `useFirstView` hook as the real one: a greeting line (two on a phone), its
-meta line, the inline composer and three starter chips as wide as the fresh copy's. It draws the
-real fresh copy's five charter cards and two agents links: beside the chat from 900 px, and under
-the footer below that, as the first view does. In setup's fresh preview (`footer={false}`), there
-is no charter or footer, so neither is drawn.
-The Hours and deposit-policy placeholder wrap lines follow the About column's content width,
-so their cards keep their landed heights as the column grows.
+view, placed by the same `useFirstView` hook as the real one: the greeting, as many lines as the
+fresh copy's words take at its width, its meta line, the inline composer and three starter chips
+as wide as the fresh copy's. It draws the real fresh copy's five charter cards and two agents
+links: beside the chat from 900 px, and under the footer below that, as the first view does. In
+setup's fresh preview (`footer={false}`), there is no charter or footer, so neither is drawn.
+Each card's title takes as many lines as the fresh copy's words do at the card's width, so the
+cards keep their landed heights as the column grows.
 
 A first visit to a Desk with starters lands in place. A resumed chat keeps its head in place, and
 its composer moves down to the bottom as it lands. A Desk without starters lands on the greeting

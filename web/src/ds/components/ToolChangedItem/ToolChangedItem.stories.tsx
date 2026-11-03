@@ -36,13 +36,13 @@ export const StripeRefund: Story = {
     const card = canvas.getByRole('article', { name: title });
     expectComputed(card, { paddingTop: '16px', borderTopLeftRadius: '12px' });
     const titleLine = within(card).getByText(title);
-    expectComputed(titleLine, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(titleLine, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     const dot = card.querySelector('.cd-status-dot--held');
     await expect(dot).not.toBeNull();
     await expect(dot).toHaveAttribute('aria-hidden', 'true');
     // The meta line names the connector as a mock, when it was noticed, and what can't happen.
     const meta = within(card).getByText(`Stripe · Mock · ${args.noticed}. ${args.consequence}`);
-    expectComputed(meta, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(meta, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     // "Review" opens the tool's page.
     await userEvent.click(within(card).getByRole('button', { name: 'Review' }));
     await expect(args.onReview).toHaveBeenCalledTimes(1);

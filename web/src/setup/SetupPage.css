@@ -325,10 +325,27 @@
     min-height: min(300px, 100dvh);
   }
 
+  /* About beside the chat is as tall as the chat and no taller: a frame under 520 px makes the public
+     page short, where the row grows with what it holds, and a long charter would then stretch the
+     chat past the frame's foot. The chat's own parts set the row's height, and the charter scrolls
+     in its column. */
+  .cd-setup-live__preview .cd-public-shell__body > .cd-public-shell__about {
+    contain: size;
+  }
+
   /* The page shown when the Desk can't be reached fills the frame rather than the window, so its
      notice sits at the frame's middle. */
   .cd-setup-live__preview .cd-public-state {
     min-height: 100%;
+  }
+}
+
+/* A short laptop window (Chrome on a 1366 x 768 screen with its bookmarks bar is 625 px tall) puts the
+   page 32 px under the top bar rather than 40, so the preview keeps the chat whole above "Go live".
+   A phone's own padding, below, still wins at its widths. */
+@media (min-height: 480px) and (max-height: 640px) {
+  .cd-setup__main {
+    padding-top: var(--space-32);
   }
 }
 

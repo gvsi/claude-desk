@@ -137,7 +137,7 @@ async function expectAnnouncedOnce(status: HTMLElement, dots: readonly HTMLEleme
 /** The bubble in the visitor bubble's fill and radius, one message line tall, with 6 px round dots. */
 function expectBubbleLook(status: HTMLElement) {
   const { bubble, dots } = bubbleParts(status);
-  expectComputed(bubble, { backgroundColor: 'rgba(250, 249, 245, 0.06)', borderTopLeftRadius: '12px', height: '37px' });
+  expectComputed(bubble, { backgroundColor: 'rgba(250, 249, 245, 0.06)', borderTopLeftRadius: '12px', height: '38px' });
   for (const dot of dots) expectComputed(dot, { width: '6px', height: '6px', borderTopLeftRadius: '999px' });
 }
 
@@ -198,7 +198,7 @@ async function expectClaudeDots(status: HTMLElement, label: string) {
   await expect(dots).toHaveAttribute('aria-hidden', 'true');
   await expect(dots.textContent).toBe('');
   await expect(dots.children).toHaveLength(3);
-  expectComputed(status, { fontFamily: /Source Serif 4/, fontSize: '15px', lineHeight: '23px', animationName: 'none' });
+  expectComputed(status, { fontFamily: /Source Serif 4/, fontSize: '17px', lineHeight: '26px', animationName: 'none' });
   await expect(dots.getBoundingClientRect().height).toBe(Number.parseFloat(getComputedStyle(status).lineHeight));
   await expect(dots.getBoundingClientRect().left).toBe(status.getBoundingClientRect().left);
 }
@@ -208,7 +208,7 @@ export const VisitorTyping: Story = {
   play: async ({ canvas, canvasElement }) => {
     const status = canvas.getByRole('status');
     await expectOnlyLabel(canvasElement, status, 'Dana is typing');
-    expectComputed(status, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px' });
+    expectComputed(status, { fontFamily: /Hanken Grotesk/, fontSize: '14px', lineHeight: '19px' });
     if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       expectComputed(status, { animationName: 'cd-writing-pulse', animationDuration: '1.6s' });
     }
@@ -386,14 +386,14 @@ async function expectPersonTyping(root: HTMLElement, label: string, name: string
   // The words after the name are for screen readers only; the name is what shows.
   const hidden = parts.status.querySelector<HTMLElement>('.cd-sr-only');
   await expect(hidden?.textContent?.trim()).toBe(label.slice(name.length).trim());
-  expectComputed(parts.status, { fontSize: '13px', lineHeight: '18px' });
+  expectComputed(parts.status, { fontSize: '14px', lineHeight: '19px' });
   // The dots: hidden, three 6 px dots in one message line, no fill or padding around them.
   await expect(parts.dots).toHaveAttribute('aria-hidden', 'true');
   await expect(parts.dots.textContent).toBe('');
   await expect(parts.each).toHaveLength(3);
   for (const dot of parts.each) expectComputed(dot, { width: '6px', height: '6px', borderTopLeftRadius: '999px' });
   for (const el of [parts.frame, parts.dots]) expectComputed(el, { backgroundColor: 'rgba(0, 0, 0, 0)', paddingLeft: '0px' });
-  expectComputed(parts.dots, { height: '21px', marginTop: '4px' });
+  expectComputed(parts.dots, { height: '22px', marginTop: '4px' });
   // The dots start where the name starts, under it, and the frame starts at the row's left edge.
   const nameBox = parts.name.getBoundingClientRect();
   const first = parts.each[0]?.getBoundingClientRect();
