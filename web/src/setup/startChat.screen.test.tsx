@@ -43,6 +43,12 @@ function holdStart(): () => void {
   return release;
 }
 
+/** A token's value as the page computes it. */
+const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+/** A computed duration ("0.15s", "200ms") in ms. */
+const ms = (duration: string) => parseFloat(duration) * (duration.endsWith('ms') ? 1 : 1000);
+
 /** Lets every motion that ends run to its end. */
 async function settle(): Promise<void> {
   const ending = document.getAnimations().filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity));
@@ -191,8 +197,8 @@ describe('setup start', () => {
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
     await screen.getByRole('button', { name: 'Start' }).click();
 
-    // While the start runs: under the owner's words, the read as it runs, then the quieter line,
-    // then Claude's writing dots.
+    // While the start runs: under the owner's words, the read as it runs with the quieter line as its
+    // second line, then Claude's writing dots.
     const log = conversation(screen);
     const reading = log.getByText(SETUP_START_READING.reading, { exact: true });
     const usually = log.getByText(SETUP_START_READING.usually, { exact: true });
@@ -205,7 +211,15 @@ describe('setup start', () => {
     }
     expect(getComputedStyle(usually.element()).color).toBe(tokenColor('--text-tertiary'));
     await settle();
-    const row = reading.element().closest('.cd-tool-label')!.getBoundingClientRect();
+    // The quieter line is the read's second line: in its words' column after the icon, 2 px under them.
+    const label = reading.element().closest('.cd-tool-label')!;
+    expect(usually.element().closest('.cd-tool-label')).toBe(label);
+    const words = reading.element().getBoundingClientRect();
+    const line = usually.element().getBoundingClientRect();
+    expect(Math.abs(line.left - words.left)).toBeLessThanOrEqual(0.5);
+    expect(line.left).toBeGreaterThan(label.querySelector('svg')!.getBoundingClientRect().right);
+    expect(line.top - words.bottom).toBeCloseTo(parseFloat(token('--space-2')), 1);
+    const row = label.getBoundingClientRect();
 
     // Once the interview opens: the read, done, where it was; the quieter line and the dots go.
     release();
@@ -247,7 +261,17 @@ describe('setup start', () => {
     await expect.element(ownWords(screen)).toBeInTheDocument();
     expect(document.querySelector('.cd-setup-start-leaving-screen'), 'the start screen, leaving').not.toBeNull();
     expect(document.querySelector('.cd-setup-start-words__box'), 'the box on its way').not.toBeNull();
-    expect(getComputedStyle(document.querySelector('.cd-setup-chat .cd-page-header')!).animationName).toBe('cd-setup-start-enter');
+    // The chat's title comes in once the start page has gone, so the two titles never show together.
+    const title = getComputedStyle(document.querySelector('.cd-setup-chat .cd-page-header')!);
+    expect(title.animationName).toBe('cd-setup-start-enter');
+    expect(ms(title.animationDelay)).toBeCloseTo(ms(token('--motion-fast')), 3);
+    expect(ms(title.animationDuration)).toBeCloseTo(ms(token('--motion-base')), 3);
+    // The message's words rise in over the box's travel from 40% of it, so the box never travels empty.
+    const travel = 2 * ms(token('--motion-base'));
+    const bubble = getComputedStyle(ownWords(screen).element());
+    expect(bubble.animationName).toBe('cd-setup-start-rise');
+    expect(ms(bubble.animationDelay)).toBeCloseTo(0.4 * travel, 3);
+    expect(ms(bubble.animationDuration)).toBeCloseTo(0.6 * travel, 3);
 
     await expect.poll(() => document.querySelector('.cd-setup-start-words__box')).toBeNull();
     await expect.poll(() => document.querySelector('.cd-setup-start-leaving-screen')).toBeNull();

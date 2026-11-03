@@ -15,7 +15,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
-import { ToolLabel, VisitorMessage, WritingIndicator } from '../ds/index.ts';
+import { VisitorMessage, WritingIndicator } from '../ds/index.ts';
+import { Icon } from '../ds/icons/index.tsx';
 import { SETUP_START_READING } from './copy.ts';
 import './SetupStartTransition.css';
 
@@ -149,22 +150,28 @@ export function OwnerWords({ words, from = null }: { words: string; from?: Start
   );
 }
 
-/** Claude's read of the owner's words, as a tool's line: `reading` while the start runs, `read` once the interview opens. */
-function ReadLine({ done, settling = false }: { done: boolean; settling?: boolean }) {
+/**
+ * Claude's read of the owner's words, drawn as a tool's line (ToolLabel's own parts): `reading`
+ * while the start runs, `read` once the interview opens. While it runs, the quieter line on how
+ * long it takes is its second line, in its words' column after the icon (`usually`), which fades
+ * out (`leaving`) as the interview opens.
+ */
+function ReadLine({ done, settling = false, usually = null }: { done: boolean; settling?: boolean; usually?: 'shown' | 'leaving' | null }) {
   const state = done ? (settling ? ' cd-setup-start-read--settling' : '') : ' cd-setup-start-read--reading';
   return (
     <div className={`cd-setup-start-read${state}`}>
-      <ToolLabel text={done ? SETUP_START_READING.read : SETUP_START_READING.reading} />
+      <p className="cd-tool-label cd-type-meta">
+        <Icon name="document" size={14} className="cd-tool-label__icon" />
+        <span className="cd-tool-label__text">
+          <span className="cd-setup-start-read__words">{done ? SETUP_START_READING.read : SETUP_START_READING.reading}</span>
+          {usually === null ? null : (
+            <span className={`cd-setup-start-usually${usually === 'leaving' ? ' cd-setup-start-leaving' : ''}`} aria-hidden={usually === 'leaving' ? true : undefined}>
+              {SETUP_START_READING.usually}
+            </span>
+          )}
+        </span>
+      </p>
     </div>
-  );
-}
-
-/** The quieter line under the read while the start runs; `leaving` as the interview opens. */
-function UsuallyLine({ leaving = false }: { leaving?: boolean }) {
-  return leaving ? (
-    <p className="cd-setup-start-usually cd-setup-start-leaving cd-type-meta" aria-hidden="true">{SETUP_START_READING.usually}</p>
-  ) : (
-    <p className="cd-setup-start-usually cd-type-meta">{SETUP_START_READING.usually}</p>
   );
 }
 
@@ -176,9 +183,9 @@ function UsuallyLine({ leaving = false }: { leaving?: boolean }) {
 let dotsCameIn = false;
 
 /**
- * What runs after the owner's words while the start runs: the read, the quieter line and Claude's
- * writing dots, rising in one at a time; after the words' move when the chat has just come in
- * (`afterMove`, which the chat's `cd-setup-start-transition--entering` times).
+ * What runs after the owner's words while the start runs: the read with its quieter second line,
+ * and Claude's writing dots, rising in one at a time; after the words' move when the chat has just
+ * come in (`afterMove`, which the chat's `cd-setup-start-transition--entering` times).
  */
 export function StartingRead({ afterMove }: { afterMove: boolean }) {
   useLayoutEffect(() => {
@@ -186,8 +193,7 @@ export function StartingRead({ afterMove }: { afterMove: boolean }) {
   }, [afterMove]);
   return (
     <>
-      <ReadLine done={false} />
-      <UsuallyLine />
+      <ReadLine done={false} usually="shown" />
       <div
         className="cd-setup-start-dots"
         onAnimationEnd={(event) => {
@@ -248,9 +254,8 @@ export function StartedOpening({ words, arrived }: StartedOpeningProps) {
   return (
     <>
       <OwnerWords words={words} />
-      <ReadLine done settling={moving} />
-      {/* The quieter line and the dots, as setup's chat left them, fading out; then gone. */}
-      {leaving ? <UsuallyLine leaving /> : null}
+      {/* The quieter line and the dots, as setup's chat left them, fade out; then they are gone. */}
+      <ReadLine done settling={moving} usually={leaving ? 'leaving' : null} />
       {leaving ? (
         <div className="cd-setup-start-dots cd-setup-start-leaving" aria-hidden="true" onAnimationEnd={(event) => event.target === event.currentTarget && setLeaving(false)}>
           <WritingIndicator language="en" />
