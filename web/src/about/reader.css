@@ -911,6 +911,12 @@
   text-align: left;
 }
 
+/* In the hero's wide card the lead, the list and the caveat keep a reading measure, about 70 characters to a line;
+   the prediction at a glance under them keeps the card's width. On a phone the card is narrower than that anyway. */
+.cd-about-claim > :is(p, ul) {
+  max-width: 66ch;
+}
+
 /* The body: the contents list, the article and its details. The side columns grow with the window, so the
    article stays centered with the contents list and the details at the gutters. */
 

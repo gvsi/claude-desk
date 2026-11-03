@@ -541,6 +541,16 @@ describe('ReaderPage', () => {
       expect(bold(caveat).map((strong) => flat(strong.textContent)), where).toEqual(['enforced in code, outside the model']);
       expect(caveat?.querySelector('em, i, b'), where).toBeNull();
       for (const strong of [...bold(lead), ...bold(caveat)]) expect(getComputedStyle(strong).fontWeight, where).toBe('640');
+      // In the hero's wide card, the lead, the list and the caveat keep a reading measure: no wider than 75
+      // characters of their own type.
+      for (const block of [lead, list, caveat]) {
+        const measure = document.createElement('span');
+        measure.style.cssText = 'display: inline-block; width: 75ch';
+        block?.append(measure);
+        const most = measure.getBoundingClientRect().width;
+        measure.remove();
+        expect(box(block).width, `${where}: ${block?.localName} ${flat(block?.textContent).slice(0, 30)}`).toBeLessThanOrEqual(most);
+      }
 
       // At a glance: five rows, each a label and its value under a hairline, the longer values wrapping in their own
       // column inside the card; the benchmark links to its board.
