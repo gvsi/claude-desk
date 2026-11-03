@@ -90,6 +90,19 @@
   margin-left: auto;
 }
 
+/* On the narrower phones (below 375 px) the bar's button, the bell and "Claude Desk" sit a little closer, so the
+   three fit with room to spare at a larger type size too (PrototypeLink.css tightens the button's sides as well, and
+   drops its icon below 360 px). */
+@media (max-width: 374.98px) {
+  .cd-about-top--compact {
+    gap: var(--space-6);
+  }
+
+  .cd-about-top--compact .cd-about-brand {
+    gap: var(--space-6);
+  }
+}
+
 .cd-about-switch--compact {
   flex-wrap: wrap;
   gap: var(--space-6);

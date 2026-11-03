@@ -686,14 +686,19 @@ describe('ReaderPage', () => {
       expect(bar?.querySelector('.cd-pill'), where).toBeNull();
       expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
       // The brand keeps the bar's 16 px side, and the link, the bar's primary button, its words on one line,
-      // clear of the brand. Below 360 px the link drops its icon, so the 32 px bell and the name still fit.
+      // clear of the brand. Below 360 px the link drops its icon and the three sit closer, so the 32 px bell and
+      // the name fit with room to spare, at a larger type scale too.
       expect(bar?.querySelector('.cd-about-brand')?.getBoundingClientRect().right, where).toBeLessThanOrEqual(size.width - 16);
+      // Room to spare: the three need at least 4 px less than the bar has, so a font's metrics can't tip them over.
+      const parts = [...(bar?.children ?? [])].map((part) => part.getBoundingClientRect().width);
+      const gaps = parseFloat(getComputedStyle(bar as Element).columnGap) * (parts.length - 1);
+      expect(parts.reduce((sum, width) => sum + width, 0) + gaps, where).toBeLessThanOrEqual(size.width - 32 - 4);
       const link = bar?.querySelector<HTMLElement>('.cd-about-try');
       expect(link?.textContent, where).toBe('Try Desk prototype');
       expect(link?.getBoundingClientRect().height, where).toBe(32);
       expect(link?.classList.contains('cd-button--primary'), where).toBe(true);
       expect(link?.getBoundingClientRect().left, where).toBeGreaterThanOrEqual(16);
-      expect((link?.getBoundingClientRect().right ?? Infinity) + 8, where).toBeLessThanOrEqual(
+      expect((link?.getBoundingClientRect().right ?? Infinity) + 6, where).toBeLessThanOrEqual(
         bar?.querySelector('.cd-about-brand')?.getBoundingClientRect().left ?? 0,
       );
       const icon = link?.querySelector('.cd-about-try__icon');

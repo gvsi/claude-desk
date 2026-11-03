@@ -13,13 +13,16 @@
   flex: none;
 }
 
-/* On the narrowest phones the top bar holds the button, the 32 px bell and "Claude Desk" only without the
-   button's icon, and with its sides a little tighter; its words say where it goes. */
-@media (max-width: 359.98px) {
+/* On the narrower phones (below 375 px) the button's sides are a little tighter, as the bar's gaps are
+   (AboutBar.css). On the narrowest (below 360 px) the top bar holds the button, the 32 px bell and "Claude Desk"
+   only without the button's icon; its words say where it goes. */
+@media (max-width: 374.98px) {
   .cd-button.cd-about-try--compact {
-    padding-inline: var(--space-8);
+    padding-inline: var(--space-6);
   }
+}
 
+@media (max-width: 359.98px) {
   .cd-about-try--compact .cd-about-try__icon {
     display: none;
   }
