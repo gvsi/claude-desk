@@ -68,6 +68,13 @@ describe('transcript grouping', () => {
       ]);
     });
 
+    it('a_reply_marked_with_a_new_turn_draws_again', () => {
+      // A view that draws no row for what started the turn (the owner's, for a take-over and
+      // hand-back) marks each reply with its turn instead.
+      expect(withoutRepeatedCards([{ kind: 'reply', blocks: [booked], turn: 1 }, { kind: 'reply', blocks: [booked], turn: 2 }])).toEqual([[booked], [booked]]);
+      expect(withoutRepeatedCards([{ kind: 'reply', blocks: [booked], turn: 1 }, { kind: 'reply', blocks: [booked], turn: 1 }])).toEqual([[booked], []]);
+    });
+
     it('words_are_never_dropped', () => {
       expect(withoutRepeatedCards([{ kind: 'reply', blocks: [words] }, { kind: 'reply', blocks: [words] }])).toEqual([[words], [words]]);
     });

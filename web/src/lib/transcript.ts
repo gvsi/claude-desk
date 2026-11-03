@@ -190,8 +190,12 @@ export function groupRows<T, Row, R>(
   return settle(groups);
 }
 
-/** How a row reads for `withoutRepeatedCards`: someone's own words or a line about the chat, or Claude's reply. */
-export type CardsRow = { kind: 'words' } | { kind: 'reply'; blocks: readonly RenderedBlock[] };
+/**
+ * How a row reads for `withoutRepeatedCards`: someone's own words or a line about the chat, or
+ * Claude's reply. A view that draws no row for what started a turn (the owner's, for a take-over
+ * and hand-back) gives each reply its turn's number instead: a new number starts a new turn.
+ */
+export type CardsRow = { kind: 'words' } | { kind: 'reply'; blocks: readonly RenderedBlock[]; turn?: number };
 
 /** A card as it is drawn: its template, its fact and every word on it. */
 function cardKey(block: RenderedBlock): string {
@@ -207,10 +211,15 @@ function cardKey(block: RenderedBlock): string {
  */
 export function withoutRepeatedCards(rows: readonly CardsRow[]): (RenderedBlock[] | null)[] {
   let drawn = new Set<string>();
+  let turn: number | undefined;
   return rows.map((row) => {
     if (row.kind === 'words') {
       drawn = new Set();
       return null;
+    }
+    if (row.turn !== undefined && row.turn !== turn) {
+      drawn = new Set();
+      turn = row.turn;
     }
     return row.blocks.filter((block) => {
       if (block.kind !== 'card') return true;

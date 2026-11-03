@@ -1244,6 +1244,21 @@ describe('Conversations', () => {
     expect(document.querySelectorAll('.cd-transcript-row')).toHaveLength(rows + 1);
   });
 
+  it('a_card_after_a_take_over_and_hand_back_is_drawn_again', async () => {
+    // The owner joined and left between two replies that show the same card: a new turn, though
+    // the owner's view draws no row for either, so the card shows under both.
+    const chat = named(DANA_LIVE, DANA);
+    const booked = { ...rivera.blocks.booking_confirmed.en, fact_id: 'booking:B-91', title: 'Monday, November 9' };
+    const context = mockStore.world.context(chat, 'en', '');
+    mockStore.world.emit(chat, context.reply([proseBlock('Your booking is confirmed.'), booked]));
+    mockStore.world.takeOver(chat);
+    mockStore.world.handBack(chat);
+    mockStore.world.emit(chat, context.reply([proseBlock('Here it is again.'), booked]));
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText('Here it is again.', { exact: true })).toBeVisible();
+    expect([...document.querySelectorAll('.cd-reply-card')].filter((card) => card.textContent?.includes('Monday, November 9'))).toHaveLength(2);
+  });
+
   it('agent_name_reads_as_its_own_words', async () => {
     // An agent's chat: the name it gave is its own words wherever the page shows it, the caption
     // over the transcript included.

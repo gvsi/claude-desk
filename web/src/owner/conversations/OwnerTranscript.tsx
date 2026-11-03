@@ -46,13 +46,14 @@ type OwnerRowItem =
   | { kind: 'visitor'; n: number; text: string; translation: string | null }
   | { kind: 'agent'; n: number; text: string; request: number }
   | { kind: 'whisper'; n: number; text: string; at: string }
-  | { kind: 'message'; n: number; ev: EvMessage };
+  /** `turn` counts what started a turn before it, a take-over and hand-back included, which draw no row here. */
+  | { kind: 'message'; n: number; ev: EvMessage; turn: number };
 
 type OwnerRow = GroupedRow<OwnerRowItem, OwnerReceiptSource>;
 
 /** How a row reads for `withoutRepeatedCards`: Claude's reply, or someone's words, which start a turn. */
 function cardsRowOf({ item }: OwnerRow): CardsRow {
-  return item.kind === 'message' && item.ev.author !== 'owner' ? { kind: 'reply', blocks: item.ev.blocks } : { kind: 'words' };
+  return item.kind === 'message' && item.ev.author !== 'owner' ? { kind: 'reply', blocks: item.ev.blocks, turn: item.turn } : { kind: 'words' };
 }
 
 export interface OwnerTranscriptProps {
@@ -108,8 +109,11 @@ function rowsOf(items: readonly OwnerTranscriptItem[]) {
   const sorted = [...items].sort((a, b) => a.n - b.n);
   const firsts = new Map<string, OwnerReceiptSource>();
   let requests = 0;
+  let turns = 0;
   const partOf = (item: OwnerTranscriptItem): RowPart<OwnerRowItem, OwnerReceiptSource> | null => {
     const { event } = item;
+    if (item.kind !== 'delivered' && item.kind !== 'status') turns += 1;
+    else if (item.kind === 'delivered' && event?.type === 'message' && event.author === 'owner') turns += 1;
     switch (item.kind) {
       case 'visitor_text':
         return { kind: 'turn', row: { kind: 'visitor', n: item.n, text: item.text ?? '', translation: item.owner_translation ?? null } };
@@ -120,7 +124,7 @@ function rowsOf(items: readonly OwnerTranscriptItem[]) {
         return { kind: 'turn', row: { kind: 'whisper', n: item.n, text: item.text ?? '', at: item.created_at } };
       case 'delivered':
         if (event?.type !== 'message') return null;
-        return { kind: 'reply', row: { kind: 'message', n: item.n, ev: event }, receipt: { event, first: false } };
+        return { kind: 'reply', row: { kind: 'message', n: item.n, ev: event, turn: turns }, receipt: { event, first: false } };
       case 'status': {
         if (!isStatus(event)) return null;
         const earlier = firsts.get(event.decision_id);

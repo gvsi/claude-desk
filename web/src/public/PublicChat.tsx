@@ -785,10 +785,12 @@ function conversationStarted(state: ChatState, status: ChatStatus): boolean {
 }
 
 /** The latest row whose message carries the kernel's verify card, by its key, or null. */
-function latestVerifyRow(rows: readonly ChatRow[]): string | null {
-  const row = rows.findLast(
-    ({ item }) => item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && block.template === 'verify_prompt'),
+function latestVerifyRow(rows: readonly ChatRow[], replyBlocks: readonly (readonly RenderedBlock[] | null)[]): string | null {
+  // The card as drawn: a verify card its turn already showed isn't drawn again, so its form stays under the first.
+  const index = rows.findLastIndex(
+    ({ item }, i) => item.kind === 'message' && (replyBlocks[i] ?? item.ev.blocks).some((block) => block.kind === 'card' && block.template === 'verify_prompt'),
   );
+  const row = rows[index];
   return row === undefined ? null : rowKey(row);
 }
 
@@ -1045,7 +1047,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
   // Under the latest message with the kernel's verify card: the code form while the chat can be
   // written in and the visitor hasn't confirmed it's them, then the verified line.
   const verified = chat.session?.verified === true;
-  const verifyRow = latestVerifyRow(state.rows);
+  const verifyRow = latestVerifyRow(state.rows, replyBlocks);
   // "I can't get the code" asks for the owner. While she is in the chat she is already here, so it
   // asks for nobody: it closes that card's form, sends nothing, and the visitor's place moves to the
   // composer, without scrolling the conversation. The form comes back once she is out of the chat,

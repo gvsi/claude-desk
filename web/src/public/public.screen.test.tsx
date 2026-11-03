@@ -2429,6 +2429,25 @@ describe('public chat page', () => {
     expect(rowsShown()).toHaveLength(rows + 1);
   });
 
+  it('the_code_form_stays_under_the_verify_card_shown_when_it_repeats', async () => {
+    // Claude shows the verify card, then shows it again in the same turn: it is drawn once, and
+    // the code form stays in that card's row rather than a row with no card.
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const verify = rivera.blocks.verify_prompt.en;
+    const context = mockStore.world.context(chat, 'en', '');
+    mockStore.world.emit(chat, context.reply([proseBlock('I can send that once you confirm it is you.'), verify]));
+    mockStore.world.emit(chat, context.reply([verify]));
+    const field = screen.getByRole('textbox', { name: '6-digit code' });
+    await expect.element(field).toBeVisible();
+    await vi.waitFor(() => expect(document.querySelector(COMING_IN)).toBeNull(), { timeout: 5_000 });
+    const cards = [...document.querySelectorAll('.cd-reply-card')].filter((card) => card.textContent?.includes(verify.title ?? ''));
+    expect(cards).toHaveLength(1);
+    expect(rowOf(field.element()).contains(cards[0] as Element)).toBe(true);
+  });
+
   it.each(['desktop', 'phone'] as const)('hand_back_answers_the_waiting_line_after_claude_is_back_%s', async (viewport) => {
     const { screen } = await renderRoute(PAGE, { viewport });
     await ready(screen);
