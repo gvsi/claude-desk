@@ -8,7 +8,8 @@
  * index.html's first script reads the same key), which of the owner's notifications they have
  * seen (`notifications/seen.ts`), and, for each Desk whose setup isn't finished, what the loading
  * page needs to draw its "Not live yet" card before the Desks are read again after a reload
- * (`todaySetupMemory.ts`). Nothing else is stored in the browser.
+ * (`todaySetupMemory.ts`), and the preview session this browser opened for each Desk, so an owner's
+ * preview resumes only that chat (`PublicChatProvider.tsx`). Nothing else is stored in the browser.
  * Storage can be missing or blocked (a private window, blocked site data), so neither function
  * ever throws.
  */
@@ -21,6 +22,7 @@ const KEYS = {
   theme: 'claude-desk.theme',
   notificationsSeen: 'claude-desk.notifications-seen',
   todaySetup: 'claude-desk.today-setup',
+  previewSessions: 'claude-desk.preview-sessions',
 } as const;
 
 export type LocalKey = keyof typeof KEYS;

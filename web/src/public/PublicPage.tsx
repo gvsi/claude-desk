@@ -1,7 +1,8 @@
 /**
  * `/d/:slug`: a Desk's public page. Today's "Chat as a customer" link adds `?preview=<desk>`, which
- * opens the owner's preview of that Desk; for anyone else it falls back to a visitor's chat. Its
- * about column links to the page for AI agents, and to that page's "Send an agent" panel.
+ * resumes only the preview this browser remembers opening for that Desk, or opens a new preview
+ * if its visitor cookie names any other chat. For anyone else it falls back to a visitor's chat.
+ * Its about column links to the page for AI agents, and to that page's "Send an agent" panel.
  *
  * Today's "Try to break it" hands one of its fixed ideas (`breakItIdeas`) over, by its key, in this
  * browser's storage and adds the hand-off's one-time token, `?try=<token>`: as the page opens, it

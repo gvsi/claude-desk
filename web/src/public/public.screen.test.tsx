@@ -3469,6 +3469,29 @@ describe('public chat page', () => {
     await expect.element(stranger.screen.getByRole('main')).toBeVisible();
   });
 
+  it('preview_replaces_a_plain_visitor_chat_and_reload_resumes_the_preview', async () => {
+    const visitor = await renderRoute(PAGE);
+    await ready(visitor.screen);
+    await say(visitor.screen, 'Do you work weekends?');
+    const oldSession = mockStore.visitorSession(RIVERA.slug);
+    expect(oldSession?.ownerPreview).toBe(false);
+
+    const path = `${PAGE}?preview=${RIVERA.deskId}`;
+    const preview = await renderRoute(path);
+    await ready(preview.screen);
+    const session = mockStore.visitorSession(RIVERA.slug);
+    expect(session?.ownerPreview).toBe(true);
+    expect(session?.state.session_id).not.toBe(oldSession?.state.session_id);
+    expect(preview.screen.getByText('Do you work weekends?', { exact: true }).elements()).toHaveLength(0);
+    await say(preview.screen, 'How much is drain clearing?');
+
+    const reloaded = await renderRoute(path);
+    await ready(reloaded.screen);
+    await expect.element(reloaded.screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
+    expect(mockStore.visitorSession(RIVERA.slug)?.state.session_id).toBe(session?.state.session_id);
+    expect(requests('openPreview')).toHaveLength(1);
+  });
+
   it('preview_reload_resumes_its_chat', async () => {
     // The owner's chat as a customer, from Today's link: one exchange, then a new page load.
     const preview = `${PAGE}?preview=${RIVERA.deskId}`;
