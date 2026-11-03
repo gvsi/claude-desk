@@ -8,7 +8,7 @@ import { VISION_BACK_HREF } from './vision.tsx';
 
 const meta = {
   title: 'Boards/Vision, channels',
-  render: () => <ChannelsSettings banner={<VisionBar backHref={VISION_BACK_HREF} />} />,
+  render: () => <ChannelsSettings banner={<VisionBar backHref={VISION_BACK_HREF} />} conceptFooterInSidebar={false} />,
   globals: { viewport: { value: 'laptop', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
@@ -39,6 +39,9 @@ export const Board: Story = {
     await expect(await expectNoFactsInProse(canvasElement)).toEqual({ prose: 0, receipts: 0 });
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
+    // Vision keeps its page-bottom footer and its original sidebar.
+    await expect(canvas.getByRole('main').querySelector('[data-ds="concept-footer"]')).not.toBeNull();
+    await expect(sidebar.querySelector('[data-ds="concept-footer"]')).toBeNull();
 
     // The bar's link is the first stop, then the app as on the Channels page.
     await expectTabOrder(userEvent, [

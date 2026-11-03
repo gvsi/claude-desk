@@ -71,7 +71,7 @@ export { SectionHeader, type SectionHeaderProps } from './components/SectionHead
 export { Mark, MarkAppIcon, Wordmark, type MarkAppIconProps, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { AUTHOR_NAME, AUTHOR_URL, ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
-export { AppShell, type AppShellProps } from './components/AppShell/AppShell.tsx';
+export { AppShell, AppShellOnly, type AppShellProps, type AppShellOnlyProps } from './components/AppShell/AppShell.tsx';
 export {
   NAV_LABELS,
   Sidebar,
@@ -194,7 +194,7 @@ export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
 export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
-export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
+export { Transcript, type TranscriptProps, type TranscriptVariant } from './components/Transcript/Transcript.tsx';
 export { VisitorMessage, type VisitorMessageProps } from './components/VisitorMessage/VisitorMessage.tsx';
 export { ClaudeMessage, PROSE_LINKS, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
 export { ChatMarkdown, type ChatMarkdownProps } from './components/ChatMarkdown/ChatMarkdown.tsx';
@@ -252,7 +252,6 @@ export { OutcomeGroups, type OutcomeGroupRow, type OutcomeGroupsProps } from './
 export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
 export { ToolTitleList, type ToolTitles } from './components/RuleRow/ToolTitles.tsx';
 export { RuleSentence, type RuleMeta, type RuleSentenceProps, type SentencePart } from './components/RuleSentence/RuleSentence.tsx';
-export { EffectTags, effectTags, type EffectTagsProps } from './components/EffectTags/EffectTags.tsx';
 export { AdvancedDetails, DetailsSlot, type AdvancedDetailsProps, type DetailsCode, type DetailsField } from './components/AdvancedDetails/AdvancedDetails.tsx';
 export { jsonText } from './components/AdvancedDetails/detailsJson.ts';
 export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';

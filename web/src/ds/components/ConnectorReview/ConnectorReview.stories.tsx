@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
-import { chenBusinessTools } from '../../../mocks/businessTools.ts';
+import { businessToolRows, chenBusinessTools } from '../../../mocks/businessTools.ts';
 import { businessGlyph, businessRows } from '../../../owner/connectors/businessWords.ts';
 import { SETUP_COPY } from '../../../setup/copy.ts';
-import { reviewTool } from '../../../setup/ToolsStep.tsx';
+import { reviewTool, startingRule } from '../../../setup/ToolsStep.tsx';
 
 import { chen, rivera } from '../../fixtures';
 import { expectBalancedLines } from '../../test/expectBalancedLines.ts';
@@ -396,5 +396,58 @@ export const AppConnected: Story = {
 
 export const AppConnectedPhone: Story = {
   ...AppConnected,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+};
+
+
+/** The signed setup review: each connected tool, and the rule each starts under, as Rules reads it, with no effect badges. */
+export const SetupStartingRules: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  args: {
+    connector: stripeView, connection: 'connected', onChangeOutcome: undefined,
+    tools: [rivera.toolProfiles.listCharges, rivera.toolProfiles.createRefund].map((row) => reviewTool(row, [])),
+    startingRules: [rivera.toolProfiles.listCharges, rivera.toolProfiles.createRefund].map((row) => startingRule(row, [])),
+    moneyHint: true,
+  },
+  render: (args) => <div style={{ maxWidth: 720 }}><ConnectorReview {...args} /></div>,
+  parameters: { canvas: 'none', canvasNote: 'REV-SETUP connector review, v343: one rule line per tool in Rules’ words, and no effect badges (owner ruling: effects show only in Details).' },
+  play: async ({ canvas }) => {
+    const rules = canvas.getByRole('region', { name: 'The rules that will cover them' });
+    await expect([...rules.querySelectorAll('.cd-rule-sentence__sentence')].map((el) => el.textContent)).toEqual(['Claude asks you before showing customers their own charges', 'Claude asks you before any refund']);
+    await expect(within(rules).getAllByText('Ask me first')).toHaveLength(2);
+    // No effect badges: a tool's effects show only in its Details, on Rules.
+    const tools = canvas.getByRole('region', { name: 'Tools' });
+    await expect(tools.querySelector('.cd-effect-tags')).toBeNull();
+    for (const tag of ['Private data', 'Money', "Can't be undone"]) await expect(within(tools).queryByText(tag)).toBeNull();
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const SetupStartingRulesPhone: Story = {
+  ...SetupStartingRules,
+  globals: { viewport: { value: 'phone', isRotated: false } },
+};
+
+const retainer = businessToolRows([{ title: 'Send a retainer link', how: '', config: { block: 'purpose_payment', purpose: 'Retainer', amount_cents: 50_000 } }])[0]!;
+
+export const SetupJobRule: Story = {
+  ...SetupStartingRules,
+  args: {
+    connector: undefined,
+    job: { title: retainer.business!.title, glyph: businessGlyph(retainer.business!.config)!, rows: businessRows(retainer.business!, 'ask') },
+    tools: [reviewTool(retainer, [])], startingRules: [startingRule(retainer, [])], moneyHint: true,
+    onChangeOutcome: undefined,
+  },
+  parameters: { canvas: 'none', canvasNote: 'REV-SETUP job review, v343: the job’s starting rule and the money note.' },
+  play: async ({ canvas }) => {
+    const rule = canvas.getByRole('region', { name: 'The rule that will cover it' });
+    await expect(rule.querySelector('.cd-rule-sentence__sentence')).toHaveTextContent('Claude asks you before sending a retainer link');
+    await expect(within(rule).getByText('Ask me first')).toBeVisible();
+    await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
+  },
+};
+
+export const SetupJobRulePhone: Story = {
+  ...SetupJobRule,
   globals: { viewport: { value: 'phone', isRotated: false } },
 };

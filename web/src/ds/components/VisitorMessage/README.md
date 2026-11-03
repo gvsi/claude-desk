@@ -1,6 +1,6 @@
 # VisitorMessage
 
-`VisitorMessage` shows what a visitor typed, in a faint bubble on the right.
+`VisitorMessage` shows what a visitor typed, in a faint bubble on the right (on the left in the owner's conversation view, `Transcript`'s `variant="owner"`).
 
 ## When to use
 

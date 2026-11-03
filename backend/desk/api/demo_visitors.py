@@ -20,6 +20,9 @@ credential is present. After the opening, each step:
 1. Wait for the Desk: until Claude's turn ends (`turn_end`), or, once the owner has taken the chat over, until the
    owner says something or hands it back (waiting for Claude when work resumes). While the owner stays quiet, it sends its one fixed nudge
    (`DEMO_VISITOR_NUDGE`) after 90 seconds, with no model call, and ends `owner_silent` after four minutes.
+   Once its brief is done while a request the chat showed as held has no outcome yet, it waits instead of ending: for
+   that outcome (`resolved`) and Claude's own follow-up to it (`_deciding`), or until the owner says something in the
+   chat, with no nudge and no model call, since the owner answers in Approvals.
 2. Its model reads what a visitor saw since its last step: each delivered message's plain text labelled by who said
    it (Claude, or the owner by the name the stream carries, as a person), each request's signed status, and where the
    owner joined and left, all inside `<desk_reply>` (`prompts.wrap`), as information.
@@ -34,12 +37,14 @@ credential is present. After the opening, each step:
 Its persona is the fixed line of the Desk's set (`prompts.DEMO_VISITORS`, chosen by the caller with
 `agents.demo_task_set`), so no business's, owner's or visitor's words reach its model except the chat it is shown.
 
-A run ends `done` once its brief is done (`finished`), at a cap (`limit`: ten messages, twelve model calls or fifteen
-minutes) or when the owner stays quiet (`owner_silent`); `stopped` when the owner stops it (`stopped_by_owner`, with no
-further model call, and its stream closed) or the chat's session is gone (`chat_ended`: a 401 `no_session`, a closed
-stream or the stream's `session` error); `failed` for today's budget (`budget`) or a model or HTTP failure (`failed`,
-logged by type only, never with the Desk's text). Runs live in this process's memory (`DemoVisitors`): the 50 newest
-that have ended, for an hour, and every one still running, each readable by its copy alone.
+A run ends `done` once its brief is done, no held request waits on the owner and nothing has come that its model
+hasn't read (`finished`; else it reads what came, step 2), at a cap (`limit`: ten messages, twelve model calls or
+fifteen minutes) or when the owner stays quiet (`owner_silent`); `stopped` when the owner stops it
+(`stopped_by_owner`, with no further model call, and its stream closed) or the chat's session is gone (`chat_ended`: a
+401 `no_session`, a closed stream or the stream's `session` error); `failed` for today's budget (`budget`) or a model
+or HTTP failure (`failed`, logged by type only, never with the Desk's text). Runs live in this process's memory
+(`DemoVisitors`): the 50 newest that have ended, for an hour, and every one still running, each readable by its copy
+alone.
 """
 
 import asyncio
@@ -90,6 +95,7 @@ RUN_LIFE = timedelta(hours=1)   # how long an ended run's record, and a start, c
 STARTS_PER_HOUR = 3             # a copy's starts
 NUDGE_AFTER_S = 90.0            # the owner quiet this long after taking the chat over: one "Are you still there?"
 OWNER_SILENT_S = 240.0          # and this long: the run ends
+FOLLOW_UP_S = 10.0              # a follow-up turn starts well within this of the turn before it ending
 READING_MIN_S, READING_MAX_S, READING_PER_CHAR_S = 2.0, 4.0, 0.02
 TYPING_MIN_S, TYPING_MAX_S, TYPING_PER_CHAR_S = 3.0, 8.0, 0.05
 TYPING_REFRESH_S = 4.0          # refresh before presence.TYPING_SHOWS_FOR's five-second lifetime
@@ -334,6 +340,58 @@ def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
     return _Answer(False, "owner" if handoff else mode, heard)
 
 
+@dataclass
+class _Deciding:
+    """Whether the chat still waits on the owner's answer to a held request, and, when that may already be over,
+    until when (`grace`)."""
+
+    waiting: bool
+    grace: datetime | None
+
+
+def _deciding(events: Sequence[_Seen]) -> _Deciding:
+    """Whether the chat still waits on the owner's answer to a request it showed as `held`: one with no `resolved`
+    for it yet, or Claude's follow-up to the latest `resolved` not ended yet. The follow-up is the turn that starts
+    (`writing`) after the outcome; when no turn is running as the outcome comes, the first turn to end after it. A
+    turn running as it comes may read it with its next model call, and then no turn of its own follows: once that
+    turn has ended, the wait is over `FOLLOW_UP_S` later unless a follow-up starts. While the owner has the chat no
+    turn's end counts: a hand-back that resumes work waits for that work's turn, and one that resumes none ends the
+    wait."""
+    held: set[str] = set()
+    owner = running = following = started = skip = False
+    grace: datetime | None = None
+    for _, seen in _unfenced_events(events):
+        event = seen.event
+        kind = event.type
+        if kind == "held":
+            held.add(event.decision_id)
+        elif kind == "resolved":
+            held.discard(event.decision_id)
+            following, started, skip, grace = True, False, running, None
+        elif kind == "writing":
+            running, started = True, following
+            grace = None
+        elif kind == "owner_joined":
+            owner, grace = True, None
+        elif kind == "owner_left":
+            owner = False
+            following, started, skip, grace = following and event.resuming, False, False, None
+        elif kind == "turn_end":
+            running = False
+            if owner:
+                continue
+            if following and skip and not started:     # the turn that was running as the outcome came
+                skip, grace = False, seen.at + timedelta(seconds=FOLLOW_UP_S)
+            elif following:
+                following, grace = False, None
+    return _Deciding(waiting=bool(held) or following, grace=None if held else grace)
+
+
+def _owner_said(events: Sequence[_Seen], since: int) -> bool:
+    """Whether the owner said something in the chat in the events from `since` on (a whisper never reaches it)."""
+    return any(seen.event.type == "message" and seen.event.author == "owner" for seen in events[since:])
+
+
 async def _first(feed: _Feed, timer: Awaitable[None]) -> None:
     """Wait until the feed changes or `timer` ends, whichever is first."""
     changed = asyncio.ensure_future(feed.after(len(feed.events)))
@@ -455,6 +513,24 @@ class _Chat:
                 wait = min(wait, (OWNER_SILENT_S if nudged else NUDGE_AFTER_S) - quiet)
             await _first(self.feed, self.sleep(wait))
 
+    def deciding(self) -> datetime | None:
+        """Until when the chat waits on the owner's answer to a held request (`_deciding`): the run's deadline, or a
+        grace's end before it; None once it doesn't wait."""
+        deciding = _deciding(self.feed.events)
+        if not deciding.waiting:
+            return None
+        if deciding.grace is None:
+            return self.deadline
+        return min(self.deadline, deciding.grace) if self.clock() < deciding.grace else None
+
+    async def decided(self, since: int) -> None:
+        """Wait while the chat waits on the owner's answer to a held request (`deciding`), unless the owner says
+        something in the chat that the visitor's model hasn't read (from the feed's `since` on). The owner answers the
+        request in Approvals, not in the chat, so it sends no nudge; the run's own time limit holds throughout."""
+        while (until := self.deciding()) is not None and not _owner_said(self.feed.events, since):
+            self.check()
+            await _first(self.feed, self.sleep((until - self.clock()).total_seconds()))
+
 
 async def _step(model: ModelClient, messages: list[dict], record: Record) -> VisitorStep:
     """The visitor's next step, its usage recorded right after the call; `ModelUnavailable` when there is none."""
@@ -560,12 +636,16 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
         step = await chat.active(_step(model, messages, record))
         calls += 1
         if step.done:
-            raise _Ended("finished")
-        if not step.message.strip():
+            await chat.decided(shown)             # a held request's outcome, and Claude's follow-up to it
+            nudged = False
+        elif not step.message.strip():
             raise RunFailed("the model wrote an empty message")
-        mark = await chat.active(chat.write(step.message, read=read))
-        nudged = await chat.answered(mark, chat.clock())
+        else:
+            mark = await chat.active(chat.write(step.message, read=read))
+            nudged = await chat.answered(mark, chat.clock())
         lines = _lines(chat.feed.events, shown)
+        if step.done and not lines:               # its brief is done, and nothing came that its model hasn't read
+            raise _Ended("finished")
         shown, read = len(chat.feed.events), sum(len(line) for line in lines)
         messages += [{"role": "assistant", "content": [{"type": "text", "text": step.model_dump_json()}]},
                      _shown(lines, nudged=nudged)]

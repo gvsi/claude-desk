@@ -30,6 +30,7 @@ function deskWithoutJobs() {
 function seedJobs() {
   const desk = deskWithoutJobs();
   desk.summary.business_name = 'Chen & Co. CPA';
+  desk.summary.hours = [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }];
   seedBusinessTools(desk, chenBusinessTools.map((row) => ({ ...row, status: 'enabled', review_reason: null })));
   desk.policy = { ...desk.policy, cards: [INTAKE_RULE] };
   return desk;
@@ -44,10 +45,10 @@ it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order, with
   expect([...jobs.element().querySelectorAll('.cd-house-rules__tool-name')].map((el) => el.textContent)).toEqual([
     'Book a free intro call', 'New client intake',
   ]);
-  await expect.element(jobs.getByText('Free intro call, 20 minutes, in your opening hours')).toBeVisible();
+  await expect.element(jobs.getByText('Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', { exact: true })).toBeVisible();
   await expect.element(jobs.getByText('Asks: Is this for you or for a business? Which tax years do you need help with? Do you already have a bookkeeper?')).toBeVisible();
   await expect.element(jobs.getByText('Claude can use new client intake', { exact: true })).toBeVisible();
-  await expect.element(jobs.getByText('Claude asks you before using book a free intro call', { exact: true })).toBeVisible();
+  await expect.element(jobs.getByText('Claude asks you before booking a free intro call', { exact: true })).toBeVisible();
   expect(jobs.getByText('Anything else here: ask me.').elements()).toHaveLength(0);
   expect(jobs.getByRole('link').elements()).toHaveLength(0);
   // The Desk's own jobs are the first card, tool by tool.
@@ -126,7 +127,7 @@ it('keeps active jobs and their rules with safe fallback names and descriptions'
     ]);
     const untitled = jobs.getByRole('region', { name: 'A connected tool', exact: true }).elements();
     expect(untitled.map((card) => card.querySelector(`${prefix}__tool-description`)?.textContent)).toEqual([
-      undefined, 'Free intro call, 20 minutes, in your opening hours', 'Free intro call, 20 minutes, in your opening hours',
+      undefined, 'Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm', 'Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm',
     ]);
     for (const [index, card] of untitled.entries()) {
       expect(card.querySelectorAll('.cd-house-rules__rule')).toHaveLength(1);

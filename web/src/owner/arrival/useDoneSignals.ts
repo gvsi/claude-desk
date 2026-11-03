@@ -3,7 +3,8 @@
  * another owner screen already makes, under that screen's key, so they share it: the conversations
  * list, a preview chat's transcript, Safety's attempts and its signed record, and the copy's Desks.
  * "Chat as a customer", "Try to break it" and "Answer a held request" read the Desk the copy started
- * with, on whichever Desk the list shows. "Watch a demo visitor" and "Create your own Desk" are
+ * with, on whichever Desk the list shows. "Try to break it" counts a stopped attempt or a held
+ * request in one of the owner's preview chats. "Watch a demo visitor" and "Create your own Desk" are
  * copy-wide: a demo visitor runs on the Desk it was started from, so every listed Desk's
  * conversations are read for one. A hidden list reads nothing, and a read stops once every thing it tells is
  * done. A read that is loading or failed ticks nothing and shows no error: the list is a guide.
@@ -27,6 +28,7 @@ import {
   answeredOnRecord,
   chattedAsCustomer,
   demoVisitorRan,
+  heldInPreview,
   keepFor,
   listedDesks,
   madeAnotherDesk,
@@ -198,7 +200,11 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
         reading &&
         fresh(conversationsKey(seeded ?? ''), conversations) &&
         (previews.length === 0 || (fresh(attemptsQuery(seeded ?? '').queryKey, attempts) && fresh(ledgerQuery(seeded ?? '').queryKey, ledger))),
-      done: reading && conversationsWorked && stopped !== undefined && record !== undefined && stoppedInPreview(stopped, record, previewIds),
+      done:
+        reading &&
+        conversationsWorked &&
+        record !== undefined &&
+        (heldInPreview(record, previewIds) || (stopped !== undefined && stoppedInPreview(stopped, record, previewIds))),
     },
     answer: {
       settled: reading && fresh(ledgerQuery(seeded ?? '').queryKey, ledger),

@@ -55,6 +55,8 @@
   display: flex;
   align-items: center;
   gap: var(--space-10);
+  color: inherit;
+  text-decoration: none;
 }
 
 .cd-about-switch {

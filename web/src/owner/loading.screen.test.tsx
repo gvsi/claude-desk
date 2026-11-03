@@ -415,7 +415,7 @@ it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_
 });
 
 const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
-  { name: 'owner-footer', page: '.cd-owner-layout__footer', size: true },
+  { name: 'owner-footer', page: '[data-owner-footer]', size: true },
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
   { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
@@ -471,11 +471,11 @@ it.each([320, 620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s',
   await expectSkeletonLoad({
     status: 'Opening your Desk',
     anchors,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => { await router.navigate(TODAY); },
     release: () => {
       before = anchors.map(({ name }) => document.querySelector(`[data-skeleton-anchor="${name}"]`)!.getBoundingClientRect());
-      footer = landedRect('.cd-owner-layout__footer');
+      footer = landedRect('[data-owner-footer]');
       reads.forEach((read) => read.release());
     },
   });
@@ -486,7 +486,7 @@ it.each([320, 620, 820, 1024, 1279, 1512])('today_content_lands_in_place at %s',
     }
   }
   for (const edge of ['top', 'bottom'] as const) {
-    expect(Math.abs(footer![edge] - landedRect('.cd-owner-layout__footer')[edge]), `footer ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+    expect(Math.abs(footer![edge] - landedRect('[data-owner-footer]')[edge]), `footer ${edge}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
   }
   expect(gaps()).toBe(0);
   expectNoHorizontalScroll();
@@ -699,7 +699,7 @@ function watchTheTickedRow(phone: boolean) {
     return {
       card: boundsFromRect(card?.getBoundingClientRect() ?? shape('things-card')),
       under: under.map(({ name, page }) => boundsFromRect(landedElement(page)?.getBoundingClientRect() ?? shape(name))),
-      footer: boundsFromRect(landedRect('.cd-owner-layout__footer')),
+      footer: boundsFromRect(landedRect('[data-owner-footer]')),
     };
   };
   const changes: ReturnType<typeof snapshot>[] = [];
@@ -722,7 +722,7 @@ function watchTheTickedRow(phone: boolean) {
   onTestFinished(stop);
   return {
     record: () => {
-      before = { card: shape('things-card'), under: under.map(({ name }) => shape(name)), footer: landedRect('.cd-owner-layout__footer') };
+      before = { card: shape('things-card'), under: under.map(({ name }) => shape(name)), footer: landedRect('[data-owner-footer]') };
       sample();
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state'] });
       frame = requestAnimationFrame(sampleFrame);
@@ -750,7 +750,7 @@ function watchTheTickedRow(phone: boolean) {
           expect(Math.abs(real[dimension] - before!.under[i]![dimension]), `${name} ${dimension}`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
         }
       });
-      const footer = landedRect('.cd-owner-layout__footer');
+      const footer = landedRect('[data-owner-footer]');
       expect(Math.abs(footer.top - before!.footer.top - change), "the footer moves by the card's change").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
     },
   };
@@ -1124,8 +1124,9 @@ it('other_page_reload_draws_the_frame_alone', async () => {
     open: async () => {
       await renderRoute(`/app/${RIVERA.deskId}/share`, { pollScale: 100 });
       await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
-      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout')?.children).toHaveLength(1);
-      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout > footer')).not.toBeNull();
+      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout')?.children).toHaveLength(0);
+      expect(document.querySelector('.cd-skeleton-screen__layer .cd-sidebar__concept-footer [data-ds="concept-footer"]')).not.toBeNull();
+      expect(document.querySelector('.cd-skeleton-screen__layer .cd-owner-layout > footer')).toBeNull();
       expect(document.querySelector('.cd-skeleton-screen__layer .cd-today')).toBeNull();
     },
     release: desks.release,
@@ -1258,7 +1259,7 @@ it.each(['desktop', 'phone'] as const)('customers_load_in_place at %s', async (v
   await expectSkeletonLoad({
     status: 'Loading your customers',
     anchors: CUSTOMERS_ANCHORS,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Customers/ }).click();
       else await router.navigate(PEOPLE);
@@ -1275,7 +1276,7 @@ it('customers_still_under_reduced_motion', async () => {
   await expectSkeletonStill({
     status: 'Loading your customers',
     anchors: CUSTOMERS_ANCHORS,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Customers/ }).click();
     },
@@ -1371,7 +1372,7 @@ it.each(['desktop', 'phone'] as const)('customers_reload_hands_off at %s', async
     status: 'Loading your customers',
     continues: true,
     anchors: CUSTOMERS_ANCHORS,
-    stays: ['.cd-owner-layout__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       desks.release();
       await expect.element(screen.getByRole('heading', { level: 1, name: 'Customers' })).toBeVisible();
@@ -1644,7 +1645,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await expectSkeletonLoad({
     status: 'Reading your conversations',
     anchors: LIST_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Conversations/ }).click();
       else await router.navigate(CONVERSATIONS);
@@ -1662,7 +1663,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       if (viewport === 'desktop') await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
       else await router.navigate(`${CONVERSATIONS}/${SEEDED_HOLD}`);
@@ -1761,7 +1762,7 @@ it('conversation_waits_for_needs_you', async () => {
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors: PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open,
     release: held.release,
   });
@@ -1776,7 +1777,7 @@ it('conversation_waits_for_the_list_that_names_it', async () => {
   await expectSkeletonLoad({
     status: 'Opening the conversation',
     anchors: PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open,
     release: held.release,
   });
@@ -1808,7 +1809,7 @@ it('conversations_still_under_reduced_motion', async () => {
   await expectSkeletonStill({
     status: 'Reading your conversations',
     anchors: LIST_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       await screen.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /^Conversations/ }).click();
     },
@@ -1818,7 +1819,7 @@ it('conversations_still_under_reduced_motion', async () => {
   await expectSkeletonStill({
     status: 'Opening the conversation',
     anchors: PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       await screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: /Needs you/ }).click();
     },
@@ -1846,7 +1847,7 @@ it('conversation_reload_hands_off at 390', async () => {
     status: 'Opening the conversation',
     continues: true,
     anchors: PHONE_PANE_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       desks.release();
       await expect.element(screen.getByRole('link', { name: 'All conversations' })).toBeVisible();
@@ -1870,9 +1871,10 @@ it('conversations_reload_hands_off at 1440', async () => {
   const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
   await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
   await nextFrames();
-  // The full-page skeleton draws the list's title, its rows down the column and the page's own footer.
+  // The full-page skeleton draws the list and the concept line in the desktop sidebar.
   expect(document.querySelector(`${FULL_LAYER} .cd-conversations__title .cd-skeleton-line--page-title`)).not.toBeNull();
-  expect(document.querySelector(`${FULL_LAYER} .cd-conversations__footer .cd-concept-footer`)).not.toBeNull();
+  expect(document.querySelector(`${FULL_LAYER} .cd-sidebar__concept-footer .cd-concept-footer`)).not.toBeNull();
+  expect(document.querySelector(`${FULL_LAYER} .cd-conversations__footer`)).toBeNull();
   expect(document.querySelector(`${FULL_LAYER} .cd-owner-layout__footer`)).toBeNull();
   const names = LIST_ANCHORS.map(({ name }) => name);
   const before = fullPageShapes(names);
@@ -1880,7 +1882,7 @@ it('conversations_reload_hands_off at 1440', async () => {
     status: 'Reading your conversations',
     continues: true,
     anchors: LIST_ANCHORS,
-    stays: ['.cd-conversations__footer'],
+    stays: ['[data-owner-footer]'],
     open: async () => {
       desks.release();
       await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
@@ -2019,7 +2021,7 @@ it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async 
   const headings = watchTopHeadings();
   await expectSkeletonLoad({
     status: 'Reading your rules', anchors: RULES_ANCHORS,
-    stays: ['.cd-rules__header', '.cd-rules__ask', '.cd-owner-layout__footer'],
+    stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
       await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
@@ -2086,7 +2088,7 @@ it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (view
   await expectSkeletonLoad({
     status: 'Reading what was stopped',
     anchors: SAFETY_ANCHORS,
-    stays: ['.cd-safety > .cd-page-header', '.cd-owner-layout__footer'],
+    stays: ['.cd-safety > .cd-page-header', '[data-owner-footer]'],
     open: async () => { await router.navigate(SAFETY); }, release: ledger.release,
   });
   await landing.expectStill();
@@ -2117,7 +2119,7 @@ it.each([
       desks.release();
       await vi.waitFor(() => expect(document.querySelector(`${region} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
       expectSameShapes(region, names, before);
-      const realFooter = landedElement('.cd-owner-layout__footer')!.getBoundingClientRect();
+      const realFooter = landedElement('[data-owner-footer]')!.getBoundingClientRect();
       for (const edge of ['top', 'bottom', 'left', 'width', 'height'] as const) {
         expect(Math.abs(footer![edge] - realFooter[edge]), `footer ${edge} across the hand-off`).toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
       }
@@ -2592,7 +2594,7 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
   const { router } = await openToday();
   await expectSkeletonLoad({
     status: 'Reading your rules', anchors: RULES_ANCHORS,
-    stays: ['.cd-rules__header', '.cd-rules__ask', '.cd-owner-layout__footer'],
+    stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
       await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));

@@ -29,6 +29,7 @@ from sqlalchemy import text
 
 from desk.api import demo_visitors as demo_visitors_module
 from desk.api.demo_visitors import (
+    FOLLOW_UP_S,
     MAX_MESSAGES,
     MAX_MODEL_CALLS,
     MAX_RUNS,
@@ -49,6 +50,7 @@ from desk.api.prompts import (
     DEMO_VISITORS,
     DEMO_VISITOR_SYSTEM,
     DESK_REPLY_TAG,
+    RECEIPT_LINE,
     DemoTaskSet,
     VisitorStep,
     demo_visitor_brief,
@@ -57,12 +59,12 @@ from desk.api.prompts import (
 from desk.api.setup import default_notifications
 from desk.contracts import BusinessSeed, CopyCreated, DeskSeed
 from desk.kernel_api import CreateCopyRequest, CreateDeskRequest
-from tests.api.fakes import JOB_ROUTES, ScriptedModel, gated, response, unavailable
+from tests.api.fakes import JOB_ROUTES, ScriptedModel, gated, response, tool_use, unavailable
 from tests.api.fakes import text as text_block
 from tests.api.loopback import StreamingLoopback
 from tests.api.test_copies import usage_row
 from tests.api.test_demo_agent import owner_desk, setup_row, task_set_of
-from tests.api.test_public_chat import Stream, reply
+from tests.api.test_public_chat import DISCOUNTED_QUOTE, Stream, reply
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
 
@@ -731,6 +733,304 @@ async def test_handoff_waits_for_an_answer_or_owner_silence(
         assert len(visitor_model.requests) == 0
         assert await rows(engine, started.session_id, "visitor_text") == [
             OPENING_LINES["rivera"], "Are you still there?"]
+
+
+# A request held for the owner ---------------------------------------------------------------------------------------
+
+DISCOUNT_ASK = "Could I get 15% off a drain clearing?"
+
+
+def asks_for_a_discount(visitor_model: ScriptedModel, desk_model: ScriptedModel, *after: ModelResponse) -> None:
+    """After Claude answers its opening, its first message of its own asks for a discount, which Claude quotes and the
+    kernel holds for the owner; its model then says its brief is done, and plays `after` if it is asked again."""
+    visitor_model.add(step(DISCOUNT_ASK), step("", done=True), *after)
+    desk_model.add(say("Yes, we fix leaks like that."),
+                   response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")))
+
+
+def held_decision(fake, session_id: str):
+    (held,) = [record.decision for record in fake.decisions.values()
+               if record.decision.session_id == session_id and record.decision.state == "held"]
+    return held
+
+
+async def until_asked(visitor_model: ScriptedModel, count: int) -> None:
+    """Until its model has been asked `count` times, and the run has gone on from that step."""
+    async def asked() -> bool:
+        return len(visitor_model.requests) >= count
+
+    await until(asked)
+    await asyncio.sleep(0.1)
+
+
+async def until_done_while_held(visitor_model: ScriptedModel) -> None:
+    """Until its model has said its brief is done while the quote is held, and the run has gone on from that step."""
+    await until_asked(visitor_model, 2)
+
+
+async def deny(owner: httpx.AsyncClient, fake, session_id: str) -> dict:
+    """The owner denies the session's held request in Approvals; the decision as the kernel signed it."""
+    answered = await owner.post(f"/api/owner/approvals/{held_decision(fake, session_id).decision_id}/answer",
+                                json={"answer": "deny_once"})
+    assert answered.status_code == 200, answered.text
+    return answered.json()["decision"]
+
+
+async def resolved_shown(engine, session_id: str) -> bool:
+    async with engine.connect() as conn:
+        return (await conn.execute(text("SELECT count(*) FROM app.run_events WHERE session_id = :s AND kind = 'sse'"
+                                        " AND type = 'resolved'"), {"s": session_id})).scalar_one() > 0
+
+
+async def test_waits_for_the_owners_answer_to_a_held_request_and_claudes_follow_up(
+        app, browser, fake, visitors, visitor_model, desk_model, engine, copy, sleeps):
+    owner = owner_of(app, browser, copy)
+    asks_for_a_discount(visitor_model, desk_model, step("", done=True))
+    desk_model.add(say("Mike couldn't offer that discount this time, sorry."))
+    started = await start(visitors, fake, copy)
+    await until_done_while_held(visitor_model)
+
+    # Its brief is done, but its quote waits in the owner's Approvals: it keeps the chat open, with no nudge and no
+    # model call, its own time limit the only timer.
+    assert visitors.run(started.run_id, copy.copy_id).state == "running"
+    assert await sleeps.waiting() > OWNER_SILENT_S
+    assert len(visitor_model.requests) == 2
+    answered = await owner.post(f"/api/owner/approvals/{held_decision(fake, started.session_id).decision_id}/answer",
+                                json={"answer": "deny_once"})
+    assert answered.status_code == 200, answered.text
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    # The denial reached the chat while its stream was open, so Claude followed it up; its model read both, then
+    # finished.
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 2)
+    assert len(desk_model.requests) == 3 and len(visitor_model.requests) == 3
+    denied = answered.json()["decision"]
+    assert denied["state"] == "denied"
+    assert last_input(visitor_model.requests[2]) == wrap(DESK_REPLY_TAG, "\n".join([
+        RECEIPT_LINE.format(state="denied", text=denied["visitor_plain"]),
+        "Claude (the business's AI): Mike couldn't offer that discount this time, sorry."]))
+    assert await rows(engine, started.session_id, "visitor_text") == [OPENING_LINES["rivera"], DISCOUNT_ASK]
+    assert sleeps.timers == []
+
+
+async def test_an_outcome_that_comes_while_its_model_thinks_is_read_before_it_finishes(
+        app, browser, fake, visitors, visitor_model, desk_model, engine, copy, sleeps, monkeypatch):
+    owner = owner_of(app, browser, copy)
+    release, followed_up = asyncio.Event(), asyncio.Event()
+    thinking = gated(step("", done=True), release)
+    ends = 0
+    push = demo_visitors_module._Feed.push
+
+    def observed(feed, at, event):
+        nonlocal ends
+        push(feed, at, event)
+        ends += event.type == "turn_end"
+        if ends == 3:                                              # the opening's, the quote's and the follow-up's
+            followed_up.set()
+
+    monkeypatch.setattr(demo_visitors_module._Feed, "push", observed)
+    visitor_model.add(step(DISCOUNT_ASK), thinking, step("", done=True))
+    desk_model.add(say("Yes, we fix leaks like that."),
+                   response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")),
+                   say("Mike couldn't offer that discount this time, sorry."))
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(thinking.entered.wait(), 5)
+    try:
+        # While its model thinks about the held quote, the owner denies it and Claude's follow-up comes and ends.
+        denied = await deny(owner, fake, started.session_id)
+        await asyncio.wait_for(followed_up.wait(), 5)
+    finally:
+        release.set()
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    # Its model said it was done having read only the held quote: it reads the outcome and the follow-up first.
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 2)
+    assert len(visitor_model.requests) == 3
+    assert last_input(visitor_model.requests[2]) == wrap(DESK_REPLY_TAG, "\n".join([
+        RECEIPT_LINE.format(state="denied", text=denied["visitor_plain"]),
+        "Claude (the business's AI): Mike couldn't offer that discount this time, sorry."]))
+    assert sleeps.timers == []
+
+
+async def test_a_turn_running_as_the_answer_comes_isnt_claudes_follow_up(
+        app, browser, fake, visitors, visitor_model, desk_model, engine, copy):
+    owner = owner_of(app, browser, copy)
+    release_reply, release_follow_up = asyncio.Event(), asyncio.Event()
+    answering = gated(say("Yes, we clear blocked drains too."), release_reply)
+    following = gated(say("Mike couldn't offer that discount this time, sorry."), release_follow_up)
+    # It keeps talking while the quote is held, and Claude is answering when the owner's answer comes.
+    visitor_model.add(step(DISCOUNT_ASK), step("Do you also clear blocked drains?"), step("", done=True),
+                      step("", done=True))
+    desk_model.add(say("Yes, we fix leaks like that."),
+                   response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")),
+                   answering, following)
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(answering.entered.wait(), 5)
+    denied = await deny(owner, fake, started.session_id)
+    await until(lambda: resolved_shown(engine, started.session_id))     # the answer reaches the chat mid-turn
+    release_reply.set()
+    await asyncio.wait_for(following.entered.wait(), 5)           # Claude's follow-up is a turn of its own
+    try:
+        # Its model read the reply and the outcome and said it was done, but the follow-up hasn't ended: it waits.
+        await until_asked(visitor_model, 3)
+        assert visitors.run(started.run_id, copy.copy_id).state == "running"
+        assert len(visitor_model.requests) == 3
+    finally:
+        release_follow_up.set()
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 3)
+    assert len(visitor_model.requests) == 4
+    assert last_input(visitor_model.requests[2]) == wrap(DESK_REPLY_TAG, "\n".join([
+        RECEIPT_LINE.format(state="denied", text=denied["visitor_plain"]),
+        "Claude (the business's AI): Yes, we clear blocked drains too."]))
+    assert last_input(visitor_model.requests[3]) == wrap(
+        DESK_REPLY_TAG, "Claude (the business's AI): Mike couldn't offer that discount this time, sorry.")
+
+
+async def test_a_turn_that_read_the_outcome_itself_ends_the_wait_after_a_grace(
+        app, browser, fake, visitors, visitor_model, desk_model, engine, copy, sleeps):
+    owner = owner_of(app, browser, copy)
+    release = asyncio.Event()
+    looking = gated(response(tool_use("native__find_slots", {"days": 3})), release)
+    visitor_model.add(step(DISCOUNT_ASK), step("Do you have any open times this week?"), step("", done=True))
+    desk_model.add(say("Yes, we fix leaks like that."),
+                   response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")),
+                   looking, say("Mike couldn't offer that discount this time, sorry."))
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(looking.entered.wait(), 5)
+    denied = await deny(owner, fake, started.session_id)
+    await until(lambda: resolved_shown(engine, started.session_id))     # the answer reaches the chat mid-turn
+    release.set()                                  # the turn's next call reads the outcome: no turn of its own follows
+    await until_asked(visitor_model, 3)
+
+    # Its model said it was done once that turn ended. A follow-up of its own would start within the grace; none does.
+    assert await sleeps.waiting(FOLLOW_UP_S) == FOLLOW_UP_S
+    assert visitors.run(started.run_id, copy.copy_id).state == "running"
+    assert await sleeps.elapse(FOLLOW_UP_S) == FOLLOW_UP_S
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 3)
+    assert len(visitor_model.requests) == 3 and len(desk_model.requests) == 4
+    assert f'<action_update decision_id=\\"{denied["decision_id"]}\\" state=\\"denied\\">' in json.dumps(
+        desk_model.requests[3].messages)
+    assert "Claude (the business's AI): Mike couldn't offer that discount this time, sorry." in last_input(
+        visitor_model.requests[2])
+    assert sleeps.timers == [FOLLOW_UP_S]
+
+
+async def test_no_turns_end_counts_while_the_owner_has_the_chat(app, browser, fake, visitors, visitor_model,
+                                                                desk_model, engine, copy):
+    owner = owner_of(app, browser, copy)
+    release = asyncio.Event()
+    following = gated(say("Mike couldn't offer that discount this time, sorry."), release)
+    asks_for_a_discount(visitor_model, desk_model, step("", done=True))
+    desk_model.add(following)
+    started = await start(visitors, fake, copy)
+    await until_done_while_held(visitor_model)
+    denied = await deny(owner, fake, started.session_id)
+    await asyncio.wait_for(following.entered.wait(), 5)           # Claude's follow-up is under way
+    try:
+        await change_mode(owner, fake, started.session_id, "takeover")
+    finally:
+        release.set()                                              # its reply is fenced, and its turn ends
+    await until(lambda: turn_ends_at_least(engine, started.session_id, 3))
+    await asyncio.sleep(0.1)
+    # The owner has the chat, so that end doesn't count: it waits for the hand-back, with no model call.
+    assert visitors.run(started.run_id, copy.copy_id).state == "running"
+    assert len(visitor_model.requests) == 2
+    await change_mode(owner, fake, started.session_id, "handback")
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    # The fenced turn had read the outcome, so the hand-back resumed nothing and ended the wait.
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 2)
+    assert len(visitor_model.requests) == 3 and len(desk_model.requests) == 3
+    assert last_input(visitor_model.requests[2]) == wrap(DESK_REPLY_TAG, "\n".join([
+        RECEIPT_LINE.format(state="denied", text=denied["visitor_plain"]),
+        "Mike Turner (the owner, a person) joined the chat.",
+        "The owner left the chat, and Claude (the business's AI) answers again."]))
+
+
+async def test_the_owner_saying_something_ends_the_wait(app, browser, fake, visitors, visitor_model, desk_model,
+                                                        engine, copy, sleeps):
+    owner = owner_of(app, browser, copy)
+    asks_for_a_discount(visitor_model, desk_model, step("Okay, thanks Mike."), step("", done=True))
+    desk_model.add(say("Mike has declined the discount, sorry."))
+    started = await start(visitors, fake, copy)
+    session_id = started.session_id
+    await until_done_while_held(visitor_model)
+    await change_mode(owner, fake, session_id, "takeover")
+    await asyncio.sleep(0.1)
+    assert len(visitor_model.requests) == 2                        # taking over alone doesn't end the wait
+    await owner_writes(owner, session_id, "Mike here: there's no extra discount, sorry.", kind="whisper")
+    await asyncio.sleep(0.1)
+    assert len(visitor_model.requests) == 2                        # nor does a whisper, which the chat never shows
+
+    # The owner's own message does: its model reads it on its next step and answers the owner.
+    await owner_writes(owner, session_id, "Hi Riley, Mike here. I can't do 15% this time, sorry.")
+    await until_asked(visitor_model, 3)
+    assert last_input(visitor_model.requests[2]) == wrap(DESK_REPLY_TAG, "\n".join([
+        "Mike Turner (the owner, a person) joined the chat.",
+        "Mike Turner (the owner, a person): Hi Riley, Mike here. I can't do 15% this time, sorry."]))
+    await until(lambda: rows_count(engine, session_id, 3))
+    denied = await deny(owner, fake, session_id)
+    await change_mode(owner, fake, session_id, "handback")        # the answer waited for Claude: it resumes
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 3)
+    assert await rows(engine, session_id, "visitor_text") == [OPENING_LINES["rivera"], DISCOUNT_ASK,
+                                                              "Okay, thanks Mike."]
+    assert len(visitor_model.requests) == 4 and len(desk_model.requests) == 3
+    assert last_input(visitor_model.requests[3]) == wrap(DESK_REPLY_TAG, "\n".join([
+        RECEIPT_LINE.format(state="denied", text=denied["visitor_plain"]),
+        "The owner left the chat, and Claude (the business's AI) answers again.",
+        "Claude (the business's AI): Mike has declined the discount, sorry."]))
+    assert sleeps.timers == []                                     # nothing waited out a timer, let alone 15 minutes
+
+
+async def test_a_held_request_never_answered_ends_at_its_time_limit(app, fake, visitors, visitor_model, desk_model,
+                                                                     engine, copy, sleeps):
+    asks_for_a_discount(visitor_model, desk_model, step("never asked"))
+    started = await start(visitors, fake, copy)
+    await until_done_while_held(visitor_model)
+    waited = await sleeps.elapse()                                 # the rest of its fifteen minutes
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "limit", 2)
+    assert sum(sleeps.pauses) + waited == pytest.approx(RUN_LIMIT.total_seconds())
+    assert sleeps.timers == [waited]                               # no nudge, and no model call while it waited
+    assert len(visitor_model.requests) == 2
+    assert await rows(engine, started.session_id, "visitor_text") == [OPENING_LINES["rivera"], DISCOUNT_ASK]
+
+
+async def test_stop_ends_the_wait_for_a_held_request(app, fake, visitors, visitor_model, desk_model, copy, sleeps):
+    asks_for_a_discount(visitor_model, desk_model, step("never asked"))
+    started = await start(visitors, fake, copy)
+    await until_done_while_held(visitor_model)
+    assert await sleeps.waiting() > OWNER_SILENT_S
+
+    stopped = await visitors.stop(started.run_id, copy.copy_id)
+    assert (stopped.state, stopped.ended, stopped.messages_sent) == ("stopped", "stopped_by_owner", 2)
+    assert app.state.runtime.stream_slots.open_counts() == ({}, {})        # its stream closed
+    assert len(visitor_model.requests) == 2
+
+
+async def test_finishes_at_once_when_no_request_is_held(app, fake, visitors, visitor_model, desk_model, copy, sleeps):
+    visitor_model.add(step("What does a drain clearing cost?"), step("", done=True))
+    desk_model.add(say("Yes, we fix leaks like that."), say("A drain clearing is on our price list."))
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 2)
+    assert len(visitor_model.requests) == 2 and sleeps.timers == []
 
 
 # How a run ends ---------------------------------------------------------------------------------------------------

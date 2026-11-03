@@ -21,6 +21,7 @@
 - Its receipts attach under the message at every width, `space-8` below it and `space-8` apart, on the message's side: under Claude's and the owner's words they start at the left, as wide as the row; under a visitor's or an agent's bubble on the right they end where the bubble ends and are at most 85% of the row wide, like the bubble. Their lines start together either way, so the dots stay in one column. On the owner's wide screens, on a phone and on the public page alike, each checkpoint result sits right under the message it explains.
 - A `Notice` under a bubble on the right keeps the same rule, at every width: its line starts with the lines above it, so the dots stay in one column, and its next step sits `space-8` under the line, at the right, ending where the bubble ends. The line ends there too when it is the widest thing attached. The step never sits beside the line there, so what is attached is only as wide as its widest line.
 - The header's captions stack the same way, the receipts' caption second.
+- In the owner's conversation view (`Transcript`'s `variant="owner"`, board REV-FLIP) the sides flip: a visitor's or an agent's bubble starts at the left, with what is attached under it starting where it starts, and a row holding Claude's, a whisper's or the owner's own words takes a column `min(520px, 88%)` wide at the right, its receipts in the same column. `Transcript`'s README has the details.
 
 ## Arriving live
 
@@ -42,6 +43,7 @@ A live row whose message reveals itself (`ClaudeMessage`'s `reveal`, Claude's re
 - The message doesn't rise: its words come in on their own, word by word, then its cards fade in (`ClaudeMessage`, "Arriving live").
 - While the words come in, what is attached waits unseen in its place, so nothing below it moves when it comes.
 - Then each line fades and rises `space-4` in, over `motion-base`, `motion-follow` apart, from the beat after the message's last card: the message tells the row that beat (`RowArrival`, in `arrival.ts`). Each line has a beat of its own, however many there are. A receipt's dot grows and its check draws on its line's beat.
+- The parts come in strictly one after another: the words, then each card, then each line, each starting once the one before has finished (`motion-follow` is never shorter than `motion-base` or `motion-settle`). A line attached while they come in (a newer status, say) waits its turn after whatever is still coming in, and never comes in with it.
 - A line already shown before its row arrived (`MarginReceipt`'s `shownBefore`) is already read: it doesn't wait.
 - Once the last line has come in, the row is like any other, as after a landing.
 - Under reduced motion the reply shows whole and everything attached shows at once.

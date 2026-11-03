@@ -1,10 +1,12 @@
 import { Skeleton } from '../Skeleton/Skeleton.tsx';
+import { AppShellOnly } from '../AppShell/AppShell.tsx';
+import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 
 import './Sidebar.css';
 import '../Switch/Switch.css';
 
 /** The fresh copy's sidebar, before its business and owner have been read. */
-export function SidebarSkeleton({ rows, about }: { rows: number; about: number }) {
+export function SidebarSkeleton({ rows, about, conceptFooter = false }: { rows: number; about: number; conceptFooter?: boolean }) {
   const row = (key: string, anchor?: string) => (
     <div key={key} className="cd-sidebar__row" data-skeleton-anchor={anchor}>
       <Skeleton shape="block" width={20} height={20} />
@@ -32,6 +34,13 @@ export function SidebarSkeleton({ rows, about }: { rows: number; about: number }
             </div>
             {Array.from({ length: about }, (_, i) => row(`about-${i}`))}
           </div>
+        ) : null}
+        {conceptFooter ? (
+          <AppShellOnly layout="wide">
+            <div className="cd-sidebar__concept-footer" data-skeleton-anchor="owner-footer" data-owner-footer>
+              <ConceptFooter skeleton />
+            </div>
+          </AppShellOnly>
         ) : null}
       </div>
       <div className="cd-sidebar__footer">
