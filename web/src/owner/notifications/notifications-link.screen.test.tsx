@@ -14,7 +14,7 @@ import { DECISIONS } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
-import { focusIsOn, nextFrames } from '../../test/screen.ts';
+import { nextFrames } from '../../test/screen.ts';
 import { FRESH_MS } from '../useDesks.ts';
 
 const TODAY = `/app/${RIVERA.deskId}/today`;
@@ -39,8 +39,8 @@ function heldCard(screen: RenderResult, reason: string) {
   return screen.getByRole('article', { name: `Held for you: ${reason}`, exact: true });
 }
 
-/** Where a held request's alert links to: its card on Today. */
-const requestLink = (decisionId: string) => `${TODAY}#request-${encodeURIComponent(decisionId)}`;
+/** Where a held request's alert links to: its conversation. */
+const requestLink = (decisionId: string) => `/app/${RIVERA.deskId}/conversations/${mockStore.world.decisions.get(decisionId)!.decision.session_id}`;
 
 /**
  * Settles once the app has the answers to as many more reads of each route as `counts` says, read
@@ -101,6 +101,20 @@ afterEach(() => {
 });
 
 describe('Notifications request link', () => {
+  it('opens_the_held_conversation_and_back_returns_to_notifications', async () => {
+    const held = seededHold();
+    const { screen, router } = await renderRoute(TODAY);
+    const page = await openNotifications(screen, held.decision_id);
+    const path = `/app/${RIVERA.deskId}/conversations/${held.session_id}`;
+    await expect.element(requestRows(page)).toHaveAttribute('href', path);
+    await requestRows(page).click();
+    expect(router.state.location.pathname).toBe(path);
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).toBeVisible();
+    await expect.element(requestRows(screen.getByRole('main'))).toHaveAttribute('href', path);
+  });
+
   it('held_alert_has_no_ending_and_keeps_its_link', async () => {
     const held = seededHold();
     const { screen } = await renderRoute(TODAY);
@@ -297,15 +311,15 @@ describe('Notifications request link', () => {
 
     await link.click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).not.toBeInTheDocument();
-    expect(router.state.location.hash).toBe(`#request-${encodeURIComponent(refund.decision_id)}`);
+    expect(router.state.location.pathname).toBe(requestLink(refund.decision_id));
     const card = heldCard(screen, rivera.heldRefund.reason_plain);
-    await vi.waitFor(() => expect(focusIsOn(card.element())).toBe(true));
+    await expect.element(card).toBeVisible();
   });
 
   it('another_desks_answered_request_has_no_link', async () => {
     // The notifications are the whole copy's. On Emergencies, Main line's requests are read in Main
     // line's Needs you: the one answered elsewhere (another tab) has no link, the one still held
-    // links to Main line's Today.
+    // links to Main line's conversation.
     const { screen } = await renderRoute(`/app/${RIVERA.emergenciesDeskId}/today`, { seed: 'rivera_two_desks' });
     await expect.element(screen.getByRole('heading', { level: 1 })).toBeVisible();
     const answered = seededHold();

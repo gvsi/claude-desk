@@ -3,6 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { requestInHash, requestPath } from './requestLink.ts';
 
 describe('request links', () => {
+  it('opens_a_loaded_visitor_or_agent_session_and_encodes_its_ids', () => {
+    for (const kind of ['visitor', 'agent'] as const) {
+      expect(requestPath('desk /1', 'dec-7', { session_id: 'ses /7', kind })).toBe('/app/desk%20%2F1/conversations/ses%20%2F7');
+    }
+  });
+
+  it('keeps_the_today_fallback_without_an_openable_session', () => {
+    const fallback = '/app/desk-1/today#request-dec-7';
+    expect(requestPath('desk-1', 'dec-7', null)).toBe(fallback);
+    expect(requestPath('desk-1', 'dec-7', { session_id: '', kind: 'visitor' })).toBe(fallback);
+    expect(requestPath('desk-1', 'dec-7', { session_id: 'ses-owner', kind: 'owner' })).toBe(fallback);
+  });
+
   it('request_link_round_trips_the_decision', () => {
     expect(requestPath('desk-1', 'dec-7')).toBe('/app/desk-1/today#request-dec-7');
     // An id with characters a URL would read otherwise is encoded, and reads back as it was.

@@ -346,7 +346,7 @@ export const OwnerAlertNotOpenYet: Story = {
 const holdAlert = everythingArrived.find((item) => item.entry?.kind === 'alert') as DemoInboxItem;
 
 /** Where the owner app opens the held request Linda's alert is about: a path in the app. */
-const IN_APP_HREF = '/app/main/today#request-dec-chen-consultation';
+const IN_APP_HREF = '/app/main/conversations/ses-chen-consultation';
 
 export const OwnerAlertLinkIsAPathInTheApp: Story = {
   args: { viewer: 'owner', items: [{ ...holdAlert, requestHref: IN_APP_HREF }] },
