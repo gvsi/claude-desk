@@ -1597,7 +1597,7 @@ describe('OwnerLayout', () => {
     holdReads(ROUTES.ownerInbox.path);
     await notificationsRow(screen, 1).click();
     const page = screen.getByRole('main');
-    await expect.element(page.getByRole('link', { name: /Open the request/ })).toHaveAttribute('href', `/app/${mockStore.world.ids.deskId}/conversations/${mockStore.world.decisions.get(newHold)!.decision.session_id}`);
+    await expect.element(page.getByRole('link', { name: /Open the request/ })).toHaveAttribute('href', `/app/${mockStore.world.ids.deskId}/conversations/${mockStore.world.decisions.get(newHold)!.decision.session_id}#request-${encodeURIComponent(newHold)}`);
     expect(page.getByText(leftBehind).elements()).toHaveLength(0);
   });
 
@@ -1840,7 +1840,7 @@ describe('Things to try ticks off', () => {
     const href = step.element().getAttribute('href');
     expect(href).toMatch(/\/conversations\//);
     await step.click();
-    expect(router.state.location.pathname).toBe(href);
+    expect(router.state.location.pathname + router.state.location.hash).toBe(href);
     await expect.element(heldCard(screen)).toBeVisible();
     await heldCard(screen).getByRole('button', { name: 'Allow this time' }).click();
     await expect.element(heldCard(screen).getByText("You allowed this. It's done.", { exact: true })).toBeVisible();

@@ -60,7 +60,7 @@ export { COPIED_FOR_MS } from '../../ds/index.ts';
  * the Desk's setup hasn't gone live, "How your Desk works" with what Claude did today under it, and
  * "Things to try"; under it two columns: in this order "Needs
  * you" and "Live now" when they have something, and "Since last night" always; at the right the last
- * 7 days. Today opens no visitor chat itself, and
+ * 7 days. Today has no inline visitor chat; its request links open the conversation page, and it
  * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
  * request (`#request-<id>`, for old links and requests without a conversation) brings that request's card
  * into view and focus. Until what the page first shows is read, it holds its own shapes, so it

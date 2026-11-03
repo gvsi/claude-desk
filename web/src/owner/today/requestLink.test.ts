@@ -5,7 +5,7 @@ import { requestInHash, requestPath } from './requestLink.ts';
 describe('request links', () => {
   it('opens_a_loaded_visitor_or_agent_session_and_encodes_its_ids', () => {
     for (const kind of ['visitor', 'agent'] as const) {
-      expect(requestPath('desk /1', 'dec-7', { session_id: 'ses /7', kind })).toBe('/app/desk%20%2F1/conversations/ses%20%2F7');
+      expect(requestPath('desk /1', 'dec-7', { session_id: 'ses /7', kind })).toBe('/app/desk%20%2F1/conversations/ses%20%2F7#request-dec-7');
     }
   });
 

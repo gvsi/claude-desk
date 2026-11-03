@@ -40,7 +40,7 @@ function heldCard(screen: RenderResult, reason: string) {
 }
 
 /** Where a held request's alert links to: its conversation. */
-const requestLink = (decisionId: string) => `/app/${RIVERA.deskId}/conversations/${mockStore.world.decisions.get(decisionId)!.decision.session_id}`;
+const requestLink = (decisionId: string) => `/app/${RIVERA.deskId}/conversations/${mockStore.world.decisions.get(decisionId)!.decision.session_id}#request-${encodeURIComponent(decisionId)}`;
 
 /**
  * Settles once the app has the answers to as many more reads of each route as `counts` says, read
@@ -106,13 +106,13 @@ describe('Notifications request link', () => {
     const { screen, router } = await renderRoute(TODAY);
     const page = await openNotifications(screen, held.decision_id);
     const path = `/app/${RIVERA.deskId}/conversations/${held.session_id}`;
-    await expect.element(requestRows(page)).toHaveAttribute('href', path);
+    await expect.element(requestRows(page)).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
     await requestRows(page).click();
     expect(router.state.location.pathname).toBe(path);
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).toBeVisible();
-    await expect.element(requestRows(screen.getByRole('main'))).toHaveAttribute('href', path);
+    await expect.element(requestRows(screen.getByRole('main'))).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
   });
 
   it('held_alert_has_no_ending_and_keeps_its_link', async () => {
@@ -311,7 +311,7 @@ describe('Notifications request link', () => {
 
     await link.click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Notifications' })).not.toBeInTheDocument();
-    expect(router.state.location.pathname).toBe(requestLink(refund.decision_id));
+    expect(router.state.location.pathname + router.state.location.hash).toBe(requestLink(refund.decision_id));
     const card = heldCard(screen, rivera.heldRefund.reason_plain);
     await expect.element(card).toBeVisible();
   });

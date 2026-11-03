@@ -438,7 +438,7 @@ describe('Today', () => {
     const things = region(screen, 'Things to try');
     const link = things.getByRole('link', { name: 'Open the request', exact: true });
     const path = `${DESK}/conversations/${held.session_id}`;
-    await expect.element(link).toHaveAttribute('href', path);
+    await expect.element(link).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
     const column = document.querySelector('main')!;
     column.scrollTop = 150;
     await nextFrames();
@@ -3490,7 +3490,7 @@ describe("Today's How your Desk works", () => {
     const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
     await expect.element(held).toBeVisible();
     expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
-    await expect.element(held).toHaveAttribute('href', `${DESK}/conversations/${seeded.decision.session_id}`);
+    await expect.element(held).toHaveAttribute('href', `${DESK}/conversations/${seeded.decision.session_id}#request-${encodeURIComponent(seeded.decision.decision_id)}`);
     await held.click();
     expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seeded.decision.session_id}`);
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
@@ -3518,7 +3518,7 @@ describe("Today's How your Desk works", () => {
     expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 1 for you', 'turned down 1 request']);
     expect(links.map((a) => a?.getAttribute('href'))).toEqual([
       `/app/${RIVERA.deskId}/conversations`,
-      `/app/${RIVERA.deskId}/conversations/${seededHold().session_id}`,
+      `/app/${RIVERA.deskId}/conversations/${seededHold().session_id}#request-${encodeURIComponent(seededHold().decision_id)}`,
       `/app/${RIVERA.deskId}/safety`,
     ]);
     // Under a hairline, 16 px under the steps with 12 px inside it, in the secondary ink; each
@@ -4341,7 +4341,7 @@ describe('Notifications from Today', () => {
     expect(links.elements()).toHaveLength(1);
     const link = links.first();
     expect(link.element().textContent).toContain(alert.body);
-    expect(link.element().getAttribute('href')).toBe(`${DESK}/conversations/${held.session_id}`);
+    expect(link.element().getAttribute('href')).toBe(`${DESK}/conversations/${held.session_id}#request-${encodeURIComponent(held.decision_id)}`);
     await expectScreenBasics(screen.container, { owner: true });
 
     // Following it leaves the page and lands on the held request's card, in view.
@@ -4365,7 +4365,7 @@ describe('Notifications from Today', () => {
     const page = await openNotifications(screen);
     const link = requestRows(page);
     const path = `${DESK}/conversations/${held.session_id}`;
-    await expect.element(link).toHaveAttribute('href', path);
+    await expect.element(link).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
     expect(requests('decision').map((r) => r.path)).toEqual([decisionPath(held.decision_id)]);
     await link.click();
     await expect.element(notificationsHeading(screen)).not.toBeInTheDocument();

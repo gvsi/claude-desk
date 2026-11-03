@@ -760,10 +760,16 @@ describe('Safety', () => {
     const { screen, router } = await renderRoute(SAFETY);
     const link = screen.getByRole('link', { name: '1 held for you', exact: true });
     const path = `${DESK}/conversations/${held.session_id}`;
-    await expect.element(link).toHaveAttribute('href', path);
+    const column = screen.getByRole('main').element();
+    const top = column.scrollTop;
+    await expect.element(link).toHaveAttribute('href', `${path}#request-${encodeURIComponent(held.decision_id)}`);
     await link.click();
     expect(router.state.location.pathname).toBe(path);
     await expect.element(screen.getByRole('article', { name: `Held for you: ${held.reason_plain}`, exact: true })).toBeVisible();
+    await router.navigate(-1);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Safety', exact: true })).toBeVisible();
+    expect(router.state.location.pathname).toBe(SAFETY);
+    expect(column.scrollTop).toBe(top);
   });
 
   it('held_for_you_dot_stands_apart_from_its_words', async () => {
@@ -1334,7 +1340,8 @@ describe('Safety', () => {
     await screen.getByRole('link', { name: /^Today, \d{1,2}:\d{2} [ap]m A visitor not on record/ }).click();
     await expect.element(detail(screen).getByText('Held for you', { exact: true })).toBeVisible();
     expect(detail(screen).element().textContent).not.toMatch(/didn.t run|never shown/);
-    await expect.element(screen.getByRole('link', { name: '1 held for you', exact: true })).toHaveAttribute('href', `${DESK}/conversations/${[...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held')!.decision.session_id}`);
+    const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held')!.decision;
+    await expect.element(screen.getByRole('link', { name: '1 held for you', exact: true })).toHaveAttribute('href', `${DESK}/conversations/${held.session_id}#request-${encodeURIComponent(held.decision_id)}`);
     await expectScreenBasics(screen.container, { owner: true });
     await detail(screen).getByRole('button', { name: 'See how it was stopped' }).click();
     await expectScreenBasics(screen.container, { owner: true });

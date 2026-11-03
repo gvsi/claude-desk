@@ -10,11 +10,11 @@ const PREFIX = '#request-';
 
 /** Use only session metadata already read by the caller; owner-only chats cannot open here. */
 export function requestPath(deskId: string, decisionId: string, session?: Pick<NeedsYouSession, 'session_id' | 'kind'> | null): string {
-  if (session?.session_id && session.kind !== 'owner') return conversationPath(deskId, session.session_id);
-  return `${todayPath(deskId)}${PREFIX}${encodeURIComponent(decisionId)}`;
+  const page = session?.session_id && session.kind !== 'owner' ? conversationPath(deskId, session.session_id) : todayPath(deskId);
+  return `${page}${PREFIX}${encodeURIComponent(decisionId)}`;
 }
 
-/** The held request a Today address's hash names, or null when it names none or can't be read. */
+/** The held request an address's hash names, or null when it names none or can't be read. */
 export function requestInHash(hash: string): string | null {
   if (!hash.startsWith(PREFIX)) return null;
   try {

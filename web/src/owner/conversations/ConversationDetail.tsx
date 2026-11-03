@@ -9,6 +9,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -37,6 +38,7 @@ import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { requestInHash } from '../today/requestLink.ts';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { DEMO_VISITOR_PILL, TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder, whisperHelper } from './copy.ts';
@@ -148,6 +150,7 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
 
 export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk, demoVisitorRun = null }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
+  const location = useLocation();
   // Who the owner is in this chat's lines ("{owner} joined the chat", "{owner} said") and on their own
   // messages' avatar: their name, or the business's when they gave none (owner, 2026-11-02).
   const ownerShown = givenOwnerName(business.owner_display_name) ?? business.name;
@@ -282,6 +285,20 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
       opened.current = document.activeElement === nameRef.current;
     }
   }, [loading, chat.data]);
+  // A request address takes its landing after useEndInView's initial end-of-chat scroll and the
+  // ordinary phone/handoff arrival. Card refs exist once the loaded transcript has committed.
+  // Spend each history arrival once, so polling never takes focus back after she moves on.
+  const requestArrival = useRef<string | null>(null);
+  const { cardFor } = answeredFocus;
+  useEffect(() => {
+    if (loading || chat.data === undefined || !ready || requestArrival.current === location.key) return;
+    requestArrival.current = location.key;
+    const decisionId = requestInHash(location.hash);
+    const card = decisionId === null ? undefined : cardFor(decisionId);
+    if (card === undefined) return;
+    card.focus();
+    card.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  }, [loading, chat.data, ready, location.key, location.hash, cardFor]);
   const pane = (content: ReactNode) => (
     <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
       {content}
