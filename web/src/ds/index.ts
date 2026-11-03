@@ -194,7 +194,7 @@ export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
 export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
-export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
+export { Transcript, type TranscriptProps, type TranscriptVariant } from './components/Transcript/Transcript.tsx';
 export { VisitorMessage, type VisitorMessageProps } from './components/VisitorMessage/VisitorMessage.tsx';
 export { ClaudeMessage, PROSE_LINKS, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
 export { ChatMarkdown, type ChatMarkdownProps } from './components/ChatMarkdown/ChatMarkdown.tsx';
