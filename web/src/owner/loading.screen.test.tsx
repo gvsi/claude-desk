@@ -22,7 +22,7 @@ import { SETUP_QUESTIONS } from '../mocks/setup.ts';
 import { renderRoute } from '../test/renderRoute.tsx';
 import { liveSetupDeskIds } from '../test/liveSetupDesk.ts';
 import { expectSkeletonLoad, expectSkeletonStill, SKELETON_TOLERANCE_PX, watchSkeletonGaps, type SkeletonAnchor } from '../test/skeleton.ts';
-import { expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
+import { conversationAtTop, expectScreenBasics, expectNoHorizontalScroll, expectNoWindowScroll, nextFrames } from '../test/screen.ts';
 import { watchFor, watchPages, watchTop } from '../test/watch.ts';
 import { holdReads } from '../test/holdReads.ts';
 import { DESKS_KEY, needsYouKey, todayKey } from './useDesks.ts';
@@ -1734,6 +1734,7 @@ it.each(['desktop', 'phone'] as const)('conversations_load_in_place at %s', asyn
   await inView.expectStill();
   expectNoHorizontalScroll();
   expectNoWindowScroll();
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -1919,6 +1920,7 @@ it('conversation_reload_hands_off at 390', async () => {
   expect(gaps()).toBe(0);
   expect(headings(), 'one top heading through the reload, the hand-off and the landing').toEqual([1]);
   expectNoHorizontalScroll();
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 
@@ -1995,6 +1997,7 @@ it.each(['desktop', 'phone'] as const)('opening_a_conversation_keeps_one_heading
   await nextFrames();
   // Waiting, shown, fading and landed: one top heading each time, never none and never two.
   expect(headings()).toEqual([1]);
+  await conversationAtTop();
   await expectScreenBasics(document.body, { owner: true });
 });
 

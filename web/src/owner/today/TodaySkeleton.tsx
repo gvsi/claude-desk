@@ -370,7 +370,8 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
       <div className="cd-section-header__title">
         <Skeleton shape="line" text="section" width={135} anchor={anchor} />
       </div>
-      {caption ? <Skeleton shape="line" text="caption" width={145} /> : null}
+      {/* The caption is in meta type (`SectionHeader`), and on a phone it drops under the title, where its line height counts. */}
+      {caption ? <Skeleton shape="line" text="meta" width={145} /> : null}
     </div>
   );
 }

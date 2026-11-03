@@ -26,11 +26,11 @@ import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.t
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
-import { expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, nextFrames, tokenColor } from '../../test/screen.ts';
+import { conversationAtTop, expectNoHorizontalScroll, expectNoWindowScroll, expectScreenBasics, focusIsOn, nextFrames, tokenColor } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
 const LIST = `${DESK}/conversations`;
-// A phone whose open conversation's pane stays under the single column's 46rem, so the pane scrolls as one.
+// A phone whose open conversation's pane stays under the single column's 47.5rem, so the pane scrolls as one.
 const SHORT_PHONE = { width: 390, height: 780 };
 const LA = 'America/Los_Angeles';
 const OWNER = rivera.business.ownerName;
@@ -699,7 +699,7 @@ describe('Conversations', () => {
     const chat = named(DANA_LIVE, DANA);
     lengthen(chat);
     mockStore.world.context(chat, 'en', '').openHandoff({ reason: 'Please call Dana', callbackWindow: null, lead: DANA });
-    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 47.5rem, so it scrolls as one.
     const { screen } = await renderRoute(LIST, { viewport: viewport === 'phone' ? SHORT_PHONE : viewport, pollScale: 100 });
     const row = screen.getByRole('navigation', { name: 'Conversations' }).getByRole('link', { name: new RegExp(DANA) });
     await expect.element(row.getByText('Wants you', { exact: true })).toBeVisible();
@@ -1103,10 +1103,7 @@ describe('Conversations', () => {
     // The booked card and its checks stay under their message.
     await expect.element(log(screen).getByRole('article', { name: 'Booked', exact: true })).toBeVisible();
     await expect.element(log(screen).getByRole('button', { name: "Reply checked against Mike Turner's rules Open the full trace." }).last()).toBeVisible();
-    // Opened at the chat's end, a phone can rest a receipt half under the pinned bar, where axe counts
-    // only its visible sliver as the button; check the screen with the log at its top, every line whole.
-    scrollerOf(log(screen).element()).scrollTop = 0;
-    await nextFrames();
+    await conversationAtTop();
     await expectScreenBasics(screen.container, { owner: true });
     expectNoHorizontalScroll();
 
@@ -1562,7 +1559,7 @@ describe('Conversations', () => {
 
   it('in_a_short_window_focus_in_the_transcript_holds_it', async () => {
     // A long chat with Dana's refund held at its end, opened at 1440 by 640, where the open
-    // conversation scrolls as one (under 37.5rem of content) and its end still shows the last held
+    // conversation scrolls as one (under 38rem of content) and its end still shows the last held
     // card's receipt above the card, with its "Your rule" box, and the owner's controls: it opens
     // at its end, and the owner is on the last receipt.
     const first = mockStore.world.addHeldRefund();
@@ -2737,7 +2734,7 @@ describe('Conversations', () => {
   it('conversations_fit_a_phone', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     mockStore.world.addHeldRefund();
-    // A phone short enough that the open conversation's pane is under 46rem, so it scrolls as one.
+    // A phone short enough that the open conversation's pane is under 47.5rem, so it scrolls as one.
     const { screen, router } = await renderRoute(LIST, { viewport: SHORT_PHONE });
 
     // The list has the page to itself.

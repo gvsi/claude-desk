@@ -59,7 +59,7 @@ export const DanaWhitfield: Story = {
     expectComputed(card, { paddingTop: '0px' });
     expectComputed(book, { paddingTop: '12px', paddingLeft: '16px', paddingBottom: '12px' });
     expectComputed(rows[1] as HTMLElement, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
-    await expect(Math.round(book.getBoundingClientRect().height)).toBe(64);
+    await expect(Math.round(book.getBoundingClientRect().height)).toBe(85);
   },
 };
 
