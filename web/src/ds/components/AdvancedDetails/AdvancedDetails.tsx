@@ -1,10 +1,10 @@
-import { useId, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useId, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from 'react';
 
 import { Icon } from '../../icons/index.tsx';
 import { Button } from '../Button/Button.tsx';
 import { CopyResult } from '../CopyResult/CopyResult.tsx';
 import { copyResultLine, useCopyText } from '../CopyField/useCopyText.ts';
-import { jsonText, jsonTokens } from './detailsJson.ts';
+import { jsonLines, jsonText } from './detailsJson.ts';
 
 import './AdvancedDetails.css';
 
@@ -65,6 +65,7 @@ function JsonBlock({ label, value, onCopy }: DetailsCode & Pick<AdvancedDetailsP
   const labelId = useId();
   const pre = useRef<HTMLPreElement>(null);
   const { state, announcement, copy } = useCopyText(onCopy);
+  const lines = jsonLines(value);
   return (
     <div className="cd-advanced-details__code">
       <div className="cd-advanced-details__code-head">
@@ -74,13 +75,16 @@ function JsonBlock({ label, value, onCopy }: DetailsCode & Pick<AdvancedDetailsP
           Copy
         </Button>
       </div>
-      {/* Focusable, so a keyboard can scroll a long line into view. */}
+      {/* Keep literal newlines and spaces for selection; wrapping adds no characters. */}
       <pre ref={pre} className="cd-advanced-details__json cd-type-trace" data-copy="code" translate="no" tabIndex={0}>
-        {jsonTokens(value).map((token, index) =>
-          token.kind === 'space' ? token.text : (
-            <span key={index} className={`cd-advanced-details__json-${token.kind}`}>{token.text}</span>
-          ),
-        )}
+        {lines.map((line, index) => (
+          <span key={index} className="cd-advanced-details__json-line" style={{ '--indent': line.indent } as CSSProperties}>
+            {line.tokens.map((token, tokenIndex) => token.kind === 'space' ? token.text : (
+              <span key={tokenIndex} className={`cd-advanced-details__json-${token.kind}`}>{token.text}</span>
+            ))}
+            {index < lines.length - 1 ? '\n' : null}
+          </span>
+        ))}
       </pre>
     </div>
   );

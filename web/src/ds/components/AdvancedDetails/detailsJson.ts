@@ -70,6 +70,20 @@ export function jsonTokens(value: unknown): JsonToken[] {
   return tokens;
 }
 
+/** Each JSON line keeps its leading spaces and tint, with the indent also available for wrapping. */
+export function jsonLines(value: unknown): { indent: number; tokens: JsonToken[] }[] {
+  const lines = [{ indent: 0, tokens: [] as JsonToken[] }];
+  for (const token of jsonTokens(value)) {
+    // Layout tokens are a single newline followed by this line's leading spaces.
+    if (token.kind === 'space' && token.text.startsWith('\n')) {
+      lines.push({ indent: token.text.length - 1, tokens: [{ ...token, text: token.text.slice(1) }] });
+    } else {
+      lines[lines.length - 1]!.tokens.push(token);
+    }
+  }
+  return lines;
+}
+
 /** The value's pretty JSON, exactly as the block shows it and Copy copies it. */
 export function jsonText(value: unknown): string {
   return jsonTokens(value).map((token) => token.text).join('');

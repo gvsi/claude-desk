@@ -296,8 +296,9 @@ it('the JSON in Details is the tool row and the rule card, and Copy copies it', 
   });
   expect(toolCode.textContent).toContain('\n  "tool": "native.payment_link",\n');
   expect(toolCode.classList.contains('cd-type-trace')).toBe(true);
-  expect(getComputedStyle(toolCode).whiteSpace).toBe('pre');
-  expect(getComputedStyle(toolCode).overflowX).toBe('auto');
+  expect(getComputedStyle(toolCode).whiteSpace).toBe('pre-wrap');
+  expect(getComputedStyle(toolCode).overflowWrap).toBe('anywhere');
+  expect(toolCode.scrollWidth).toBeLessThanOrEqual(toolCode.clientWidth);
   expect(getComputedStyle(toolCode).fontVariantLigatures).toBe('none');
   const toolPanel = toolCode.closest('.cd-advanced-details__panel')!;
   expect(toolPanel.querySelector('.cd-advanced-details__code-label')?.textContent).toBe('As your Desk lists it');
