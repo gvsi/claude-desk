@@ -1260,6 +1260,25 @@ describe('Conversations', () => {
     expect([...document.querySelectorAll('.cd-reply-card')].filter((card) => card.textContent?.includes('Monday, November 9'))).toHaveLength(2);
   });
 
+  it('a_stopped_draft_keeps_its_turn', async () => {
+    // The check stopped a draft between two replies that show the same card: still one turn, so the
+    // card is drawn once.
+    const chat = named(DANA_LIVE, DANA);
+    const booked = { ...rivera.blocks.booking_confirmed.en, fact_id: 'booking:B-92', title: 'Tuesday, November 10' };
+    const context = mockStore.world.context(chat, 'en', '');
+    mockStore.world.emit(chat, context.reply([proseBlock('Your booking is confirmed.'), booked]));
+    const read = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
+    const last = read.items.at(-1);
+    if (last?.event?.type !== 'message') throw new Error("Dana's chat ends with the reply");
+    const n = Math.max(...read.items.map((item) => item.n));
+    const stopped = { n: n + 1, kind: 'stopped_draft' as const, created_at: last.created_at, text: null, event: null };
+    const again = { ...last, n: n + 2, event: { ...last.event, message_id: 'msg-after-stopped', blocks: [booked] } };
+    mockStore.inject({ route: 'conversation', status: 200, times: 10_000, body: { ...read, items: [...read.items, stopped, again] } });
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    await expect.element(log(screen).getByText('Your booking is confirmed.', { exact: true })).toBeVisible();
+    expect([...document.querySelectorAll('.cd-reply-card')].filter((card) => card.textContent?.includes('Tuesday, November 10'))).toHaveLength(1);
+  });
+
   it('agent_name_reads_as_its_own_words', async () => {
     // An agent's chat: the name it gave is its own words wherever the page shows it, the caption
     // over the transcript included.

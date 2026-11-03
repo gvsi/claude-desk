@@ -85,6 +85,9 @@ export interface OwnerTranscriptProps {
   readSinceOpened: boolean;
 }
 
+/** What starts a turn, with the owner's own messages: someone's words, and the owner joining or leaving. A stopped draft doesn't. */
+const TURN_STARTS: ReadonlySet<OwnerTranscriptItem['kind']> = new Set(['visitor_text', 'agent_text', 'whisper', 'owner_joined', 'owner_left']);
+
 /** Cards that report something done: their executed receipt draws the check. */
 const DONE_CARDS: ReadonlySet<string> = new Set(['booking_confirmed', 'payment_confirmed', 'charge_confirmed']);
 
@@ -112,8 +115,7 @@ function rowsOf(items: readonly OwnerTranscriptItem[]) {
   let turns = 0;
   const partOf = (item: OwnerTranscriptItem): RowPart<OwnerRowItem, OwnerReceiptSource> | null => {
     const { event } = item;
-    if (item.kind !== 'delivered' && item.kind !== 'status') turns += 1;
-    else if (item.kind === 'delivered' && event?.type === 'message' && event.author === 'owner') turns += 1;
+    if (TURN_STARTS.has(item.kind) || (item.kind === 'delivered' && event?.type === 'message' && event.author === 'owner')) turns += 1;
     switch (item.kind) {
       case 'visitor_text':
         return { kind: 'turn', row: { kind: 'visitor', n: item.n, text: item.text ?? '', translation: item.owner_translation ?? null } };
