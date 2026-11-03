@@ -39,12 +39,10 @@
   color: var(--text-secondary);
 }
 
-/* Presence words and the screen's second line share one column after however many glyphs show. */
+/* Presence words take the remaining room after however many glyphs show. */
 .cd-greeting__presence-text {
   display: flex;
   flex: 1;
-  flex-direction: column;
-  gap: var(--space-6);
   min-width: 0;
 }
 

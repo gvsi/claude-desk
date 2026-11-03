@@ -414,38 +414,32 @@ it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
-it.each([390, 820, 1440, 1512])('today_skeleton_places_the_outcome_shape_under_the_greeting_without_a_band at %s', async (width) => {
+it.each([390, 820, 1440, 1512])('today_skeleton_keeps_the_greeting_and_things_in_place at %s', async (width) => {
   const held = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
   onTestFinished(held.release);
-  await renderRoute(TODAY, { viewport: { width, height: 900 } });
-  await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
-  const skeleton = document.querySelector('.cd-today--skeleton')!;
-  expect(skeleton).not.toBeNull();
-  expect(skeleton.querySelector('.cd-how, [data-skeleton-anchor="how-card"]')).toBeNull();
-  const line = skeleton.querySelector('.cd-greeting__presence-text > [data-skeleton-anchor="today-line"]');
-  expect(line).not.toBeNull();
-  expect(line!.textContent).toBe('');
-  expect(line!.querySelector('.cd-skeleton')).not.toBeNull();
-  const presenceWords = skeleton.querySelector('.cd-greeting__presence-line')!;
-  expect(line!.getBoundingClientRect().left).toBe(presenceWords.getBoundingClientRect().left);
-  expect(line!.getBoundingClientRect().left - skeleton.querySelector('.cd-greeting__text')!.getBoundingClientRect().left).toBe(34);
-  const shape = line!.getBoundingClientRect();
-  const text = skeleton.querySelector('.cd-greeting__text')!.getBoundingClientRect();
-  const actions = skeleton.querySelector('.cd-greeting__actions')!.getBoundingClientRect();
-  held.release();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
-  const real = document.querySelector('.cd-how__today')!.getBoundingClientRect();
-  for (const key of ['top', 'left', 'width', 'height'] as const) expect(real[key], `outcomes ${key}`).toBeCloseTo(shape[key], 0);
-  const realText = document.querySelector('.cd-greeting__text')!.getBoundingClientRect();
-  expect(realText.width).toBeCloseTo(text.width, 0);
-  expect(document.querySelector('.cd-greeting__actions')!.getBoundingClientRect().top).toBe(actions.top);
-  if (width >= 1440) expect(real.height).toBe(19);
-  if (width === 390) {
-    expect(real.height).toBe(46);
-    const heldOutcome = document.querySelectorAll('.cd-how__outcome')[1]!.getBoundingClientRect();
-    expect(heldOutcome.left).toBe(real.left);
-    expect(heldOutcome.top - real.top).toBe(27);
-  }
+  await expectSkeletonLoad({
+    status: 'Opening your Desk',
+    anchors: [
+      { name: 'greeting-header', page: '.cd-greeting', size: true },
+      { name: 'presence', page: '.cd-greeting__presence', size: true },
+      { name: 'things-title', page: '.cd-things__title' },
+    ],
+    open: async () => {
+      await renderRoute(TODAY, { viewport: { width, height: 900 } });
+      await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+    },
+    release: () => {
+      const skeleton = document.querySelector('.cd-today--skeleton')!;
+      expect(skeleton.querySelector('.cd-how__today, [data-skeleton-anchor="today-line"]')).toBeNull();
+      const header = skeleton.querySelector('.cd-greeting')!.getBoundingClientRect();
+      const things = skeleton.querySelector('.cd-things')!.getBoundingClientRect();
+      expect(things.top - header.bottom).toBeCloseTo(32, 0);
+      held.release();
+    },
+  });
+  const header = document.querySelector('.cd-greeting')!.getBoundingClientRect();
+  const things = document.querySelector('.cd-things')!.getBoundingClientRect();
+  expect(things.top - header.bottom).toBeCloseTo(32, 0);
 });
 
 const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
@@ -453,7 +447,8 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
   { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
-  { name: 'today-line', page: '.cd-greeting__presence-text > .cd-how__today', size: true },
+  { name: 'greeting-header', page: '.cd-greeting', size: true },
+  { name: 'presence', page: '.cd-greeting__presence', size: true },
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-progress', page: '.cd-things__progress', size: true },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
@@ -1157,7 +1152,7 @@ it.each([1280, 1440, 1512])('reload_places_a_longer_link_once_at_%s', async (wid
     await expect.element(screen.getByRole('heading', { name: /Good .*Mike/ })).toBeVisible();
     await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
-    // Outcomes don't widen the greeting, so even a newly read long slug stays beside its words.
+    // A newly read long slug stays beside the greeting's words.
     // Only the pill's data-dependent width changes, once when the real link lands.
     expect(Math.abs(real.height - shape.height)).toBeLessThanOrEqual(2);
     const text = document.querySelector('.cd-greeting__text')!.getBoundingClientRect();

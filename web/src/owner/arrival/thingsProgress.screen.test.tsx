@@ -48,7 +48,6 @@ it('draws_six_neutral_progress_segments_when_nothing_is_done', async () => {
   await expect.element(progress).toHaveAttribute('aria-valuenow', '0');
   await expect.element(progress).toHaveAttribute('aria-valuemax', '6');
   expectThingsType(progress.element().closest('.cd-things')!);
-  expectComputed(document.querySelector<HTMLElement>('.cd-how__today')!, { fontSize: '14px', lineHeight: '19px' });
 });
 
 it('opens_the_latest_stopped_entry_with_its_trace_and_remembers_the_visit', async () => {

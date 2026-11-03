@@ -6,7 +6,7 @@ import { renderRoute } from '../../test/renderRoute.tsx';
 import { focusIsOn } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
-const SOURCES = ['things', 'outcomes', 'notifications', 'safety'] as const;
+const SOURCES = ['things', 'notifications', 'safety'] as const;
 
 beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
@@ -19,11 +19,9 @@ it.each(SOURCES)('a_request_without_an_openable_conversation_keeps_its_today_car
   const { screen, router } = await renderRoute(start);
   const link = source === 'things'
     ? screen.getByRole('region', { name: 'Things to try' }).getByRole('link', { name: 'Open the request', exact: true })
-    : source === 'outcomes'
-      ? screen.getByRole('main').getByRole('link', { name: 'held 1 for you', exact: true })
-      : source === 'safety'
-        ? screen.getByRole('link', { name: '1 held for you', exact: true })
-        : screen.getByRole('link', { name: /Open the request/ });
+    : source === 'safety'
+      ? screen.getByRole('link', { name: '1 held for you', exact: true })
+      : screen.getByRole('link', { name: /Open the request/ });
   const path = `${DESK}/today#request-${encodeURIComponent(held.decision_id)}`;
   await expect.element(link).toHaveAttribute('href', path);
   await link.click();
