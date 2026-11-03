@@ -112,12 +112,15 @@ function MeasuredLines({ words, text = 'body' }: { words: string; text?: Skeleto
   );
 }
 
-/** How many lines some words take: the same at every width, or more on a phone, where they wrap. */
+/**
+ * How many lines some words take: the same at every width, or apart on a phone, whose column can be
+ * narrower than a laptop's (a row's title) or wider (a row's right column, which drops under it).
+ */
 type LineCount = number | { wide: number; phone: number };
 
 /**
  * Lines of one type style for words that come with the read, an estimate: the last one short
- * (`last`, or `phoneLast` for a phone's). Where a phone wraps the words onto more lines, the
+ * (`last`, or `phoneLast` for a phone's). Where a phone wraps the words onto other lines, the
  * laptop's lines and the phone's are drawn apart, each shown only at its own width.
  */
 function Lines({ count, text = 'body', last = '70%', phoneLast = last }: { count: LineCount; text?: SkeletonText; last?: string; phoneLast?: string }) {
@@ -133,7 +136,7 @@ function Lines({ count, text = 'body', last = '70%', phoneLast = last }: { count
         {...(only === undefined ? {} : { className: `cd-setup-skeleton__${only}-line` })}
       />
     ));
-  return wide === phone ? <>{set(wide)}</> : <>{set(wide, 'wide')}{set(phone, 'phone')}</>;
+  return wide === phone && last === phoneLast ? <>{set(wide)}</> : <>{set(wide, 'wide')}{set(phone, 'phone')}</>;
 }
 
 /** A fresh Desk's built-in connectors, in the catalog's order, and where each stands or its button. */
@@ -309,29 +312,39 @@ function MainButton({ label, variant = 'primary' }: { label: string; variant?: '
   );
 }
 
-/** One situation's row: its title's width on a laptop and its lines on a phone, who is asking, and the reason. */
+/** One situation's row: its title's lines (`title` the last one's width on a laptop), who is asking, and its reason. */
 interface SituationShape {
   title: string;
+  /** The title's lines on a laptop: 1 when left out. */
+  wide?: number;
   phone: number;
   phoneLast?: string;
   who: string;
-  reason: string;
+  reason: ReasonShape;
   /** "Not what we planned" under who is asking. */
   flag?: boolean;
 }
 
 /**
- * The situations a fresh copy's draft is tried on: a weekday drain, a cash discount, an agent's
- * deposit, a customer's invoice, a Saturday visit the draft doesn't book as planned, and another
- * customer's address.
+ * A row's reason: the kernel's own words, one meta line this wide, or, for a situation one draft
+ * rule decided, that rule's sentence (`RuleSentence`), body lines in the right column's width: 300 px
+ * on a laptop, the whole row on a phone, where it drops under who is asking.
+ */
+type ReasonShape = string | { sentence: LineCount; last: string; phoneLast?: string };
+
+/**
+ * The situations a fresh copy's draft is tried on, at the lines and widths a fresh CPA copy's words
+ * take: a weekday drain and a Saturday visit the draft doesn't book as planned, read as the bookings
+ * rule's sentence; a cash discount in the kernel's words; an agent's deposit and a customer's
+ * invoice, read as their rules' sentences; and another customer's address in the kernel's words.
  */
 const SITUATIONS: readonly SituationShape[] = [
-  { title: '92%', phone: 2, phoneLast: '30%', who: '35%', reason: '40%' },
-  { title: '75%', phone: 1, who: '35%', reason: '27%' },
-  { title: '68%', phone: 1, who: '48%', reason: '55%' },
-  { title: '66%', phone: 1, who: '33%', reason: '42%' },
-  { title: '95%', phone: 2, phoneLast: '15%', who: '34%', reason: '40%', flag: true },
-  { title: '76%', phone: 1, who: '35%', reason: '45%' },
+  { title: '98%', phone: 2, phoneLast: '20%', who: '36%', reason: { sentence: 2, last: '32%', phoneLast: '17%' } },
+  { title: '77%', phone: 1, who: '36%', reason: '49%' },
+  { title: '71%', phone: 1, who: '52%', reason: { sentence: 2, last: '67%', phoneLast: '55%' } },
+  { title: '70%', phone: 1, who: '35%', reason: { sentence: { wide: 2, phone: 1 }, last: '25%', phoneLast: '94%' } },
+  { title: '10%', wide: 2, phone: 2, phoneLast: '22%', who: '36%', reason: { sentence: 2, last: '32%', phoneLast: '17%' }, flag: true },
+  { title: '87%', phone: 1, who: '36%', reason: '81%' },
 ];
 
 /**
@@ -349,7 +362,7 @@ export function SituationsSkeleton() {
               <div className="cd-situation-row">
                 <div className="cd-situation-row__grid">
                   <div className="cd-situation-row__situation">
-                    <Lines count={{ wide: 1, phone: row.phone }} text="control" last={row.title} phoneLast={row.phoneLast} />
+                    <Lines count={{ wide: row.wide ?? 1, phone: row.phone }} text="control" last={row.title} phoneLast={row.phoneLast} />
                     <div className="cd-situation-row__who">
                       <Skeleton shape="line" text="meta" width={row.who} />
                     </div>
@@ -375,7 +388,7 @@ export function SituationsSkeleton() {
 }
 
 /** A row's right column, as `SituationRow` and `SafetyCheckRow` draw it: the outcome beside its dot, the reason under it. */
-function ResultShape({ reason, kind = 'situation' }: { reason: string; kind?: 'situation' | 'safety-check' }) {
+function ResultShape({ reason, kind = 'situation' }: { reason: ReasonShape; kind?: 'situation' | 'safety-check' }) {
   return (
     <div className={`cd-${kind}-row__result`}>
       <div className={`cd-${kind}-row__outcome cd-type-meta`}>
@@ -383,7 +396,7 @@ function ResultShape({ reason, kind = 'situation' }: { reason: string; kind?: 's
         <Skeleton shape="line" text="meta" width={64} />
       </div>
       <div className={`cd-${kind}-row__reason`}>
-        <Skeleton shape="line" text="meta" width={reason} />
+        {typeof reason === 'string' ? <Skeleton shape="line" text="meta" width={reason} /> : <Lines count={reason.sentence} last={reason.last} phoneLast={reason.phoneLast} />}
       </div>
     </div>
   );

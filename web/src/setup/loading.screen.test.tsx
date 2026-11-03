@@ -174,7 +174,7 @@ const linesRows: Part[] = Array.from({ length: 6 }, (_, i) => ({ name: `public-l
 const ONE_LINE_PX = 21;
 
 /** The line heights the estimated words are set in: caption, meta, and body or control. */
-const LINE_HEIGHTS_PX = [17, 18, 20] as const;
+const LINE_HEIGHTS_PX = [18, 19, 21] as const;
 
 /**
  * Each step's load. The tools' words are the app's own, so their shapes take the lines those words
