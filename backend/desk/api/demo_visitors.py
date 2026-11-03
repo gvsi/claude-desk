@@ -21,8 +21,8 @@ credential is present. After the opening, each step:
    owner says something or hands it back (waiting for Claude when work resumes). While the owner stays quiet, it sends its one fixed nudge
    (`DEMO_VISITOR_NUDGE`) after 90 seconds, with no model call, and ends `owner_silent` after four minutes.
    Once its brief is done while a request the chat showed as held has no outcome yet, it waits instead of ending: for
-   that outcome (`resolved`) and Claude's own follow-up to it (`_deciding`), with no nudge and no model call, since
-   the owner answers in Approvals, not in the chat.
+   that outcome (`resolved`) and Claude's own follow-up to it (`_deciding`), or until the owner says something in the
+   chat, with no nudge and no model call, since the owner answers in Approvals.
 2. Its model reads what a visitor saw since its last step: each delivered message's plain text labelled by who said
    it (Claude, or the owner by the name the stream carries, as a person), each request's signed status, and where the
    owner joined and left, all inside `<desk_reply>` (`prompts.wrap`), as information.
@@ -386,6 +386,11 @@ def _deciding(events: Sequence[_Seen]) -> _Deciding:
     return _Deciding(waiting=bool(held) or following, grace=None if held else grace)
 
 
+def _owner_said(events: Sequence[_Seen], since: int) -> bool:
+    """Whether the owner said something in the chat in the events from `since` on (a whisper never reaches it)."""
+    return any(seen.event.type == "message" and seen.event.author == "owner" for seen in events[since:])
+
+
 async def _first(feed: _Feed, timer: Awaitable[None]) -> None:
     """Wait until the feed changes or `timer` ends, whichever is first."""
     changed = asyncio.ensure_future(feed.after(len(feed.events)))
@@ -517,10 +522,11 @@ class _Chat:
             return self.deadline
         return min(self.deadline, deciding.grace) if self.clock() < deciding.grace else None
 
-    async def decided(self) -> None:
-        """Wait while the chat waits on the owner's answer to a held request (`deciding`). The owner answers it in
-        Approvals, not in the chat, so it sends no nudge; the run's own time limit holds throughout."""
-        while (until := self.deciding()) is not None:
+    async def decided(self, since: int) -> None:
+        """Wait while the chat waits on the owner's answer to a held request (`deciding`), unless the owner says
+        something in the chat that the visitor's model hasn't read (from the feed's `since` on). The owner answers the
+        request in Approvals, not in the chat, so it sends no nudge; the run's own time limit holds throughout."""
+        while (until := self.deciding()) is not None and not _owner_said(self.feed.events, since):
             self.check()
             await _first(self.feed, self.sleep((until - self.clock()).total_seconds()))
 
@@ -631,7 +637,7 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
         if step.done:
             if chat.deciding() is None:
                 raise _Ended("finished")
-            await chat.decided()                  # a held request's outcome, and Claude's follow-up to it
+            await chat.decided(shown)             # a held request's outcome, and Claude's follow-up to it
             nudged = False
         elif not step.message.strip():
             raise RunFailed("the model wrote an empty message")

@@ -916,6 +916,44 @@ async def test_no_turns_end_counts_while_the_owner_has_the_chat(app, browser, fa
         "The owner left the chat, and Claude (the business's AI) answers again."]))
 
 
+async def test_the_owner_saying_something_ends_the_wait(app, browser, fake, visitors, visitor_model, desk_model,
+                                                        engine, copy, sleeps):
+    owner = owner_of(app, browser, copy)
+    asks_for_a_discount(visitor_model, desk_model, step("Okay, thanks Mike."), step("", done=True))
+    desk_model.add(say("Mike has declined the discount, sorry."))
+    started = await start(visitors, fake, copy)
+    session_id = started.session_id
+    await until_done_while_held(visitor_model)
+    await change_mode(owner, fake, session_id, "takeover")
+    await asyncio.sleep(0.1)
+    assert len(visitor_model.requests) == 2                        # taking over alone doesn't end the wait
+    await owner_writes(owner, session_id, "Mike here: there's no extra discount, sorry.", kind="whisper")
+    await asyncio.sleep(0.1)
+    assert len(visitor_model.requests) == 2                        # nor does a whisper, which the chat never shows
+
+    # The owner's own message does: its model reads it on its next step and answers the owner.
+    await owner_writes(owner, session_id, "Hi Riley, Mike here. I can't do 15% this time, sorry.")
+    await until_asked(visitor_model, 3)
+    assert last_input(visitor_model.requests[2]) == wrap(DESK_REPLY_TAG, "\n".join([
+        "Mike Turner (the owner, a person) joined the chat.",
+        "Mike Turner (the owner, a person): Hi Riley, Mike here. I can't do 15% this time, sorry."]))
+    await until(lambda: rows_count(engine, session_id, 3))
+    denied = await deny(owner, fake, session_id)
+    await change_mode(owner, fake, session_id, "handback")        # the answer waited for Claude: it resumes
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 3)
+    assert await rows(engine, session_id, "visitor_text") == [OPENING_LINES["rivera"], DISCOUNT_ASK,
+                                                              "Okay, thanks Mike."]
+    assert len(visitor_model.requests) == 4 and len(desk_model.requests) == 3
+    assert last_input(visitor_model.requests[3]) == wrap(DESK_REPLY_TAG, "\n".join([
+        RECEIPT_LINE.format(state="denied", text=denied["visitor_plain"]),
+        "The owner left the chat, and Claude (the business's AI) answers again.",
+        "Claude (the business's AI): Mike has declined the discount, sorry."]))
+    assert sleeps.timers == []                                     # nothing waited out a timer, let alone 15 minutes
+
+
 async def test_a_held_request_never_answered_ends_at_its_time_limit(app, fake, visitors, visitor_model, desk_model,
                                                                      engine, copy, sleeps):
     asks_for_a_discount(visitor_model, desk_model, step("never asked"))
