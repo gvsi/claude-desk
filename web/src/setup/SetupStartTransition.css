@@ -24,22 +24,6 @@
   pointer-events: none;
 }
 
-/* Claude's read of the words while the start runs: its icon quieter. */
-.cd-setup-start-read--reading .cd-tool-label__icon {
-  opacity: 0.4;
-}
-
-/* The read's words and, while it runs, its quieter second line, in its words' column after the icon. */
-.cd-setup-start-read__words {
-  display: block;
-}
-
-.cd-setup-start-usually {
-  display: block;
-  margin-top: var(--space-2);
-  color: var(--text-tertiary);
-}
-
 /* The start page as it leaves: a copy where it was, over the chat coming in. */
 .cd-setup-start-leaving-screen {
   position: fixed;
@@ -88,9 +72,8 @@
     animation: cd-setup-start-rise calc(1.4 * var(--motion-base)) var(--motion-ease) calc(0.6 * var(--motion-base)) both;
   }
 
-  /* 3. One move at a time: once the box has landed, the read rises in, its quieter second line half a
-     stagger later and the dots a stagger later. A chat come back to, or tried again, starts them at
-     once. */
+  /* 3. One move at a time: once the box has landed, Claude's writing dots rise in. A chat come back
+     to, or tried again, has them rise at once. */
   .cd-setup-start-transition {
     --setup-start-after: calc(0 * var(--motion-base));
   }
@@ -99,32 +82,14 @@
     --setup-start-after: calc(2 * var(--motion-base));
   }
 
-  .cd-setup-start-transition .cd-setup-start-read {
+  .cd-setup-start-transition .cd-setup-start-dots {
     animation: cd-setup-start-rise var(--motion-base) var(--motion-ease) var(--setup-start-after) both;
   }
 
-  .cd-setup-start-transition .cd-setup-start-usually {
-    animation: cd-setup-start-rise var(--motion-base) var(--motion-ease) calc(var(--setup-start-after) + var(--motion-stagger) / 2) both;
-  }
-
-  .cd-setup-start-transition .cd-setup-start-dots {
-    animation: cd-setup-start-rise var(--motion-base) var(--motion-ease) calc(var(--setup-start-after) + var(--motion-stagger)) both;
-  }
-
-  /* The read's words pulse while it runs, as a writing line does. */
-  .cd-setup-start-read--reading .cd-setup-start-read__words {
-    animation: cd-writing-pulse var(--motion-writing) var(--motion-ease) infinite;
-  }
-
-  /* 4. The interview opens: the dots and the quieter line fade out over motion-fast, and the read's
-     icon settles to full over motion-base. (The question's rise and the name's fade are run from
-     SetupStartTransition.tsx, on the interview's own parts.) */
+  /* 4. The interview opens: the dots fade out over motion-fast. (The question's rise and the name's
+     fade are run from SetupStartTransition.tsx, on the interview's own parts.) */
   .cd-setup-start-leaving {
     animation: cd-setup-start-out var(--motion-fast) var(--motion-ease) both;
-  }
-
-  .cd-setup-start-read--settling .cd-tool-label__icon {
-    animation: cd-setup-start-settle var(--motion-base) var(--motion-ease-emphasis);
   }
 }
 
@@ -158,12 +123,5 @@
   from {
     opacity: 0;
     transform: translateY(var(--space-8));
-  }
-}
-
-@keyframes cd-setup-start-settle {
-  from {
-    opacity: 0.4;
-    transform: scale(0.86);
   }
 }

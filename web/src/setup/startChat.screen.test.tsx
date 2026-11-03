@@ -10,11 +10,11 @@ import type { RenderResult } from 'vitest-browser-react';
 
 import { reduceMotion } from '../ds/test/reducedMotion.ts';
 import { worker } from '../mocks/browser.ts';
-import { holdNextStart } from '../mocks/setup.ts';
+import { CONSENT_QUESTION, holdNextStart } from '../mocks/setup.ts';
 import { mockStore } from '../mocks/store.ts';
 import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics, tokenColor } from '../test/screen.ts';
-import { SETUP_COPY, SETUP_START_READING, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
+import { SETUP_COPY, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
 
 const DESCRIPTION =
   "Turner Plumbing. I'm Mike, a licensed plumber in Oakland. We fix leaks, clear drains and replace water heaters for homes and small shops. Weekdays mostly, emergencies on Saturday mornings.";
@@ -89,6 +89,28 @@ function watchFrames(): () => Frame[] {
   return () => [...frames];
 }
 
+/** Lines setup's start doesn't show, at any stage: the chat carries the wait with the dots alone. */
+const NOT_SHOWN = ['Reading what you wrote', 'Read what you wrote', 'This usually takes about 15 seconds.'];
+
+/** Each of `NOT_SHOWN` the page drew from now until the test ends, at any commit. */
+function watchUnshown(): () => string[] {
+  const seen = new Set<string>();
+  const record = () => {
+    const text = document.body.textContent ?? '';
+    for (const line of NOT_SHOWN) if (text.includes(line)) seen.add(line);
+  };
+  const observer = new MutationObserver(record);
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+  onTestFinished(() => observer.disconnect());
+  return () => {
+    record();
+    return [...seen];
+  };
+}
+
+/** The rows of setup's conversation, in order. */
+const rows = (screen: RenderResult) => [...conversation(screen).element().children];
+
 /** A start that didn't settle: its line in the chat where the dots were, under the owner's words, with "Try again". */
 async function expectLineInChat(screen: RenderResult, line: string): Promise<void> {
   const notice = screen.getByRole('alert').filter({ hasText: line });
@@ -107,6 +129,7 @@ describe('setup start', () => {
     const { screen, router } = await renderRoute('/app/setup', { viewport });
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
     const frames = watchFrames();
+    const unshown = watchUnshown();
     await screen.getByRole('button', { name: 'Start' }).click();
 
     // At once, before the start answers: setup's chat, the owner's words as their first message and
@@ -141,12 +164,14 @@ describe('setup start', () => {
     const fromChat = drawn.slice(drawn.findIndex((frame) => frame.chat));
     expect(fromChat.length).toBeGreaterThan(0);
     expect(fromChat.filter((frame) => frame.form || !frame.chat || !frame.words || !frame.next)).toEqual([]);
+    expect(unshown()).toEqual([]);
   });
 
   it('a_start_that_did_not_settle_says_so_in_the_chat_where_the_dots_were', async () => {
     const { screen, router } = await renderRoute('/app/setup');
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
     const end = holdNextStart(mockStore.world);
+    const unshown = watchUnshown();
     await screen.getByRole('button', { name: 'Start' }).click();
 
     // Its answer lost: the retry-safe line, and "Try again" sends the same start with the same key.
@@ -171,6 +196,7 @@ describe('setup start', () => {
     expect(mockStore.requests.filter((r) => r.key === 'startSetup').map((r) => (r.body as { description: string }).description)).toEqual(
       Array(7).fill(DESCRIPTION),
     );
+    expect(unshown()).toEqual([]);
   });
 
   it('a_refused_start_gives_the_words_back_to_the_form', async () => {
@@ -191,63 +217,35 @@ describe('setup start', () => {
     expect(keys[1]).not.toBe(keys[0]);
   });
 
-  it('the_read_line_says_reading_while_the_start_runs_then_read_above_the_question', async () => {
+  it('the_dots_carry_the_wait_and_nothing_comes_between_the_words_and_the_question', async () => {
     const release = holdStart();
     const { screen } = await renderRoute('/app/setup');
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    const unshown = watchUnshown();
     await screen.getByRole('button', { name: 'Start' }).click();
 
-    // While the start runs: under the owner's words, the read as it runs with the quieter line as its
-    // second line, then Claude's writing dots.
-    const log = conversation(screen);
-    const reading = log.getByText(SETUP_START_READING.reading, { exact: true });
-    const usually = log.getByText(SETUP_START_READING.usually, { exact: true });
-    const dots = log.getByText('Claude is writing');
-    await expect.element(reading).toBeVisible();
-    await expect.element(usually).toBeVisible();
-    const order = [ownWords(screen), reading, usually, dots].map((part) => part.element());
-    for (const [at, part] of order.entries()) {
-      if (at > 0) expect(order[at - 1]!.compareDocumentPosition(part) & Node.DOCUMENT_POSITION_FOLLOWING, `part ${at}`).toBeTruthy();
-    }
-    expect(getComputedStyle(usually.element()).color).toBe(tokenColor('--text-tertiary'));
+    // While the start runs: the owner's words, then Claude's writing dots, and nothing else.
+    const dots = conversation(screen).getByText('Claude is writing');
+    await expect.element(dots).toBeInTheDocument();
     await settle();
-    // The quieter line is the read's second line: in its words' column after the icon, 2 px under them.
-    const label = reading.element().closest('.cd-tool-label')!;
-    expect(usually.element().closest('.cd-tool-label')).toBe(label);
-    const words = reading.element().getBoundingClientRect();
-    const line = usually.element().getBoundingClientRect();
-    expect(Math.abs(line.left - words.left)).toBeLessThanOrEqual(0.5);
-    expect(line.left).toBeGreaterThan(label.querySelector('svg')!.getBoundingClientRect().right);
-    expect(line.top - words.bottom).toBeCloseTo(parseFloat(token('--space-2')), 1);
-    const row = label.getBoundingClientRect();
+    expect(rows(screen)).toHaveLength(2);
+    expect(rows(screen)[0]!.contains(ownWords(screen).element())).toBe(true);
+    expect(rows(screen)[1]!.contains(dots.element())).toBe(true);
+    expect(getComputedStyle(rows(screen)[1]!).opacity).toBe('1');
 
-    // Once the interview opens: the read, done, where it was; the quieter line and the dots go.
+    // The interview opens: the dots go, and the owner's words are all the conversation holds above
+    // the memory question, docked.
     release();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
-    const read = conversation(screen).getByText(SETUP_START_READING.read, { exact: true });
-    await expect.element(read).toBeVisible();
-    const done = read.element().closest('.cd-tool-label')!.getBoundingClientRect();
-    expect(Math.abs(done.top - row.top)).toBeLessThanOrEqual(1);
-    expect(screen.getByText(SETUP_START_READING.reading, { exact: true }).elements()).toHaveLength(0);
-    await expect.poll(() => screen.getByText(SETUP_START_READING.usually, { exact: true }).elements().length).toBe(0);
-    await expect.poll(() => screen.getByText('Claude is writing').elements().length).toBe(0);
+    await expect.poll(() => rows(screen).length).toBe(1);
+    expect(rows(screen)[0]!.contains(ownWords(screen).element())).toBe(true);
 
-    // It stays in the conversation, under the owner's words, as the questions go on.
+    // Answered, the question takes its place in the conversation, right under the owner's words.
     await screen.getByRole('button', { name: 'Yes, use it' }).click();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeInTheDocument();
-    const kept = conversation(screen).getByText(SETUP_START_READING.read, { exact: true });
-    await expect.element(kept).toBeVisible();
-    expect(ownWords(screen).element().compareDocumentPosition(kept.element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
-
-  it('a_start_that_did_not_settle_takes_the_read_line_down_with_the_dots', async () => {
-    const { screen } = await renderRoute('/app/setup');
-    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
-    mockStore.inject({ route: 'startSetup', status: 503 });
-    await screen.getByRole('button', { name: 'Start' }).click();
-    await expectLineInChat(screen, setupStartLostLine());
-    expect(screen.getByText(SETUP_START_READING.reading, { exact: true }).elements()).toHaveLength(0);
-    expect(screen.getByText(SETUP_START_READING.usually, { exact: true }).elements()).toHaveLength(0);
+    await expect.element(conversation(screen).getByText(CONSENT_QUESTION, { exact: true })).toBeVisible();
+    expect(rows(screen)[1]!.textContent).toBe(CONSENT_QUESTION);
+    expect(unshown()).toEqual([]);
   });
 
   it('the_start_screen_hands_its_words_to_the_chat', async () => {
@@ -285,8 +283,8 @@ describe('setup start', () => {
 
   it('the_handoff_plays_once_and_change_something_opens_the_chat_settled', async () => {
     // The start's hand-off plays as its interview first opens. Past the questions and back in the
-    // chat with "Change something", no start is running: the owner's words and the read are there,
-    // settled, with no quieter line, no dots and nothing leaving.
+    // chat with "Change something", no start is running: the owner's words are there, settled, with
+    // no dots and nothing leaving.
     const release = holdStart();
     const { screen } = await renderRoute('/app/setup');
     await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
@@ -307,22 +305,23 @@ describe('setup start', () => {
     // From the press on, what the chat draws: nothing of the start's hand-off.
     const drawn: string[] = [];
     const record = () => {
-      for (const selector of ['.cd-setup-start-leaving', '.cd-setup-start-read--reading', '.cd-setup-start-read--settling', '.cd-setup-chat .cd-writing-indicator']) {
+      for (const selector of ['.cd-setup-start-leaving', '.cd-setup-chat .cd-writing-indicator']) {
         if (document.querySelector(selector) !== null && !drawn.includes(selector)) drawn.push(selector);
       }
     };
     const observer = new MutationObserver(record);
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     onTestFinished(() => observer.disconnect());
+    const unshown = watchUnshown();
     await screen.getByRole('button', { name: 'Change something', exact: true }).click();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
     await expect.element(ownWords(screen)).toBeVisible();
-    const read = conversation(screen).getByText(SETUP_START_READING.read, { exact: true });
-    await expect.element(read).toBeVisible();
     record();
     expect(drawn).toEqual([]);
-    expect(screen.getByText(SETUP_START_READING.usually, { exact: true }).elements()).toHaveLength(0);
-    expect(read.element().closest('.cd-setup-start-read')!.getAnimations({ subtree: true })).toEqual([]);
+    expect(unshown()).toEqual([]);
+    expect(rows(screen)[0]!.contains(ownWords(screen).element())).toBe(true);
+    expect(rows(screen)[0]!.getAnimations({ subtree: true })).toEqual([]);
+    expect(rows(screen)[1]!.textContent).toBe(CONSENT_QUESTION);
   });
 
   it('under_reduced_motion_every_part_is_at_its_end_at_once', async () => {
@@ -334,24 +333,22 @@ describe('setup start', () => {
     await screen.getByRole('button', { name: 'Start' }).click();
     await expect.element(ownWords(screen)).toBeVisible();
 
-    // No leaving screen and no travelling box: the owner's words in their own fill, and the read,
-    // the quieter line and the dots in place, with nothing moving.
+    // No leaving screen and no travelling box: the owner's words in their own fill, and the dots in
+    // place, with nothing moving.
     expect(document.querySelector('.cd-setup-start-leaving-screen')).toBeNull();
     expect(document.querySelector('.cd-setup-start-words__box')).toBeNull();
     expect(getComputedStyle(ownWords(screen).element()).backgroundColor).toBe(tokenColor('--fill-bubble'));
     const chat = document.querySelector('.cd-setup-chat')!;
     expect(chat.getAnimations({ subtree: true })).toEqual([]);
-    for (const part of [SETUP_START_READING.reading, SETUP_START_READING.usually]) {
-      const el = conversation(screen).getByText(part, { exact: true }).element();
-      expect(getComputedStyle(el.closest('.cd-transcript > *')!).opacity, part).toBe('1');
-    }
+    const dots = conversation(screen).getByText('Claude is writing').element();
+    expect(getComputedStyle(dots.closest('.cd-transcript > *')!).opacity).toBe('1');
 
-    // The interview opens at its end: the read done, nothing leaving, the question in the dock, still.
+    // The interview opens at its end: nothing leaving, the owner's words alone in the conversation,
+    // the question in the dock, still.
     release();
     await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
-    await expect.element(conversation(screen).getByText(SETUP_START_READING.read, { exact: true })).toBeVisible();
-    expect(screen.getByText(SETUP_START_READING.usually, { exact: true }).elements()).toHaveLength(0);
     expect(screen.getByText('Claude is writing').elements()).toHaveLength(0);
+    expect(rows(screen)).toHaveLength(1);
     expect(document.querySelector('.cd-setup-chat')!.getAnimations({ subtree: true })).toEqual([]);
     expect(document.querySelector('.cd-setup__bar')!.getAnimations({ subtree: true })).toEqual([]);
   });

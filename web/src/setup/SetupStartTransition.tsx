@@ -7,17 +7,14 @@
  *
  * On the press, the start page fades out while setup's chat fades in; a box travels from the
  * description's field to the owner's first message, behind its words, which rise in as it lands
- * (a FLIP: the message is drawn in place at once, and the box moves with a transform only). Then,
- * one at a time: Claude's read of the words, the quieter line under it, and the writing dots rise
- * in. When the interview opens, the dots and the quieter line fade out, the read is done in place,
- * the business's name fades into the bar, and the memory question rises into the dock.
+ * (a FLIP: the message is drawn in place at once, and the box moves with a transform only). Then
+ * Claude's writing dots rise in where its first message will be. When the interview opens, the dots
+ * fade out, the business's name fades into the bar, and the memory question rises into the dock.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type AnimationEvent, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 
 import { VisitorMessage, WritingIndicator } from '../ds/index.ts';
-import { Icon } from '../ds/icons/index.tsx';
-import { SETUP_START_READING } from './copy.ts';
 import './SetupStartTransition.css';
 
 /** The reader asks for reduced motion: every part of the transition is at its end at once. */
@@ -151,31 +148,6 @@ export function OwnerWords({ words, from = null }: { words: string; from?: Start
 }
 
 /**
- * Claude's read of the owner's words, drawn as a tool's line (ToolLabel's own parts): `reading`
- * while the start runs, `read` once the interview opens. While it runs, the quieter line on how
- * long it takes is its second line, in its words' column after the icon (`usually`), which fades
- * out (`leaving`) as the interview opens.
- */
-function ReadLine({ done, settling = false, usually = null }: { done: boolean; settling?: boolean; usually?: 'shown' | 'leaving' | null }) {
-  const state = done ? (settling ? ' cd-setup-start-read--settling' : '') : ' cd-setup-start-read--reading';
-  return (
-    <div className={`cd-setup-start-read${state}`}>
-      <p className="cd-tool-label cd-type-meta">
-        <Icon name="document" size={14} className="cd-tool-label__icon" />
-        <span className="cd-tool-label__text">
-          <span className="cd-setup-start-read__words">{done ? SETUP_START_READING.read : SETUP_START_READING.reading}</span>
-          {usually === null ? null : (
-            <span className={`cd-setup-start-usually${usually === 'leaving' ? ' cd-setup-start-leaving' : ''}`} aria-hidden={usually === 'leaving' ? true : undefined}>
-              {SETUP_START_READING.usually}
-            </span>
-          )}
-        </span>
-      </p>
-    </div>
-  );
-}
-
-/**
  * Whether the writing dots of the last start shown had come in before its interview opened: only
  * then do they fade out as it opens. A start answered before them (only the mock answers that fast)
  * opens with nothing to fade.
@@ -183,26 +155,23 @@ function ReadLine({ done, settling = false, usually = null }: { done: boolean; s
 let dotsCameIn = false;
 
 /**
- * What runs after the owner's words while the start runs: the read with its quieter second line,
- * and Claude's writing dots, rising in one at a time; after the words' move when the chat has just
- * come in (`afterMove`, which the chat's `cd-setup-start-transition--entering` times).
+ * Claude's writing dots while the start runs, where its first message will be, rising in; after the
+ * words' move when the chat has just come in (`afterMove`, which the chat's
+ * `cd-setup-start-transition--entering` times).
  */
-export function StartingRead({ afterMove }: { afterMove: boolean }) {
+export function StartingDots({ afterMove }: { afterMove: boolean }) {
   useLayoutEffect(() => {
     dotsCameIn = reducesMotion() || !afterMove;
   }, [afterMove]);
   return (
-    <>
-      <ReadLine done={false} usually="shown" />
-      <div
-        className="cd-setup-start-dots"
-        onAnimationEnd={(event) => {
-          if (event.target === event.currentTarget) dotsCameIn = true;
-        }}
-      >
-        <WritingIndicator language="en" />
-      </div>
-    </>
+    <div
+      className="cd-setup-start-dots"
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget) dotsCameIn = true;
+      }}
+    >
+      <WritingIndicator language="en" />
+    </div>
   );
 }
 
@@ -214,10 +183,9 @@ export interface StartedOpeningProps {
 }
 
 /**
- * The opening of an interview the start on this page made: the owner's words, then Claude's read
- * of them, done. Just opened (`arrived`), the hand-off from setup's chat: the dots and the quieter
- * line fade out, the read is done in place, the business's name fades into the bar when it comes,
- * and the docked question rises in.
+ * The opening of an interview the start on this page made: the owner's words, their first message.
+ * Just opened (`arrived`), the hand-off from setup's chat: the dots fade out, the business's name
+ * fades into the bar when it comes, and the docked question rises in.
  */
 export function StartedOpening({ words, arrived }: StartedOpeningProps) {
   const [moving] = useState(() => arrived && !reducesMotion());
@@ -254,8 +222,7 @@ export function StartedOpening({ words, arrived }: StartedOpeningProps) {
   return (
     <>
       <OwnerWords words={words} />
-      {/* The quieter line and the dots, as setup's chat left them, fade out; then they are gone. */}
-      <ReadLine done settling={moving} usually={leaving ? 'leaving' : null} />
+      {/* The dots, as setup's chat left them, fade out; then they are gone. */}
       {leaving ? (
         <div className="cd-setup-start-dots cd-setup-start-leaving" aria-hidden="true" onAnimationEnd={(event) => event.target === event.currentTarget && setLeaving(false)}>
           <WritingIndicator language="en" />

@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, ConceptFooter, Notice, PageHeader, Transcript } from '../ds/index.ts';
 import { useTopFade } from '../lib/useTopFade.ts';
 import { SETUP_COPY, setupStartLostLine, setupStartSlowLine, setupStartSpentLine } from './copy.ts';
-import { OwnerWords, StartingRead, type StartScreen } from './SetupStartTransition.tsx';
+import { OwnerWords, StartingDots, type StartScreen } from './SetupStartTransition.tsx';
 import type { StartFailure } from './StartStep.tsx';
 import './SetupConversation.css';
 
@@ -29,11 +29,10 @@ export interface StartingChatProps {
 
 /**
  * Setup's chat while its start runs, from the press of "Start": the conversation as its interview
- * opens it (`QuestionsStep`, in the same frame), the owner's own words as their first message,
- * Claude's read of them with a quieter line on how long it takes, and Claude's writing dots where
- * its first message will be. A start that doesn't settle says so in their place, with "Try again".
- * Once the interview is made, it opens in this chat's place, the owner's words and the read where
- * they were and the memory question where the dots were.
+ * opens it (`QuestionsStep`, in the same frame), the owner's own words as their first message and
+ * Claude's writing dots where its first message will be. A start that doesn't settle says so where
+ * the dots were, with "Try again". Once the interview is made, it opens in this chat's place, the
+ * owner's words where they were and the memory question where the dots were.
  *
  * How it comes in and hands off is SetupStartTransition's, the one place the transition moves.
  */
@@ -73,7 +72,7 @@ export function StartingChat({ words, failure, onTryAgain, from = null }: Starti
           <PageHeader title={copy.title} titleRef={title} />
           <Transcript label={copy.conversation}>
             <OwnerWords words={words} from={from} />
-            {failure === null ? <StartingRead afterMove={entering} /> : null}
+            {failure === null ? <StartingDots afterMove={entering} /> : null}
           </Transcript>
           {failure === null ? null : (
             <Notice
