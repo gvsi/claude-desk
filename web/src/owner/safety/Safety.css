@@ -331,6 +331,31 @@
   color: var(--text-secondary);
 }
 
+/* The rule that turned a request down, as REV-RULES-B5 draws it: a box on the card line with the
+   control radius and 12 px inside, its label in secondary caption type 6 px over the rule's
+   sentence. The page's paragraph reset would take the sentence's line its 2 px, so it keeps them. */
+.cd-attempt__rule {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-12);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+}
+
+.cd-attempt__rule-label {
+  color: var(--text-secondary);
+}
+
+.cd-attempt__rule .cd-rule-sentence__meta {
+  margin-top: var(--space-2);
+}
+
+/* The rule reads as the Rules page's rule cell draws one: its sentence in primary text. */
+.cd-attempt__rule .cd-rule-sentence__sentence {
+  color: var(--text-primary);
+}
+
 .cd-attempt__part {
   display: flex;
   flex-direction: column;

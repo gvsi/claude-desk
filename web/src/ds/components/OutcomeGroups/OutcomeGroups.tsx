@@ -26,7 +26,7 @@ export interface OutcomeGroupsProps {
 const MODES = ['auto', 'ask', 'never'] as const satisfies readonly RuleMode[];
 
 /**
- * A Desk's rules grouped by what Claude does: "Does on its own", "Asks you" and "Never does", each
+ * A Desk's rules grouped by what Claude does: "Allow", "Ask me first" and "Never", each
  * a card under its outcome's dot with a row per rule, what it does at the left and who it's for at
  * the right. The payment limit's line, when given, sits in a card of its own above them, since it
  * holds over every rule below it. The setup interview's rules step shows the draft this way.

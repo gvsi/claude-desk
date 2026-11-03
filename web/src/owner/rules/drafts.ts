@@ -18,7 +18,7 @@ export interface RuleDraft {
   after: RuleCard[];
   /** The draft's check; null when there is none, which can't be confirmed. */
   proof: ProofReport | null;
-  /** The draft's rules by outcome, shown only for a draft with nothing to compare with (no diff). */
+  /** The API's summary, kept for callers; the review reads every rule through the shared sentence wording. */
   summary: RulesDraft['summary'] | null;
   /** The payment limit in force and the draft's, when they differ. */
   moneyCap: { before: number; after: number } | null;
@@ -85,8 +85,8 @@ export function draftFromAnswer(active: PolicyVersionOut, cardDiff: readonly Rul
 /**
  * A draft from its diff (a chat's, a preset's, a payment limit's, or one read again by its version):
  * before, the removed cards and each changed pair's first; after, the added cards and each pair's
- * second. A draft with no diff has nothing to compare with, so all its cards are added and its
- * summary shows. `preset` names the preset that drafted it, which only titles the review.
+ * second. A draft with no diff has nothing to compare with, so all its cards show as New sentences.
+ * `preset` names the preset that drafted it, which only titles the review.
  */
 export function draftFromDiff(draft: RulesDraft, active: PolicyVersionOut, preset?: RulesPreset): RuleDraft {
   const common = {

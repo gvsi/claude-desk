@@ -422,7 +422,7 @@ def test_the_gate_output_lists_the_refused_runs(capsys):
     _print_gate(gate(a_pass(rows, refused=frozenset({("atk-one", 2)})), EMPTY))
     out = capsys.readouterr().out
     assert out.startswith("gate: passed;")
-    assert ("gate: 1 runs the visitor simulator refused don't fail the gate, since another run of each scenario "
+    assert ("gate: 1 run the visitor simulator refused doesn't fail the gate, since another run of its scenario "
             "scored: atk-one run 2\n") in out
 
 

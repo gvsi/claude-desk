@@ -5,16 +5,18 @@
  * deposit, about 40 minutes before), the seeded hold (a visitor not on record asking for 15% off, 12
  * minutes before) with the reply the check stopped (on Safety, so in no read here), Dana's chat
  * (live, booked, with Mike's whisper), the briefing and the last 7 days they make, and the hold's
- * alert in Notifications, unread. The held request and the names come from the design system's Turner
- * fixtures. Each part of the seed is dated back from when the copy opened as the seed dates it, and
- * counted on its own day on the business's clock as Today reads it, so just after midnight what
- * happened before it is yesterday's. Nothing here is read from the API: no copy exists yet.
+ * alert in Notifications, unread. The held request, the names and the rules that word the held
+ * card's rule come from the design system's Turner fixtures. Each part of the seed is dated back
+ * from when the copy opened as the seed dates it, and counted on its own day on the business's
+ * clock as Today reads it, so just after midnight what happened before it is yesterday's. Nothing
+ * here is read from the API: no copy exists yet.
  */
 import type { QueryKey } from '@tanstack/react-query';
 
 import type { DemoInboxEntry } from '../../api/contracts.ts';
-import type { BusinessOut, ConversationSummary, DeskSummary, NeedsYouItem, Today } from '../../api/views.ts';
+import type { BusinessOut, ConversationSummary, DeskSummary, NeedsYouItem, RulesView, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
+import { requestRulesQuery } from '../rules/requestRulesQuery.ts';
 import { firstName, needsYouKey, OWNER_INBOX_KEY, todayKey } from '../useDesks.ts';
 
 const MINUTE = 60_000;
@@ -200,13 +202,34 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
     {
       decision: held,
       handoff: null,
-      // Past the list-price quote card's limit: the headline quotes that card, so no rule is named.
+      // Past the list-price quote card's limit: no ask card held it, so Needs you names no rule's
+      // reason; its card names that quote rule's hold line from the rules (`rules` below).
       held_by: null,
       held_at: heldAt,
       session: { session_id: held.session_id, kind: 'visitor', display_name: null, verified: false, assurance: 'none' },
       from_the_visitor: visitorTurn?.kind === 'visitor' ? visitorTurn.text : null,
     },
   ];
+
+  // The seed's own rules, which the held card's "Your rule" box is worded from (`useRequestRules`):
+  // only their cards are read, so the version's hashes are left empty.
+  const rules: RulesView = {
+    active: {
+      desk_id: DESK_ID,
+      version: 1,
+      parent_version: null,
+      cards: Object.values(rivera.ruleCards).map((card) => ({ ...card })),
+      cedar_sha256: '',
+      schema_sha256: '',
+      baseline_sha256: '',
+      profiles_sha256: '',
+      invariants_sha256: '',
+      review_thresholds_version: 1,
+      status: 'active',
+    },
+    tools: [],
+    preset: null,
+  };
 
   const inbox: DemoInboxEntry[] = [
     {
@@ -228,6 +251,7 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
     reads: [
       [todayKey(DESK_ID), todayRead],
       [needsYouKey(DESK_ID), needsYou],
+      [requestRulesQuery(DESK_ID).queryKey, rules],
       [OWNER_INBOX_KEY, inbox],
     ],
   };

@@ -875,14 +875,16 @@ describe('Vision pages against their boards', () => {
     await expect.element(held.getByRole('button', { name: 'Deny this time' })).toBeVisible();
     await expect.element(held.getByText('Web chat, 2 min ago', { exact: true })).toBeVisible();
     // The page sets only its own lines: the greeting 2 px under the business's name, and the held
-    // quote with the card's own spacing, its reason 12 px under the status line and "Held by" 14 px
-    // under the reason.
+    // quote with the card's own spacing, its reason 12 px under the status line and the rule that
+    // held it, in its "Your rule" box, 12 px under the reason.
     const businessName = owner.getByText('Turner Plumbing', { exact: true }).element();
     const greeting = owner.getByRole('heading', { level: 2, name: 'Good morning, Mike' }).element();
     expect(round(top(greeting) - bottom(businessName))).toBe(2);
     const reason = one(held.element(), '.cd-approval-card__reason');
     expect(round(top(reason) - bottom(one(held.element(), '.cd-approval-card__top')))).toBe(12);
-    expect(round(top(one(held.element(), '.cd-approval-card__held-by')) - bottom(reason))).toBe(14);
+    const rule = held.getByRole('group', { name: 'Your rule' });
+    expect(rule.element().textContent).toBe('Your ruleClaude asks you before any discountQuote · AnyoneAsk me first');
+    expect(round(top(rule.element()) - bottom(reason))).toBe(12);
     const live = owner.getByRole('region', { name: 'Live now' });
     expect(live.getByRole('listitem').elements().map((row) => row.textContent)).toEqual(['Lucía HerreraVisitor', 'Alex Kim’s assistantAgent']);
     const tabs = owner.getByRole('navigation', { name: "The owner app's tabs" }).getByRole('link').elements();

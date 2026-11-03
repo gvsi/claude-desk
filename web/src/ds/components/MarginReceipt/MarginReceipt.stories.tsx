@@ -6,6 +6,7 @@ import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { settled } from '../../test/settled.ts';
+import { fixtureHeldRule } from '../../test/heldRule.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
@@ -83,7 +84,7 @@ function ownerReceipt(decision: Decision) {
 const OWNER_LINES = [
   { receipt: ownerReceipt(rivera.decisions.held), words: 'Held for you', tone: 'held' },
   { receipt: ownerReceipt(rivera.decisions.refused), words: 'Stopped', tone: 'refused' },
-  { receipt: { ...executed, reason: rivera.decisions.allowed.reason_plain }, words: 'Automatic', tone: 'handled' },
+  { receipt: { ...executed, reason: rivera.decisions.allowed.reason_plain }, words: 'Allowed', tone: 'handled' },
   { receipt: ownerReceipt(rivera.decisions.allowed), words: 'Running', tone: 'handled' },
 ] as const;
 
@@ -358,7 +359,7 @@ export const HeldWithCardBelow: Story = {
       </TranscriptRow>
       <ApprovalCard
         decision={rivera.decisions.held}
-        heldBy={rivera.ruleCards['rv-quote'].reason}
+        rule={fixtureHeldRule(rivera.decisions.held)}
         waiting="Web chat, 2 min ago"
         onAnswer={fn()}
       />

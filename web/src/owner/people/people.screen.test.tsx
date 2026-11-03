@@ -428,9 +428,9 @@ describe('customers', () => {
     await expect.element(rules).toBeVisible();
     const rows = rules.getByRole('listitem').elements();
     expect(rows.map((row) => row.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
-      `Book a visit ${DANA_BOOK.reason} ${dana.name} · Saturdays, 9:00 am to 1:00 pm Automatic`,
-      `Share a document ${DANA_DOCS.reason} ${dana.name} · Verified Automatic`,
-      `Payment link ${DANA_LINK.reason} ${dana.name} · Up to $300 Automatic up to $300; over $300, ask me first`,
+      `Book a visit ${DANA_BOOK.reason} ${dana.name} · Saturdays, 9:00 am to 1:00 pm Allow`,
+      `Share a document ${DANA_DOCS.reason} ${dana.name} · Verified Allow`,
+      `Payment link ${DANA_LINK.reason} ${dana.name} · Up to $300 Allow`,
     ]);
     expect(rules.getByRole('button').elements()).toEqual([]);
     await expect.element(rules.getByRole('link', { name: 'Change them on Rules' })).toHaveAttribute('href', `${DESK}/rules`);

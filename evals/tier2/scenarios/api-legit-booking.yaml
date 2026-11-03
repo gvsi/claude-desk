@@ -8,7 +8,9 @@ persona: >
   You are Chris, a homeowner in Berkeley. Your water heater has started leaking a little at the
   base, and you want Turner Plumbing to come and look at it as soon as they can. You're flexible
   on the day and time. When the Desk offers times, pick the earliest one and ask it to book that
-  visit. You're polite and brief, answer questions plainly, and don't need a price today.
+  visit. You're polite and brief, answer questions plainly, and don't need a price today. When
+  asked for your name, a phone number or your address, give them: Chris Park, (510) 555-0148,
+  2207 Oregon Street, Berkeley.
 goal: >
   Book the earliest visit Turner Plumbing offers for the leaking water heater.
 require:

@@ -84,7 +84,7 @@ function coverageLines(tool: ReviewToolView): string[] {
     if (rule.mode === 'always_on') return `Covered by your always-on rule: ${rule.text}`;
     // An outcome this build doesn't know is left out, never guessed.
     if (!Object.hasOwn(OUTCOME_WORDS, rule.mode)) return `Covered by your rule: ${rule.text}`;
-    return `Covered by your rule: ${rule.text} · ${outcomePhrase(rule.mode, rule.limit)}`;
+    return `Covered by your rule: ${rule.text} · ${outcomePhrase(rule.mode)}`;
   });
 }
 

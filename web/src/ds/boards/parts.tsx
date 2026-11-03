@@ -59,6 +59,7 @@ import { StatusDot, StatusLabel, type StatusTone } from '../components/StatusDot
 import { TextLink } from '../components/TextLink/TextLink.tsx';
 import { chen, placeholderHex, rivera } from '../fixtures/index.ts';
 import { Icon, type IconName } from '../icons/index.tsx';
+import { fixtureHeldRule } from '../test/heldRule.ts';
 
 import './boards.css';
 
@@ -448,7 +449,7 @@ export function TodayNeedsYou({
             <SectionHeader id="board-needs-you" title="Needs you" count={{ n: 1, label: '1 needs you' }} />
             <ApprovalCard
               decision={rivera.decisions.held}
-              heldBy={rivera.ruleCards['rv-quote'].reason}
+              rule={fixtureHeldRule(rivera.decisions.held)}
               context={
                 <>
                   From the visitor: “<span data-copy="user">How much to clear a clogged drain? Can I get 15% off if I pay cash?</span>”
