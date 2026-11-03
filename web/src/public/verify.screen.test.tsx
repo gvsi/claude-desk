@@ -117,6 +117,73 @@ describe('verification', () => {
     await expectScreenBasics(screen.container, { owner: false });
   });
 
+  it('the_code_box_takes_focus_when_it_arrives_and_points_to_the_demo_inbox', async () => {
+    // The visitor's words go, the verify card comes: the field takes focus once it shows, asks for
+    // the code, and the line under it says where the code arrives. On a wide window the Demo inbox
+    // is beside the chat while the code is awaited, even before anything is in it (owner,
+    // 2026-11-02): a contact not on record gets no code, and the inbox says it has nothing yet.
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    await expect.element(screen.getByRole('region', { name: 'Demo inbox' })).not.toBeInTheDocument();
+    const context = mockStore.world.context(chat, 'en', '');
+    mockStore.world.emit(chat, context.reply([rivera.blocks.verify_prompt.en]));
+    const field = screen.getByRole('textbox', { name: '6-digit code' });
+    await expect.element(field).toBeVisible();
+    await vi.waitFor(() => expect(document.activeElement).toBe(field.element()), { timeout: 5_000 });
+    expect(field.element().getAttribute('placeholder')).toBe('Enter the 6-digit code');
+    await expect.element(field).toHaveAccessibleDescription('Your code arrives in the Demo inbox.');
+    const inbox = screen.getByRole('region', { name: 'Demo inbox' });
+    await expect.element(inbox).toBeVisible();
+    expect(inbox.element().closest('.cd-public-chat__inbox-column')).not.toBeNull();
+    await expect.element(inbox.getByText('Nothing here yet. Codes and alerts you’d get by text or email show up here.', { exact: true })).toBeVisible();
+    await expectScreenBasics(screen.container, { owner: false });
+  });
+
+  it('a_code_box_read_on_a_reload_takes_no_focus', async () => {
+    const first = await renderRoute(PAGE);
+    await ready(first.screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([rivera.blocks.verify_prompt.en]));
+    await expect.element(first.screen.getByRole('textbox', { name: '6-digit code' })).toBeVisible();
+
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const field = screen.getByRole('textbox', { name: '6-digit code' });
+    await expect.element(field).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(document.activeElement).not.toBe(field.element());
+  });
+
+  it('typing_elsewhere_keeps_its_focus_when_the_code_box_arrives', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const box = screen.getByRole('textbox', { name: /^Message / });
+    await box.fill('And one more thing');
+    (box.element() as HTMLElement).focus();
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([rivera.blocks.verify_prompt.en]));
+    await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(document.activeElement).toBe(box.element());
+  });
+
+  it('a_button_the_visitor_moved_to_keeps_its_focus_when_the_code_box_arrives', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const button = screen.getByRole('button', { name: 'Ask for Mike Turner' });
+    (button.element() as HTMLElement).focus();
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([rivera.blocks.verify_prompt.en]));
+    await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(document.activeElement).toBe(button.element());
+  });
+
   it('cant_get_the_code_closes_the_form_while_the_owner_is_in_the_chat', async () => {
     const ask = "I'd like to talk to Mike Turner.";
     const { screen } = await renderRoute(PAGE, { seed: 'rivera' });

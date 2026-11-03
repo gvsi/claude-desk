@@ -1068,6 +1068,7 @@ export function PublicChat({ slug, embedded = false, previewDeskId, onSession, a
               onSubmit={chat.verify}
               onAskForOwner={chat.ownerInChat ? closeVerify : askForOwner}
               askWaits={!chat.ownerInChat && sendHeld}
+              arrived={row.live === true}
             />
           </div>,
         ]

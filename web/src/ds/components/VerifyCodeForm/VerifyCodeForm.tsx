@@ -55,17 +55,20 @@ export interface VerifyCodeFormProps {
   askWaits?: boolean;
   /** The visitor's language. */
   language: CopyLanguage;
+  /** A line under the field saying where the code arrives; it describes the field. None by default. */
+  hint?: string;
 }
 
 /**
  * The six-digit code a visitor types under the verify card. The card carries the kernel's message,
  * so the form says nothing of its own beyond its label, its buttons and a failed try's line.
  */
-export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = false, language }: VerifyCodeFormProps) {
+export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = false, language, hint }: VerifyCodeFormProps) {
   const copy = VERIFY_COPY[language];
   const id = useId();
   const fieldId = `${id}-code`;
   const failedId = `${id}-failed`;
+  const hintId = `${id}-hint`;
   const fieldRef = useRef<HTMLInputElement>(null);
   const [code, setCode] = useState('');
   // Set by a submit and cleared when the screen's state moves on or the code changes, so a second
@@ -77,6 +80,7 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = fals
 
   const checking = state === 'checking';
   const failed = state === 'failed';
+  const describedBy = [failed ? failedId : null, hint === undefined ? null : hintId].filter((part) => part !== null).join(' ');
   const whole = WHOLE_CODE.test(code);
 
   useEffect(() => {
@@ -156,9 +160,10 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = fals
             type="text"
             inputMode="numeric"
             autoComplete="one-time-code"
+            placeholder={copy.placeholder}
             value={code}
             aria-invalid={failed || undefined}
-            aria-describedby={failed ? failedId : undefined}
+            aria-describedby={describedBy === '' ? undefined : describedBy}
             onChange={change}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && event.repeat) event.preventDefault();
@@ -169,6 +174,11 @@ export function VerifyCodeForm({ state, onSubmit, onAskForOwner, askWaits = fals
             {copy.confirm}
           </Button>
         </div>
+        {hint === undefined ? null : (
+          <p id={hintId} className="cd-verify-code__hint cd-type-meta">
+            {hint}
+          </p>
+        )}
       </div>
       {failed ? (
         <div id={failedId}>
