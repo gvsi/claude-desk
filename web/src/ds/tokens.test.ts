@@ -825,9 +825,17 @@ describe('design tokens', () => {
   });
 
   test('follow_beat_is_a_token', () => {
-    // After a revealed reply's words, its cards and then their receipts fade in 120 ms apart, as the
-    // signed visitor reveal boards draw it.
-    expect(tokenValue('motion-follow')).toBe('120ms');
+    // After a revealed reply's words, its cards and then their receipts fade in 200 ms apart, one
+    // after another, as the project owner asked.
+    expect(tokenValue('motion-follow')).toBe('200ms');
+  });
+
+  test('follow_beat_lets_each_part_finish_first', () => {
+    // Each part of a revealed reply starts only once the one before has finished: the beat is never
+    // shorter than a card's or a line's fade (motion-base) or the last word's settle (motion-settle).
+    const ms = (name: string) => Number.parseFloat(String(tokenValue(name)));
+    expect(ms('motion-follow')).toBeGreaterThanOrEqual(ms('motion-base'));
+    expect(ms('motion-follow')).toBeGreaterThanOrEqual(ms('motion-settle'));
   });
 
   test('motion_stays_in_range', () => {

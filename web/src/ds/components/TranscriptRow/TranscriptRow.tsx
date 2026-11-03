@@ -1,4 +1,4 @@
-import { Children, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Children, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { RowArrivalContext, type RowArrival } from './arrival.ts';
 
@@ -32,6 +32,43 @@ const LANDING: ReadonlySet<string> = new Set(['cd-transcript-row-rise', 'cd-tran
  */
 type Follow = 'waiting' | number | null;
 
+/** What brings a revealed message in: its words settling, its cards, and the lines that follow them. */
+const COMING_IN: ReadonlySet<string> = new Set(['cd-md-settle', 'cd-md-settle-marker', 'cd-claude-message-follow', 'cd-transcript-row-follow']);
+
+/** A time token's value in ms, as the page reads it, in ms or in s; 0 when it can't be read. */
+function msOf(value: string): number {
+  const time = Number.parseFloat(value);
+  if (Number.isNaN(time)) return 0;
+  return value.trim().endsWith('ms') ? time : time * 1000;
+}
+
+/** The page's animation clock now, in ms: the time a motion that starts now is counted from. */
+function clockNow(): number {
+  const time = document.timeline?.currentTime;
+  return typeof time === 'number' ? time : performance.now();
+}
+
+/**
+ * When everything coming in under `row` that is already playing or waiting for its beat will have
+ * ended, on the page's animation clock, leaving out the lines in `unplaced`, which are yet to be
+ * given theirs: one not yet started starts with the next frame, as one given its beat `now` does,
+ * so it is counted from `now`.
+ */
+function comingInUntil(row: HTMLElement, now: number, unplaced: readonly Element[]): number {
+  if (typeof row.getAnimations !== 'function') return now;
+  return row
+    .getAnimations({ subtree: true })
+    .filter((animation) => {
+      if (!(animation instanceof CSSAnimation) || !COMING_IN.has(animation.animationName) || animation.playState === 'finished') return false;
+      const target = (animation.effect as KeyframeEffect | null)?.target;
+      return !unplaced.some((line) => target != null && line.contains(target));
+    })
+    .reduce((until, animation) => {
+      const start = animation.startTime === null ? now : Number(animation.startTime);
+      return Math.max(until, start + Number(animation.effect?.getComputedTiming().endTime ?? 0));
+    }, now);
+}
+
 /** Whether anything in `row` is still landing: playing, or waiting for its beat. */
 function landing(row: HTMLElement): boolean {
   if (typeof row.getAnimations !== 'function') return false;
@@ -63,13 +100,32 @@ export function TranscriptRow({ children, margin, live = false }: TranscriptRowP
     };
     return { wait: () => set('waiting'), follow: (beat) => set(beat) };
   }, []);
-  // Following a revealed message, each attached line's place among them, which its beat follows
-  // (TranscriptRow.css), before it is drawn: a line attached while they follow gets its place too.
+  // Following a revealed message, when the row began to follow it, on the page's animation clock,
+  // and the lines already given their beat.
+  const sequence = useRef<{ from: number; placed: WeakSet<Element> } | null>(null);
+  // Each attached line's beat (--cd-follow-delay, TranscriptRow.css), before it is drawn, one after
+  // another: the first once the message's cards have come in (the beat it says, `motion-follow`
+  // apart, from when its words were whole), and each line once everything before it has, so no two
+  // parts of the reply ever come in together. A line attached while they follow (a newer status,
+  // say) waits its turn the same way: after whatever is still coming in, or at once when nothing is.
+  // A line already shown before its row arrived has no beat: it shows at once.
   useLayoutEffect(() => {
-    if (!arriving || typeof follow !== 'number') return;
-    rowRef.current
-      ?.querySelectorAll<HTMLElement>(':scope > .cd-transcript-row__margin > *')
-      .forEach((line, index) => line.style.setProperty('--cd-follow-line', String(index + 1)));
+    const row = rowRef.current;
+    if (!arriving || typeof follow !== 'number' || row === null) return;
+    const now = clockNow();
+    sequence.current ??= { from: now, placed: new WeakSet() };
+    const { from, placed } = sequence.current;
+    const lines = [...row.querySelectorAll<HTMLElement>(':scope > .cd-transcript-row__margin > *')].filter(
+      (line) => !placed.has(line) && !line.classList.contains('cd-margin-line--shown'),
+    );
+    if (lines.length === 0) return;
+    const beat = msOf(getComputedStyle(row).getPropertyValue('--motion-follow'));
+    let next = Math.max(from + follow * beat, comingInUntil(row, now, lines));
+    for (const line of lines) {
+      placed.add(line);
+      line.style.setProperty('--cd-follow-delay', `${next - now}ms`);
+      next += beat;
+    }
   });
   useLayoutEffect(() => {
     const row = rowRef.current;
@@ -105,11 +161,9 @@ export function TranscriptRow({ children, margin, live = false }: TranscriptRowP
   if (arriving) className += ' cd-transcript-row--live';
   if (arriving && follow === 'waiting') className += ' cd-transcript-row--waiting';
   if (arriving && typeof follow === 'number') className += ' cd-transcript-row--following';
-  // The beat the first attached line follows on, after the message's cards.
-  const style = arriving && typeof follow === 'number' ? ({ '--cd-follow-next': follow } as CSSProperties) : undefined;
   return (
     <RowArrivalContext.Provider value={arrival}>
-      <div ref={rowRef} className={className} style={style}>
+      <div ref={rowRef} className={className}>
         <div className="cd-transcript-row__main">{children}</div>
         {hasMargin ? <div className="cd-transcript-row__margin">{margin}</div> : null}
       </div>
