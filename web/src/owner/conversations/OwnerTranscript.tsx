@@ -27,6 +27,7 @@ import {
   VisitorMessage,
   Whisper,
 } from '../../ds/index.ts';
+import { POLL_MS } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { groupRows, opensAReply, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
 import { paymentLinkMemory } from '../../public/paymentLinks.ts';
@@ -35,11 +36,12 @@ import { ledgerQuery } from '../safety/queries.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { useOwnerReceipt } from './ownerReceipt.ts';
 
-/** One receipt as the owner's transcript keeps it: its signed event, and whether it is the first for its decision. */
+/** One receipt as the owner's transcript keeps it: its signed event, whether it is the first for its decision, and its item's place. */
 interface OwnerReceiptSource {
   event: StatusEvent | EvMessage;
   first: boolean;
   ownerPlain?: string | null;
+  n: number;
 }
 
 type OwnerRowItem =
@@ -126,11 +128,11 @@ function rowsOf(items: readonly OwnerTranscriptItem[]) {
         return { kind: 'turn', row: { kind: 'whisper', n: item.n, text: item.text ?? '', at: item.created_at } };
       case 'delivered':
         if (event?.type !== 'message') return null;
-        return { kind: 'reply', row: { kind: 'message', n: item.n, ev: event }, receipt: { event, first: false } };
+        return { kind: 'reply', row: { kind: 'message', n: item.n, ev: event }, receipt: { event, first: false, n: item.n } };
       case 'status': {
         if (!isStatus(event)) return null;
         const earlier = firsts.get(event.decision_id);
-        const receipt: OwnerReceiptSource = { event, first: earlier === undefined, ownerPlain: item.owner_plain };
+        const receipt: OwnerReceiptSource = { event, first: earlier === undefined, ownerPlain: item.owner_plain, n: item.n };
         if (earlier === undefined) firsts.set(event.decision_id, receipt);
         return { kind: 'receipt', receipt, beside: earlier };
       }
@@ -151,15 +153,29 @@ function rowsOf(items: readonly OwnerTranscriptItem[]) {
  * until then (coming back to the chat), as recorded history always does. A row is live only in the
  * render that first shows it; `TranscriptRow` keeps its motion from there.
  */
-function useArrivals(rows: readonly OwnerRow[], recorded: boolean, readSinceOpened: boolean): (row: OwnerRow) => boolean {
+function useArrivals(
+  items: readonly OwnerTranscriptItem[],
+  rows: readonly OwnerRow[],
+  recorded: boolean,
+  readSinceOpened: boolean,
+): { arrived: (row: OwnerRow) => boolean; liveAfter: number | null } {
   // The newest item this view has shown from a read taken since it opened, or null until then.
   const shownUpTo = useRef<number | null>(null);
+  // The newest item of the first read taken since it opened: anything after it came while the
+  // owner watched. Null until that read is shown, and for recorded history.
+  const opened = useRef<number | null>(null);
   const newest = rows.reduce((max, row) => Math.max(max, row.item.n), 0);
+  const newestItem = items.reduce((max, item) => Math.max(max, item.n), 0);
   useEffect(() => {
-    if (readSinceOpened) shownUpTo.current = Math.max(shownUpTo.current ?? 0, newest);
-  }, [newest, readSinceOpened]);
+    if (!readSinceOpened) return;
+    shownUpTo.current = Math.max(shownUpTo.current ?? 0, newest);
+    opened.current ??= newestItem;
+  }, [newest, newestItem, readSinceOpened]);
   const before = shownUpTo.current;
-  return (row) => !recorded && before !== null && row.item.kind === 'message' && row.item.ev.author !== 'owner' && row.item.n > before;
+  return {
+    arrived: (row) => !recorded && before !== null && row.item.kind === 'message' && row.item.ev.author !== 'owner' && row.item.n > before,
+    liveAfter: recorded ? null : opened.current,
+  };
 }
 
 /**
@@ -215,6 +231,12 @@ const COMING_IN: ReadonlySet<string> = new Set([
  */
 const LONGEST_WAIT_MS = 8_000;
 
+/**
+ * The longest a held card whose hold came in before its reply waits for that reply: one
+ * conversation poll, the time the next read takes to bring it (owner, 2026-11-02).
+ */
+const REPLY_WAIT_MS = POLL_MS.conversation;
+
 /** The page's animation clock now, in ms. */
 function clockNow(): number {
   const time = document.timeline?.currentTime;
@@ -251,48 +273,81 @@ function comingIn(slot: Element): boolean {
   );
 }
 
+/** How a held card is drawn: the props `HeldAfter` takes from the transcript. */
+interface HeldAfterProps {
+  /** The card has been seen already: it never waits again. */
+  seen: boolean;
+  /** Its hold came in while the owner watched, before its turn's reply: it waits for that reply. */
+  waitsForReply: boolean;
+  /** When the card was first drawn, on `performance.now()`'s clock, which its waits count from. */
+  since: number;
+  /** Says the card is seen, once it shows. */
+  onSeen: () => void;
+  render: (slot: HeldSlot) => ReactNode;
+}
+
 /**
- * A held request's card after the row its hold is under. After a reply that is coming in live, it
- * comes in last: it waits unseen in its place, not focusable and busy for assistive technology,
- * until the reply's words, cards and lines have all come in, then fades and rises in (Conversations.css).
- * Anything else shows it at once, and never later: a card already seen, one from history (its row
- * isn't arriving), reduced motion, a hidden tab, where the browser can't list its animations, and
- * a reply that hasn't come in after `LONGEST_WAIT_MS`. A reply replaced or gone while it waits
- * ends the wait: nothing before it is coming in.
+ * A held request's card after the row its hold is under. It comes in last, after the reply that
+ * held it: it waits unseen in its place, not focusable and busy for assistive technology, until
+ * that reply's words, cards and lines have all come in, then fades and rises in (Conversations.css).
+ * When its hold came in while the owner watched but before the reply (after the visitor's
+ * question), it waits there for the reply for at most `REPLY_WAIT_MS` from when it was first
+ * drawn: the reply coming moves it after the reply, where it waits for it as above, and no reply
+ * by then shows it at once where it is. Anything else shows it at once, and never later: a card
+ * already seen, one from history, reduced motion, a hidden tab, where the browser can't list its
+ * animations, and any wait past `LONGEST_WAIT_MS` from when it was first drawn. A reply replaced
+ * or gone while it waits ends the wait: nothing before it is coming in.
  */
-function HeldAfter({ shownBefore, render }: { shownBefore: boolean; render: (slot: HeldSlot) => ReactNode }) {
+function HeldAfter({ seen, waitsForReply, since, onSeen, render }: HeldAfterProps) {
   const slot = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<'shown' | 'waiting' | 'landing'>('shown');
-  // Read once, when the card is first drawn, before it is painted.
-  const [first] = useState(() => ({ shownBefore }));
+  // Read once, when the card is first drawn, before it is painted: whether it waits, and for what.
+  const [first] = useState(() => ({ seen, waitsForReply, since }));
+  const forReply = useRef(false);
+  const said = useRef(onSeen);
+  said.current = onSeen;
   useLayoutEffect(() => {
     const el = slot.current;
-    if (first.shownBefore || el === null || typeof el.getAnimations !== 'function' || typeof CSSAnimation === 'undefined') return;
-    if (document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    if (partsBefore(el)?.row.classList.contains('cd-transcript-row--live') && comingIn(el)) setPhase('waiting');
+    if (el === null) return;
+    const waits = (): boolean => {
+      if (first.seen || typeof el.getAnimations !== 'function' || typeof CSSAnimation === 'undefined') return false;
+      if (document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+      if (partsBefore(el)?.row.classList.contains('cd-transcript-row--live') && comingIn(el)) return true;
+      forReply.current = first.waitsForReply && performance.now() - first.since < REPLY_WAIT_MS;
+      return forReply.current;
+    };
+    if (waits()) setPhase('waiting');
+    else said.current();
   }, [first]);
   useEffect(() => {
     const el = slot.current;
     if (phase !== 'waiting' || el === null) return undefined;
-    const show = () => setPhase('shown');
+    const come = (next: 'shown' | 'landing') => {
+      said.current();
+      setPhase(next);
+    };
     let frame = 0;
     const step = () => {
-      if (comingIn(el)) frame = requestAnimationFrame(step);
-      else setPhase('landing');
+      if (forReply.current) {
+        // No reply came in time: it shows at once, where it is.
+        if (performance.now() - first.since < REPLY_WAIT_MS) frame = requestAnimationFrame(step);
+        else come('shown');
+      } else if (comingIn(el)) frame = requestAnimationFrame(step);
+      else come('landing');
     };
     frame = requestAnimationFrame(step);
     // A hidden tab plays nothing, so the reply would never finish coming in.
     const hidden = () => {
-      if (document.hidden) show();
+      if (document.hidden) come('shown');
     };
     document.addEventListener('visibilitychange', hidden);
-    const longest = window.setTimeout(show, LONGEST_WAIT_MS);
+    const longest = window.setTimeout(() => come('shown'), Math.max(0, first.since + LONGEST_WAIT_MS - performance.now()));
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener('visibilitychange', hidden);
       window.clearTimeout(longest);
     };
-  }, [phase]);
+  }, [phase, first]);
   // Once it has come in, it is like any other card.
   useEffect(() => {
     const el = slot.current;
@@ -311,16 +366,27 @@ function HeldAfter({ shownBefore, render }: { shownBefore: boolean; render: (slo
 }
 
 /**
- * The held requests this view has drawn, as of its last draw: a card already drawn (after the
- * question, say, or last while its hold wasn't in the conversation yet) never waits again when it
- * moves after the reply.
+ * The held requests this view has shown, and when it first drew each: a card already seen never
+ * waits again when it moves (after the reply, say), and one still waiting keeps counting from when
+ * it was first drawn.
  */
-function useShownHeld(ids: readonly string[]): ReadonlySet<string> {
+function useHeldCards(): { seen: (id: string) => boolean; markSeen: (id: string) => void; since: (id: string) => number } {
   const shown = useRef(new Set<string>());
-  useEffect(() => {
-    for (const id of ids) shown.current.add(id);
-  }, [ids]);
-  return shown.current;
+  const drawn = useRef(new Map<string, number>());
+  return useMemo(
+    () => ({
+      seen: (id) => shown.current.has(id),
+      markSeen: (id) => {
+        shown.current.add(id);
+      },
+      since: (id) => {
+        const at = drawn.current.get(id) ?? performance.now();
+        drawn.current.set(id, at);
+        return at;
+      },
+    }),
+    [],
+  );
 }
 
 interface ReceiptLineProps {
@@ -432,9 +498,9 @@ export function OwnerTranscript({
   const messages = useMemo(() => groups.rows.flatMap(({ item }) => item.kind === 'message' ? [item.ev] : []), [groups]);
   const [paymentLinks] = useState(paymentLinkMemory);
   const paymentBlock = usePaymentLinks(messages, paymentLinks, focusTarget);
-  const arrived = useArrivals(groups.rows, recorded, readSinceOpened);
+  const { arrived, liveAfter } = useArrivals(items, groups.rows, recorded, readSinceOpened);
   const shown = useShownReceipts(groups);
-  const shownHeld = useShownHeld(heldIds);
+  const heldCards = useHeldCards();
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const traceBox = useRef<HTMLDivElement>(null);
@@ -520,9 +586,23 @@ export function OwnerTranscript({
   const leading = groups.leading;
   const [leadingCards = [], ...rowCards] = cardsAfter([leading, ...groups.rows.map((row) => row.receipts)], heldIds);
   const placed = new Set([leadingCards, ...rowCards].flat());
-  // A request's card drawn after a reply coming in live comes in after it (HeldAfter).
-  const held = (ids: readonly string[]): ReactNode[] =>
-    ids.map((id) => <HeldAfter key={`held-${id}`} shownBefore={shownHeld.has(id)} render={(slot) => renderHeld(id, slot)} />);
+  // Each held request's card comes in after the reply that held it (HeldAfter). One whose hold
+  // came in while the owner watched, under a row that isn't Claude's reply (her question, before
+  // the reply has come), or not yet in the conversation at all, waits for that reply.
+  const holdCameLive = (receipts: readonly OwnerReceiptSource[], id: string) =>
+    liveAfter !== null && receipts.some(({ event, n }) => event.type === 'held' && event.decision_id === id && n > liveAfter);
+  const held = (ids: readonly string[], waitsForReply: (id: string) => boolean): ReactNode[] =>
+    ids.map((id) => (
+      <HeldAfter
+        key={`held-${id}`}
+        seen={heldCards.seen(id)}
+        waitsForReply={waitsForReply(id)}
+        since={heldCards.since(id)}
+        onSeen={() => heldCards.markSeen(id)}
+        render={(slot) => renderHeld(id, slot)}
+      />
+    ));
+  const isReply = (row: OwnerRow) => row.item.kind === 'message' && row.item.ev.author !== 'owner';
   const hasSeq = (receipts: readonly OwnerReceiptSource[]) => openSeq !== null && receipts.some((r) => r.event.ledger_seq === openSeq);
 
   const rows = groups.rows.map((row, index) => {
@@ -541,11 +621,14 @@ export function OwnerTranscript({
           onOpenTrace={openTrace}
         />
         {hasSeq(row.receipts) ? trace : null}
-        {held(cards)}
+        {held(cards, (id) => !isReply(row) && holdCameLive(row.receipts, id))}
       </Fragment>
     );
   });
-  const rest = held(heldIds.filter((id) => !placed.has(id)));
+  const rest = held(
+    heldIds.filter((id) => !placed.has(id)),
+    () => liveAfter !== null,
+  );
 
   return (
     <>
@@ -566,7 +649,7 @@ export function OwnerTranscript({
             {null}
           </TranscriptRow>
           {hasSeq(leading) ? trace : null}
-          {held(leadingCards)}
+          {held(leadingCards, (id) => holdCameLive(leading, id))}
         </>
       ) : null}
       {rows}
