@@ -171,6 +171,19 @@ describe('verification', () => {
     expect(document.activeElement).toBe(box.element());
   });
 
+  it('a_button_the_visitor_moved_to_keeps_its_focus_when_the_code_box_arrives', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const chat = mockStore.visitorSession(RIVERA.slug);
+    if (!chat) throw new Error('this browser has a chat');
+    const button = screen.getByRole('button', { name: 'Ask for Mike Turner' });
+    (button.element() as HTMLElement).focus();
+    mockStore.world.emit(chat, mockStore.world.context(chat, 'en', '').reply([rivera.blocks.verify_prompt.en]));
+    await expect.element(screen.getByRole('textbox', { name: '6-digit code' })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(document.activeElement).toBe(button.element());
+  });
+
   it('cant_get_the_code_closes_the_form_while_the_owner_is_in_the_chat', async () => {
     const ask = "I'd like to talk to Mike Turner.";
     const { screen } = await renderRoute(PAGE, { seed: 'rivera' });

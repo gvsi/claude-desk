@@ -61,18 +61,36 @@ function useVerifiedFocus(): { formRef: RefCallback<HTMLDivElement>; lineRef: Re
 /** How long the field waits to be shown in a reply still coming in before it gives up on focus. */
 const LONGEST_WAIT_MS = 8_000;
 
-/** The visitor has words in another field: they are typing there, so focus stays. */
-function typingElsewhere(field: HTMLInputElement): boolean {
-  const active = document.activeElement;
-  return (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) && active !== field && active.value !== '';
+/**
+ * Where focus rests when the visitor isn't doing anything else: nowhere, or the chat's composer
+ * with nothing typed in it (the message just sent, by Enter or by Send).
+ */
+function idle(active: Element | null): boolean {
+  if (active === null || active === document.body) return true;
+  const composer = active.closest('.cd-public-shell__composer');
+  const box = composer?.querySelector('textarea');
+  return composer !== null && composer !== undefined && (box === null || box === undefined || box.value === '');
+}
+
+/** The field can be seen: shown, and no longer fully see-through at the start of its fade. */
+function seen(field: HTMLInputElement): boolean {
+  if (typeof field.checkVisibility === 'function') return field.checkVisibility({ visibilityProperty: true, opacityProperty: true });
+  // Older Safari has no checkVisibility: its own visibility, and no see-through box around it.
+  if (getComputedStyle(field).visibility !== 'visible') return false;
+  for (let node: Element | null = field; node !== null; node = node.parentElement) {
+    if (getComputedStyle(node).opacity === '0') return false;
+  }
+  return true;
 }
 
 /**
- * The code field takes focus once it shows, when its card arrived while the page was open (owner,
- * 2026-11-02), so the visitor can type the code from the Demo inbox at once. Not a form read on a
- * reload, not while the visitor is typing in another field, and not on a touch screen, where it
- * would raise the keyboard over the inbox, as the chat's other moves don't. In a reply still coming
- * in the form waits unseen, so the field takes focus once it can, for up to 8 s.
+ * The code field takes focus once it can be seen, when its card arrived while the page was open
+ * (owner, 2026-11-02), so the visitor can type the code from the Demo inbox at once. Only from an
+ * idle place: nowhere, or the composer with nothing typed in it. Focus the visitor moved anywhere
+ * else, before or while the form waits, stays where it is. Not a form read on a reload, and not on
+ * a touch screen, where it would raise the keyboard over the inbox, as the chat's other moves
+ * don't. In a reply still coming in the form waits unseen, so the field takes focus once it can,
+ * for up to 8 s.
  */
 function useFocusOnArrival(arrived: boolean): RefCallback<HTMLDivElement> {
   const place = useRef<HTMLDivElement | null>(null);
@@ -80,13 +98,12 @@ function useFocusOnArrival(arrived: boolean): RefCallback<HTMLDivElement> {
   useEffect(() => {
     if (!arrivedAtFirst.current || window.matchMedia('(pointer: coarse)').matches) return undefined;
     const started = performance.now();
+    const from = document.activeElement;
     let frame = 0;
     const tryFocus = () => {
       const field = place.current?.querySelector<HTMLInputElement>('input');
-      if (!field || typingElsewhere(field)) return;
-      // Older Safari has no checkVisibility: the field's own visibility says the same here.
-      const shown = typeof field.checkVisibility === 'function' ? field.checkVisibility({ visibilityProperty: true }) : getComputedStyle(field).visibility === 'visible';
-      if (shown) {
+      if (!field || document.activeElement !== from || !idle(from)) return;
+      if (seen(field)) {
         field.focus({ preventScroll: true });
         return;
       }
