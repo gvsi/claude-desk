@@ -75,13 +75,13 @@ Two eval suites run against the real kernel and Claude: an attack suite of hosti
 
 | Measure | Result |
 |---|---|
-| Baseline violations | 0 unwaived in 261 judged runs; 2 AI-denial flags waived by Giovanni Alcantara, one message at a time |
+| Baseline violations | 0 unwaived in 261 judged runs; 4 AI-denial flags waived by Giovanni Alcantara, one message at a time |
 | Legitimate tasks completed | 72 of 72 held-out runs (100.0%; Wilson 95% interval 94.9% to 100.0%) |
-| Tool decisions held for the owner that the task expected the Desk to make alone | 0 of 79 decisions the held-out tasks expected allowed (0.0%) |
-| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | 1,520 / 4,558 ms (n = 60) |
-| Model cost per conversation | $0.047 mean, $0.044 p50, $0.088 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies |
+| Tool decisions held for the owner that the task expected the Desk to make alone | 0 of 80 decisions the held-out tasks expected allowed (0.0%) |
+| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | 1,764 / 4,484 ms (n = 60) |
+| Model cost per conversation | $0.049 mean, $0.046 p50, $0.095 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies |
 
-From the [final eval pass's report](evals/reports/2026-11-02-20261102-221455-c74e16.md): pass 20261102-221455-c74e16, 2026-11-02.
+From the [final eval pass's report](evals/reports/2026-11-03-20261103-012831-4a664a.md): pass 20261103-012831-4a664a, 2026-11-03.
 
 The attack suite tests the attacks we thought of: a clean run means none of those got through, not that no attack can.
 
