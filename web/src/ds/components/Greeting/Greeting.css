@@ -47,7 +47,7 @@
 }
 
 /* 22 px circles on the raised surface, side by side, each ringed in the app background against
-   the next. None covers another's icon or initials (the count type, 11 px). */
+   the next. None covers another's icon or initials (the count type, 12 px). */
 .cd-greeting__glyph {
   display: flex;
   flex: none;

@@ -2,6 +2,7 @@ import { focusManager } from '@tanstack/react-query';
 import { afterEach, beforeEach, expect, it, onTestFinished } from 'vitest';
 
 import { proseBlock } from '../../ds/fixtures/index.ts';
+import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { attempts } from '../../mocks/readModels.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -11,6 +12,20 @@ const TODAY = `/app/${RIVERA.deskId}/today`;
 
 beforeEach(() => localStorage.clear());
 afterEach(() => localStorage.clear());
+
+/** The shared type roles also cover done and empty detail lines. */
+function expectThingsType(things: Element) {
+  const meta = { fontSize: '14px', lineHeight: '19px' };
+  expectComputed(things.querySelector<HTMLElement>('.cd-things__caption')!, meta);
+  for (const title of things.querySelectorAll<HTMLElement>('.cd-things__item-title')) {
+    expect(title).toHaveClass('cd-type-control');
+    expectComputed(title, { fontSize: '15px', lineHeight: '21px' });
+  }
+  for (const detail of things.querySelectorAll<HTMLElement>('.cd-things__detail')) {
+    expect(detail).toHaveClass('cd-type-meta');
+    expectComputed(detail, meta);
+  }
+}
 
 async function tryThree() {
   await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
@@ -32,6 +47,8 @@ it('draws_six_neutral_progress_segments_when_nothing_is_done', async () => {
   expect(progress.element().querySelectorAll('.cd-things__segment--done')).toHaveLength(0);
   await expect.element(progress).toHaveAttribute('aria-valuenow', '0');
   await expect.element(progress).toHaveAttribute('aria-valuemax', '6');
+  expectThingsType(progress.element().closest('.cd-things')!);
+  expectComputed(document.querySelector<HTMLElement>('.cd-how__today')!, { fontSize: '14px', lineHeight: '19px' });
 });
 
 it('opens_the_latest_stopped_entry_with_its_trace_and_remembers_the_visit', async () => {
@@ -77,6 +94,7 @@ it('three_done_cards_recede_to_check_discs_and_three_green_segments', async () =
     expect(card.querySelector('.cd-pill, .cd-things__action, button, a')).toBeNull();
   }
   await expect.element(things.getByText('Done. You watched a demo visitor.', { exact: true })).toBeVisible();
+  expectThingsType(things.element());
 });
 
 it('keeps_the_stopped_thing_empty_without_a_step_until_something_is_stopped', async () => {
@@ -86,6 +104,7 @@ it('keeps_the_stopped_thing_empty_without_a_step_until_something_is_stopped', as
   const row = things.getByRole('heading', { name: 'See what was stopped' }).element().closest('li')!;
   expect(row.querySelector('button, a')).toBeNull();
   expect(row.classList.contains('cd-things__item--done')).toBe(false);
+  expectThingsType(things.element());
 });
 
 it('all_six_done_fills_every_segment_and_a_new_copy_clears_the_safety_visit', async () => {
@@ -101,6 +120,7 @@ it('all_six_done_fills_every_segment_and_a_new_copy_clears_the_safety_visit', as
   expect(things.element().querySelectorAll('.cd-things__segment--done')).toHaveLength(6);
   expect(things.element().querySelectorAll('.cd-things__item--done')).toHaveLength(6);
   await expect.element(things.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '6');
+  expectThingsType(things.element());
   await screen.getByRole('button', { name: 'Reset demo', exact: true }).click();
   await screen.getByRole('dialog', { name: 'Reset demo?' }).getByRole('button', { name: 'Reset demo', exact: true }).click();
   // The two-Desk seed still completes Create, but none of the owner's actions in the old copy count.

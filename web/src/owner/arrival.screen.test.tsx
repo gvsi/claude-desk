@@ -1956,9 +1956,18 @@ describe('Things to try ticks off', () => {
     await allow.click();
     const frames = await watching;
 
-    // The short waiting and done lines take the same room on a phone. A longer rule holds its
-    // old height through the check, then glides to the shorter done line.
-    expectHeldThenGlided(frames, row.element() as HTMLElement, at === 'phone');
+    if (at === 'phone') {
+      // At the current meta size, the done line takes one more line than the short waiting line.
+      const item = row.element() as HTMLElement;
+      const lineHeight = Number.parseFloat(getComputedStyle(item.querySelector('.cd-things__detail')!).lineHeight);
+      const before = frames[0]!.below;
+      expect(frames.some((frame) => frame.checkDrawing), 'the check drew').toBe(true);
+      expect(frames.filter((frame) => frame.showing).every((frame) => Math.abs(frame.below - before - lineHeight) < 0.5)).toBe(true);
+      expect(item.style.minHeight).toBe('');
+    } else {
+      // A longer rule holds its old height through the check, then glides to the shorter done line.
+      expectHeldThenGlided(frames, row.element() as HTMLElement);
+    }
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     expectNoHorizontalScroll();
   });
@@ -2032,7 +2041,7 @@ describe('Things to try ticks off', () => {
     delayNextRead(ROUTES.conversation.path.replace('{session_id}', second.state.session_id), 1_000);
 
     // "Chat as a customer" was done before Today opened: once every chat is read, it's drawn still.
-    const animated = watchListAnimations();
+    const animated = await watchListAnimations();
     const { screen } = await renderRoute(TODAY);
     await expect.element(thingRow(screen, 'Chat as a customer').getByText('Done. You chatted as a customer.', { exact: true }), { timeout: 3_000 }).toBeVisible();
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(requests('needsYou').length + 2);
@@ -2094,7 +2103,7 @@ describe('Things to try ticks off', () => {
     await mockStore.dispatch('answer', { params: { decision_id: held.decision_id }, body: { answer: 'allow_once' } });
 
     // Today opens while that read is still out, and the row waits.
-    const animated = watchListAnimations();
+    const animated = await watchListAnimations();
     await router.navigate(TODAY);
     const row = thingRow(screen, 'Answer a held request');
     await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
@@ -2128,7 +2137,7 @@ describe('Things to try ticks off', () => {
     await expect.element(thingsToTry(screen)).not.toBeInTheDocument();
 
     // Shown again, the row is done as it was, its check drawn still: it ticked before, not now.
-    const animated = watchListAnimations();
+    const animated = await watchListAnimations();
     await screen.getByRole('button', { name: 'Show things to try' }).click();
     await expect.element(thingRow(screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
     await expect.element(thingsToTry(screen).getByText('1 of 6 done. No real customer sees any of it.', { exact: true })).toBeVisible();
@@ -2414,7 +2423,7 @@ describe('Things to try ticks off', () => {
     await expect.element(thingRow(before.screen, 'Answer a held request').getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
 
     // Reloaded, nothing is held and nothing was answered in this view: only the record says it was.
-    const animated = watchListAnimations();
+    const animated = await watchListAnimations();
     const { screen } = await renderRoute(TODAY);
     const row = thingRow(screen, 'Answer a held request');
     await expect.element(row.getByText(ANSWERED_LINE, { exact: true })).toBeVisible();
@@ -2696,7 +2705,7 @@ describe('Things to try ticks off', () => {
     await section.getByRole('button', { name: 'Delete this Desk' }).click();
     await screen.getByRole('dialog', { name: "Delete “Main line” for Turner Plumbing?" }).getByRole('button', { name: 'Delete Desk' }).click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${RIVERA.emergenciesDeskId}/today`);
-    const animated = watchListAnimations();
+    const animated = await watchListAnimations();
     // The copy's Desks are read again without the main line: the Desk switcher goes.
     await expect.element(screen.getByRole('button', { name: /^Switch Desk/ })).not.toBeInTheDocument();
 
@@ -2758,7 +2767,10 @@ function notificationsRow(screen: RenderResult, unread?: number) {
     .getByRole('link', { name: unread === undefined ? /^Notifications \d+ unread$/ : `Notifications ${unread} unread`, exact: true });
 }
 
-function watchListAnimations(): () => string[] {
+async function watchListAnimations(): Promise<() => string[]> {
+  // A pointer left over a new button would animate its hover color as the page lands.
+  await userEvent.hover(page.elementLocator(document.body), { position: { x: 1, y: 1 } });
+  await settled(document.body);
   const seen = new Set<string>();
   let frame = 0;
   const look = () => {
