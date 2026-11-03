@@ -110,6 +110,29 @@
   overflow-wrap: anywhere;
 }
 
+/* What agents can do here, as board B5 draws it: one row for each ability, each under a hairline,
+   its words, then its outcome (a status dot and the kernel's words) 8 px under them. */
+.cd-agents-page__abilities {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cd-agents-page__ability {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+  padding: var(--space-12) 0;
+  border-top: 1px solid var(--line-hairline);
+  overflow-wrap: anywhere;
+}
+
+.cd-agents-page__outcome {
+  display: flex;
+  min-width: 0;
+  color: var(--text-primary);
+}
+
 .cd-agents-page__list--quiet,
 .cd-agents-page__quiet {
   color: var(--text-secondary);

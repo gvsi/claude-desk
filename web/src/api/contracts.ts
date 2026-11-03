@@ -4,6 +4,7 @@
 // that move money.
 
 import type {
+  AgentAbility,
   Approval,
   Decision,
   DemoInboxEntry,
@@ -24,6 +25,8 @@ export type * from './contracts.gen';
 export type BrandPalette = NonNullable<DeskBusinessRequest['brand_palette']>;
 
 export type ActorKind = SessionState['kind'];
+/** What happens when an agent asks for an ability on the Agent Card (`PublicDesk.agent_card`). */
+export type AgentOutcome = NonNullable<AgentAbility['outcome']>;
 export type ClauseTemplate = NonNullable<RenderedBlock['template']>;
 export type ApprovalAnswer = Approval['answer'];
 export type DecisionState = Decision['state'];

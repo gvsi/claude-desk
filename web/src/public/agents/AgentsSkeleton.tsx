@@ -5,13 +5,41 @@ import './AgentCardPage.css';
 
 /**
  * The fresh copy's "What agents can do here": one row for each ability the Turner seed offers an
- * agent, in the order the kernel's Agent Card lists them, each with the lines it takes on a phone.
- * On wider screens every row is one line.
+ * agent, in the order the kernel's Agent Card lists them, each with the lines its words take on a
+ * phone; its outcome's line follows. On wider screens every ability is one line. Both signed-limit
+ * labels fit on one line in the rows; the verification line, and in Spanish the documents line, take two.
  */
 const CAN_DO_ROWS: Readonly<Record<CopyLanguage, readonly number[]>> = {
-  en: [1, 1, 1, 1, 2, 1, 1, 2, 1, 1],
-  es: [1, 1, 1, 1, 2, 1, 1, 2, 2, 1],
+  en: [1, 1, 1, 1, 1, 1, 1, 2, 1, 1],
+  es: [1, 1, 1, 1, 1, 1, 1, 2, 2, 1],
 };
+
+/**
+ * Shapes for "What agents can do here", in the real card's rows: each ability's line (and the lines
+ * it wraps to on a phone), then its outcome's line under it, each row under a hairline.
+ */
+function CanDoCard({ rows }: { rows: readonly number[] }) {
+  return (
+    <SkeletonCard padding={16} anchor="can-do-card">
+      <Skeleton shape="line" text="section" width="65%" />
+      <div className="cd-agents-card__body">
+        <div className="cd-agents-page__abilities">
+          {rows.map((phoneLines, i) => (
+            <div key={i} className="cd-agents-page__ability">
+              <div>
+                <Skeleton shape="line" text="body" width={i === rows.length - 1 ? '70%' : '100%'} />
+                {Array.from({ length: phoneLines - 1 }, (_, line) => (
+                  <Skeleton key={line} shape="line" text="body" width="70%" className="cd-agents-skeleton__phone-line" />
+                ))}
+              </div>
+              <Skeleton shape="line" text="meta" width={72} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </SkeletonCard>
+  );
+}
 
 /** Shapes for one reference card, using the real cards' title and body spacing. */
 function ReferenceCard({ rows, text, anchor }: { rows: readonly number[]; text: 'body' | 'meta'; anchor: string }) {
@@ -79,7 +107,7 @@ export function AgentsSkeleton({ language }: { language: CopyLanguage }) {
               </div>
             </div>
           </SkeletonCard>
-          <ReferenceCard rows={CAN_DO_ROWS[language]} text="body" anchor="can-do-card" />
+          <CanDoCard rows={CAN_DO_ROWS[language]} />
           <ReferenceCard rows={language === 'es' ? [2, 3, 2, 1, 1] : [2, 2, 2, 1, 1]} text="meta" anchor="prove-card" />
           <SkeletonCard padding={16} anchor="connect-card">
             <Skeleton shape="line" text="section" width="55%" />
