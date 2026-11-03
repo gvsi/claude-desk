@@ -23,6 +23,14 @@
   justify-content: center;
 }
 
+.cd-standalone-page__home {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: inherit;
+  text-decoration: none;
+}
+
 @media (max-width: 639.98px) {
   .cd-standalone-page {
     padding: var(--space-16);

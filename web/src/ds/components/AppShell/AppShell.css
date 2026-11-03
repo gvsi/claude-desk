@@ -156,6 +156,13 @@
   background: var(--bg-panel);
 }
 
+.cd-app-shell__brand {
+  display: flex;
+  flex: none;
+  color: inherit;
+  text-decoration: none;
+}
+
 .cd-app-shell__business {
   flex: 1 1 auto;
   min-width: 0;

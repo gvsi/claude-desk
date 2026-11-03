@@ -22,7 +22,7 @@ import { MINUTE, type SessionRecord } from '../../mocks/world.ts';
 import { expectOwnerBoard } from '../../test/boards.ts';
 import { expectSettledInItsSlot, watchAnswerLanding } from '../../test/answerLanding.ts';
 import { watchLandings } from '../../test/landings.ts';
-import { expectRevealed, watchReveal, watchRevealing } from '../../test/reveal.ts';
+import { expectInSequence, expectRevealed, watchReveal, watchRevealing, watchSequence } from '../../test/reveal.ts';
 import { liveSetupDeskIds } from '../../test/liveSetupDesk.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { holdReads } from '../../test/holdReads.ts';
@@ -2334,9 +2334,15 @@ describe('Conversations', () => {
     // Dana asks while the owner watches, and Claude's reply comes in as Dana sees it: its words, then
     // its quote card a beat after them, then its two receipts a beat apart.
     const reply = watchReveal();
+    const played = watchSequence();
     priceTurn(chat, 'How much is drain clearing?');
-    expectRevealed(await reply, { cards: [0.12], lines: [0.24, 0.36] });
+    expectRevealed(await reply, { cards: [0.2], lines: [0.4, 0.6] });
     expect(revealed()).toHaveLength(1);
+    // Each part starts once the one before has ended: its words, its card, then each receipt.
+    const row = [...document.querySelectorAll('.cd-claude-message')].at(-1)?.closest('.cd-transcript-row');
+    const lines = [...(row?.querySelectorAll(':scope > .cd-transcript-row__margin > *') ?? [])].map((line) => `line ${line.textContent ?? ''}`);
+    expect(lines).toHaveLength(2);
+    expectInSequence(await played, ['words', 'card 1', ...lines]);
   });
 
   it('a_reply_that_came_while_away_draws_still', async () => {
@@ -2424,7 +2430,7 @@ describe('Conversations', () => {
     expect(waiting.length).toBeGreaterThan(0);
     for (const frame of waiting) expect(frame.lines.map((line) => line.visibility)).toEqual(['hidden', 'visible']);
     expect(frames.find((frame) => !frame.revealing)?.lines).toEqual([
-      { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.24s' },
+      { visibility: 'visible', name: 'cd-transcript-row-follow', delay: '0.4s' },
       { visibility: 'visible', name: 'none', delay: '0s' },
     ]);
   });

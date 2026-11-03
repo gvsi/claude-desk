@@ -189,7 +189,7 @@ export const Lockup: Story = {
     const name = brand.querySelector('.cd-type-wordmark') as HTMLElement;
     const badge = brand.querySelector(CAPS_BADGE.selector) as HTMLElement;
     await expect(mark).not.toBeNull();
-    await expect(brand.textContent).toBe('Claude DeskPreview');
+    await expect(brand.textContent).toBe('Claude Desk Preview');
     await expect([mark.getAttribute('width'), mark.getAttribute('height')]).toEqual(['36', '36']);
     // The bell with no tile, in its light ink on the panel.
     await expect(mark.querySelector('rect')).toBeNull();
@@ -488,13 +488,13 @@ export const SidebarSkeleton: Story = {
       <div data-real-sidebar style={{ display: 'flex', height: 820 }}>
         <Sidebar {...args} desks={[MAIN_LINE]} hrefs={{ ...hrefs, connectors: undefined }} about={{ title: 'About this prototype', links: [{ id: 'proposal', label: 'Product proposal', href: '#proposal' }, { id: 'prediction', label: 'Capability prediction', href: '#prediction' }] }} />
       </div>
-      <div data-shaped-sidebar aria-hidden="true" style={{ display: 'flex', height: 820 }}><SidebarShapes rows={9} about={2} /></div>
+      <div data-shaped-sidebar aria-hidden="true" style={{ display: 'flex', height: 820 }}><SidebarShapes rows={9} about={2} conceptFooter={args.conceptFooter} /></div>
     </div>
   ),
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const real = canvasElement.querySelector<HTMLElement>('[data-real-sidebar]')!;
     const shapes = canvasElement.querySelector<HTMLElement>('[data-shaped-sidebar]')!;
-    for (const selector of ['.cd-sidebar__brand', '.cd-sidebar__business', '.cd-sidebar__nav', '.cd-sidebar__about', '.cd-sidebar__footer', '.cd-sidebar__owner']) {
+    for (const selector of ['.cd-sidebar__brand', '.cd-sidebar__business', '.cd-sidebar__nav', '.cd-sidebar__about', '.cd-sidebar__footer', '.cd-sidebar__owner', ...(args.conceptFooter ? ['.cd-sidebar__concept-footer'] : [])]) {
       const a = real.querySelector(selector)!.getBoundingClientRect();
       const b = shapes.querySelector(selector)!.getBoundingClientRect();
       for (const [edge, delta] of [['top', real.getBoundingClientRect().top - shapes.getBoundingClientRect().top], ['left', 0], ['width', 0], ['height', 0]] as const) {
@@ -502,6 +502,12 @@ export const SidebarSkeleton: Story = {
       }
     }
   },
+};
+
+export const OwnerFooterSkeleton: Story = {
+  ...SidebarSkeleton,
+  args: { conceptFooter: true },
+  parameters: { canvas: 'none', canvasNote: 'The desktop owner sidebar keeps the concept line under About in both the loading and landed frame.' },
 };
 
 export const SidebarSkeletonPhone: Story = {

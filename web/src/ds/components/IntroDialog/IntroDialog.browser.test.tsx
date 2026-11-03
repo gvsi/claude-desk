@@ -212,7 +212,7 @@ it('brand_row_shows_the_preview_badge_as_the_lockup_does', async () => {
     await page.viewport(width, height);
     const { dialog } = await openDialog();
     const brand = dialog.querySelector<HTMLElement>('.cd-intro__brand');
-    expect(brand?.textContent, where).toBe('Claude DeskPreview');
+    expect(brand?.textContent, where).toBe('Claude Desk Preview');
     const mark = brand?.querySelector(':scope > svg.cd-mark');
     const name = brand?.querySelector(':scope > .cd-wordmark > .cd-type-wordmark');
     const badge = brand?.querySelector(`:scope > .cd-wordmark > ${CAPS_BADGE.selector}`);

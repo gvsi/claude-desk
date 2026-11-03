@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { LeadRow, PersonRow } from '../components/PersonRow/PersonRow.tsx';
@@ -54,7 +55,7 @@ function PeoplePhone() {
               ))}
             </ul>
           </section>
-          <ConceptFooter />
+          <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
         </div>
       </div>
     </RiveraFrame>

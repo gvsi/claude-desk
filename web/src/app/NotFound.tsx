@@ -17,10 +17,10 @@ export class OutsideTheCopy extends Error {
 }
 
 /** A path the app doesn't know, or a record outside this demo copy: what happened and a way back. */
-export function NotFound() {
+export function NotFound({ visitor = false }: { visitor?: boolean }) {
   const titleId = useId();
   return (
-    <StandalonePage labelledBy={titleId}>
+    <StandalonePage labelledBy={titleId} homeHref={visitor ? undefined : '/'}>
       <EmptyState
         title={<span id={titleId}>This page doesn't exist</span>}
         body={

@@ -95,8 +95,8 @@
    rise, its words come in on their own. While they do (--waiting), what is attached waits unseen in
    its place, so nothing below it moves when it comes. Once the words are whole and the message's
    cards are on their beats (--following), each line fades and rises space-4 in, over motion-base,
-   motion-follow apart, from the beat after the last card (--cd-follow-next, as the message tells
-   the row), each on its own beat (--cd-follow-line, its place among the lines, which the row sets).
+   one after another: the first once the last card has come in, motion-follow apart, and a line
+   attached later once everything before it has (--cd-follow-delay, its beat, which the row sets).
    A line already on screen before its row arrived (MarginReceipt's shownBefore) is already read
    and shows at once. */
 .cd-transcript-row--waiting > .cd-transcript-row__main,
@@ -111,7 +111,7 @@
 
 .cd-transcript-row--following > .cd-transcript-row__margin > * {
   animation: cd-transcript-row-follow var(--motion-base) var(--motion-ease) backwards;
-  animation-delay: calc(var(--motion-follow) * (var(--cd-follow-next) + var(--cd-follow-line, 1) - 1));
+  animation-delay: var(--cd-follow-delay);
 }
 
 @keyframes cd-transcript-row-follow {

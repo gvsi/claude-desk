@@ -4,7 +4,8 @@
 
 ## When to use
 
-- Once per surface, at the bottom: the owner app, the public page, setup and the checkout.
+- Once per surface. The owner app carries it in the sidebar under About this prototype on desktop and at the page bottom on phones. Owner error pages without a sidebar keep it at the bottom.
+- The public page, setup and checkout keep it at the bottom.
 - `poweredBy` on the public page, where a visitor may want to know what answers for the business.
 
 ## What the consumer provides
