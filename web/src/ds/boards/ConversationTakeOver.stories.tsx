@@ -15,7 +15,7 @@ import { Transcript } from '../components/Transcript/Transcript.tsx';
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { RiveraFrame, TurnRows, type ListedConversation } from './parts.tsx';
-import { SPEC, expectConversationType, expectFooter, expectOwnerFrame, expectReceiptsUnderMessages, expectTabOrder, one } from './spec.ts';
+import { SPEC, expectConversationType, expectFooter, expectOwnerFrame, expectOwnerSides, expectReceiptsUnderMessages, expectTabOrder, one } from './spec.ts';
 
 const lucia = rivera.conversations.lucia;
 const OWNER = rivera.business.ownerName;
@@ -81,7 +81,7 @@ function ConversationTakeOver() {
             Earlier, Claude quoted a drain clearing. <TextLink href="#earlier">Show 2 messages</TextLink>
           </p>
           <div className="board-takeover__reading">
-            <Transcript label={`Conversation with ${lucia.name}`}>
+            <Transcript variant="owner" label={`Conversation with ${lucia.name}`}>
               <TurnRows turns={shown} onOpenTrace={fn()} translations={TRANSLATIONS} ownersOwnScreen />
             </Transcript>
             <TakeOverBar mode="owner" visitorName={lucia.name} ownerName={OWNER} onTakeOver={fn()} onHandBack={fn()} onResume={fn()} />
@@ -104,6 +104,7 @@ const meta = {
       'The board’s page: the title with the day’s count, today’s conversations across the top, the open chat’s head across the page, then its messages in the reading column. Receipts sit under each message, signed after this board, where it draws a margin column.',
       'The chat is the Turner fixture’s with Lucía from her ask for Mike: a callback, then Mike’s message, shown as it was delivered, in Spanish, under “You” beside his initials. The board’s folded line names a garbage disposal quote; the board’s English original with “Lucía saw:”, the translated composer line and “Claude suggests” with its reply to use are static vision.',
       'Mike joining is a status line with his initials and no time, as no contract carries one; Hand back to Claude sits above the composer, as TakeOverBar places it, where the board puts it beside the composer, in the margin column.',
+      "Board REV-FLIP (signed 2026-11-02) flips the sides of the owner's conversation from this board's: the visitor's bubbles start at the left, and Claude's replies, the whisper and the owner's own messages sit in one column min(520 px, 88%) wide at the right, their receipts with them and their cards across it.",
     ].join(' '),
   },
 } satisfies Meta;
@@ -130,6 +131,8 @@ export const Board: Story = {
     const log = canvas.getByRole('log', { name: `Conversation with ${lucia.name}` });
     expectConversationType(log);
     await expect(await expectReceiptsUnderMessages(log)).toBeGreaterThanOrEqual(3);
+    // Board REV-FLIP: the visitor on the left, Claude, the whisper and the owner in one column at the right.
+    await expect(await expectOwnerSides(log)).toBeGreaterThanOrEqual(3);
     await expect(within(log).getByText('Perfect. When can you come?')).toBeVisible();
 
     // Mike joined: a status line, with no time.

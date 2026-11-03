@@ -29,16 +29,16 @@ import { deskPath, RIVERA_SAMPLE_BUSINESS_NAME, useNeedsYou } from '../useDesks.
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
-import { AlwaysOnRule, moneyTitles, NeverMovesMoney, NOTHING_LANDED, ToolConnectors, ToolRule, type LandedRules, type ToolGroup } from './HouseRules.tsx';
+import { AcrossYourDeskRules, moneyTitles, NeverMovesMoney, NOTHING_LANDED, ToolConnectors, ToolRule, type LandedRules, type ToolGroup } from './HouseRules.tsx';
 import { holdQuestion, parseLimit } from './hub.ts';
 import { reducesMotion, takeLanding, useLanding, type Landing } from './landing.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
-import { ACROSS_DESK_SENTENCES, moneyCapBandSentence } from './ruleSentence.ts';
+import { moneyCapBandSentence } from './ruleSentence.ts';
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import { RulesSkeleton } from './RulesSkeleton.tsx';
-import { COMPOSER_HELPER, RULES_FALLBACK, RULES_SECTIONS, RULES_SUBTITLE, rulesChipsToOffer, rulesVersionLine } from './copy.ts';
+import { COMPOSER_HELPER, RULES_SECTIONS, RULES_SUBTITLE, rulesChipsToOffer, rulesVersionLine } from './copy.ts';
 
 import './RulesPage.css';
 
@@ -438,7 +438,7 @@ export function RulesPage() {
     body = null;
   } else {
     const cap = capOf(active);
-    const view = rules.data;
+    const view = { ...rules.data, hours: desk.hours };
     // The payment limit, then "never moves money", atop a card whose tools move money.
     const moneyBand = (group: ToolGroup) => {
       const titles = moneyTitles(group, view);
@@ -475,17 +475,12 @@ export function RulesPage() {
       <>
         <section className="cd-rules__section" aria-labelledby={acrossId}>
           <SectionHeader id={acrossId} title={RULES_SECTIONS.across.title} caption={RULES_SECTIONS.across.caption} />
-          <Card padding={0}>
-            <ul className="cd-house-rules__rules cd-house-rules__rules--card" role="list">
-              {ACROSS_DESK_SENTENCES.map((rule) => <AlwaysOnRule key={rule.key} parts={rule.parts} {...(rule.line === undefined ? {} : { line: rule.line })} />)}
-              <ToolRule parts={[{ text: RULES_FALLBACK }]} status="held" landed={landed.fallback ?? undefined} data={{ 'data-fallback': true }} />
-            </ul>
-          </Card>
+          <AcrossYourDeskRules landed={landed.fallback ?? undefined} />
         </section>
         <section className="cd-rules__section" aria-labelledby={toolsId}>
           <SectionHeader id={toolsId} title={RULES_SECTIONS.tools.title} caption={RULES_SECTIONS.tools.caption} />
           <div className="cd-rules__tool-cards">
-            <ToolConnectors deskId={deskId} view={view} people={people.data ?? null} landed={landed} moneyBand={moneyBand} />
+            <ToolConnectors deskId={deskId} view={view} people={people.data ?? null} landed={landed} moneyBand={moneyBand} cap={cap} />
           </div>
           <p className="cd-rules__version cd-type-meta">{rulesVersionLine(active.version)}</p>
         </section>

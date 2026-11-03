@@ -1,15 +1,16 @@
 import type { CSSProperties } from 'react';
 
 import type { Outcome } from '../../../api/contracts.ts';
-import { checkpointName, type Checkpoint } from '../AttemptRow/CheckpointMeter.tsx';
+import { type Checkpoint } from '../AttemptRow/CheckpointMeter.tsx';
+import { OUTCOME_WORDS } from '../OutcomeMenu/outcomeWords.ts';
 import { StatusDot, type StatusTone } from '../StatusDot/StatusDot.tsx';
 
 import './SafetyCheckRow.css';
 
 /** Each verdict's badge; a trick that got through keeps the failing presentation. */
 const OUTCOMES = {
-  refuse: { label: 'Blocked', tone: 'refused' },
-  hold: { label: 'Asks you', tone: 'held' },
+  refuse: { label: OUTCOME_WORDS.never, tone: 'refused' },
+  hold: { label: OUTCOME_WORDS.ask, tone: 'held' },
   allow: { label: 'Not blocked', tone: 'held' },
 } as const satisfies Record<Outcome, { label: string; tone: StatusTone }>;
 
@@ -20,7 +21,7 @@ export interface SafetyCheckRowProps {
   attempt: string;
   /** The probe's verdict, which sets the badge independently of whether it passed the check. */
   outcome: Outcome;
-  /** Whether the draft rules stopped it, as the API reports; controls the checkpoint, not the badge. */
+  /** Whether the draft rules stopped it, as the API reports; the screen uses this for its count. */
   blocked: boolean;
   /** The checkpoint that stopped it, when it was stopped. */
   stoppedBy?: Checkpoint;
@@ -39,12 +40,12 @@ export interface SafetyCheckRowProps {
 
 /**
  * One trick the setup safety check tried on the draft rules: what kind it is, the words it tried in
- * quotes and the checkpoint that stopped it at the left; at the right "Blocked", "Asks you" or "Not blocked"
+ * quotes at the left; at the right "Never", "Ask me first" or "Not blocked"
  * beside its dot, and the kernel's reason under it. Live rows land one by one, `motion-stagger`
  * apart, and appear at once under reduced motion. Hairlines are drawn only between rows; put
  * each in a list item.
  */
-export function SafetyCheckRow({ label, attempt, outcome, blocked, stoppedBy, reason, index, live = false }: SafetyCheckRowProps) {
+export function SafetyCheckRow({ label, attempt, outcome, reason, index, live = false }: SafetyCheckRowProps) {
   const style = { '--cd-safety-check-index': Math.max(0, Math.floor(index)) } as CSSProperties;
   const badge = OUTCOMES[outcome];
   return (
@@ -55,9 +56,6 @@ export function SafetyCheckRow({ label, attempt, outcome, blocked, stoppedBy, re
           <p className="cd-safety-check-row__attempt cd-type-meta">
             “<span data-copy="user">{attempt}</span>”
           </p>
-          {blocked && stoppedBy !== undefined ? (
-            <p className="cd-safety-check-row__checkpoint cd-type-caption">{checkpointName(stoppedBy)}</p>
-          ) : null}
         </div>
         <div className="cd-safety-check-row__result">
           <p className="cd-safety-check-row__outcome cd-type-meta">

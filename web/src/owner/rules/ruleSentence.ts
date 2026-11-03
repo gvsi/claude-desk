@@ -135,20 +135,49 @@ const URGENT_PHRASE: ToolPhrase = {
   never: [{ text: 'take ' }, key('urgent callbacks')],
 };
 
+/** The verbs a Desk job's title may start with, each with its form after "Claude asks you before ". */
+const TITLE_VERBS: Readonly<Record<string, string>> = {
+  ask: 'asking',
+  book: 'booking',
+  collect: 'collecting',
+  quote: 'quoting',
+  request: 'requesting',
+  schedule: 'scheduling',
+  send: 'sending',
+  share: 'sharing',
+  show: 'showing',
+  take: 'taking',
+};
+
+/**
+ * A Desk job's title as a phrase. One that starts with a verb (`TITLE_VERBS`) reads as what Claude
+ * does, the rest of the title set off as the owner's words, as the setup boards word a job (REV-SETUP-1,
+ * -3): "Claude can book a free intro call", "Claude asks you before sending **a retainer link**",
+ * "Claude never books a free intro call". Any other title is used: "Claude can use SMS reminder".
+ */
+function titlePhrase(title: string): ToolPhrase {
+  const match = /^(\S+)\s+(\S.*)$/s.exec(title);
+  const verb = match?.[1]?.toLowerCase() ?? '';
+  const rest = match?.[2] ?? '';
+  const ing = Object.hasOwn(TITLE_VERBS, verb) ? TITLE_VERBS[verb] : undefined;
+  if (ing !== undefined && rest !== '') {
+    return { can: [{ text: `${verb} ` }, { text: rest, user: true }], before: [{ text: `${ing} ` }, { text: rest, key: true, user: true }] };
+  }
+  const named: SentencePart = { text: lowerFirst(title), user: true };
+  return { can: [{ text: 'use ' }, named], before: [{ text: 'using ' }, named] };
+}
+
 /**
  * A target's phrase: the table's; a Desk's urgent job's (`URGENT_PHRASE`); a listed business tool's
- * own title, set off as user text, "use {title}"; else the app's words for it ("use a connected
- * tool"), never its raw name.
+ * own title, set off as user text (`titlePhrase`: "book a free intro call", else "use {title}");
+ * else the app's words for it ("use a connected tool"), never its raw name.
  */
 function targetPhrase(target: string, business: BusinessTools): ToolPhrase {
   const phrase = Object.hasOwn(TOOL_PHRASES, target) ? TOOL_PHRASES[target] : undefined;
   if (phrase !== undefined) return phrase;
   if (isBusinessToolName(target) && business.get(target)?.config.block === 'urgent') return URGENT_PHRASE;
   const title = isBusinessToolName(target) ? toolDisplayName(target, business) : null;
-  if (title !== null && title.trim() !== '') {
-    const named: SentencePart = { text: lowerFirst(title.trim()), user: true };
-    return { can: [{ text: 'use ' }, named], before: [{ text: 'using ' }, named] };
-  }
+  if (title !== null && title.trim() !== '') return titlePhrase(title.trim());
   const words = lowerFirst(targetWords(target, business));
   return { can: `use ${words}`, before: `using ${words}` };
 }
@@ -345,12 +374,34 @@ function toolsCovered(card: RuleCard, row: readonly RuleCard[], words: SentenceW
 const VERIFIED_CUSTOMER = 'The customer, once verified';
 
 /**
+ * The tools that show or send customers their own records: Share a document, See charges and
+ * Refund. Only these release private data; a tool that lists the private-data effect only because
+ * it saves what visitors give it (a new-client intake) is used unverified.
+ */
+const PRIVATE_DATA_TOOLS: ReadonlySet<string> = new Set(['native.release_document', 'payments.list_charges', 'payments.create_refund']);
+
+/** Whether a target is one of the tools that show or send customers their own records. */
+const touchesPrivateData = (target: string): boolean => PRIVATE_DATA_TOOLS.has(target);
+
+/** The tool a rule is listed under, when it isn't the rule's own target (a shared rule under one of its tools). */
+export type RuleTool = Pick<ToolRow, 'tool' | 'effects'>;
+
+/**
  * Who a card is for, in one line, the same on every screen (REV-RULES-D, v354): "Anyone", signed
  * agents included; "The customer, once verified" for a verified customer or the record's owner; a
  * person by name, "Dana Whitfield, verified" on private data; an agent by its name, else "One agent".
+ * A rule for anyone that lets Share a document, See charges or Refund run, or asks first (its
+ * default ask included), on its own target or listed under one of them (`under`), reads "The
+ * customer, once verified": the baseline gives private data only to its verified owner, so "Anyone"
+ * would read as if an approval could release it to anyone. Anywhere else, and on a never rule, it
+ * reads "Anyone": "once verified" under a never rule would read as if verifying unlocked it (owner
+ * rulings, 2026-11-02).
  */
-function whoLine(card: RuleCard, words: SentenceWords): string {
-  if (card.who === 'anyone') return 'Anyone';
+function whoLine(card: RuleCard, words: SentenceWords, under?: RuleTool): string {
+  if (card.who === 'anyone') {
+    const reachesPrivateData = touchesPrivateData(card.applies_to) || (under !== undefined && touchesPrivateData(under.tool));
+    return card.mode !== 'never' && reachesPrivateData ? VERIFIED_CUSTOMER : 'Anyone';
+  }
   if (card.who === 'verified' || card.who === 'record_owner') return VERIFIED_CUSTOMER;
   return whoWords(card, words.people, words.agents)
     .map((word, index) => (index === 0 ? word.text : lowerFirst(word.text)))
@@ -360,12 +411,13 @@ function whoLine(card: RuleCard, words: SentenceWords): string {
 /**
  * The line under a rule's sentence in Rules' rule cell (REV-RULES-D, v354): who it is for, then its
  * qualifiers, "Checked by the reviewer" and, past an automatic rule's amount limit, "Over $300, it
- * asks you first". Never the tools, which head the cell.
+ * asks you first". Never the tools, which head the cell. `under` is the tool the cell is listed
+ * under, when that isn't the rule's own target.
  */
-export function ruleQualifiers(card: RuleCard, words: SentenceWords): string {
+export function ruleQualifiers(card: RuleCard, words: SentenceWords, under?: RuleTool): string {
   const limit = limitOf(card);
   return [
-    whoLine(card, words),
+    whoLine(card, words, under),
     ...(card.mode === 'auto' && card.review ? ['Checked by the reviewer'] : []),
     ...(limit === null ? [] : [`Over ${formatCents(limit)}, it asks you first`]),
   ].join(' · ');
@@ -374,11 +426,11 @@ export function ruleQualifiers(card: RuleCard, words: SentenceWords): string {
 /**
  * The line under a rule's sentence (`RuleMeta`): the tools it covers by their titles, "Find open
  * times and Book a visit", or for a rule on an effect group the Desk's tools with that effect
- * (`words.tools`), else the group in the app's words; then who it is for, as Rules has always said
- * it ("Anyone", "Signed agents", "The record's owner, verified"). Cards that can't read as one
- * rule (`canJoin`) are refused with an error.
+ * (`words.tools`), else the group in the app's words; then who it is for (`whoLine`: "Anyone", "The
+ * customer, once verified"), read for the tool `under` when it's listed under one that isn't its own
+ * target. Cards that can't read as one rule (`canJoin`) are refused with an error.
  */
-export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWords): RuleMeta {
+export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWords, under?: RuleTool): RuleMeta {
   const cards = asCards(card);
   const named: { titles: string[]; words: string }[] = targetsOf(cards).map((target) => {
     const effectCard = target.startsWith('effect:') ? cards.find((c) => c.applies_to === target) : undefined;
@@ -388,7 +440,7 @@ export function ruleMeta(card: RuleCard | readonly RuleCard[], words: SentenceWo
     const title = toolDisplayName(target, words.business);
     return { titles: title === null ? [] : [title], words: targetWords(target, words.business) };
   });
-  const who = whoLine(cards[0], words);
+  const who = whoLine(cards[0], words, under);
   if (named.every((target) => target.titles.length > 0)) return { tools: { titles: [...new Set(named.flatMap((target) => target.titles))] }, who };
   return { tools: listWords(named.map((target) => (target.titles.length > 0 ? listWords(target.titles) : target.words))), who };
 }

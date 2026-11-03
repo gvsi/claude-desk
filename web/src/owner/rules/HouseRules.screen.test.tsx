@@ -60,8 +60,11 @@ it('an Allow private-data rule keeps its verified record-owner scope', async () 
 it.each(['desktop', 'phone'] as const)('at %s, every outcome says whom it is for in the same words', async (viewport) => {
   const desk = mockStore.world.desk(RIVERA.deskId)!;
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
+  // Share a document touches private data, so an Allow or Ask me first rule there for anyone reads
+  // its verified owner, and a Never rule keeps "Anyone" (owner rulings, 2026-11-02); a quote for
+  // anyone reads "Anyone".
   const scopes: { who: RuleCard['who']; text: string }[] = [
-    { who: 'anyone', text: 'Anyone' },
+    { who: 'anyone', text: 'The customer, once verified' },
     { who: 'verified', text: 'The customer, once verified' },
     { who: 'record_owner', text: 'The customer, once verified' },
     { who: 'person', text: 'Dana Whitfield, verified' },
@@ -74,14 +77,15 @@ it.each(['desktop', 'phone'] as const)('at %s, every outcome says whom it is for
       agent_key_id: who === 'agent' ? 'key-one-agent' : null,
     })),
     { ...base, card_id: `${mode}:paid`, mode, applies_to: 'payments.create_refund' },
+    { ...base, card_id: `${mode}:quote`, mode, who: 'anyone' as const, person_id: null, agent_key_id: null, applies_to: 'native.quote' },
   ]);
   const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
   await expect.element(screen.getByText('Dana Whitfield, verified', { exact: true }).first()).toBeVisible();
   for (const mode of ['auto', 'ask', 'never'] as const) {
-    for (const { who, text } of [...scopes, { who: 'paid', text: 'The customer, once verified' }]) {
+    for (const { who, text } of [...scopes, { who: 'paid', text: 'The customer, once verified' }, { who: 'quote', text: 'Anyone' }]) {
       const row = screen.container.querySelector(`[data-rule-id="${mode}:${who}"]`)!;
       const line = row.querySelector('.cd-house-rules__rule-line')!;
-      expect(line.textContent, `${mode} ${who}`).toBe(text);
+      expect(line.textContent, `${mode} ${who}`).toBe(who === 'anyone' && mode === 'never' ? 'Anyone' : text);
       const sentence = row.querySelector('.cd-rule-sentence__sentence')!;
       expect(sentence.textContent).toMatch(mode === 'auto' ? /^Claude can / : mode === 'ask' ? /^Claude asks you before / : /^Claude never /);
       expect(line.classList.contains('cd-type-meta')).toBe(true);
