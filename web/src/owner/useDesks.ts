@@ -11,6 +11,7 @@ import { request } from '../api/http.ts';
 import { SETUP_STEPS, type BusinessOut, type DeskSetup, type DeskSummary, type NeedsYouItem, type SetupStep } from '../api/views.ts';
 import { pollMs } from '../app/poll.ts';
 import { readLocal } from '../lib/storage.ts';
+import { attemptsQuery } from './safety/queries.ts';
 
 export const DESKS_KEY = ['desks'] as const;
 /**
@@ -156,7 +157,8 @@ function deadlinesOf(queryClient: QueryClient): Map<string, number> {
 }
 
 /**
- * Reads what a Desk's Today first shows (the copy's Desks, its Today and Needs you) at once, for up to `capMs`, so a page can open onto a Today that is already drawn,
+ * Reads what a Desk's Today first shows (the copy's Desks, its Today, Needs you and a visible list's
+ * latest stop) at once, for up to `capMs`, so a page can open onto a Today that is already drawn,
  * with nothing in it still to come in and push what is under it. A read that fails or runs long is
  * left to Today, which shows and retries it as it always does; this never throws. The Desk's Today,
  * opened next, keeps its own skeleton until its reads settle (`useTodayOpening`).
@@ -177,6 +179,7 @@ async function readTodayUntil(queryClient: QueryClient, deskId: string, deadline
     queryClient.prefetchQuery(desksQuery()),
     queryClient.prefetchQuery(todayQuery(deskId)),
     queryClient.prefetchQuery(needsYouQuery(deskId)),
+    ...(readLocal('thingsToTryHidden') === 'true' ? [] : [queryClient.prefetchQuery(attemptsQuery(deskId))]),
   ]);
   await Promise.race([reads, cap]);
   clearTimeout(timer);
@@ -228,11 +231,11 @@ export function forgetReadAhead(queryClient: QueryClient, deskId: string): void 
 }
 
 /**
- * Whether a Desk's Today, just opened, is still reading what it first shows (its Today and Needs
- * you; the copy's notifications are the sidebar's, read as the frame opens), so its sections open together rather than one by one, each
+ * Whether a Desk's Today, just opened, is still reading what it first shows (its Today, Needs
+ * you and a visible list's latest stop; the copy's notifications are the sidebar's, read as the frame opens), so its sections open together rather than one by one, each
  * pushing the next down, when the owner comes from another Desk or another page. A first visit's page and a
  * reload's loading page read them first (`readTodayAhead`, `useTodayReadAhead`). Reads already in,
- * or failed, open it at once; else its skeleton continues until both reads settle, even past
+ * or failed, open it at once; else its skeleton continues until those reads settle, even past
  * the frame's `READ_AHEAD_MS` deadline (plan 08c, decision 7). Offline reads paused before a send or
  * retry also settle opening: their sections show the existing error UI. Once open, it stays open.
  */
@@ -240,7 +243,14 @@ export function useTodayOpening(deskId: string): boolean {
   const queryClient = useQueryClient();
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
-  const read = [today, needsYou].every((query) => query.data !== undefined || query.isError || query.isPaused);
+  // The sixth thing needs Safety's latest entry before its button and detail can land in place.
+  const showsThings = readLocal('thingsToTryHidden') !== 'true';
+  const stoppedOptions = attemptsQuery(deskId);
+  const stopState = queryClient.getQueryState(stoppedOptions.queryKey);
+  const stopSettled = stopState?.data !== undefined || stopState?.status === 'error' || stopState?.fetchStatus === 'paused';
+  // Only the list continues reading after opening, until it is hidden or this thing is done.
+  const stopped = useQuery({ ...stoppedOptions, enabled: showsThings && !stopSettled, retryOnMount: false });
+  const read = [today, needsYou, ...(showsThings ? [stopped] : [])].every((query) => query.data !== undefined || query.isError || query.isPaused);
   const [open, setOpen] = useState(read);
   if (read && !open) setOpen(true);
   // Taken once Today has it: the Desk's next Today is a later visit, with a wait of its own.

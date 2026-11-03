@@ -3,7 +3,7 @@
  * intro dialog, which draws Today itself from it. It holds the Turner seed as a new copy opens on
  * it: the business and its Main line Desk, Alex Kim's assistant's chat (a visiting agent's quote and
  * deposit, about 40 minutes before), the seeded hold (a visitor not on record asking for 15% off, 12
- * minutes before) with the reply the check stopped (on Safety, so in no read here), Dana's chat
+ * minutes before) with the reply the check stopped (the latest entry Things to try opens on Safety), Dana's chat
  * (live, booked, with Mike's whisper), the briefing and the last 7 days they make, and the hold's
  * alert in Notifications, unread. The held request and the names come from the design system's Turner
  * fixtures. Each part of the seed is dated back from when the copy opened as the seed dates it, and
@@ -13,9 +13,10 @@
 import type { QueryKey } from '@tanstack/react-query';
 
 import type { DemoInboxEntry } from '../../api/contracts.ts';
-import type { BusinessOut, ConversationSummary, DeskSummary, NeedsYouItem, Today } from '../../api/views.ts';
+import type { Attempt, BusinessOut, ConversationSummary, DeskSummary, NeedsYouItem, Today } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { firstName, needsYouKey, OWNER_INBOX_KEY, todayKey } from '../useDesks.ts';
+import { attemptsQuery } from '../safety/queries.ts';
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -220,6 +221,12 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
     },
   ];
 
+  // Today only uses the stop's presence and address; the still preview's controls are inert.
+  const stopped: Attempt[] = [{
+    ref_id: 'preview-stopped', kind: 'reply_blocked', reason_plain: '', card_ids: [], origin: 'kernel',
+    created_at: heldAt, triage: null, ledger_seq: 0, cause: null, from_the_visitor: null,
+  }];
+
   return {
     business,
     desk,
@@ -229,6 +236,7 @@ export function stillToday(opened: Date, readAt: Date): StillToday {
       [todayKey(DESK_ID), todayRead],
       [needsYouKey(DESK_ID), needsYou],
       [OWNER_INBOX_KEY, inbox],
+      [attemptsQuery(DESK_ID).queryKey, stopped],
     ],
   };
 }

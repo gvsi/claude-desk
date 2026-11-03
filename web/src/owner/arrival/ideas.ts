@@ -1,6 +1,6 @@
 /**
- * What the demo suggests trying: the five things Today's "Things to try" counts and the intro dialog
- * lists (`INTRO_THINGS`), in the same order, "Watch a demo visitor" second; each of Today's rows
+ * What the demo suggests trying: Today's six things and the intro dialog's shorter list
+ * (`INTRO_THINGS`), with "Watch a demo visitor" second; each of Today's rows
  * with the line it says once it's done. "Show me ideas" offers `breakItIdeas`
  * (`web/src/lib/breakItIdeas.ts`), in the Desk's own owner's name, which the public page shares.
  */
@@ -16,8 +16,8 @@ export interface ThingToTry {
 }
 
 /**
- * In order, the four of Today's "Things to try" besides "Watch a demo visitor" (`DEMO_VISITOR_THING`,
- * second on Today and in the intro dialog), each with its intro dialog line and its done line.
+ * The intro dialog's suggestions besides "Watch a demo visitor" (`DEMO_VISITOR_THING`, second),
+ * reused on Today, each with its intro dialog line and its done line.
  */
 export const THINGS_TO_TRY = [
   { title: 'Chat as a customer', detail: 'Turner’s public page opens in a new tab.', icon: 'person', done: 'Done. You chatted as a customer.' },
@@ -32,7 +32,7 @@ const DEMO_VISITOR_SHORT = 'An AI plays a customer on your Desk.';
 /**
  * Today's "Watch a demo visitor", the second of its things to try and of the intro dialog's: an AI
  * plays a customer in a chat on the owner's own Desk, so the owner can take it over or whisper to
- * Claude while it chats. Its done row keeps these words, with its Done pill read out.
+ * Claude while it chats. Its done line takes these words' place once a demo visitor has run.
  */
 export const DEMO_VISITOR_THING = {
   title: 'Watch a demo visitor',
@@ -41,13 +41,24 @@ export const DEMO_VISITOR_THING = {
   short: DEMO_VISITOR_SHORT,
   icon: 'agent',
   start: 'Start a demo visitor',
+  done: 'Done. You watched a demo visitor.',
   /** Said in the detail's place, after a refused dot, when a start fails for any reason; the button stays. */
   startFailed: 'The demo visitor couldn’t start. Try again in a few minutes.',
-} as const satisfies Omit<ThingToTry, 'done'> & { short: string; start: string; startFailed: string };
+} as const satisfies ThingToTry & { short: string; start: string; startFailed: string };
+
+/** Today's sixth thing, placed after "Try to break it"; its next step opens the newest stop. */
+export const STOPPED_THING = {
+  title: 'See what was stopped',
+  detail: 'Open the latest request Claude turned down, and see which check stopped it.',
+  icon: 'history',
+  start: 'Open in Safety',
+  done: 'Done. You saw which check stopped it.',
+  empty: 'When Claude turns a request down, it shows up here.',
+} as const satisfies ThingToTry & { start: string; empty: string };
 
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 
-/** The intro dialog's list: the five things to try, in Today's order, each with its one-line detail. */
+/** The intro dialog's suggestions, in Today's order, each with its one-line detail. */
 export const INTRO_THINGS: readonly IntroThing[] = [
   CHAT,
   { title: DEMO_VISITOR_THING.title, detail: DEMO_VISITOR_THING.short, icon: DEMO_VISITOR_THING.icon },
@@ -71,10 +82,3 @@ export const UNCOUNTED_ANSWER_LINES = {
   unknown: 'You allowed this. Still confirming whether it went through.',
   refused_at_execution: "Your rules changed before this ran, so it wasn't done.",
 } as const satisfies Record<UncountedAnswer, string>;
-
-/**
- * The longest line "Answer a held request" can end on, whose room the row keeps while an answer
- * waits, so ending doesn't grow it. An execution refusal's own owner_plain can still run longer.
- */
-export const ANSWER_ROOM: string = Object.values(UNCOUNTED_ANSWER_LINES).reduce((longest, line) =>
-  line.length > longest.length ? line : longest);

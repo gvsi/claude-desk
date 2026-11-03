@@ -769,15 +769,15 @@ describe('Today', () => {
     expect(pages().slice(1)).toEqual(['today opening', 'today']);
   });
 
-  it('today_after_conversations_opens_on_its_needs_you_read', async () => {
-    // Reloaded on Conversations, its fresh Needs you read lets Today open drawn without another
-    // read. Any further Needs you reads stay held until after the opening assertions.
+  it('today_after_conversations_opens_after_its_initial_reads_settle', async () => {
+    // Reloaded on Conversations, the fresh Needs you read is reused. Today still waits for its
+    // latest stopped entry; further Needs you reads stay held until after the opening assertions.
     const mounted = vi.spyOn(QueryClient.prototype, 'mount');
     const { screen } = await renderRoute(CONVERSATIONS, { pollScale: 100 });
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Conversations' })).toBeVisible();
     const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
     await expect.poll(() => queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.status).toBe('success');
-    // Settle the unrelated inbox read first so only Needs you could hold this opening.
+    // Settle the unrelated inbox read first so it cannot hold this opening.
     await queryClient.prefetchQuery(ownerInboxQuery());
 
     const needsYou = holdReads(needsYouPath);
@@ -787,7 +787,7 @@ describe('Today', () => {
     await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     expect(since()).toHaveLength(1);
-    expect(pages().slice(1)).toEqual(['today']);
+    expect(pages().slice(1)).toEqual(['today opening', 'today']);
     expect(document.querySelector('.cd-today-opening .cd-skeleton-screen__layer')).toBeNull();
     needsYou.release();
   });
@@ -3185,13 +3185,13 @@ describe("Today's top band", () => {
     expectComputed(band.querySelector('.cd-today__greeting')!, { paddingTop: '16px' });
 
     // How your Desk works 32 px under the header, then Things to try 32 px under it, in the band:
-    // five equal cards, three across in two rows, 16 px apart, across the band, each row's next steps on one line.
+    // six equal cards, three across in two rows, 16 px apart, across the band, each row's next steps on one line.
     expect(band.contains(things.element())).toBe(true);
     const how = region(screen, 'How your Desk works').element();
     expect(box(how).top - box(header).bottom).toBeCloseTo(32, 0);
     expect(box(things.element()).top - box(how).bottom).toBeCloseTo(32, 0);
     const cards = things.getByRole('listitem').elements();
-    expect(cards).toHaveLength(5);
+    expect(cards).toHaveLength(6);
     const rects = cards.map(box);
     const rows = [rects.slice(0, 3), rects.slice(3)];
     for (const rect of rects) expect(rect.width).toBeCloseTo(rects[0]!.width, 0);
@@ -3213,6 +3213,7 @@ describe("Today's top band", () => {
       ['Open your public page'],
       ['Start a demo visitor'],
       ['Show me ideas'],
+      ['Open in Safety'],
       ['Open the request'],
       ['Start a Desk'],
     ]);
@@ -3283,8 +3284,8 @@ describe("Today's top band", () => {
 
     // Each row is one control named by its title, with a chevron at its right and no button inside.
     const rows = things.getByRole('listitem').elements();
-    expect(rows).toHaveLength(5);
-    const names = ['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk'];
+    expect(rows).toHaveLength(6);
+    const names = ['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'See what was stopped', 'Answer a held request', 'Create your own Desk'];
     for (const [i, row] of rows.entries()) {
       const controls = drawnControls(row);
       expect(controls, names[i]).toHaveLength(1);
@@ -3303,6 +3304,8 @@ describe("Today's top band", () => {
     // Tabbed to, the row shows the focus edge just inside the whole row, 1 px of line-focus, and no ring
     // outside it; its chevron draws nothing of its own.
     things.getByRole('button', { name: 'Try to break it', exact: true }).element().focus();
+    await userEvent.keyboard('{Tab}');
+    expect(document.activeElement).toBe(things.getByRole('link', { name: 'See what was stopped', exact: true }).element());
     await userEvent.keyboard('{Tab}');
     expect(document.activeElement).toBe(answerRow.element());
     const ring = getComputedStyle(answerRow.element(), '::after');
@@ -3334,31 +3337,31 @@ describe("Today's top band", () => {
   });
 
   it.each(['desktop', 'phone'] as const)('held_request_card_shows_before_anything_is_held_on_%s', async (viewport) => {
-    // The caption counts four things, so all four show, "Answer a held request" with its line and no
+    // The caption counts six things, so all six show, "Answer a held request" with its line and no
     // next step until something is held.
     const { screen } = await renderRoute(TODAY, { seed: 'rivera_quiet', viewport });
     const things = region(screen, 'Things to try');
     await expect.element(things).toBeVisible();
     const titles = () => things.getByRole('heading', { level: 3 }).elements().map((h) => h.textContent);
-    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
-    const row = () => things.getByRole('listitem').nth(3).element();
+    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'See what was stopped', 'Answer a held request', 'Create your own Desk']);
+    const row = () => things.getByRole('listitem').nth(4).element();
     await expect.element(things.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
     expect(drawnControls(row())).toEqual([]);
     expect(row().querySelector('.cd-status-dot--held')).toBeNull();
     expect(row().querySelector(`path[d="${CHEVRON_PATH}"]`)).toBeNull();
 
-    // The owner chats in a preview: one of the five is done, and all five still show.
+    // The owner chats in a preview: one of the six is done, and all six still show.
     await mockStore.dispatch('openPreview', { params: { desk_id: RIVERA.deskId } });
     await mockStore.dispatch('sendMessage', { params: { slug: RIVERA.slug }, body: { text: 'Do you work weekends?' } });
-    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
-    expect(titles()).toHaveLength(5);
+    await expect.element(things.getByText('1 of 6 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    expect(titles()).toHaveLength(6);
 
     // Once something is held, the same card in the same place shows the dot and its next step.
     await visitorSays('Can I get 50% off if I pay cash?');
     await expect
       .element(things.getByText('A request is waiting for your answer.', { exact: true }), { timeout: 3_000 })
       .toBeVisible();
-    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'Answer a held request', 'Create your own Desk']);
+    expect(titles()).toEqual(['Chat as a customer', 'Watch a demo visitor', 'Try to break it', 'See what was stopped', 'Answer a held request', 'Create your own Desk']);
     expect(row().querySelector('.cd-status-dot--held')).not.toBeNull();
     const step = drawnControls(row());
     expect(step).toHaveLength(1);
@@ -3787,11 +3790,11 @@ describe("Today's unfinished setup", () => {
     if ('network' in answering || answering.status !== 200) throw new Error('the mock sets Answering');
     const screen = await saveAndExitAtTools(state);
     const row = createRow(screen);
-    await expect.element(row.getByText('Done', { exact: true })).toBeVisible();
-    await expect.element(region(screen, 'Things to try').getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(row.getByText('Done', { exact: true })).toBeInTheDocument();
+    await expect.element(region(screen, 'Things to try').getByText('1 of 6 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     await expect.element(screen.getByText('Not live yet', { exact: true })).toBeVisible();
     expect(row.element().textContent).not.toMatch(/live/i);
-    // It keeps its own words, so its Done pill is read out.
+    // It keeps its own words, so its hidden Done label is read out.
     await expect.element(row.getByText('Describe a business in a few sentences. Claude drafts the rules, and you confirm them.', { exact: true })).toBeVisible();
     expect(row.element().querySelector('.cd-things__done')?.getAttribute('aria-hidden')).toBeNull();
 

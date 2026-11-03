@@ -12,6 +12,8 @@ export interface RecordListProps {
   devKey: boolean;
   /** The business's time zone, which every time is read in. */
   timezone: string;
+  /** The entry whose trace the owner opened. */
+  onOpenEntry?: (seq: number) => void;
 }
 
 interface RecordRowProps {
@@ -49,7 +51,7 @@ function RecordRow({ entry, timezone, open, onOpen }: RecordRowProps) {
  * it on a narrow window), with the chain's check and the signing key; closing the trace returns to
  * the row.
  */
-export function RecordList({ page, devKey, timezone }: RecordListProps) {
+export function RecordList({ page, devKey, timezone, onOpenEntry }: RecordListProps) {
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const trace = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
@@ -70,6 +72,7 @@ export function RecordList({ page, devKey, timezone }: RecordListProps) {
   const openEntry = (seq: number, el: HTMLButtonElement) => {
     opener.current = el;
     setOpenSeq(seq);
+    onOpenEntry?.(seq);
     // The trace takes focus once it is drawn, so a keyboard or screen reader user lands in it.
     requestAnimationFrame(() => focusTrace(trace.current));
   };

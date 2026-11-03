@@ -265,6 +265,29 @@
   align-self: center;
 }
 
+.cd-things__progress {
+  display: flex;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 280px;
+  margin-top: var(--space-6);
+}
+
+.cd-things__segment {
+  flex: 1 1 0;
+  height: var(--space-6);
+  border-radius: var(--radius-full);
+  background: var(--fill-secondary);
+}
+
+.cd-things__segment--done {
+  background: var(--status-handled);
+}
+
+.cd-things__progress > .cd-skeleton {
+  flex: 1 1 0;
+}
+
 .cd-things__hide,
 .cd-things__show {
   display: flex;
@@ -280,7 +303,7 @@
 }
 
 /* A row that ticks keeps the height it had while its check draws (a least height set as it ticks),
-   with its words and its pill together in the middle of it. */
+   with its check and words together in the middle of it. */
 .cd-things__item {
   display: grid;
   grid-template-columns: var(--size-control) minmax(0, 1fr) auto;
@@ -313,6 +336,13 @@
   color: var(--text-secondary);
 }
 
+.cd-things__icon--done {
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--status-handled);
+  color: var(--bg-app);
+}
+
 .cd-things__text {
   display: flex;
   flex-direction: column;
@@ -339,17 +369,6 @@
   margin-right: var(--space-6);
 }
 
-/* The waiting words and unseen longest end line share a cell, so an answer never grows the row. */
-.cd-things__detail[data-room] {
-  display: grid;
-}
-
-.cd-things__detail[data-room]::after {
-  content: attr(data-room);
-  grid-area: 1 / 1;
-  visibility: hidden;
-}
-
 .cd-things__detail-now {
   grid-area: 1 / 1;
   align-self: start;
@@ -367,7 +386,7 @@
 
 /* From 640 px: the card around the list goes, and each thing is a card of its own, its next step
    at the foot, so the steps of a row of cards share a line (grid rows stretch). Two to a row, three
-   from 1280 px, two rows for the five things, where the band is wide enough for each step's words. */
+   from 1280 px, two rows for the six things, where the band is wide enough for each step's words. */
 @media (min-width: 640px) {
   .cd-things > .cd-card {
     padding: 0;
@@ -392,6 +411,11 @@
     border: 1px solid var(--line-card);
     border-radius: var(--radius-card);
     background: var(--fill-card);
+  }
+
+  .cd-things__item.cd-things__item--done {
+    background: transparent;
+    border-color: var(--line-hairline);
   }
 
   .cd-things__action {
@@ -421,22 +445,16 @@
   transition: min-height var(--motion-base) var(--motion-ease-emphasis) var(--motion-base);
 }
 
-/* A done row: the Done pill in the next step's place. */
-.cd-things__done {
-  display: flex;
-}
-
 /* A row done in view: its check draws once, short arm first, as every check in the app does (the
    shared path starts at the long arm's tip, so the dash comes in from its end), and its done line
-   and pill come in. Without the animation (reduced motion), the check is drawn whole and the words
+   come in. Without the animation (reduced motion), the check is drawn whole and the words
    are there. */
 .cd-things__check--draws path {
   stroke-dasharray: 24;
   animation: cd-things-check-draw var(--motion-base) var(--motion-ease-emphasis);
 }
 
-.cd-things__detail--done,
-.cd-things__done--ticked {
+.cd-things__detail--done {
   animation: cd-things-done-in var(--motion-base) var(--motion-ease);
 }
 
@@ -483,7 +501,7 @@
 
 /* On a phone each row is its next step: the icon tile, the title and its line, and a chevron at the
    right, whose press area covers the row (its ideas, under it, keep their own presses), with the
-   focus edge just inside the row. The card's button isn't drawn; a done row keeps its pill at the right. */
+   focus edge just inside the row. The card's button isn't drawn; a done row has no next step. */
 @media (max-width: 639.98px) {
   .cd-things__item {
     position: relative;
@@ -491,7 +509,7 @@
     column-gap: var(--space-12);
   }
 
-  .cd-things__action:not(.cd-things__action--done) {
+  .cd-things__action {
     display: none;
   }
 

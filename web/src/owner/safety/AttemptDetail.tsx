@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type Ref } from 'react';
+import { useEffect, useId, useRef, useState, type Ref } from 'react';
 
 import type { LedgerPage } from '../../api/contracts.ts';
 import type { Attempt } from '../../api/views.ts';
@@ -17,6 +17,8 @@ export interface AttemptDetailProps {
   deskId: string;
   /** The business's time zone, which the time is read in. */
   timezone: string;
+  /** A link from Today opens the entry with its existing Full trace toggle expanded. */
+  initiallyShowTrace?: boolean;
 }
 
 /** What the stop itself means, and only for the stopped item: earlier actions in the chat keep their own receipts. */
@@ -59,9 +61,9 @@ function Toggle({ label, open, controls, onToggle, buttonRef }: ToggleProps) {
  * summary, labelled as written by Claude; then, on request, the
  * checkpoints it went through and the signed entry it is kept in; and its conversation.
  */
-export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: AttemptDetailProps) {
+export function AttemptDetail({ attempt, page, devKey, deskId, timezone, initiallyShowTrace = false }: AttemptDetailProps) {
   const [showHow, setShowHow] = useState(false);
-  const [showTrace, setShowTrace] = useState(false);
+  const [showTrace, setShowTrace] = useState(initiallyShowTrace);
   const traceButton = useRef<HTMLButtonElement>(null);
   const traceBox = useRef<HTMLDivElement>(null);
   const howId = useId();
@@ -75,6 +77,12 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone }: Attem
   const claim = CLAIMS[attempt.kind] ?? null;
   const replayed = entry !== null && replayedOf(entry) !== null;
   const sessionId = entry?.event.session_id ?? null;
+  const focusedInitialTrace = useRef(false);
+  useEffect(() => {
+    if (!initiallyShowTrace || entry === null || focusedInitialTrace.current) return;
+    focusedInitialTrace.current = true;
+    focusTrace(traceBox.current);
+  }, [initiallyShowTrace, entry]);
 
   const toggleTrace = () => {
     const opening = !showTrace;
