@@ -193,7 +193,7 @@ describe('a rule for anyone on a tool that touches private data', () => {
 
   it('private_data_tools_read_the_verified_customer_for_anyone', () => {
     for (const tool of ['native.release_document', 'payments.list_charges', 'payments.create_refund', 'desk.new-client-intake', 'effect:private_data']) {
-      for (const mode of ['ask', 'auto', 'never'] as const) {
+      for (const mode of ['ask', 'auto'] as const) {
         expect(ruleQualifiers(anyone(tool, mode), onDesk), `${tool} ${mode}`).toBe('The customer, once verified');
         expect(ruleMeta(anyone(tool, mode), onDesk).who, `${tool} ${mode}`).toBe('The customer, once verified');
       }
@@ -207,6 +207,16 @@ describe('a rule for anyone on a tool that touches private data', () => {
     expect(ruleQualifiers(change, onDesk, tools[4])).toBe('The customer, once verified');
     expect(ruleMeta(change, onDesk, tools[4]).who).toBe('The customer, once verified');
     expect(ruleQualifiers(change, onDesk, tools[0])).toBe('Anyone');
+  });
+
+  it('a_never_rule_keeps_anyone_where_an_ask_on_the_same_tool_reads_the_verified_customer', () => {
+    // "Once verified" under a never rule would read as if verifying unlocked it, and it doesn't (owner ruling, 2026-11-02).
+    for (const tool of ['native.release_document', 'payments.list_charges', 'payments.create_refund', 'desk.new-client-intake', 'effect:private_data']) {
+      expect(ruleQualifiers(anyone(tool, 'never'), onDesk), tool).toBe('Anyone');
+      expect(ruleMeta(anyone(tool, 'never'), onDesk).who, tool).toBe('Anyone');
+      expect(ruleQualifiers(anyone(tool, 'ask'), onDesk), tool).toBe('The customer, once verified');
+    }
+    expect(ruleQualifiers(anyone('effect:pay_out', 'never'), onDesk, tools[3])).toBe('Anyone');
   });
 
   it('other_tools_keep_anyone', () => {

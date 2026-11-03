@@ -993,7 +993,7 @@ describe('Safety', () => {
 
     await screen.getByRole('link', { name: /Your rule says no/ }).click();
     await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
-      'The rule that turned it downClaude never sends refundsRefund · The customer, once verifiedNever',
+      'The rule that turned it downClaude never sends refundsRefund · AnyoneNever',
     );
     const slot = screen.getByRole('link', { name: /That time isn't open/ });
     await slot.click();
@@ -1033,7 +1033,7 @@ describe('Safety', () => {
     mockStore.inject({ route: 'rules', status: 200, times: 10_000, body: { ...view, active: { ...view.active, cards: [...view.active.cards, never] } } });
     await open.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
-      'The rule that turned it downClaude never sends refundsRefund · The customer, once verifiedNever',
+      'The rule that turned it downClaude never sends refundsRefund · AnyoneNever',
     );
     expect(open.getByRole('alert').elements()).toHaveLength(0);
   });
@@ -1051,7 +1051,7 @@ describe('Safety', () => {
     const { screen } = await renderRoute(`${SAFETY}/dec-never`, { retryScale: 0 });
     const open = detail(screen);
     const rule = () => open.getByRole('group', { name: 'The rule that turned it down', exact: true });
-    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · The customer, once verifiedNever');
+    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · AnyoneNever');
     expect(open.getByRole('alert').elements()).toHaveLength(0);
 
     const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
@@ -1076,7 +1076,7 @@ describe('Safety', () => {
     await screen.getByRole('link', { name: /Your rule says no/ }).click();
     await open.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
     await expect.poll(() => open.getByRole('alert').elements().length).toBe(0);
-    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · The customer, once verifiedNever');
+    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · AnyoneNever');
   });
 
   it.each(['missing', 'empty'] as const)('an_entry_with_its_visitor_words_%s_shows_none', async (words) => {
