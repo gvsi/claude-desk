@@ -292,7 +292,9 @@ describe('Conversations', () => {
     const days = list.querySelectorAll<HTMLElement>('.cd-conversations__day');
     expect(days).toHaveLength(1);
     expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
-    expect(parseFloat(getComputedStyle(list).scrollPaddingTop)).toBe(days[0]!.getBoundingClientRect().height);
+    // Focus keeps clear of the head, which stays at the column's top, and the day band stuck under it.
+    const head = list.querySelector<HTMLElement>('.cd-conversations__title')!.getBoundingClientRect().bottom - list.getBoundingClientRect().top;
+    expect(parseFloat(getComputedStyle(list).scrollPaddingTop)).toBe(head + days[0]!.getBoundingClientRect().height);
     const links = [...list.querySelectorAll<HTMLElement>('.cd-conversation-item')];
     links.at(-1)!.focus();
     expect(list.scrollTop).toBeGreaterThan(0);
@@ -345,15 +347,17 @@ describe('Conversations', () => {
     legacy.remove();
     expect(resting()).toEqual(before);
 
-    const edge = list.getBoundingClientRect().top;
-    const tops = days.map(day => day.getBoundingClientRect().top - edge);
+    // The head (the title) stays at the column's top; the day labels stick just under it.
+    const edge = list.querySelector<HTMLElement>('.cd-conversations__title')!.getBoundingClientRect().bottom;
+    const tops = days.map(day => day.getBoundingClientRect().top - list.getBoundingClientRect().top);
     const scrollTo = async (top: number) => {
       list.scrollTop = top;
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     };
+    const head = edge - list.getBoundingClientRect().top;
     for (let i = 0; i < 2; i += 1) {
       const day = days[i]!;
-      await scrollTo(tops[i]! + 100);
+      await scrollTo(tops[i]! - head + 100);
       expect(day.getBoundingClientRect().top).toBe(edge);
       expect(getComputedStyle(day).backgroundColor).toBe(tokenColor('--bg-app'));
       expect(getComputedStyle(day).zIndex).toBe('1');
@@ -364,13 +368,60 @@ describe('Conversations', () => {
       }
 
       const next = days[i + 1]!;
-      await scrollTo(tops[i + 1]! - day.getBoundingClientRect().height / 2);
+      await scrollTo(tops[i + 1]! - head - day.getBoundingClientRect().height / 2);
       expect(day.getBoundingClientRect().top).toBeLessThan(edge);
       expect(day.getBoundingClientRect().bottom).toBeLessThanOrEqual(next.getBoundingClientRect().top);
-      await scrollTo(tops[i + 1]! + 1);
+      await scrollTo(tops[i + 1]! - head + 1);
       expect(next.getBoundingClientRect().top).toBe(edge);
       expect(day.getBoundingClientRect().bottom).toBeLessThanOrEqual(edge);
     }
+    expectNoWindowScroll();
+    expectNoHorizontalScroll();
+  });
+
+  it.each([[1440, 900], [390, 844]])('the_list_head_stays_while_the_rows_scroll_at_%sx%s', async (width, height) => {
+    // The title and the recorded-history caption stay at the top of the list's column while the
+    // rows scroll under them, and the day labels pin just under the caption (owner, 2026-11-02).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-29T20:00:00Z'));
+    onTestFinished(() => { vi.useRealTimers(); });
+    const [base] = await served<ConversationSummary[]>('conversations', { desk_id: RIVERA.deskId });
+    const rows = Array.from({ length: 36 }, (_, i): ConversationSummary => ({
+      ...base!, session_id: `head-${i}`, display_name: DANA, latest_visitor_text: 'Tuesday at 2 works.',
+      replayed: i === 0, outcome_counts: {},
+      last_activity: new Date(Date.now() - Math.floor(i / 12) * 86_400_000 - i * 1000).toISOString(),
+    }));
+    mockStore.inject({ route: 'conversations', status: 200, times: 10_000, body: rows });
+    const { screen } = await renderRoute(LIST, { viewport: { width, height }, pollScale: 100 });
+    await expect.element(screen.getByRole('link', { name: new RegExp(`^${DANA}`) }).first()).toBeVisible();
+    await expect.poll(() => document.querySelector('.cd-skeleton-screen__layer')).toBeNull();
+    const list = document.querySelector<HTMLElement>('.cd-conversations__list')!;
+    const title = list.querySelector<HTMLElement>('.cd-conversations__title')!;
+    const caption = list.querySelector<HTMLElement>('.cd-conversations__under > .cd-conversations__caption')!;
+    expect(caption).not.toBeNull();
+    expect(list.scrollHeight).toBeGreaterThan(list.clientHeight);
+    // The head's heights are the lines its type draws.
+    const style = getComputedStyle(list);
+    expect(getComputedStyle(title).lineHeight).toBe(style.getPropertyValue('--cd-list-title-line').trim());
+    expect(`${caption.getBoundingClientRect().height}px`).toBe(style.getPropertyValue('--cd-list-caption-line').trim());
+
+    const rest = { title: title.getBoundingClientRect().toJSON(), caption: caption.getBoundingClientRect().toJSON() };
+    list.scrollTop = list.scrollHeight;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    expect(list.scrollTop).toBeGreaterThan(0);
+    expect(title.getBoundingClientRect().toJSON()).toEqual(rest.title);
+    expect(caption.getBoundingClientRect().toJSON()).toEqual(rest.caption);
+    expect(rest.caption.top).toBe(rest.title.bottom);
+    // Its ground is opaque from the column's top edge to the caption's foot, across the column.
+    const edge = list.getBoundingClientRect().top;
+    for (const y of [edge + 1, rest.title.bottom - 1, rest.caption.top + 1, rest.caption.bottom - 1]) {
+      for (const x of [rest.title.left + 2, rest.title.right - 2]) {
+        expect(document.elementFromPoint(x, y)?.closest('.cd-conversations__title, .cd-conversations__caption'), `${x},${y}`).not.toBeNull();
+      }
+    }
+    // The last day's label is stuck just under the caption.
+    const days = [...list.querySelectorAll<HTMLElement>('.cd-conversations__day')];
+    expect(days.at(-1)!.getBoundingClientRect().top).toBe(rest.caption.bottom);
     expectNoWindowScroll();
     expectNoHorizontalScroll();
   });
