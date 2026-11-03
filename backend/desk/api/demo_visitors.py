@@ -21,8 +21,8 @@ credential is present. After the opening, each step:
    owner says something or hands it back (waiting for Claude when work resumes). While the owner stays quiet, it sends its one fixed nudge
    (`DEMO_VISITOR_NUDGE`) after 90 seconds, with no model call, and ends `owner_silent` after four minutes.
    Once its brief is done while a request the chat showed as held has no outcome yet, it waits instead of ending: for
-   that outcome (`resolved`) and Claude's turn after it, with no nudge and no model call, since the owner answers in
-   Approvals, not in the chat.
+   that outcome (`resolved`) and Claude's own follow-up to it (`_deciding`), with no nudge and no model call, since
+   the owner answers in Approvals, not in the chat.
 2. Its model reads what a visitor saw since its last step: each delivered message's plain text labelled by who said
    it (Claude, or the owner by the name the stream carries, as a person), each request's signed status, and where the
    owner joined and left, all inside `<desk_reply>` (`prompts.wrap`), as information.
@@ -94,6 +94,7 @@ RUN_LIFE = timedelta(hours=1)   # how long an ended run's record, and a start, c
 STARTS_PER_HOUR = 3             # a copy's starts
 NUDGE_AFTER_S = 90.0            # the owner quiet this long after taking the chat over: one "Are you still there?"
 OWNER_SILENT_S = 240.0          # and this long: the run ends
+FOLLOW_UP_S = 10.0              # a follow-up turn starts well within this of the turn before it ending
 READING_MIN_S, READING_MAX_S, READING_PER_CHAR_S = 2.0, 4.0, 0.02
 TYPING_MIN_S, TYPING_MAX_S, TYPING_PER_CHAR_S = 3.0, 8.0, 0.05
 TYPING_REFRESH_S = 4.0          # refresh before presence.TYPING_SHOWS_FOR's five-second lifetime
@@ -338,20 +339,51 @@ def _answer(events: Sequence[_Seen], mark: int) -> _Answer:
     return _Answer(False, "owner" if handoff else mode, heard)
 
 
-def _deciding(events: Sequence[_Seen]) -> bool:
+@dataclass
+class _Deciding:
+    """Whether the chat still waits on the owner's answer to a held request, and, when that may already be over,
+    until when (`grace`)."""
+
+    waiting: bool
+    grace: datetime | None
+
+
+def _deciding(events: Sequence[_Seen]) -> _Deciding:
     """Whether the chat still waits on the owner's answer to a request it showed as `held`: one with no `resolved`
-    for it yet, or Claude's turn after the latest `resolved` not ended yet (a fenced turn's end doesn't count)."""
-    held, following = set(), False
+    for it yet, or Claude's follow-up to the latest `resolved` not ended yet. The follow-up is the turn that starts
+    (`writing`) after the outcome; when no turn is running as the outcome comes, the first turn to end after it. A
+    turn running as it comes may read it with its next model call, and then no turn of its own follows: once that
+    turn has ended, the wait is over `FOLLOW_UP_S` later unless a follow-up starts. While the owner has the chat no
+    turn's end counts: a hand-back that resumes work waits for that work's turn, and one that resumes none ends the
+    wait."""
+    held: set[str] = set()
+    owner = running = following = started = skip = False
+    grace: datetime | None = None
     for _, seen in _unfenced_events(events):
         event = seen.event
-        if event.type == "held":
+        kind = event.type
+        if kind == "held":
             held.add(event.decision_id)
-        elif event.type == "resolved":
+        elif kind == "resolved":
             held.discard(event.decision_id)
-            following = True
-        elif event.type == "turn_end":
-            following = False
-    return bool(held) or following
+            following, started, skip, grace = True, False, running, None
+        elif kind == "writing":
+            running, started = True, following
+            grace = None
+        elif kind == "owner_joined":
+            owner, grace = True, None
+        elif kind == "owner_left":
+            owner = False
+            following, started, skip, grace = following and event.resuming, False, False, None
+        elif kind == "turn_end":
+            running = False
+            if owner:
+                continue
+            if following and skip and not started:     # the turn that was running as the outcome came
+                skip, grace = False, seen.at + timedelta(seconds=FOLLOW_UP_S)
+            elif following:
+                following, grace = False, None
+    return _Deciding(waiting=bool(held) or following, grace=None if held else grace)
 
 
 async def _first(feed: _Feed, timer: Awaitable[None]) -> None:
@@ -475,12 +507,22 @@ class _Chat:
                 wait = min(wait, (OWNER_SILENT_S if nudged else NUDGE_AFTER_S) - quiet)
             await _first(self.feed, self.sleep(wait))
 
+    def deciding(self) -> datetime | None:
+        """Until when the chat waits on the owner's answer to a held request (`_deciding`): the run's deadline, or a
+        grace's end before it; None once it doesn't wait."""
+        deciding = _deciding(self.feed.events)
+        if not deciding.waiting:
+            return None
+        if deciding.grace is None:
+            return self.deadline
+        return min(self.deadline, deciding.grace) if self.clock() < deciding.grace else None
+
     async def decided(self) -> None:
-        """Wait while the chat waits on the owner's answer to a held request (`_deciding`). The owner answers it in
+        """Wait while the chat waits on the owner's answer to a held request (`deciding`). The owner answers it in
         Approvals, not in the chat, so it sends no nudge; the run's own time limit holds throughout."""
-        while _deciding(self.feed.events):
+        while (until := self.deciding()) is not None:
             self.check()
-            await _first(self.feed, self.sleep((self.deadline - self.clock()).total_seconds()))
+            await _first(self.feed, self.sleep((until - self.clock()).total_seconds()))
 
 
 async def _step(model: ModelClient, messages: list[dict], record: Record) -> VisitorStep:
@@ -587,9 +629,9 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
         step = await chat.active(_step(model, messages, record))
         calls += 1
         if step.done:
-            if not _deciding(chat.feed.events):
+            if chat.deciding() is None:
                 raise _Ended("finished")
-            await chat.decided()                  # a held request's outcome, and Claude's turn after it
+            await chat.decided()                  # a held request's outcome, and Claude's follow-up to it
             nudged = False
         elif not step.message.strip():
             raise RunFailed("the model wrote an empty message")
@@ -597,6 +639,8 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
             mark = await chat.active(chat.write(step.message, read=read))
             nudged = await chat.answered(mark, chat.clock())
         lines = _lines(chat.feed.events, shown)
+        if step.done and not lines:               # its brief is done, and the wait brought nothing new
+            raise _Ended("finished")
         shown, read = len(chat.feed.events), sum(len(line) for line in lines)
         messages += [{"role": "assistant", "content": [{"type": "text", "text": step.model_dump_json()}]},
                      _shown(lines, nudged=nudged)]
