@@ -1,5 +1,5 @@
 /**
- * When each of Today's five things to try is done, as pure functions of reads the owner app already
+ * When each of Today's six things to try is done, as pure functions of reads the owner app already
  * makes. A thing is done only on what the reads show the owner did in this copy: never on replayed
  * history, never on the seed's own stopped reply or hold, and never on a click alone.
  */
@@ -7,8 +7,8 @@ import type { Decision, DecisionState, LedgerEntry, LedgerPage } from '../../api
 import type { Attempt, BusinessOut, ConversationSummary, OwnerTranscript } from '../../api/views.ts';
 import { isLive } from '../useDesks.ts';
 
-/** The five things, in the list's order: the intro dialog's four, with "Watch a demo visitor" second. */
-export const THINGS = ['chat', 'demo', 'break', 'answer', 'create'] as const;
+/** The six things, in the list's order, including opening a stopped entry in Safety. */
+export const THINGS = ['chat', 'demo', 'break', 'stopped', 'answer', 'create'] as const;
 
 export type Thing = (typeof THINGS)[number];
 
@@ -62,7 +62,7 @@ export function remember(memory: DoneMemory, now: Record<Thing, Reading>): DoneM
 
 /**
  * The list's line under its heading: how long the tour takes until something is done, then how many
- * of the five are, always "of 5", even before "Answer a held request" shows.
+ * of the six are, always "of 6", even before a request is held or stopped.
  */
 export function doneCaption(count: number): string {
   if (count <= 0) return 'About 10 minutes. No real customer sees any of it.';

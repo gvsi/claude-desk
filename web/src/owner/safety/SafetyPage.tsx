@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -12,8 +12,9 @@ import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { ReadFailed } from '../ReadFailed.tsx';
+import { heldOldestFirst, useDesks, useNeedsYou, useToday } from '../useDesks.ts';
+import { rememberStoppedEntry } from '../arrival/keptCopy.ts';
 import { useRequestRules, type RequestRules } from '../rules/useRequestRules.ts';
-import { heldOldestFirst, useNeedsYou, useToday } from '../useDesks.ts';
 import { requestPath } from '../today/requestLink.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { AttemptDetail } from './AttemptDetail.tsx';
@@ -196,6 +197,7 @@ interface AttemptsViewProps {
  * with nothing read yet it takes the place of "Reading what was stopped".
  */
 function AttemptsView({ deskId, rules, rulesFailure, refId, page, devKey, timezone }: AttemptsViewProps) {
+  const [params] = useSearchParams();
   const safety = useAttempts(deskId);
   const failure = useReadFailure(safety, { pausedRoute: 'safety' });
   const [filter, setFilter] = useState(ALL);
@@ -254,7 +256,7 @@ function AttemptsView({ deskId, rules, rulesFailure, refId, page, devKey, timezo
       <div className="cd-safety__beside">
         {open !== null ? (
           <div ref={opened} className="cd-safety__opened" tabIndex={-1}>
-            <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} rules={rules} rulesFailure={rulesFailure} />
+            <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} initiallyShowTrace={params.get('trace') === '1'} rules={rules} rulesFailure={rulesFailure} />
           </div>
         ) : refId !== undefined ? (
           <EmptyState title="This one isn't in the list" body="It may be from an earlier copy of this Desk. Choose one from the list to see how it was stopped." />
@@ -296,6 +298,16 @@ export function SafetyPage() {
   const [hasShownRegion, setHasShownRegion] = useState(settled || view === 'entries');
   if ((settled || view === 'entries') && !hasShownRegion) setHasShownRegion(true);
   const ready = settled || hasShownRegion;
+  const queryClient = useQueryClient();
+  const desks = useDesks(deskId, { passive: true });
+  const [openedSeq, setOpenedSeq] = useState<number | null>(null);
+  const openedStop = view === 'entries'
+    ? attempts.data?.find((attempt) => attempt.ledger_seq === openedSeq)
+    : refId === undefined ? attempts.data?.[0] : attempts.data?.find((attempt) => attempt.ref_id === refId);
+  // A stopped entry actually opened in Safety, including its trace in Every entry, completes the thing.
+  useEffect(() => {
+    if (ready && openedStop !== undefined && openedStop.kind !== 'held' && desks.data !== undefined) rememberStoppedEntry(queryClient, desks.data);
+  }, [ready, openedStop, desks.data, queryClient]);
 
   const changeView = (next: SafetyView) => {
     setParams(
@@ -332,7 +344,7 @@ export function SafetyPage() {
         </div>
         {view === 'entries' ? (
           ledger.data ? (
-            <RecordList page={ledger.data} devKey={devKey} timezone={business.timezone} />
+            <RecordList page={ledger.data} devKey={devKey} timezone={business.timezone} onOpenEntry={setOpenedSeq} />
           ) : null
         ) : (
           <AttemptsView deskId={deskId} rules={rules.rules} rulesFailure={rules.failure} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />

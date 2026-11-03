@@ -1,6 +1,6 @@
 /**
  * The demo visitor in a real browser against the mock API: Today's "Watch a demo visitor" card that
- * starts one and opens its conversation, its start error, the five cards' layout, the "Demo
+ * starts one and opens its conversation, its start error, the six cards' layout, the "Demo
  * visitor" pill on its row, its conversation's bar and wherever Needs you names it, the note at the
  * top of its transcript with Stop, and how the note says it ended.
  */
@@ -78,6 +78,7 @@ describe('Demo visitor', () => {
       'Chat as a customer',
       CARD_TITLE,
       'Try to break it',
+      'See what was stopped',
       'Answer a held request',
       'Create your own Desk',
     ]);
@@ -136,16 +137,16 @@ describe('Demo visitor', () => {
     [800, 900, 2],
     [640, 900, 2],
     [390, 844, 1],
-  ])('the_five_things_lay_out_at_%sx%s_%s_across', async (width, height, across) => {
+  ])('the_six_things_lay_out_at_%sx%s_%s_across', async (width, height, across) => {
     const { screen } = await renderRoute(TODAY, { viewport: { width, height } });
     const things = region(screen, 'Things to try');
     await expect.element(things.getByRole('heading', { level: 3, name: CARD_TITLE })).toBeVisible();
     const items = [...things.element().querySelectorAll('.cd-things__item')];
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
     const tops = items.map((item) => Math.round(item.getBoundingClientRect().top));
     const lefts = items.map((item) => Math.round(item.getBoundingClientRect().left));
     // Rows of `across`: each row's cards share a top, and each starts a new one under the last.
-    const rows = Math.ceil(5 / across);
+    const rows = Math.ceil(6 / across);
     for (let row = 0; row < rows; row += 1) {
       const inRow = tops.slice(row * across, row * across + across);
       expect(new Set(inRow).size, `row ${row + 1} shares its top`).toBe(1);
@@ -164,14 +165,15 @@ describe('Demo visitor', () => {
     await expect.poll(() => demoChats().length).toBe(1);
     await expect.poll(() => router.state.location.pathname).not.toBe(TODAY);
 
-    // Back on Today, it is ticked off like the others: its check, its own line kept, and a Done pill read out.
+    // Back on Today, it is ticked off like the others: its green check disc and its done line in place of the detail.
     await router.navigate(TODAY);
     things = region(screen, 'Things to try');
-    await expect.element(things.getByText('1 of 5 done. No real customer sees any of it.', { exact: true })).toBeVisible();
+    await expect.element(things.getByText('1 of 6 done. No real customer sees any of it.', { exact: true })).toBeVisible();
     const card = things.getByRole('heading', { level: 3, name: CARD_TITLE }).element().closest('.cd-things__item')!;
     expect(card.querySelector('.cd-things__done')?.textContent).toBe('Done');
-    expect(card.querySelector('.cd-things__done')?.getAttribute('aria-hidden')).toBeNull();
-    expect(card.textContent).toContain(CARD_DETAIL);
+    expect(card.querySelector('.cd-things__done')?.getAttribute('aria-hidden')).toBe('true');
+    expect(card.textContent).toContain('Done. You watched a demo visitor.');
+    expect(card.textContent).not.toContain(CARD_DETAIL);
     expect(card.querySelector('button, a'), 'no next step once done').toBeNull();
   });
 

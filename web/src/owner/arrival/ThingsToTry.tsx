@@ -1,10 +1,11 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import type { Decision } from '../../api/contracts.ts';
 import { ApiError, newIdempotencyKey, request } from '../../api/http.ts';
 import type { NeedsYouItem } from '../../api/views.ts';
-import { Button, Card, Icon, Notice, Pill, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
+import { Button, Card, Icon, Notice, StatusDot, SuggestionChips, TextLink, type IconName } from '../../ds/index.ts';
 import { breakItIdeas, handOffBreakItIdea, type BreakItIdea } from '../../lib/breakItIdeas.ts';
 import { readLocal, writeLocal } from '../../lib/storage.ts';
 import { givenOwnerName } from '../../public/brand.ts';
@@ -14,10 +15,14 @@ import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, isLive, useToday } from '../useDesks.ts';
 import { TODAY_COPY } from '../today/copy.ts';
+import { pollMs } from '../../app/poll.ts';
+import { attemptsQuery } from '../safety/queries.ts';
+import { attemptPath } from '../safety/SafetyPage.tsx';
 import { requestPath } from '../today/requestLink.ts';
 import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
-import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
+import { DEMO_VISITOR_THING, STOPPED_THING, THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
 import { useDoneSignals, type Done } from './useDoneSignals.ts';
+import { ThingsProgress } from './ThingsProgress.tsx';
 
 export interface ThingsToTryProps {
   /**
@@ -35,13 +40,13 @@ const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
 
 /**
  * How a row ended, as it draws it: the line that takes the detail's place (null keeps the detail);
- * whether it ticked (done, with a check and a Done pill) or only settled (an answer the list doesn't
+ * whether it ticked (done, with a check disc) or only settled (an answer the list doesn't
  * count: its line alone); whether its line says it's done; and whether it was so at load.
  */
 interface RowEnd extends Done {
   line: string | null;
   ticks: boolean;
-  /** False when a done row keeps words that don't say so, so its Done pill is read out instead. */
+  /** False when a done row keeps words that don't say so, so its hidden Done label is read out. */
   readsDone?: boolean;
 }
 
@@ -85,14 +90,14 @@ function routerClick(go: () => void) {
 }
 
 /**
- * Today's "Things to try": five ways into the demo, each with its next step, ticked off in place as
+ * Today's "Things to try": six ways into the demo, each with its next step, ticked off in place as
  * the owner does it, and counted in the line under the heading; then a link to the Vision article,
  * where a Desk could go next. From 640 px they are cards, two across and three across from 1280 px,
  * each next step at its foot; on a phone they are rows in one card, each row the next step itself
  * with a chevron at its right. "Watch a demo visitor", second, starts an AI customer on the Desk and
  * opens its conversation, wherever the run it answers is.
  * "Answer a held request" says where a request will show until something is held (no next step, so
- * the four keep their places), and stays once it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
+ * the other things keep their places), and stays once it's answered: ticked when the answer counts, or settled in its slot with how the answer ended when
  * it doesn't (a request that had expired or been cancelled, or an answer given on a Desk the list
  * doesn't count). "Create your own Desk" says a new Desk is live only on a live Desk's Today. The
  * public page always opens in a new tab, never on Today. "Hide this list" is
@@ -105,6 +110,11 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer }: ThingsToTryPr
   const titleId = useId();
   const [hidden, setHidden] = useState(() => readLocal('thingsToTryHidden') === 'true');
   const signals = useDoneSignals({ enabled: !hidden, deskId: desk.desk_id, answered, latest: latestAnswer });
+  const stops = useQuery({
+    ...attemptsQuery(desk.desk_id),
+    enabled: !hidden && signals.done.stopped === undefined,
+    refetchInterval: pollMs('today'),
+  });
   // The row settles with how the latest answer given here ended, when the list doesn't count it, and
   // keeps that line when its card is dismissed. A new request held clears it: the answer whose line it
   // was is remembered here, so the line doesn't come back once that request is gone.
@@ -156,8 +166,10 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer }: ThingsToTryPr
   const answerWaits = answerDone === null && waiting;
   // "Create your own Desk" is done for the copy once another Desk is live. Its done line says a new
   // Desk is live, so on the Today of a Desk still in setup ("Not live yet"), the row keeps its own
-  // words and its Done pill is read out, as "Answer a held request" does on another Desk.
+  // words and its hidden Done label is read out, as "Answer a held request" does on another Desk.
   const createDone = isLive(desk) ? rowDone(signals.done.create, CREATE.done) : rowDone(signals.done.create, null, false);
+  const latestStop = stops.data?.[0];
+  const stoppedPath = latestStop === undefined ? null : `${attemptPath(desk.desk_id, latestStop.ref_id)}?trace=1`;
 
   return (
     <section className="cd-things" aria-labelledby={titleId}>
@@ -176,6 +188,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer }: ThingsToTryPr
         <p className="cd-things__caption cd-type-meta" data-room={doneCaption(0)}>
           <span className="cd-things__caption-now">{doneCaption(signals.count)}</span>
         </p>
+        <ThingsProgress done={signals.done} />
       </div>
       <Card padding={16}>
         <ul className="cd-things__list">
@@ -186,14 +199,20 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer }: ThingsToTryPr
             end={rowDone(signals.done.chat, CHAT.done)}
             step={{ label: 'Open your public page', href: link, external: true }}
           />
-          <DemoVisitorThing deskId={desk.desk_id} end={rowDone(signals.done.demo, null, false)} />
+          <DemoVisitorThing deskId={desk.desk_id} end={rowDone(signals.done.demo, DEMO_VISITOR_THING.done)} />
           <BreakIt slug={desk.slug} deskId={desk.desk_id} ownerName={ownerName} business={business.name} end={rowDone(signals.done.break, signals.onStartingDesk ? BREAK.done : null, signals.onStartingDesk)} />
+          <Thing
+            icon={STOPPED_THING.icon}
+            title={STOPPED_THING.title}
+            detail={latestStop === undefined ? STOPPED_THING.empty : STOPPED_THING.detail}
+            end={rowDone(signals.done.stopped, STOPPED_THING.done)}
+            step={stoppedPath === null ? null : { label: STOPPED_THING.start, href: stoppedPath, onClick: routerClick(() => void navigate(stoppedPath)) }}
+          />
           <Thing
             icon="clock"
             title={ANSWER.title}
             held={answerWaits}
             detail={answerWaits ? heldLine(firstHeld?.held_by) : TODAY_COPY.heldNone}
-            detailRoom={answerWaits ? ANSWER_ROOM : undefined}
             end={answerEnd}
             step={answerWaits && firstHeld?.decision ? { label: 'Open the request', href: requestPath(desk.desk_id, firstHeld.decision.decision_id, firstHeld.session) } : null}
           />
@@ -240,8 +259,6 @@ interface ThingProps {
    * screen reader hears it again; undefined while it doesn't.
    */
   alert?: number;
-  /** Keep room for the longest end line while an answer waits, so ending never grows the row. */
-  detailRoom?: string;
   /** Shown under the detail, across the row. */
   below?: ReactNode;
   /** Set once the row has ended: it ticks off when its thing is done, or settles with its line alone. */
@@ -366,14 +383,14 @@ function useTickInPlace(done: boolean, eases: boolean) {
 }
 
 /**
- * One thing to try. Once it's done, its icon gives way to a check, its detail to its done line and
- * its next step to a Done pill, in place, at the height it had until the check has drawn. A row that
+ * One thing to try. Once it's done, its icon gives way to a check disc, its detail to its done line,
+ * and its next step goes, in place, at the height it had until the check has drawn. A row that
  * settles instead (an answer the list doesn't count) keeps its icon, and its detail gives way to its
  * line, with no check, no pill and no next step, in the same settle. The check draws, and the line
  * comes in, when the row ends in view; a row that ended at load, or before it was drawn (a list
  * shown again), is drawn still.
  */
-function Thing({ icon, title, held = false, detail, alert, detailRoom, below, end = null, step }: ThingProps) {
+function Thing({ icon, title, held = false, detail, alert, below, end = null, step }: ThingProps) {
   const titleId = useId();
   const detailId = useId();
   // Ended when it was drawn: drawn still. A row that waits again (a new request held) ends in view next time.
@@ -382,8 +399,8 @@ function Thing({ icon, title, held = false, detail, alert, detailRoom, below, en
   const inView = end !== null && !end.atLoad && !drawnEnded;
   const { ref, titleRef, settling, onFocus, onBlur } = useTickInPlace(end !== null, inView);
   return (
-    <li ref={ref} className={settling ? 'cd-things__item cd-things__item--settling' : 'cd-things__item'} onFocus={onFocus} onBlur={onBlur}>
-      <span className="cd-things__icon">
+    <li ref={ref} className={['cd-things__item', end?.ticks && 'cd-things__item--done', settling && 'cd-things__item--settling'].filter(Boolean).join(' ')} onFocus={onFocus} onBlur={onBlur}>
+      <span className={end?.ticks ? 'cd-things__icon cd-things__icon--done' : 'cd-things__icon'}>
         {end?.ticks ? (
           <Icon name="check" size={16} className={inView ? 'cd-things__check cd-things__check--draws' : 'cd-things__check'} />
         ) : (
@@ -400,12 +417,11 @@ function Thing({ icon, title, held = false, detail, alert, detailRoom, below, en
           id={detailId}
           role={alert === undefined || end !== null ? undefined : 'alert'}
           className={inView ? 'cd-things__detail cd-things__detail--done cd-type-meta' : 'cd-things__detail cd-type-meta'}
-          data-room={end === null ? detailRoom : undefined}
         >
           <span className="cd-things__detail-now">{end?.line ?? detail}</span>
         </p>
       </div>
-      {/* A settled row has no next step and no pill, so no place for one either; nor has a row with no step yet. */}
+      {/* A settled row has no next step, so no place for one either; nor has a row with no step yet. */}
       {end === null && step !== null ? (
         <>
           <div className="cd-things__action">
@@ -423,15 +439,7 @@ function Thing({ icon, title, held = false, detail, alert, detailRoom, below, en
         </>
       ) : null}
       {end?.ticks ? (
-        <div className="cd-things__action cd-things__action--done">
-          {/* A done line already says it in words, so the pill isn't read twice; a row that keeps its own words has it read. */}
-          <span className={inView ? 'cd-things__done cd-things__done--ticked' : 'cd-things__done'} aria-hidden={end.readsDone === false ? undefined : true}>
-            <Pill>
-              <StatusDot tone="handled" />
-              Done
-            </Pill>
-          </span>
-        </div>
+        <span className="cd-things__done cd-sr-only" aria-hidden={end.readsDone === false ? undefined : true}>Done</span>
       ) : null}
       {below && end === null ? <div className="cd-things__below">{below}</div> : null}
     </li>

@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type Ref } from 'react';
+import { useEffect, useId, useRef, useState, type Ref } from 'react';
 
 import type { LedgerPage } from '../../api/contracts.ts';
 import type { Attempt } from '../../api/views.ts';
@@ -22,6 +22,8 @@ export interface AttemptDetailProps {
   deskId: string;
   /** The business's time zone, which the time is read in. */
   timezone: string;
+  /** A link from Today opens the entry with its existing Full trace toggle expanded. */
+  initiallyShowTrace?: boolean;
   /** The active rules, once read (`useRequestRules`), which name the owner's rule that turned a request down. */
   rules: RequestRules | null;
   /** The rules' latest read failed: said first for a request the owner's own rule turned down, over the rule as last read. */
@@ -72,9 +74,9 @@ function Toggle({ label, open, controls, onToggle, buttonRef }: ToggleProps) {
  * that made it, quoted; Claude's summary, labelled as written by Claude; then, on request, the
  * checkpoints it went through and the signed entry it is kept in; and its conversation.
  */
-export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules, rulesFailure }: AttemptDetailProps) {
+export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules, rulesFailure, initiallyShowTrace = false }: AttemptDetailProps) {
   const [showHow, setShowHow] = useState(false);
-  const [showTrace, setShowTrace] = useState(false);
+  const [showTrace, setShowTrace] = useState(initiallyShowTrace);
   const traceButton = useRef<HTMLButtonElement>(null);
   const traceBox = useRef<HTMLDivElement>(null);
   const howId = useId();
@@ -88,6 +90,12 @@ export function AttemptDetail({ attempt, page, devKey, deskId, timezone, rules, 
   const claim = CLAIMS[attempt.kind] ?? null;
   const replayed = entry !== null && replayedOf(entry) !== null;
   const sessionId = entry?.event.session_id ?? null;
+  const focusedInitialTrace = useRef(false);
+  useEffect(() => {
+    if (!initiallyShowTrace || entry === null || focusedInitialTrace.current) return;
+    focusedInitialTrace.current = true;
+    focusTrace(traceBox.current);
+  }, [initiallyShowTrace, entry]);
   // An always-on rule needs no read of the rules; the owner's own Never rule does. While the rules'
   // latest read has failed, such a request says so first, with Try again, over the rule as it was
   // last read (or in its place, with none read), so an earlier read never passes for current.
