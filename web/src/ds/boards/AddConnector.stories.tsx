@@ -341,10 +341,12 @@ export const TurnOnGoogleCalendar: Story = {
   play: async ({ canvasElement, userEvent }) => {
     const main = await expectAddStep(canvasElement, ['Connectors', 'Google Calendar'], APP_STEPS, 'Confirm');
     expectComputed(within(main).getByRole('heading', { level: 1, name: 'Turn on Google Calendar' }), SPEC.pageTitle);
-    // A tag per row in words, in the change tag's look.
+    // A tag per row in words, in the change tag's look: "Added" at its 64 px floor, "Changed" as
+    // wide as its word in caption type.
     const tags = some(main, '.cd-change-review__tag');
     await expect(tags.map((tag) => tag.textContent)).toEqual(['Added', 'Changed']);
-    for (const tag of tags) expectComputed(tag, CONNECTORS_SPEC.changeTag);
+    const { width: _width, ...tagLook } = CONNECTORS_SPEC.changeTag;
+    for (const [index, tag] of tags.entries()) expectComputed(tag, { ...tagLook, width: index === 0 ? '64px' : '66px' });
     // The changed row's two sides, in the board's words.
     const before = one(main, '.cd-change-review__side--before');
     const after = some(main, '.cd-change-review__side--after').at(-1) as HTMLElement;

@@ -1,7 +1,7 @@
 /* AdvancedDetails: REV-RULES-D's quiet Details button, and the panel it opens under its row. */
 
 /* The button: control type in the secondary ink, no fill until hovered or open. 2 px by 6 px, so one
-   line is 24 px tall, the smallest target WCAG 2.2 allows. */
+   line is 25 px tall, over the 24 px smallest target WCAG 2.2 allows. */
 .cd-advanced-details__toggle {
   display: inline-flex;
   align-items: center;

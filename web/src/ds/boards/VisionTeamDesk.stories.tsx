@@ -20,7 +20,7 @@ const meta = {
   title: 'Boards/Vision, team desk',
   render: () => <TeamDeskConversations />,
   // Drawn at a 14-inch laptop's width, with the same components as the page.
-  globals: { viewport: { value: 'laptop-1061', isRotated: false } },
+  globals: { viewport: { value: 'laptop-1142', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-R2-Vision-TeamDesk',
@@ -39,7 +39,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1061]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1142]);
     const bar = await expectVisionBar(canvasElement, VISION_BACK_HREF);
     await expectOwnerFrame(canvasElement, 'Conversations', { fill: true });
     const sidebar = canvas.getByRole('complementary', { name: 'Claude Desk' });
@@ -118,7 +118,7 @@ export const Board: Story = {
 
     // The day's line, then the footer at the foot.
     const today = within(main).getByText(TEAM_TODAY);
-    expectComputed(today, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(today, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expectFooter(canvasElement);
     const footer = one(canvasElement, '[data-ds="concept-footer"]');
     await expect(Math.round(footer.getBoundingClientRect().top - today.getBoundingClientRect().bottom)).toBe(16);

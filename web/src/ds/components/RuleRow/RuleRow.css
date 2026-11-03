@@ -42,10 +42,10 @@
   color: var(--text-secondary);
 }
 
-/* The 14 px icon sits on the middle of the caption's 17 px first line. */
+/* The 14 px icon sits on the middle of the caption's 18 px first line. */
 .cd-rule-row__shared > svg {
   flex: none;
-  margin-top: 1.5px;
+  margin-top: var(--space-2);
 }
 
 .cd-rule-row__shared > span {

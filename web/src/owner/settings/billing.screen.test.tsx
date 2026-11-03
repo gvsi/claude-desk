@@ -33,9 +33,9 @@ it.each(['desktop', 'phone'] as const)('billing_matches_the_signed_content_at_%s
   ]);
   const parts = [...content.children];
   expect(parts.slice(1).map((part, i) => Math.round(part.getBoundingClientRect().top - parts[i]!.getBoundingClientRect().bottom))).toEqual([24, 24, 24, 24]);
-  for (const heading of content.querySelectorAll('h2')) expectComputed(heading, { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
-  for (const line of content.querySelectorAll('.cd-type-body')) expectComputed(line, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)' });
-  for (const line of content.querySelectorAll('.cd-type-meta')) expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  for (const heading of content.querySelectorAll('h2')) expectComputed(heading, { fontSize: '16px', lineHeight: '21px', fontWeight: '520' });
+  for (const line of content.querySelectorAll('.cd-type-body')) expectComputed(line, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.92)' });
+  for (const line of content.querySelectorAll('.cd-type-meta')) expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   const track = one(content, '.cd-billing__budget-track');
   expectComputed(track, { height: '6px', marginTop: '8px', borderRadius: '999px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
   expect(track.getAttribute('aria-hidden')).toBe('true');

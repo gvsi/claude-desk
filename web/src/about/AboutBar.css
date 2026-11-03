@@ -105,9 +105,9 @@
   padding: var(--space-12) var(--about-bar-gutter) 0;
 }
 
-/* 8 px either side of each name, not the laptop's 12, keeps the three pages on one row down to a 375 px phone.
-   Brought into view by the keyboard, a name stops clear of the bar. */
+/* 4 px either side of each name, not the laptop's 12, keeps the three pages on one row down to a 375 px phone;
+   each link keeps the control's height to tap. Brought into view by the keyboard, a name stops clear of the bar. */
 .cd-about-switch--compact .cd-about-switch__link {
-  padding: 0 var(--space-8);
+  padding: 0 var(--space-4);
   scroll-margin-top: calc(var(--about-top) + var(--space-24));
 }

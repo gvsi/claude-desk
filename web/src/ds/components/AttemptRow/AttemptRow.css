@@ -61,6 +61,13 @@
   color: var(--text-primary);
 }
 
+/* Its label sits at the top of its line, 1 px down as the time beside it is, so their words stay
+   level: on the line's baseline, the label's dot would set it lower. */
+.cd-attempt-row__why > .cd-status-label {
+  margin-top: 1px;
+  vertical-align: top;
+}
+
 .cd-attempt-row__title,
 .cd-attempt-row__who {
   min-width: 0;

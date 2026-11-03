@@ -46,7 +46,7 @@ export const ToolPage: Story = {
     for (const separator of separators) await expect(separator).toHaveTextContent('/');
     await expect(nav).toHaveTextContent('Connectors/Stripe/Refund');
     // As the board draws it: meta type, the links in accent blue and underlined, the page in primary text.
-    expectComputed(links[0] as Element, { fontSize: '13px', color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
+    expectComputed(links[0] as Element, { fontSize: '14px', color: 'rgb(126, 174, 218)', textDecorationLine: 'underline' });
     expectComputed(current, { color: 'rgba(250, 249, 245, 0.92)' });
     expectComputed(separators[0] as Element, { color: 'rgba(250, 249, 245, 0.6)' });
   },

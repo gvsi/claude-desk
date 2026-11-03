@@ -47,11 +47,11 @@ export const WithPresence: Story = {
   play: async ({ args, canvas, canvasElement, userEvent }) => {
     // The greeting is Today's title, in Claude's serif voice.
     const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' });
-    expectComputed(heading, { fontFamily: /Source Serif 4/, fontSize: '36px', lineHeight: '44px', fontWeight: '300', marginTop: '0px' });
+    expectComputed(heading, { fontFamily: /Source Serif 4/, fontSize: '40px', lineHeight: '48px', fontWeight: '300', marginTop: '0px' });
 
     // The presence line says it in words; the glyphs beside it are decoration, hidden from readers.
     const line = canvas.getByText('Two people and one agent are talking to your Desk right now.');
-    expectComputed(line, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.64)' });
     const glyphs = [...canvasElement.querySelectorAll<HTMLElement>('.cd-greeting__glyph')];
     await expect(glyphs).toHaveLength(3);
     const hidden = glyphs[0]?.closest('[aria-hidden="true"]');
@@ -256,7 +256,7 @@ export const LongGreetingOnAPhone: Story = {
     const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Maximiliana' });
     expectComputed(heading, { textWrapStyle: 'balance' });
     await expect(lineWords(heading)).toEqual([['Good', 'morning,'], ['Maximiliana']]);
-    await expect(heading.getBoundingClientRect().height).toBe(2 * 44);
+    await expect(heading.getBoundingClientRect().height).toBe(2 * 48);
     await expect(canvas.getByRole('button', { name: 'Copy your Desk link' }).getBoundingClientRect().top).toBeGreaterThan(heading.getBoundingClientRect().bottom);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(window.innerWidth);
   },

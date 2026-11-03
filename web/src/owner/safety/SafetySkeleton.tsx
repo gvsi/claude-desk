@@ -2,7 +2,7 @@ import { useRef } from 'react';
 
 import { chainLine, entriesLabel, PageHeaderSkeleton, Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { useTextBox, useTextLines } from '../../lib/useTextLines.ts';
-import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, SAFETY_SUBTITLE, heldForYou, originCopy, turnedDownHeadline } from './copy.ts';
+import { CATEGORY_LABELS, NOT_SORTED, REPLAYED_LABEL, REPLY_STOPPED_LABEL, SAFETY_SUBTITLE, heldForYou, originCopy, turnedDownHeadline } from './copy.ts';
 
 import './Safety.css';
 
@@ -19,6 +19,23 @@ function Lines({ words, className, text, anchor }: { words: string; className: s
         <Skeleton key={i} shape="line" text={text} width={i ? '70%' : '100%'} />
       ))}
     </div>
+  );
+}
+
+/**
+ * A fresh copy's first stopped attempt is a reply Claude has summarised, so its row's label comes
+ * first: as many lines as its words take beside its status dot.
+ */
+function RowLabel() {
+  const box = useRef<HTMLSpanElement>(null);
+  const className = 'cd-attempt-row__why cd-type-meta';
+  const count = useTextLines(box, { parts: [{ text: '', className: 'cd-safety-skeleton__dot-room' }, REPLY_STOPPED_LABEL], className }, 1);
+  return (
+    <span ref={box} className={className}>
+      {Array.from({ length: count }, (_, i) => (
+        <Skeleton key={i} shape="line" text="meta" width={i === count - 1 ? '60%' : '100%'} />
+      ))}
+    </span>
   );
 }
 
@@ -181,10 +198,7 @@ export function SafetySkeleton({ withHeader }: { withHeader: boolean }) {
               <div className="cd-attempt-row__grid">
                 <Skeleton shape="line" text="meta" className="cd-attempt-row__time" width="80%" />
                 <div className="cd-attempt-row__what">
-                  {/* A fresh copy's first stopped attempt is a reply Claude has summarised: its label first. */}
-                  <span className="cd-attempt-row__why cd-type-meta">
-                    <Skeleton shape="line" text="meta" width="60%" />
-                  </span>
+                  <RowLabel />
                   <Skeleton shape="line" text="control" className="cd-attempt-row__title" />
                   <div className="cd-attempt-row__from">
                     <Skeleton shape="line" text="caption" width="90%" />

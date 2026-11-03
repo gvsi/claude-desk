@@ -90,7 +90,7 @@ export const InertSuggestions: Story = {
     // vision_inert_line_on_first_press: the first press fills it with the one line, in a secondary
     // caption 8 px under the chips.
     await expect(status).toHaveTextContent(VISION_INERT_LINE);
-    expectComputed(status, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(status, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(Math.round(status.getBoundingClientRect().top - group.getBoundingClientRect().bottom)).toBe(8);
     // Tab goes on to the next chip, as ever, and Enter on it sends nothing either.
     await userEvent.tab();

@@ -34,16 +34,16 @@
 
 .cd-md :is(h1, h2, h3, h4, h5, h6) {
   font-family: var(--font-serif);
-  font-size: 15px;
-  line-height: 23px;
+  font-size: 17px;
+  line-height: 26px;
   font-weight: 600;
   font-variation-settings: "opsz" 20;
   color: var(--text-primary);
 }
 
 .cd-md :is(h1, h2) {
-  font-size: 17px;
-  line-height: 25px;
+  font-size: 19px;
+  line-height: 28px;
 }
 
 .cd-md > * + :is(h1, h2, h3, h4, h5, h6) {
@@ -84,7 +84,7 @@
 
 .cd-md code {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 15px;
   padding: 1px 5px;
   border-radius: var(--radius-control);
   background: var(--fill-secondary);
@@ -126,9 +126,9 @@
   border-collapse: collapse;
   width: 100%;
   font-family: var(--font-serif);
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 360;
+  font-size: 16px;
+  line-height: 23px;
+  font-weight: 380;
 }
 
 /* The header row, its empty corner cell included. */

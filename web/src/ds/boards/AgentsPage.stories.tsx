@@ -127,10 +127,10 @@ const meta = {
     canvas: 'N-R2-Agents-01-Page',
     canvasNote: [
       'Built against the board in review; sign-off pending.',
-      'The story now draws each ability’s outcome under its words, with StatusLabel and the live page’s styles, as the live page has since #948. The ten abilities keep their order and words from the existing mock fixture, the two customer lines with the kernel’s straight apostrophe. N-R2-Agents-01-Page and N-R2-Agents-06-Phone are to be redrawn to match, the laptop page now 1800 px tall to fit its outcome rows.',
+      'The story now draws each ability’s outcome under its words, with StatusLabel and the live page’s styles, as the live page has since #948. The ten abilities keep their order and words from the existing mock fixture, the two customer lines with the kernel’s straight apostrophe. N-R2-Agents-01-Page and N-R2-Agents-06-Phone are to be redrawn to match, the laptop page now 1800 px tall and the phone 2100 px tall to fit the outcome rows at the new type scale.',
       'The page for people’s AI agents, /d/:slug/agents: the public page’s brand header on its own (PublicBrandHeader), the endpoint as a CopyField with “Copy address”, and the example request as a CodeBlock, both in the code type.',
       'The column, its title and the cards’ lists are page layout the web app (plan 04) owns.',
-      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 19 px where the renders draw an earlier 17 px line, and the title above it is larger too, so everything under it sits lower than the render.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -164,11 +164,11 @@ export const Board: Story = {
     const copy = within(connect).getByRole('button', { name: 'Copy address' });
     await expect(Math.round(copy.getBoundingClientRect().right)).toBe(1119);
     // The address in its outlined box, below the ten abilities and their outcomes: from 393 px,
-    // 32 px tall at 1273, 474 px lower with the live page's outcome rows;
-    // ending 8 px before the button (603 px wide once the interface font has loaded).
+    // 32 px tall at 1306, measured with the live page's outcome rows at the new type scale;
+    // ending 8 px before the button (597 px wide once the interface font has loaded).
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents page fonts');
     const addressBox = address.getBoundingClientRect();
-    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 1273, 32]);
+    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 1306, 32]);
     await expect(Math.round(copy.getBoundingClientRect().left - addressBox.right)).toBe(8);
     expectComputed(address, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderTopLeftRadius: '8px' });
     const request = one(connect, 'pre');
@@ -198,11 +198,11 @@ export const Board: Story = {
 };
 
 export const Phone: Story = {
-  // Drawn at a phone's width and the page's own 2000 px, its footer at the foot, as the board draws it.
-  globals: { viewport: { value: 'phone-2000', isRotated: false } },
+  // Drawn at a phone's width and the page's own 2100 px, its footer at the foot, as the board draws it.
+  globals: { viewport: { value: 'phone-2100', isRotated: false } },
   parameters: { canvas: 'N-R2-Agents-06-Phone' },
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 2000]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 2100]);
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents phone fonts');
     await expectAgentsDisclosure(canvasElement);
     const column = one(canvas.getByRole('main'), '.board-agents__cards');
