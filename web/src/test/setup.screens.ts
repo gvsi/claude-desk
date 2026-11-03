@@ -42,6 +42,8 @@ beforeEach(() => {
   writeLocal('hadOwnerCopy', null);
   // Whether a paid checkout links back to a chat depends on what chats this browser showed.
   writeLocal('payChats', null);
+  // Which cookie-named chat can resume as an owner's preview depends on what this browser opened.
+  writeLocal('previewSessions', null);
   // Which notifications count as unread depends on what this browser has seen.
   forgetSeen();
   // Whether a reload's loading page draws a "Not live yet" card depends on the Desks this browser saw.

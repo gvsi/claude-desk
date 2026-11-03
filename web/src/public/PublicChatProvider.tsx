@@ -26,6 +26,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
+import { canUseLocal, readLocal, writeLocal } from '../lib/storage.ts';
 import { paymentLinkMemory, type PaymentLinkMemory } from './paymentLinks.ts';
 import {
   chatReducer,
@@ -117,18 +118,29 @@ export interface VisitorChatActions {
 
 export type VisitorChatView = VisitorChatSnapshot & VisitorChatActions;
 
+/** The preview sessions this browser opened, by Desk; unreadable storage remembers none. */
+function previewSessions(): Record<string, unknown> {
+  try {
+    const stored: unknown = JSON.parse(readLocal('previewSessions') ?? '{}');
+    return typeof stored === 'object' && stored !== null && !Array.isArray(stored) ? (stored as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * Opens a session with `slug`'s Desk. Without `previewDeskId`, the API resumes the chat the browser's
  * visitor cookie names, or opens a new one when there is none. With `previewDeskId`, it always opens a
- * new owner's preview of that Desk (`openPreview` never resumes one), which the API grants only to
- * the owner of its copy; for anyone else it fails, and a plain chat opens instead. So a caller with a
- * preview reads `visitorSession` first and comes here only when the browser has no chat yet, as
- * `openChat` does; otherwise each load would start another preview.
+ * new owner's preview and remembers its session ID for that Desk in this browser. The API grants
+ * previews only to the owner of its copy; for anyone else it fails, and a plain chat opens instead.
+ * `openChat` reads `visitorSession` first and comes here only when it cannot resume that chat.
  */
 export async function ensureSession(slug: string, previewDeskId?: string): Promise<VisitorSession> {
   if (previewDeskId !== undefined && previewDeskId !== '') {
     try {
-      return await request('openPreview', { params: { desk_id: previewDeskId } });
+      const opened = await request('openPreview', { params: { desk_id: previewDeskId } });
+      writeLocal('previewSessions', JSON.stringify({ ...previewSessions(), [previewDeskId]: opened.state.session_id }));
+      return opened;
     } catch {
       // Not this owner's Desk, or no owner at all: a visitor's chat, as anyone gets.
     }
@@ -150,16 +162,19 @@ export interface OpenedChat {
 
 /**
  * Opens the chat with `slug`'s Desk (`ensureSession`) and reads its stored conversation. The
- * owner's preview reads first: `openPreview` mints a new preview session every time, and it can't
- * see the chat this browser already has, since the visitor cookie is scoped to the Desk's public
- * path. So a reload, or a second tab from "Chat as a customer", resumes the chat the cookie names,
- * and only a 401 (no chat yet) asks for a preview.
+ * owner's preview reads first, resuming the cookie's chat only when its session ID matches the
+ * preview this browser remembers for that Desk. Otherwise it asks for a new preview, which replaces
+ * the cookie's chat. A reload or another "Chat as a customer" tab thus resumes the same preview;
+ * an ordinary visitor chat opens a new preview when storage works. Without usable storage, it resumes
+ * the cookie's chat instead, so a reload keeps the conversation. The API still checks ownership.
  */
 export async function openChat(slug: string, previewDeskId?: string): Promise<OpenedChat> {
   if (previewDeskId !== undefined && previewDeskId !== '') {
     try {
       const transcript = await request('visitorSession', { params: { slug } });
-      return { session: transcript.state, transcript };
+      if (!canUseLocal() || transcript.state.session_id === previewSessions()[previewDeskId]) {
+        return { session: transcript.state, transcript };
+      }
     } catch (err) {
       if (!sessionGone(err)) throw err;
     }
