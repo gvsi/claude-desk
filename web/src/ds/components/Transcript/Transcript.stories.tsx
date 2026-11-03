@@ -203,8 +203,8 @@ function AgentForTheOwner() {
  * side's bubbles (a visitor's, an agent's, a visitor typing) start at the log's left edge, no wider
  * than the Desk's column, and every row from the Desk's side (Claude's reply, a whisper, the owner's
  * own message) sits in one column min(520 px, 88%) of the log wide, at its right edge, with its
- * receipts. Inside the column each message, its first part and each receipt start at its left edge,
- * and a reply's cards fill it.
+ * receipts. Inside the column each part hugs its right edge, a receipt's dot before its words and
+ * the owner's initials before their name, and a reply's cards fill it.
  */
 async function expectOwnerSides(canvasElement: HTMLElement, rowsOnOurSide: number) {
   const log = canvasElement.querySelector<HTMLElement>('[role="log"]');
@@ -240,19 +240,33 @@ async function expectOwnerSides(canvasElement: HTMLElement, rowsOnOurSide: numbe
       const rect = part.getBoundingClientRect();
       await expect(Math.abs(rect.width - column), `${part.className} is min(520 px, 88%) of the log`).toBeLessThanOrEqual(0.5);
       await expect(Math.abs(rect.right - box.right), `${part.className} ends at the log's right edge`).toBeLessThanOrEqual(0.5);
-      for (const child of part.children) {
-        await expect(Math.abs(child.getBoundingClientRect().left - rect.left), `${child.className} starts at the column's left edge`).toBeLessThanOrEqual(0.5);
-      }
     }
-    const message = row.querySelector(':scope > .cd-transcript-row__main > *');
-    const first = message?.firstElementChild;
-    if (!first) throw new Error('the message has parts');
-    await expect(Math.abs(first.getBoundingClientRect().left - (box.right - column)), `${first.className} starts at the column's left edge`).toBeLessThanOrEqual(0.5);
+    // Each box hugs the column's right edge; what is inside reads from the left.
+    const hugging = row.querySelectorAll<HTMLElement>(DESK_PARTS);
+    await expect(hugging.length).toBeGreaterThan(0);
+    for (const part of hugging) {
+      await expect(Math.abs(part.getBoundingClientRect().right - box.right), `${part.className} ends at the column's right edge`).toBeLessThanOrEqual(0.5);
+    }
+    for (const line of row.querySelectorAll<HTMLElement>(':scope > .cd-transcript-row__margin .cd-margin-line')) {
+      const dot = line.querySelector('.cd-margin-line__dot')!.getBoundingClientRect();
+      await expect(dot.left, "a receipt's dot comes before its words").toBeLessThan(line.querySelector('.cd-margin-line__text')!.getBoundingClientRect().left);
+    }
+    const avatar = row.querySelector('.cd-person-message__avatar');
+    const who = row.querySelector('.cd-person-message__who');
+    if (avatar && who) await expect(avatar.getBoundingClientRect().right, 'the initials come before the name').toBeLessThanOrEqual(who.getBoundingClientRect().left);
     for (const card of row.querySelectorAll('.cd-reply-card')) {
       await expect(Math.abs(card.getBoundingClientRect().width - column), 'a reply card fills the column').toBeLessThanOrEqual(0.5);
     }
   }
 }
+
+/** The boxes of a Desk-side row that hug its column's right edge. */
+const DESK_PARTS = [
+  ':scope > .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper) > *',
+  ':scope > .cd-transcript-row__main .cd-person-message__who',
+  ':scope > .cd-transcript-row__main .cd-person-message__body > :not(.cd-person-message__who)',
+  ':scope > .cd-transcript-row__margin > *',
+].join(', ');
 
 /** Claude's replies, the whisper and Mike's own message. */
 const DANA_ROWS_ON_OUR_SIDE = dana.turns.filter((turn) => turn.kind === 'whisper' || (turn.kind === 'event' && turn.event.type === 'message')).length + 1;

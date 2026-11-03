@@ -39,17 +39,72 @@
 
 /* The Desk's side on the right: a row holding Claude's reply, the owner's whisper or the owner's own
    message takes one column min(520px, 88%) of the log wide, flush with its right edge (about 315 px
-   of a phone's 358 px log), and what is attached under it takes the same column. Inside it
-   everything starts at its left edge, so prose, cards and receipts share one edge, and a reply's
-   cards take its full width. 520 px is the reply card's own cap; no size token is it. Anything that
-   isn't a message, such as a held request's card or a full trace, keeps the log's full width. */
+   of a phone's 358 px log), and what is attached under it takes the same column. 520 px is the
+   reply card's own cap; no size token is it. Anything that isn't a message, such as a held
+   request's card or a full trace, keeps the log's full width. */
 .cd-transcript--owner .cd-transcript-row:has(> .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper, .cd-person-message)) > :is(.cd-transcript-row__main, .cd-transcript-row__margin) {
   box-sizing: border-box;
   width: min(520px, 88%);
   max-width: min(520px, 88%);
   margin-left: auto;
+  /* What is attached under the message (the margin is a flex column) sits at the right. */
+  align-items: flex-end;
 }
 
+/* Inside the column everything hugs its right edge, as a chat app draws its own side: each block
+   of Claude's words, the whisper's caption and bubble, the owner's name line and words, and each
+   line attached under a message shrink to their content, up to the column's width, and sit flush
+   right. The boxes move, never their text: words that wrap stay left-aligned inside their box, a
+   long reply still fills the column, a receipt's dot stays before its words, and the owner's
+   initials before their name. A reply's cards take the column's full width. While a live reply's
+   words come in, its blocks keep the column's width, so its first line grows to the right as on the
+   public page rather than sliding left under the reader's eye; it settles to the right once whole. */
 .cd-transcript--owner .cd-claude-message .cd-reply-card {
   max-width: 100%;
+}
+
+.cd-transcript--owner .cd-transcript-row__main > .cd-claude-message:not(.cd-claude-message--revealing) > .cd-claude-message__prose {
+  width: fit-content;
+  margin-left: auto;
+}
+
+.cd-transcript--owner .cd-transcript-row__main > .cd-whisper {
+  align-items: flex-end;
+}
+
+/* The owner's message: the initials and the name line at the right, the words under them. */
+.cd-transcript--owner .cd-transcript-row__main > .cd-person-message {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, auto);
+  align-items: center;
+  gap: 0;
+}
+
+.cd-transcript--owner .cd-transcript-row__main > .cd-person-message > .cd-person-message__avatar {
+  grid-area: 1 / 2;
+  margin-right: var(--space-10);
+}
+
+.cd-transcript--owner .cd-transcript-row__main > .cd-person-message > .cd-person-message__body {
+  display: contents;
+}
+
+.cd-transcript--owner .cd-transcript-row__main > .cd-person-message .cd-person-message__who {
+  grid-area: 1 / 3;
+}
+
+.cd-transcript--owner .cd-transcript-row__main > .cd-person-message > .cd-person-message__body > :not(.cd-person-message__who) {
+  grid-column: 1 / -1;
+  justify-self: end;
+  max-width: 100%;
+}
+
+/* A receipt that opens the full trace is only as wide as its words, wherever it is attached; under
+   the visitor's side the margin stretches it as before. */
+.cd-transcript--owner .cd-transcript-row__margin > * {
+  max-width: 100%;
+}
+
+.cd-transcript--owner .cd-transcript-row__margin > .cd-margin-line--button {
+  width: auto;
 }

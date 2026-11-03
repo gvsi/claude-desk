@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 
-import { AppShellOnly, CARD_CHROME, ConceptFooter, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
+import { AppShellOnly, CARD_CHROME, ConceptFooter, OWNER_STATE_WORDS, Skeleton, SkeletonCard, useControlWidth } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextBox, useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { HeldRuleShape } from '../approvals/HeldRuleShape.tsx';
@@ -26,6 +26,9 @@ const HELD_CHAT = {
   handoff: { label: CARD_CHROME.handoff.en.label, headline: rivera.blocks.handoff.en.title ?? '', detail: rivera.blocks.handoff.en.lines?.[0] ?? '' },
   reason: rivera.decisions.held.reason_plain,
   context: `From the visitor: “${QUESTION}”`,
+  // The receipts under Claude's handoff reply: the kernel's line for a reply it passed to the owner,
+  // then the hold's own words, alone, since its card is right under the row.
+  receipts: [`Passed to ${rivera.business.ownerName} to answer`, OWNER_STATE_WORDS.held],
 } as const;
 
 type LineText = 'caption' | 'meta' | 'section' | 'summary';
@@ -169,14 +172,22 @@ function HeldCardShape({ anchor }: { anchor?: string }) {
   );
 }
 
-/** A receipt under a message: its dot, and its line as a pill. */
-function Receipt({ width, anchor }: { width: number; anchor?: string }) {
+/**
+ * A receipt under a message: its dot, and its line as a pill as wide as its words in the caption
+ * type, so the shape, flush right under the reply as the receipt lands (board REV-FLIP), starts
+ * where the receipt starts.
+ */
+function Receipt({ words, anchor }: { words: string; anchor?: string }) {
+  const line = useRef<HTMLSpanElement>(null);
+  const width = useControlWidth(line, { label: words, className: 'cd-margin-line__text cd-type-caption', tagName: 'span' });
   return (
-    <div className="cd-margin-line" data-skeleton-anchor={anchor}>
+    <div className="cd-margin-line cd-type-caption" data-skeleton-anchor={anchor}>
       <span className="cd-margin-line__dot">
         <Skeleton shape="circle" size={6} />
       </span>
-      <Skeleton shape="line" text="caption" width={width} />
+      <span ref={line} className="cd-margin-line__text">
+        <Skeleton shape="line" text="caption" width={width ?? 0} />
+      </span>
     </div>
   );
 }
@@ -294,8 +305,8 @@ export function ConversationSkeleton() {
               <HandoffCardShape anchor="reply-card" />
             </div>
             <div className="cd-transcript-row__margin">
-              <Receipt width={170} anchor="receipt-0" />
-              <Receipt width={80} anchor="receipt-1" />
+              <Receipt words={HELD_CHAT.receipts[0]} anchor="receipt-0" />
+              <Receipt words={HELD_CHAT.receipts[1]} anchor="receipt-1" />
             </div>
           </div>
           <HeldCardShape anchor="held-card" />

@@ -251,12 +251,54 @@ const THEIR_BUBBLES = '.cd-visitor-message__bubble, .cd-agent-message__bubble';
 const OUR_SIDE = ':scope > .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper, .cd-person-message)';
 
 /**
+ * The boxes of a Desk-side row that hug its column's right edge: each block of Claude's reply, the
+ * whisper's caption and bubble, the owner's name line and words, and each line attached under the
+ * message.
+ */
+const DESK_PARTS = [
+  ':scope > .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper) > *',
+  ':scope > .cd-transcript-row__main .cd-person-message__who',
+  ':scope > .cd-transcript-row__main .cd-person-message__body > :not(.cd-person-message__who)',
+  ':scope > .cd-transcript-row__margin > *',
+].join(', ');
+
+/**
+ * A row from the Desk's side in the owner's view hugs its column's right edge, `right`: each of its
+ * boxes ends there, while what is inside them reads from the left. A receipt's dot comes before its
+ * words, the owner's initials come before their name on its line, and Claude's words that wrap are
+ * left-aligned.
+ */
+export async function expectFlushRight(row: HTMLElement, right: number): Promise<void> {
+  const parts = [...row.querySelectorAll<HTMLElement>(DESK_PARTS)];
+  await expect(parts.length, 'the row has parts').toBeGreaterThan(0);
+  for (const part of parts) {
+    await expect(Math.abs(part.getBoundingClientRect().right - right), `${part.className} ends at the column's right edge`).toBeLessThanOrEqual(1);
+  }
+  for (const line of row.querySelectorAll<HTMLElement>(':scope > .cd-transcript-row__margin .cd-margin-line')) {
+    const dot = one(line, '.cd-margin-line__dot').getBoundingClientRect();
+    const words = one(line, '.cd-margin-line__text').getBoundingClientRect();
+    await expect(dot.left, "a receipt's dot comes before its words").toBeLessThan(words.left);
+  }
+  const avatar = row.querySelector('.cd-person-message__avatar');
+  const who = row.querySelector('.cd-person-message__who');
+  if (avatar !== null && who !== null) {
+    const initials = avatar.getBoundingClientRect();
+    const name = who.getBoundingClientRect();
+    await expect(initials.right, 'the initials come before the name').toBeLessThanOrEqual(name.left);
+    await expect(initials.top < name.bottom && initials.bottom > name.top, 'the initials are on the name\'s line').toBe(true);
+  }
+  for (const prose of row.querySelectorAll<HTMLElement>('.cd-claude-message__prose')) {
+    await expect(['left', 'start'], "Claude's words read from the left").toContain(getComputedStyle(prose).textAlign);
+  }
+}
+
+/**
  * The owner's own conversation view (board REV-FLIP), the sides flipped from the visitor's chat, so
  * each side reads its own words on the right: the other side's bubbles start at the log's left
  * edge, no wider than the Desk's column, and every row from the Desk's side sits in one column
  * min(520 px, 88%) of the log wide, flush with its right edge, its receipts with it. Inside the
- * column each message, its first part and each receipt start at the column's left edge, and a
- * reply's cards fill it. Returns how many rows sit in the column.
+ * column each part hugs its right edge (`expectFlushRight`), and a reply's cards fill it. Returns
+ * how many rows sit in the column.
  */
 export async function expectOwnerSides(log: HTMLElement): Promise<number> {
   await expect(log.matches(OWNER_LOG), "the log is the owner's variant").toBe(true);
@@ -274,13 +316,8 @@ export async function expectOwnerSides(log: HTMLElement): Promise<number> {
       const rect = part.getBoundingClientRect();
       await expect(Math.abs(rect.width - column), `${part.className} is min(520 px, 88%) of the log`).toBeLessThanOrEqual(1);
       await expect(Math.abs(rect.right - box.right), `${part.className} ends at the log's right edge`).toBeLessThanOrEqual(1);
-      for (const child of part.children) {
-        await expect(Math.abs(child.getBoundingClientRect().left - rect.left), `${child.className} starts at the column's left edge`).toBeLessThanOrEqual(1);
-      }
     }
-    const first = one(row, OUR_SIDE).firstElementChild;
-    if (!first) throw new Error('the message has parts');
-    await expect(Math.abs(first.getBoundingClientRect().left - (box.right - column)), `${first.className} starts at the column's left edge`).toBeLessThanOrEqual(1);
+    await expectFlushRight(row, box.right);
     for (const card of row.querySelectorAll('.cd-reply-card')) {
       await expect(Math.abs(card.getBoundingClientRect().width - column), 'a reply card fills the column').toBeLessThanOrEqual(1);
     }
