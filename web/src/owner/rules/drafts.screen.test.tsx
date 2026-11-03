@@ -251,7 +251,7 @@ describe('rule draft review', () => {
     await expect.element(changes.getByText('Refund', { exact: true })).toBeVisible();
     const after = changes.getByRole('group', { name: 'After' });
     await expect.element(after.getByText('Claude never sends refunds', { exact: true })).toBeVisible();
-    expect(after.element().querySelector('.cd-rule-sentence__meta')?.textContent).toBe('Refund · Dana Whitfield, verified');
+    await expect.poll(() => after.element().querySelector('.cd-rule-sentence__meta')?.textContent, { timeout: 4_000 }).toBe('Refund · Dana Whitfield, verified');
     await expect.element(after.getByText('Never', { exact: true })).toBeVisible();
     await expect.element(screen.getByText(CHECKED_REVIEW, { exact: true })).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
