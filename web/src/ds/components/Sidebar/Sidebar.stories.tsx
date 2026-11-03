@@ -519,7 +519,7 @@ export const SidebarSkeletonPhone: Story = {
 /** The main Profile row and the repository link shown by the owner app. */
 export const ProfileAndGitHub: Story = {
   args: { current: 'profile', desks: [MAIN_LINE], about: SIDEBAR_ABOUT },
-  parameters: { canvas: 'none', canvasNote: 'Profile follows Safety. GitHub follows Vision and opens the repository in a new tab.' },
+  parameters: { canvas: 'none', canvasNote: 'Customers follows Safety, and Profile follows Customers. GitHub follows Vision and opens the repository in a new tab.' },
   play: async ({ canvas, canvasElement }) => {
     const profile = canvas.getByRole('link', { name: 'Profile' });
     await expect(profile).toHaveAttribute('aria-current', 'page');
