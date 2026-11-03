@@ -388,7 +388,7 @@ describe('ReaderPage', () => {
     // with it too (owner, 2026-11-02).
     for (const [size, field, radius, bell, gap, top] of [
       [DESKTOP, 120, '30px', '80', 36, '88px'],
-      [PHONE, 88, '22px', '58', 28, '36px'],
+      [PHONE, 88, '22px', '58', 28, '56px'],
     ] as const) {
       for (const id of ['proposal', 'prediction'] as const) {
         const where = `${id} at ${size.width}`;
@@ -417,9 +417,12 @@ describe('ReaderPage', () => {
         const title = hero.querySelector('h1') as Element;
         expect(kicker.getBoundingClientRect().top - box.bottom, where).toBe(gap);
         expect(box.bottom, where).toBeLessThan(title.getBoundingClientRect().top);
+        // Centred on a laptop; on a phone at the head's left edge, as the Vision article's head (owner, 2026-11-02).
         const middle = (r: DOMRect) => r.left + r.width / 2;
-        expect(Math.abs(middle(box) - middle(title.getBoundingClientRect())), where).toBeLessThanOrEqual(0.5);
-        expect(getComputedStyle(hero).paddingTop, where).toBe(top);
+        if (size === DESKTOP) expect(Math.abs(middle(box) - middle(title.getBoundingClientRect())), where).toBeLessThanOrEqual(0.5);
+        else expect(Math.abs(box.left - title.getBoundingClientRect().left), where).toBeLessThanOrEqual(0.5);
+        const head = hero.querySelector('.cd-about-hero__head') as Element;
+        expect(getComputedStyle(head).paddingTop, where).toBe(top);
         await screen.unmount();
       }
     }
@@ -472,9 +475,10 @@ describe('ReaderPage', () => {
       expect(article.querySelector('[data-claim]'), where).toBeNull();
       expect(article.firstElementChild?.id, where).toBe('capability');
       expect(flat(article.firstElementChild?.nextElementSibling?.textContent), where).toMatch(/^On its own means over a whole conversation/);
-      // The side list and the details beside the article on a laptop; the folded list and the byline on a phone.
+      // The side list beside the article on a laptop, with no details panel on its other side (owner, 2026-11-02);
+      // the folded list and the byline on a phone.
       expect(root.querySelector('nav[aria-label="On this page"]'), where).not.toBeNull();
-      if (size === DESKTOP) expect(root.querySelector('aside[aria-label="About this document"]'), where).not.toBeNull();
+      if (size === DESKTOP) expect(root.querySelector('aside[aria-label="About this document"]'), where).toBeNull();
       else expect(hero.querySelector('[data-byline]'), where).not.toBeNull();
       await prediction.screen.unmount();
     }
@@ -790,13 +794,10 @@ describe('ReaderPage', () => {
         expect(readText(contents), where).toBe(
           phone ? `On this page ${PAGES[id].sections.length} sections` : 'On this page',
         );
-        // The details: the labels beside the author, date and reading time, or the line under the summary.
-        const meta = phone
-          ? root.querySelector('[data-hero] [data-byline]')
-          : root.querySelector('aside[aria-label="About this document"]');
-        expect(meta, where).not.toBeNull();
-        const labels = phone ? [] : [...(meta?.querySelectorAll('dt') ?? [])].map(readText);
-        if (!phone) expect(labels, where).toEqual(['Written by', 'Date', 'Reading time', 'Also read']);
+        // The line under the summary on a phone; a laptop has no details panel beside the article (owner, 2026-11-02).
+        const meta = phone ? root.querySelector('[data-hero] [data-byline]') : null;
+        if (phone) expect(meta, where).not.toBeNull();
+        else expect(root.querySelector('aside[aria-label="About this document"]'), where).toBeNull();
         const next = root.querySelector('[data-next-label]');
         expect(readText(next ?? document.body), where).toBe('Read next');
         // "Figure 1" and the captions, without the architecture figure's name, a label from the checked list.
@@ -808,7 +809,7 @@ describe('ReaderPage', () => {
           topBar,
           documents,
           contents,
-          meta,
+          ...(phone ? [meta] : []),
           next,
           ...captions.map((caption) => without(caption, '[data-figure-label]')),
           ...root.querySelectorAll('.cd-about-chart__head, [data-steps]'),
@@ -963,17 +964,15 @@ describe('ReaderPage', () => {
     }
   });
 
-  it('also_read_links_to_related_about_pages', async () => {
-    for (const [id, expected] of [
-      ['proposal', [['Capability prediction', '/about/prediction'], ['Vision', '/about/vision']]],
-      ['prediction', [['Product proposal', '/about/proposal']]],
-    ] as const) {
+  it('no_details_panel_beside_the_article', async () => {
+    // The owner removed the panel of author, date, reading time and "Also read" beside the article (2026-11-02): the
+    // meta line above the title carries the kind, the date and the reading time, and the top bar links the other pages.
+    for (const id of IDS) {
       const screen = await renderReader(id);
-      const label = [...screen.container.querySelectorAll('.cd-about-meta dt')].find((term) => term.textContent === 'Also read');
-      expect(label, id).toBeDefined();
-      const links = [...(label?.nextElementSibling?.querySelectorAll('a') ?? [])];
-      expect(links.map((link) => [flat(link.textContent), link.getAttribute('href')]), id).toEqual(expected);
-      for (const link of links) expect(link.classList.contains('cd-text-link'), id).toBe(true);
+      const root = screen.container;
+      expect(root.querySelector('aside[aria-label="About this document"]'), id).toBeNull();
+      expect(readText(root.querySelector('main') ?? document.body), id).not.toMatch(/Written by|Reading time|Also read/);
+      expect(root.querySelector('[data-hero] [data-meta], .cd-about-hero__kicker'), id).not.toBeNull();
       await screen.unmount();
     }
   });
@@ -1507,23 +1506,22 @@ describe('ReaderPage', () => {
   });
 
   it('the_authors_name_links_to_their_profile', async () => {
-    // The byline's name, beside the article or in the line under the summary on a phone, and the
-    // footer's: each opens the author's LinkedIn profile in a new tab, with the words unchanged.
+    // The byline's name in the line under the summary on a phone, and the footer's at every width: each opens the
+    // author's LinkedIn profile in a new tab, with the words unchanged.
     const profile = 'https://www.linkedin.com/in/giovannialcantara/';
     for (const id of IDS) {
       for (const size of [DESKTOP, PHONE]) {
         const where = `${id} at ${size.width}`;
         const screen = await renderReader(id, { size });
         const root = screen.container;
-        const meta =
-          size === PHONE ? root.querySelector('[data-hero] [data-byline]') : root.querySelector('aside[aria-label="About this document"] dd');
+        const meta = size === PHONE ? root.querySelector('[data-hero] [data-byline]') : null;
         const footer = root.querySelector('[data-ds="concept-footer"]');
         // On a phone the line under the summary is the author alone: the meta line above the title has the date and
         // the reading time.
         for (const [part, words] of [
-          [meta, /^Giovanni Alcantara$/],
-          [footer, /^Concept prototype by Giovanni Alcantara, not an Anthropic product$/],
-        ] as const) {
+          ...(size === PHONE ? ([[meta, /^Giovanni Alcantara$/]] as const) : []),
+          [footer, /^Concept prototype by Giovanni Alcantara, not an Anthropic product$/] as const,
+        ]) {
           expect(flat(part?.textContent), where).toMatch(words);
           const links = [...(part?.querySelectorAll('a') ?? [])];
           expect(links.map((link) => [link.textContent, link.getAttribute('href'), link.target, link.rel]), where).toEqual([
