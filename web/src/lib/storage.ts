@@ -33,10 +33,14 @@ export function storageKey(key: LocalKey): string {
   return KEYS[key];
 }
 
-/** Whether a fresh value can be written and read back; checks silent write failures as well. */
+/**
+ * Whether a fresh value can be written and read back; checks silent write failures as well. The
+ * value needs no secure context (a page over plain http has no `crypto.randomUUID`), only to differ
+ * from whatever an earlier probe left behind.
+ */
 export function canUseLocal(): boolean {
   try {
-    const value = crypto.randomUUID();
+    const value = `${Date.now()}:${Math.random()}`;
     window.localStorage.setItem(KEYS.storageProbe, value);
     return window.localStorage.getItem(KEYS.storageProbe) === value;
   } catch {

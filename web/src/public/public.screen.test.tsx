@@ -3492,6 +3492,27 @@ describe('public chat page', () => {
     expect(requests('openPreview')).toHaveLength(1);
   });
 
+  it('preview_replaces_a_plain_visitor_chat_where_the_page_has_no_random_uuid', async () => {
+    // A page served over plain http (a phone on the local network) has no crypto.randomUUID, while
+    // its storage works: the preview still replaces the plain chat.
+    const visitor = await renderRoute(PAGE);
+    await ready(visitor.screen);
+    await say(visitor.screen, 'Do you work weekends?');
+    const oldSession = mockStore.visitorSession(RIVERA.slug);
+    expect(oldSession?.ownerPreview).toBe(false);
+
+    Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true });
+    try {
+      const preview = await renderRoute(`${PAGE}?preview=${RIVERA.deskId}`);
+      await ready(preview.screen);
+      const session = mockStore.visitorSession(RIVERA.slug);
+      expect(session?.ownerPreview).toBe(true);
+      expect(session?.state.session_id).not.toBe(oldSession?.state.session_id);
+    } finally {
+      delete (crypto as { randomUUID?: unknown }).randomUUID;
+    }
+  });
+
   it('preview_reload_resumes_its_chat', async () => {
     // The owner's chat as a customer, from Today's link: one exchange, then a new page load.
     const preview = `${PAGE}?preview=${RIVERA.deskId}`;
