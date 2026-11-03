@@ -36,7 +36,7 @@ function seedJobs() {
   return desk;
 }
 
-it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order, with their configuration and sentence rules, before its connectors', async (width) => {
+it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order, with their configuration and sentence rules, after its connectors', async (width) => {
   seedJobs();
   const { screen } = await renderRoute(`${DESK}/rules`, { connectorPages: true, viewport: { width, height: width === 390 ? 844 : 900 } });
   const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
@@ -51,9 +51,12 @@ it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order, with
   await expect.element(jobs.getByText('Claude asks you before booking a free intro call', { exact: true })).toBeVisible();
   expect(jobs.getByText('Anything else here: ask me.').elements()).toHaveLength(0);
   expect(jobs.getByRole('link').elements()).toHaveLength(0);
-  // The Desk's own jobs are the first card, tool by tool.
-  const first = screen.getByRole('region', { name: 'Tool by tool' }).element().querySelector('.cd-card');
-  expect(first).toBe(jobs.element());
+  // Each connector precedes the jobs; each job keeps the API's order within that final card.
+  const cards = screen.getByRole('region', { name: 'Tool by tool' }).element().querySelectorAll(':scope > .cd-rules__tool-cards > .cd-card');
+  expect([...cards].map((card) => card.getAttribute('aria-label'))).toEqual([
+    'Quotes', 'Bookings', 'Payments', 'Stripe', 'Documents', 'Leads and callbacks', 'Verification', 'Your Desk’s jobs',
+  ]);
+  expect([...cards].at(-1)).toBe(jobs.element());
   await expectScreenBasics(screen.container, { owner: true });
   expectNoHorizontalScroll();
   await page.screenshot({ path: `../../.vitest/attachments/task-3/rules-${width}.png` });
@@ -167,7 +170,7 @@ it('shows a job title that reads like the app’s own words only as user text', 
   expectUserText(screen.container, title);
   const shared = [...screen.container.querySelectorAll('[data-rule-id="changes-ask"] .cd-house-rules__shared')];
   expect(shared).toHaveLength(1);
-  expect(shared[0]?.textContent).toBe('Shared rule. Also applies to:Quote, Book a visit, Save a lead and Request a callback');
+  expect(shared[0]?.textContent).toBe(`Shared rule. Also applies to:Book a visit, Save a lead, Request a callback and ${title}`);
   expect(shared[0]?.querySelector('br + [data-copy="user"]')).not.toBeNull();
   expect(screen.container.querySelectorAll('.cd-house-rules__rule--reference[data-rule-id="changes-ask"]')).toHaveLength(4);
   await expectScreenBasics(screen.container, { owner: true });

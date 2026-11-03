@@ -11,10 +11,12 @@ import type { HoursWindow, RuleCard } from '../api/contracts.ts';
 import { newIdempotencyKey } from '../api/http.ts';
 import type { ProposalCard as Proposal, RulesDraft, SetupState, SituationResult } from '../api/views.ts';
 import { businessToolRows, seedBusinessTools } from '../mocks/businessTools.ts';
+import { rulesView } from '../mocks/readModels.ts';
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import type { DeskRecord, ToolRecord } from '../mocks/world.ts';
-import { renderRoute } from '../test/renderRoute.tsx';
+import { ToolRulesShapes } from '../owner/rules/RulesSkeleton.tsx';
+import { renderRoute, type Viewport } from '../test/renderRoute.tsx';
 import { START_EXAMPLES } from './copy.ts';
 import { ProposalCard } from './ProposalCard.tsx';
 
@@ -137,25 +139,25 @@ function toolRules(root: Element, tool: string): Map<string, Drawn> {
 const whoOf = (line: string) => line.split(' · ')[0] ?? '';
 
 /** Rules on Turner's Desk, set to `fixture`, once its rows are drawn. */
-async function rulesPage(fixture: Fixture): Promise<Element> {
+async function rulesPage(fixture: Fixture, viewport: Viewport = 'desktop'): Promise<Element> {
   const desk = mockStore.world.desk(RIVERA.deskId);
   if (!desk) throw new Error('The seed has Turner Plumbing');
   desk.tools = structuredClone(fixture.tools);
   desk.policy = { ...desk.policy, cards: structuredClone(fixture.cards), auto_money_cap_cents: fixture.cap };
-  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`);
+  const { screen } = await renderRoute(`/app/${RIVERA.deskId}/rules`, { viewport });
   await expect.poll(() => screen.container.querySelectorAll('.cd-house-rules__tool [data-rule-id]').length).toBeGreaterThan(0);
   return screen.container;
 }
 
 /** Setup's Your rules for an interview at Tools whose Desk and draft are set to `fixture`. */
-async function yourRules(state: SetupState, fixture: Fixture) {
+async function yourRules(state: SetupState, fixture: Fixture, viewport: Viewport = 'desktop') {
   deskOf(state).tools = structuredClone(fixture.tools);
   const draft = await draftOf(state);
   const record = deskOf(state).drafts.get(draft.version);
   if (!record) throw new Error('The mock keeps the draft');
   record.draft = { ...record.draft, cards: structuredClone(fixture.cards), auto_money_cap_cents: fixture.cap };
   // Drafting the rules moves the interview on to them, so setup opens at Your rules.
-  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
+  const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
   await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules', exact: true })).toBeVisible();
   // The draft's own rows, once its shapes have gone.
   await expect.poll(() => screen.container.querySelector('.cd-skeleton-screen__layer') === null && screen.container.querySelectorAll('.cd-house-rules__tool [data-rule-id]').length > 0).toBe(true);
@@ -201,6 +203,50 @@ const paymentsOff = (fixture: Fixture): Fixture => ({
   tools: fixture.tools.map((tool) => (/^(payments\.|native\.(payment_link|charge_mandate)$)/.test(tool.tool) ? { ...tool, status: 'disabled' } : tool)),
 });
 
+it.each(['Turner Plumbing', 'Chen & Co.'] as const)('Tool by tool keeps the reviewer order on Rules and Your rules for %s', async (name) => {
+  const at = name === 'Turner Plumbing' ? { state: await chenAtTools(), fixture: turner() } : await chen();
+  // An orphaned rule exercises the final Other tools card. Google Calendar has no tools yet.
+  at.fixture.cards.push({ ...at.fixture.cards[0]!, card_id: 'unlisted-job', applies_to: 'desk.unlisted-job', mode: 'ask' });
+  const expected = ['Quotes', 'Bookings', 'Payments', 'Stripe', 'Documents', 'Leads and callbacks', 'Verification', 'Your Desk’s jobs', 'Other tools'];
+  const order = (root: Element) => [...root.querySelectorAll('.cd-rules__tool-cards > section.cd-card[aria-label]')].map((card) => card.getAttribute('aria-label'));
+  const rules = await rulesPage(at.fixture);
+  expect(order(rules)).toEqual(expected);
+  const jobsIcon = rules.querySelector('[aria-label="Your Desk’s jobs"] .cd-connector-icon')!;
+  expect(jobsIcon).not.toBeNull();
+  const glyph = jobsIcon.querySelector('svg')!.innerHTML;
+  const setup = (await yourRules(at.state, at.fixture)).container;
+  expect(order(setup)).toEqual(expected);
+  expect(setup.querySelector('[aria-label="Your Desk’s jobs"] .cd-connector-icon svg')?.innerHTML).toBe(glyph);
+  // Both loading layouts use toolGroups too: identify each card by its first measured text shape.
+  const sample = { tools: rulesView(deskOf(at.state)).tools, active: { cards: at.fixture.cards } };
+  for (const readOnly of [false, true]) {
+    const shapes = await render(<ToolRulesShapes sample={sample} cap={at.fixture.cap} toolsCaption="" version={null} readOnly={readOnly} className="cd-rules" />);
+    const cards = [...shapes.container.querySelectorAll('.cd-rules__tool-cards > .cd-card')];
+    expect(cards.map((card) => card.querySelector('[data-shape-id]')?.getAttribute('data-shape-id'))).toEqual([
+      'quotes:line', 'bookings:line', 'payments:line', 'stripe:line', 'documents:line', 'leads:line', 'verification:line', 'jobs:line', 'loose:unlisted-job:sentence',
+    ]);
+    expect(cards[7]?.querySelector('.cd-house-rules__connector-header > .cd-connector-icon--section')).not.toBeNull();
+    expect(shapes.container.querySelector('[data-shape-id="across:fallback:sentence"]')?.closest('.cd-house-rules__rule')?.querySelector('.cd-advanced-details__slot')).toBeNull();
+  }
+});
+
+it.each(['desktop', 'phone'] as const)('at %s, the fallback dot ends flush with Always on on Rules and Your rules', async (viewport) => {
+  const state = await chenAtTools();
+  const fixture = turner();
+  const expectRightEdge = (root: Element) => {
+    const fallback = root.querySelector('[data-fallback]')!;
+    const dot = fallback.querySelector('.cd-status-dot')!;
+    const ends = [...fallback.closest('.cd-card')!.querySelectorAll('.cd-house-rules__always-on')];
+    expect(ends).toHaveLength(2);
+    expect(ends.map((end) => end.getBoundingClientRect().right)).toEqual([
+      dot.getBoundingClientRect().right, dot.getBoundingClientRect().right,
+    ]);
+    expect(fallback.querySelector('.cd-advanced-details__slot')).toBeNull();
+  };
+  expectRightEdge(await rulesPage(fixture, viewport));
+  expectRightEdge((await yourRules(state, fixture, viewport)).container);
+});
+
 it('Your rules names the stored hours for Chen’s intro-call job', async () => {
   const { state, fixture } = await chen();
   deskOf(state).summary.hours = [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }];
@@ -227,6 +273,8 @@ it.each(['Turner Plumbing', 'Chen & Co.', 'Chen & Co. with the payment connector
     // Neither takes "Change" or Details: the limit changes from the Payments or Stripe band.
     const own = [...rules.querySelectorAll(`.cd-house-rules__tool[data-tool="${job.tool}"] .cd-house-rules__rule`)].slice(-2);
     for (const row of own) expect(row.querySelector('button'), job.tool).toBeNull();
+    // A money job's cap still reserves Details' column on Rules, even though Across your Desk doesn't.
+    expect(own[0]?.querySelector('.cd-advanced-details__slot'), job.tool).not.toBeNull();
   }
   // With the payment connectors off, rules that cover no tool left on are listed under "Other tools".
   const loose = [...page.keys()].filter((key) => key.startsWith('loose|'));

@@ -1,14 +1,30 @@
 import { expect, it, onTestFinished, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
+import { render } from 'vitest-browser-react';
 
 import type { RuleCard } from '../../api/contracts.ts';
 import { rivera } from '../../ds/fixtures/rivera.ts';
+import { Icon } from '../../ds/icons/index.tsx';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
 import { expectNoHorizontalScroll, expectScreenBasics } from '../../test/screen.ts';
 
 const DESK = `/app/${RIVERA.deskId}`;
+
+it.each(['desktop', 'phone'] as const)('at %s, the jobs card has one section tile with the store glyph and no row icons', async (viewport) => {
+  const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
+  const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
+  await expect.element(jobs).toBeVisible();
+  const tile = jobs.element().querySelector('.cd-house-rules__connector-header > .cd-connector-icon--section');
+  expect(tile).not.toBeNull();
+  expect(tile!.getAttribute('aria-hidden')).toBe('true');
+  expect([tile!.getBoundingClientRect().width, tile!.getBoundingClientRect().height]).toEqual([36, 36]);
+  const reference = await render(<Icon name="store" />);
+  expect(tile!.querySelector('svg')?.innerHTML).toBe(reference.container.querySelector('svg')!.innerHTML);
+  expect(jobs.element().querySelectorAll('.cd-connector-icon')).toHaveLength(1);
+  expect(jobs.element().querySelectorAll('.cd-house-rules__tool-text svg')).toHaveLength(0);
+});
 
 /** Each rule row under `root` as the owner reads it: its sentence, then " / " and the line under it when it has one. */
 function cells(root: Element): string[] {
@@ -155,13 +171,15 @@ it('at 390, a shared card shows in full only once across connectors, and the pay
   const base = desk.policy.cards.find((card) => card.applies_to === 'native.release_document')!;
   desk.policy.cards.push({ ...base, card_id: 'shared-private', applies_to: 'effect:private_data', mode: 'never', who: 'anyone' });
   const { screen } = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
-  const documents = screen.getByRole('region', { name: 'Documents', exact: true });
-  await expect.element(documents.getByText('Claude never shares private data', { exact: true })).toBeVisible();
-  const shared = documents.element().querySelector('.cd-house-rules__shared');
-  expect(shared?.textContent).toBe('Shared rule. Also applies to:See charges and Refund');
-  expect([...shared!.querySelectorAll('[data-copy="user"]')].map((title) => title.textContent)).toEqual(['See charges', 'Refund']);
   const stripe = screen.getByRole('region', { name: 'Stripe', exact: true });
-  expect(stripe.getByText('Claude never shares private data · Shared rule, as above', { exact: true }).elements()).toHaveLength(2);
+  await expect.element(stripe.getByText('Claude never shares private data', { exact: true })).toBeVisible();
+  const shared = stripe.element().querySelector('.cd-house-rules__shared');
+  expect(shared?.textContent).toBe('Shared rule. Also applies to:Refund and Share a document');
+  expect([...shared!.querySelectorAll('[data-copy="user"]')].map((title) => title.textContent)).toEqual(['Refund', 'Share a document']);
+  expect(stripe.getByText('Claude never shares private data · Shared rule, as above', { exact: true }).elements()).toHaveLength(1);
+  const documents = screen.getByRole('region', { name: 'Documents', exact: true });
+  expect(documents.getByText('Claude never shares private data · Shared rule, as above', { exact: true }).elements()).toHaveLength(1);
+  expect(screen.container.querySelectorAll('[data-rule-id="shared-private"] .cd-house-rules__shared')).toHaveLength(1);
   expect(screen.getByText('Claude asks you before any payment over $500, whatever the rules below say', { exact: true }).elements()).toHaveLength(2);
   expect(screen.container.querySelectorAll('[data-money-limit]')).toHaveLength(2);
   expect(screen.container.textContent).not.toContain('Shared rule, as above · Any payment');
@@ -194,17 +212,17 @@ it.each(['desktop', 'phone'] as const)('at %s, every tool and rule has Details, 
   await expect.element(link.getByText('Claude can send payment links up to $300', { exact: true })).toBeVisible();
 
   // One Details per tool and per rule row with a dot, every one closed, and no panel drawn; an
-  // always-on rule has none, and "Anything not listed here" keeps Details' empty place.
+  // always-on rule has none, and "Anything not listed here" ends with only its dot.
   const toggles = screen.getByRole('button', { name: 'Details', exact: true }).elements();
   const drawn = (selector: string) => [...screen.container.querySelectorAll(selector)].filter((el) => el.closest('.cd-skeleton-screen__layer') === null);
   const ruleRows = drawn('.cd-house-rules__rule');
-  const withDetails = ruleRows.filter((row) => row.querySelector('.cd-status-dot') !== null && row.querySelector('.cd-advanced-details__slot') === null);
+  const withDetails = ruleRows.filter((row) => row.querySelector('.cd-status-dot') !== null && row.querySelector('.cd-advanced-details__slot') === null && !row.hasAttribute('data-fallback'));
   expect(toggles).toHaveLength(drawn('.cd-house-rules__tool').length + withDetails.length);
   expect(ruleRows.filter((row) => row.querySelector('.cd-house-rules__always-on') !== null).every((row) => row.querySelector('button') === null)).toBe(true);
   expect(toggles.every((toggle) => toggle.getAttribute('aria-expanded') === 'false')).toBe(true);
   expect(screen.container.querySelector('.cd-advanced-details__panel')).toBeNull();
   // Every rule's status dot sits in one column, just left of its Details (REV-RULES-D v351).
-  const dots = drawn('.cd-house-rules__rule-actions > .cd-status-dot');
+  const dots = drawn('.cd-rules__tool-cards .cd-house-rules__rule-actions > .cd-status-dot');
   expect(new Set(dots.map((dot) => Math.round(dot.getBoundingClientRect().left))).size).toBe(1);
   expect(new Set(toggles.map((toggle) => Math.round(toggle.getBoundingClientRect().right))).size).toBe(1);
 
