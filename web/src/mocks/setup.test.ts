@@ -226,7 +226,7 @@ describe('setup consultant run and decisions', () => {
       expect.objectContaining({
         tool: 'desk.book-a-free-intro-call', status: 'needs_review', review_reason: 'new',
         business: {
-          title: 'Book a free intro call', description: 'New clients pick a time on weekdays, 9:00 am to 6:00 pm and book a 20-minute call.',
+          title: 'Book a free intro call', description: 'New clients pick a time and book a 20-minute call.',
           config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
         },
       }),
@@ -263,6 +263,30 @@ describe('setup consultant run and decisions', () => {
   it('names_the_cpa_booking_free_intro_call', async () => {
     const state = await cpaAt('schedule');
     expect(state.messages.at(-1)?.card?.job?.config).toEqual({ block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 });
+  });
+
+  it('omits_unstored_hours_from_original_and_changed_booking_proposals', async () => {
+    let state = await cpaAt('schedule');
+    expect(mockStore.world.desk(state.desk_id)!.summary.hours).toEqual([]);
+    expect.soft(state.messages.at(-1)?.card?.job?.how).toBe('New clients pick a time and book a 20-minute call.');
+    state = await setupState('setupAnswer', state.interview_id, { question: null, card: state.pending_card, text: 'Make it 30 minutes.' });
+    expect.soft(state.messages.at(-1)?.card?.job?.how).toBe('New clients pick a time and book a 30-minute call.');
+    state = await setupState('setupAnswer', state.interview_id, { question: null, card: state.pending_card, text: 'Check with me before booking.' });
+    expect.soft(state.messages.at(-1)?.card?.job?.how).toBe('New clients ask for a time, and you approve each 30-minute call.');
+  });
+
+  it('uses_stored_weekday_hours_in_original_and_changed_booking_proposals', async () => {
+    let state = await startState();
+    mockStore.world.desk(state.desk_id)!.summary.hours = [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }];
+    state = await setupState('setupConsent', state.interview_id, { allow: true });
+    state = await setupState('setupAnswer', state.interview_id, { question: state.question, text: 'Both, about evenly' });
+    state = await setupState('setupProposal', state.interview_id, { accept: true }, state.pending_card!);
+    expect(state.messages.at(-1)?.card?.job?.job).toBe('schedule');
+    expect.soft(state.messages.at(-1)?.card?.job?.how).toBe('New clients pick a time on weekdays, 9:00 am to 6:00 pm and book a 20-minute call.');
+    state = await setupState('setupAnswer', state.interview_id, { question: null, card: state.pending_card, text: 'Make it 30 minutes.' });
+    expect.soft(state.messages.at(-1)?.card?.job?.how).toBe('New clients pick a time on weekdays, 9:00 am to 6:00 pm and book a 30-minute call.');
+    state = await setupState('setupAnswer', state.interview_id, { question: null, card: state.pending_card, text: 'Check with me before booking.' });
+    expect.soft(state.messages.at(-1)?.card?.job?.how).toBe('New clients ask for a time on weekdays, 9:00 am to 6:00 pm, and you approve each 30-minute call.');
   });
 
   it.each(['google_calendar', 'stripe'] as const)('keeps_an_accepted_%s_disconnected_when_its_simulated_connect_fails_once', async (app) => {

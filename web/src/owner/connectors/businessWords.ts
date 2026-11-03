@@ -1,7 +1,7 @@
 import type { BusinessToolDef } from '../../api/views.ts';
 import type { HoursWindow } from '../../api/contracts.ts';
 import type { RuleMode } from '../../ds/index.ts';
-import { formatCents, hoursParts, listWords } from '../../lib/format.ts';
+import { bookingHoursWords, formatCents } from '../../lib/format.ts';
 
 /** The signed words for the Desk's own jobs, shared by setup and Rules. */
 export const BUSINESS_WORDS = {
@@ -68,11 +68,7 @@ export function businessLine(def: BusinessToolDef, hours: readonly HoursWindow[]
 function configLine(config: BusinessToolDef['config'], hours: readonly HoursWindow[]): string | null {
   if (config.block === 'typed_booking') {
     // Match hoursRuns' days and preposition; only stored windows contribute words.
-    const when = listWords(hours.map((window) => {
-      const { days, times } = hoursParts(window);
-      const lowered = /^(Weekdays|Weekends|Every day)\b/.test(days) ? `${days.charAt(0).toLowerCase()}${days.slice(1)}` : days;
-      return `${lowered.startsWith('every day') ? '' : 'on '}${lowered}, ${times}`;
-    }));
+    const when = bookingHoursWords(hours);
     return `${config.appointment_type}, ${config.minutes} minutes${when ? `, ${when}` : ''}`;
   }
   if (config.block === 'intake') return `${config.questions.length} ${config.questions.length === 1 ? 'question' : 'questions'} before a booking`;
