@@ -12,6 +12,7 @@ import { ThingsToTry } from '../arrival/ThingsToTry.tsx';
 import { customerLink, publicLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { useRequestRules } from '../rules/useRequestRules.ts';
 import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
@@ -81,6 +82,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   }, [opening, reachPlace, location.key]);
   const today = useToday(deskId, { retryOnMount: false });
   const needsYou = useNeedsYou(deskId, { retryOnMount: false });
+  // The rules each held card names (Today opens once they are in, with a request held).
+  const rules = useRequestRules(deskId, { retryOnMount: false });
   const answers = useAnswer(deskId);
   // An answered card stays where it was answered, and focus that fell to the page follows it.
   const answeredFocus = useAnsweredFocus(answers.answered);
@@ -146,6 +149,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
   const needsYouRetryRef = useReadRecoveryFocus(() =>
     (needsYouSection.current ?? liveNow.current ?? sinceLastNight.current)?.querySelector<HTMLElement>('h2') ?? null,
   );
+  // A focused Try again on the rules' failed read hands its place to Needs you's heading.
+  const rulesRetryRef = useReadRecoveryFocus(() => needsYouSection.current?.querySelector<HTMLElement>('h2') ?? null);
   const [returning] = useState(() => briefingOpener?.deskId === deskId && briefingOpener.key === location.key ? briefingOpener : null);
   // This return spends the hash landing for the entry that opened the briefing.
   // Fresh hash entries and returns from other pages still land as usual.
@@ -310,6 +315,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                 callbacks={callbacks}
                 answers={answers}
                 readAt={readAt}
+                rules={rules.rules}
+                rulesFailure={rules.failure}
+                rulesRetryRef={rulesRetryRef}
                 registerCard={registerCard}
                 answeredFocus={answeredFocus}
                 readFailure={readFailure}

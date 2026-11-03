@@ -12,7 +12,6 @@ import {
   LimitChange,
   LoadingLine,
   Notice,
-  OUTCOME_GROUP_WORDS,
   PageHeader,
   RulesReceipt,
   TextLink,
@@ -128,8 +127,8 @@ export interface RuleDraftReviewProps {
 }
 
 /**
- * A rules draft before it applies: the payment limit's change in words, the draft's summary when it
- * has nothing to compare with, then `ChangeReview` with a row per change and the check in plain
+ * A rules draft before it applies: the payment limit's change in words, then `ChangeReview` with
+ * one Claude-led rule sentence per side of each change and the check in plain
  * words. Only a draft whose check passed can be confirmed, and nothing changes until it is.
  */
 export function RuleDraftReview({
@@ -290,30 +289,13 @@ export function RuleDraftReview({
   } else if (tools === undefined) {
     body = <LoadingLine>Reading your rules</LoadingLine>;
   } else {
-    const { moneyCap, summary } = draft;
-    const summaryLines = summary
-      ? (
-          [
-            [OUTCOME_GROUP_WORDS.auto, summary.on_its_own],
-            [OUTCOME_GROUP_WORDS.ask, summary.asks_you],
-            [OUTCOME_GROUP_WORDS.never, summary.never],
-          ] as const
-        ).filter(([, reasons]) => reasons.length > 0)
-      : [];
+    const { moneyCap } = draft;
     body = (
       <>
         {moneyCap ? <LimitChange now={`New limit: ${moneyCapWords(moneyCap.after)}.`} was={wasWords(moneyCap.before)} /> : null}
-        {summaryLines.length > 0 ? (
-          <div className="cd-rule-draft__summary">
-            {summaryLines.map(([label, reasons]) => (
-              <p key={label} className="cd-type-summary">
-                {label}: {reasons.join(' ')}
-              </p>
-            ))}
-          </div>
-        ) : null}
         <ChangeReview
           rows={rows}
+          sentenceReview
           checks={checkStatus(draft.proof, draft.preset)}
           hasOtherChanges={moneyCap !== null}
           cancelsLinks={cancelsLinksFor(draft)}

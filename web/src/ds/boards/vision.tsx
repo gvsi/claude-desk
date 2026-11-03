@@ -34,6 +34,7 @@ import { TranscriptRow } from '../components/TranscriptRow/TranscriptRow.tsx';
 import { VisionBar } from '../components/VisionBar/VisionBar.tsx';
 import { VisitorMessage } from '../components/VisitorMessage/VisitorMessage.tsx';
 import { cardBlock, meridian, proseBlock, rivera } from '../fixtures/index.ts';
+import { fixtureHeldRule } from '../test/heldRule.ts';
 import { OWNER_HREFS, brandOf } from './parts.tsx';
 
 import './vision.css';
@@ -372,7 +373,7 @@ function OwnerPhone() {
         {/* A vision page sends nothing: the answers keep their look and do nothing. */}
         <ApprovalCard
           decision={rivera.decisions.held}
-          heldBy={rivera.ruleCards['rv-quote'].reason}
+          rule={fixtureHeldRule(rivera.decisions.held)}
           waiting="Web chat, 2 min ago"
           onAnswer={fn()}
           inertAnswers

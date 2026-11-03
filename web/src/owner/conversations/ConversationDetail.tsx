@@ -38,6 +38,7 @@ import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { useRequestRules } from '../rules/useRequestRules.ts';
 import { requestInHash } from '../today/requestLink.ts';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
@@ -181,6 +182,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   const needsYou = useNeedsYou(deskId);
   // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
   const heldFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
+  // The rules a request held here names on its card.
+  const rules = useRequestRules(deskId);
   const answers = useAnswer(deskId);
   // A request answered here keeps focus as the button pressed goes.
   const answeredFocus = useAnsweredFocus(answers.answered);
@@ -265,10 +268,13 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
     else if (mode === 'owner') foot?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
   }, [takeOverSent, controls.changing, controls.modeError, mode]);
 
-  // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
-  // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
-  // way the pane ends up draws inside the one region, so it stays mounted as they change.
-  const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
+  // The pane's first view draws from the chat, from Needs you (the requests held in it, and with one
+  // held the rules its card names) and from the list (who it is with): until each has settled, data
+  // or failure, the pane draws its shapes. Every way the pane ends up draws inside the one region,
+  // so it stays mounted as they change.
+  const heldHere = (needsYou.data ?? []).some((item) => item.decision?.session_id === sessionId);
+  const loading =
+    (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || (heldHere && !rules.settled) || !listRead;
   // The owner's own preview is never unread, and the API answers 404 for its marker, so it isn't marked.
   useConversationRead(deskId, sessionId, !loading && readSinceOpened && summary?.owner_preview !== true
     ? chat.data.items.reduce((max, item) => Math.max(max, item.n), 0)
@@ -352,7 +358,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
     if (item === undefined) return null;
     return (
       <div className="cd-conversation__held">
-        <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={answeredFocus.register} />
+        <HeldRequest item={item} answers={answers} readAt={readAt} now={now} rules={rules.rules} registerCard={answeredFocus.register} />
       </div>
     );
   };
@@ -451,6 +457,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
+      {/* A request held here can't name its rule while the rules' latest read has failed. */}
+      {heldFailure === null && heldIds.length > 0 && rules.failure !== null ? <FailedRead failure={rules.failure} /> : null}
       {/* The transcript and its handoff cards scroll between the bar and the owner's controls, or in a short window under the bar, with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
         {callbacks.length > 0 ? (

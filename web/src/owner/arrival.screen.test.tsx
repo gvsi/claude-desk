@@ -1292,7 +1292,8 @@ describe('OwnerLayout', () => {
       ['people', 'Customers', 'Customers'],
       ['knowledge', 'Knowledge', 'Knowledge'],
       ['rules', 'Rules', 'Rules'],
-      ['rules/all', 'All rules', 'All rules'],
+      // All rules' old address opens Rules, every rule now on one page.
+      ['rules/all', 'Rules', 'Rules'],
       ['safety', 'Safety', 'Safety'],
       ['notifications', 'Notifications', 'Notifications'],
       ['profile', 'Profile', 'Profile'],

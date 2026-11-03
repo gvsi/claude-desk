@@ -12,6 +12,7 @@ import { customerLink } from '../customerLink.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { ReadFailed } from '../ReadFailed.tsx';
+import { useRequestRules, type RequestRules } from '../rules/useRequestRules.ts';
 import { heldOldestFirst, useNeedsYou, useToday } from '../useDesks.ts';
 import { requestPath } from '../today/requestLink.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
@@ -176,6 +177,10 @@ function moveToOpened(opened: HTMLElement): void {
 
 interface AttemptsViewProps {
   deskId: string;
+  /** The active rules, once read, which name the rule that turned a request down. */
+  rules: RequestRules | null;
+  /** The rules' latest read failed. */
+  rulesFailure: ReadFailure | null;
   /** The attempt the address opens, if it names one. */
   refId: string | undefined;
   page: LedgerPage | undefined;
@@ -190,7 +195,7 @@ interface AttemptsViewProps {
  * read is said above, beside the headline (`Headline`), over the attempts read before, and
  * with nothing read yet it takes the place of "Reading what was stopped".
  */
-function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewProps) {
+function AttemptsView({ deskId, rules, rulesFailure, refId, page, devKey, timezone }: AttemptsViewProps) {
   const safety = useAttempts(deskId);
   const failure = useReadFailure(safety, { pausedRoute: 'safety' });
   const [filter, setFilter] = useState(ALL);
@@ -249,7 +254,7 @@ function AttemptsView({ deskId, refId, page, devKey, timezone }: AttemptsViewPro
       <div className="cd-safety__beside">
         {open !== null ? (
           <div ref={opened} className="cd-safety__opened" tabIndex={-1}>
-            <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} />
+            <AttemptDetail key={open.ref_id} attempt={open} page={page} devKey={devKey} deskId={deskId} timezone={timezone} rules={rules} rulesFailure={rulesFailure} />
           </div>
         ) : refId !== undefined ? (
           <EmptyState title="This one isn't in the list" body="It may be from an earlier copy of this Desk. Choose one from the list to see how it was stopped." />
@@ -282,6 +287,9 @@ export function SafetyPage() {
   // Keep every first-view read mounted in either view. Switching back reuses the attempts.
   const attempts = useAttempts(deskId);
   const today = useToday(deskId);
+  // The rules a turned-down request names beside it, read in either view, so Today, opened next,
+  // finds them with Needs you and opens drawn.
+  const rules = useRequestRules(deskId);
   const settled = [ledger, health, attempts, today].every((read) => read.isFetched || read.isPaused);
   // Once either view has shown the real region, keep its control mounted. This also retains
   // paused-read errors across reconnect while reads with no data start for the first time.
@@ -327,7 +335,7 @@ export function SafetyPage() {
             <RecordList page={ledger.data} devKey={devKey} timezone={business.timezone} />
           ) : null
         ) : (
-          <AttemptsView deskId={deskId} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />
+          <AttemptsView deskId={deskId} rules={rules.rules} rulesFailure={rules.failure} refId={refId} page={ledger.data} devKey={devKey} timezone={business.timezone} />
         )}
       </SkeletonScreen>
     </div>

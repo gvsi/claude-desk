@@ -7,6 +7,7 @@ import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorNam
 import { Notice } from '../Notice/Notice.tsx';
 import { OUTCOME_TONE, outcomePhrase, type RuleMode } from '../OutcomeMenu/outcomeWords.ts';
 import type { RuleWord } from '../RuleRow/RuleRow.tsx';
+import { RuleSentence, type RuleSentenceProps } from '../RuleSentence/RuleSentence.tsx';
 import { ToolTitleList, namesATool, type ToolTitles } from '../RuleRow/ToolTitles.tsx';
 import { StatusLabel } from '../StatusDot/StatusDot.tsx';
 import type { RuleField } from './ruleDiff.ts';
@@ -22,6 +23,8 @@ export type RuleTarget = ToolTitles | string;
 
 /** One side of a change: what a rule enforces before or after it, in the screen's words. */
 export interface ChangeSide {
+  /** A Claude-led sentence and its tools · who and qualifiers line, supplied by the screen's shared wording. */
+  sentence?: Pick<RuleSentenceProps, 'parts' | 'meta'>;
   /** What the rule applies to: `{ titles: ['Payment link'] }`, or a group's words, "Every tool that charges money". */
   appliesTo?: RuleTarget;
   mode: RuleMode;
@@ -56,6 +59,8 @@ export interface ChangeRowView {
 
 export interface ChangeReviewProps {
   rows: readonly ChangeRowView[];
+  /** B3: one Claude-led sentence per side, one change tag per row, and a quiet check line. */
+  sentenceReview?: boolean;
   /** The proof report in the screen's words (Plan 04's `checkStatus`). Only `checked` can be confirmed. */
   checks: {
     status: 'checked' | 'failed' | 'unavailable';
@@ -120,7 +125,7 @@ function ChangedTag() {
 function Outcome({ side, strong = false }: { side: ChangeSide; strong?: boolean }) {
   return (
     <span className={`cd-change-review__outcome cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
-      <StatusLabel tone={OUTCOME_TONE[side.mode]}>{outcomePhrase(side.mode, side.limit)}</StatusLabel>
+      <StatusLabel tone={OUTCOME_TONE[side.mode]}>{outcomePhrase(side.mode)}</StatusLabel>
     </span>
   );
 }
@@ -239,6 +244,31 @@ function withoutTarget({ appliesTo: _target, ...side }: ChangeSide): ChangeSide 
   return side;
 }
 
+/** B3's Before or After: a labelled rule sentence in primary text, with its tools · who and qualifiers, and its outcome. */
+function SentenceSide({ label, side }: { label: 'Before' | 'After'; side: ChangeSide }) {
+  if (side.sentence === undefined) return null;
+  return (
+    <div role="group" aria-label={label} className={`cd-change-review__side cd-change-review__side--${label === 'Before' ? 'before' : 'after'}`}>
+      <p className="cd-change-review__side-label cd-type-caption">{label}</p>
+      <RuleSentence {...side.sentence} outcome={side.mode} />
+    </div>
+  );
+}
+
+function SentenceRow({ row }: { row: ChangeRowView }) {
+  const tag = row.change === 'added' ? 'New' : TAGS[row.change];
+  return (
+    <li className="cd-change-review__row cd-change-review__row--sentence">
+      <span className="cd-change-review__tag cd-type-caption">{tag}</span>
+      <div className="cd-change-review__body cd-change-review__sentence-sides">
+        {row.change === 'turned_on' ? <p className="cd-change-review__title cd-type-body"><Target target={row.title} /></p> : null}
+        {row.before === null ? null : <SentenceSide label="Before" side={row.before} />}
+        {row.after === null ? null : <SentenceSide label="After" side={row.after} />}
+      </div>
+    </li>
+  );
+}
+
 function Row({ row }: { row: ChangeRowView }) {
   const shown = row.after ?? row.before;
   // A row with one side names its target once, in its title, as a changed row does: a target that is
@@ -291,6 +321,7 @@ function Row({ row }: { row: ChangeRowView }) {
  */
 export function ChangeReview({
   rows,
+  sentenceReview = false,
   checks,
   confirmLabel = 'Confirm change',
   cancelLabel = 'Keep my rules',
@@ -321,24 +352,26 @@ export function ChangeReview({
         <p className="cd-change-review__heading cd-type-control">Changes</p>
         {rows.length > 0 ? (
           <ul role="list" className="cd-change-review__rows">
-            {rows.map((row) => (
-              <Row key={row.key} row={row} />
-            ))}
+            {rows.map((row) => sentenceReview ? <SentenceRow key={row.key} row={row} /> : <Row key={row.key} row={row} />)}
           </ul>
         ) : (
           <p className="cd-change-review__empty cd-type-body">{hasOtherChanges ? 'Your rules stay the same.' : 'No rules change.'}</p>
         )}
       </Card>
-      <Card as="section" label={CHECK_HEADINGS[status]} padding={16}>
-        <p className="cd-change-review__heading cd-type-control">{CHECK_HEADINGS[status]}</p>
-        {checks.lines.length > 0 ? (
-          <ul className="cd-change-review__checks cd-type-meta">
-            {checks.lines.map((line, index) => (
-              <li key={`${index}-${line}`}>{line}</li>
-            ))}
-          </ul>
-        ) : null}
-      </Card>
+      {sentenceReview && checked ? (
+        <p className="cd-change-review__checked cd-type-meta">Checked against the always-on rules and your other rules before you confirm.</p>
+      ) : (
+        <Card as="section" label={CHECK_HEADINGS[status]} padding={16}>
+          <p className="cd-change-review__heading cd-type-control">{CHECK_HEADINGS[status]}</p>
+          {checks.lines.length > 0 ? (
+            <ul className="cd-change-review__checks cd-type-meta">
+              {checks.lines.map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
+              ))}
+            </ul>
+          ) : null}
+        </Card>
+      )}
       {cancelsLinks ? <p className="cd-change-review__cancels cd-type-body">{CANCELS_LINKS}</p> : null}
       <div className="cd-change-review__controls">
         {canConfirm ? (

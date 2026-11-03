@@ -96,8 +96,8 @@ it('revealed_cards_wait_for_the_words_then_fade_in_one_by_one', async () => {
   await pass(500);
   expect(words(message)).toEqual([WORDS]);
   expect(arrivals(message)).toEqual([
-    { visibility: 'visible', name: 'cd-claude-message-follow', duration: '0.2s', delay: '0.12s' },
-    { visibility: 'visible', name: 'cd-claude-message-follow', duration: '0.2s', delay: '0.24s' },
+    { visibility: 'visible', name: 'cd-claude-message-follow', duration: '0.2s', delay: '0.2s' },
+    { visibility: 'visible', name: 'cd-claude-message-follow', duration: '0.2s', delay: '0.4s' },
   ]);
 });
 
@@ -106,7 +106,7 @@ it('cards_with_no_words_before_them_fade_in_at_once', async () => {
   const message = mount(<ClaudeMessage blocks={[QUOTE, TIMES]} language="en" ownerName={OWNER} reveal />);
   expect(arrivals(message).map(({ visibility, delay }) => ({ visibility, delay }))).toEqual([
     { visibility: 'visible', delay: '0s' },
-    { visibility: 'visible', delay: '0.12s' },
+    { visibility: 'visible', delay: '0.2s' },
   ]);
   // Busy until the cards are in.
   expect(message.getAttribute('aria-busy')).toBe('true');
@@ -126,8 +126,8 @@ it('prose_blocks_are_revealed_one_after_another', async () => {
   await pass(400);
   expect(words(message)).toEqual([WORDS, second]);
   expect(arrivals(message).map(({ visibility, delay }) => ({ visibility, delay }))).toEqual([
-    { visibility: 'visible', delay: '0.12s' },
-    { visibility: 'visible', delay: '0.24s' },
+    { visibility: 'visible', delay: '0.2s' },
+    { visibility: 'visible', delay: '0.4s' },
   ]);
 });
 
@@ -237,8 +237,8 @@ it('every_card_comes_in_on_its_own_beat', async () => {
   const four = [QUOTE, TIMES, rivera.blocks.payment_link.en, rivera.blocks.document_link.en];
   const message = mount(<ClaudeMessage blocks={[proseBlock(WORDS), ...four]} language="en" ownerName={OWNER} reveal />);
   await pass(700);
-  // However many cards there are, each is 120 ms after the one before.
-  expect(arrivals(message).map((card) => card.delay)).toEqual(['0.12s', '0.24s', '0.36s', '0.48s']);
+  // However many cards there are, each starts once the one before has come in, 200 ms later.
+  expect(arrivals(message).map((card) => card.delay)).toEqual(['0.2s', '0.4s', '0.6s', '0.8s']);
 });
 
 it('plain_prose_is_never_revealed', async () => {

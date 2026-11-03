@@ -36,7 +36,7 @@ const PRIVATE_TARGETS: ReadonlySet<string> = new Set(['native.release_document',
  *   "Verified" on private data;
  * - an agent: its name in `agents` ("Alex Kim's assistant"), else "One agent".
  */
-function whoWords(card: RuleCard, people: PeopleOut | null | undefined, agents: AgentNames | undefined): RuleWord[] {
+export function whoWords(card: RuleCard, people: PeopleOut | null | undefined, agents: AgentNames | undefined): RuleWord[] {
   const who = (text: string): RuleWord => ({ field: 'who', text });
   switch (card.who) {
     case 'anyone':
@@ -62,7 +62,7 @@ function whoWords(card: RuleCard, people: PeopleOut | null | undefined, agents: 
 }
 
 /** A discount in basis points as a percentage: 1000 → "10%", 1250 → "12.5%". */
-function percent(bp: number): string {
+export function percent(bp: number): string {
   return `${Number((bp / 100).toFixed(2))}%`;
 }
 

@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { rivera } from '../../fixtures/index.ts';
 import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { fixtureHeldRule } from '../../test/heldRule.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { Greeting } from '../Greeting/Greeting.tsx';
 import { ReviewerBar } from '../ReviewerBar/ReviewerBar.tsx';
@@ -101,7 +102,7 @@ const today = (
       <div style={{ maxWidth: 'var(--size-reading)' }}>
         <ApprovalCard
           decision={rivera.decisions.held}
-          heldBy={rivera.ruleCards['rv-quote'].reason}
+          rule={fixtureHeldRule(rivera.decisions.held)}
           waiting="Web chat, 2 min ago"
           onAnswer={fn()}
         />

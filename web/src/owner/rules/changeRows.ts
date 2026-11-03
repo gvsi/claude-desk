@@ -22,6 +22,7 @@ import { CONNECTORS, TOOL_NAMES, businessTools, connectorByKey, connectorOf, isC
 import type { RuleDraft } from './drafts.ts';
 import { toolOutcome } from './outcome.ts';
 import { ruleWords, targetWords } from './ruleWords.ts';
+import { ruleMeta, ruleQualifiers, ruleSentence, type SentenceWords } from './ruleSentence.ts';
 
 /** What applies where no rule the owner set covers a request: the compiler's default ask. */
 export const DEFAULT_SIDE = {
@@ -39,26 +40,39 @@ function connectorFor(card: RuleCard): ConnectorView | undefined {
 }
 
 /**
- * A card on one side of a row: its outcome and limit, its reason and its words, and `appliesTo`,
- * what it applies to, only when the row's target moves (a card retargeted, one that goes to a rule
+ * A side's sentence as the Rules page's rule cell words it: the shared sentence, and under it the
+ * tools it covers, since the review has no tool heading above it, then who it is for and its
+ * qualifiers (`ruleQualifiers`): "Payment link · Anyone · Checked by the reviewer · Over $300, it
+ * asks you first".
+ */
+function sentenceOf(card: RuleCard, words: SentenceWords): NonNullable<ChangeSide['sentence']> {
+  return { parts: ruleSentence(card, words), meta: { tools: ruleMeta(card, words).tools, who: ruleQualifiers(card, words) } };
+}
+
+/**
+ * A card on one side of a row: its shared sentence and its line (`sentenceOf`), plus the legacy outcome,
+ * limit, reason, words and `appliesTo` for consumers that still use the field review.
+ * `appliesTo` names what it applies to, only when the row's target moves (a card retargeted, one that goes to a rule
  * for a whole effect group, or a shared rule that covers other tools than it did), so the widened
  * or narrowed target shows. Otherwise the row's title names the target and the sides don't repeat
  * it (N-Conn-18).
  */
-function cardSide(card: RuleCard, people: PeopleOut | null | undefined, appliesTo: RuleTarget | undefined): ChangeSide {
+function cardSide(card: RuleCard, words: SentenceWords, appliesTo: RuleTarget | undefined): ChangeSide {
   const amount = card.mode === 'auto' && card.max_amount_cents != null ? formatCents(card.max_amount_cents) : undefined;
   return {
     ...(appliesTo === undefined ? {} : { appliesTo }),
     mode: card.mode,
     ...(amount === undefined ? {} : { limit: amount }),
     reason: card.reason,
-    words: ruleWords(card, people),
+    words: ruleWords(card, words.people),
+    sentence: sentenceOf(card, words),
   };
 }
 
 /** The default ask, which is for the row's own tool, so it names no target. */
-function defaultSide(): ChangeSide {
-  return { ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words] };
+function defaultSide(tool: string, words: SentenceWords): ChangeSide {
+  const card: RuleCard = { card_id: 'default-ask', applies_to: tool, mode: 'ask', who: 'anyone', reason: DEFAULT_SIDE.reason };
+  return { ...DEFAULT_SIDE, words: [...DEFAULT_SIDE.words], sentence: sentenceOf(card, words) };
 }
 
 /** A card shared by every tool with that effect (`effect:charge`), which a tool's own card outranks. */
@@ -224,7 +238,8 @@ export function reviewedTools(draft: RuleDraft, tools: ToolEffects): AnyToolName
 
 /**
  * The review's rows: a row per card change (`reviewChanges` over the draft's before and after), each
- * side in words, then a `turned_on` row per tool the draft turns on, at the outcome Rules shows
+ * side in shared sentence wording (a removed rule has Before alone), then a `turned_on` row per
+ * tool the draft turns on, at the outcome Rules shows
  * for the draft's rules (`toolOutcome`: the most that runs on its own for some visitor), in the
  * words of the rule that gives it, else the default ask. Every card's row goes by connector and by
  * tool within one, in one stable pass, so an added rule follows the changed rows of its own tool: a
@@ -235,6 +250,14 @@ export function reviewedTools(draft: RuleDraft, tools: ToolEffects): AnyToolName
  */
 export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefined, tools: ToolEffects = []): ChangeRowView[] {
   const { business, catalog, changes } = pairCards(draft, tools);
+  const sentenceTools = catalog.map((tool) => ({ ...tool, effects: [...tool.effects] }));
+  // Shared auto rules cover a tool with several effects only jointly. Give the foundation each
+  // side's actual coverage, and the side's cards it reads that coverage among, so its meta names
+  // exactly those tools, once.
+  const wordsFor = (card: RuleCard, side: readonly RuleCard[]): SentenceWords => {
+    const covered = isEffectCard(card) ? new Set(coveredTools(card, side, catalog)) : null;
+    return { business, people, cards: side, tools: covered === null ? sentenceTools : sentenceTools.filter((tool) => covered.has(tool.tool)) };
+  };
   // Each side's labels, read once: a shared rule's coverage depends on the other shared rules beside it.
   const labelsOf = (side: readonly RuleCard[]) => new Map(side.map((card) => [card, rowLabel(card, side, catalog, business)]));
   const beforeLabels = labelsOf(draft.before);
@@ -260,12 +283,12 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     const shared = (before === null || isEffectCard(before)) && (after === null || isEffectCard(after));
     const row: ChangeRowView = {
       key: card.card_id,
-      change: change.change,
+      change: after === null ? 'removed' : change.change,
       title,
       ...(connector === undefined ? {} : { connector }),
       ...(shared ? { shared: true } : {}),
-      before: before === null ? null : cardSide(before, people, target(before, move?.before)),
-      after: after === null ? defaultSide() : cardSide(after, people, target(after, move?.after)),
+      before: before === null ? null : cardSide(before, wordsFor(before, draft.before), target(before, move?.before)),
+      after: after === null ? null : cardSide(after, wordsFor(after, draft.after), target(after, move?.after)),
       changed: move === undefined || change.fields.includes('applies_to') ? change.fields : ['applies_to', ...change.fields],
     };
     return { row, place };
@@ -278,13 +301,16 @@ export function changeRows(draft: RuleDraft, people: PeopleOut | null | undefine
     const title = targetOf(row.tool, business);
     const connector = isCatalogTool(row.tool) ? connectorOf(row.tool)?.view : undefined;
     const { rule } = toolOutcome({ tool: row.tool, effects: row.effects }, draft.after);
+    // The governing rule may be shared, but this row activates only this tool; a shared rule
+    // covers it among the draft's cards, jointly with an automatic rule on each of its other effects.
+    const words: SentenceWords = { business, people, cards: draft.after, tools: [row] };
     rows.push({
       key: `turned-on:${row.tool}`,
       change: 'turned_on',
       title,
       ...(connector === undefined ? {} : { connector }),
       before: null,
-      after: rule === undefined ? defaultSide() : cardSide(rule, people, undefined),
+      after: rule === undefined ? defaultSide(row.tool, words) : cardSide(rule, words, undefined),
       changed: [],
     });
   }

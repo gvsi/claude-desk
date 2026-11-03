@@ -29,7 +29,9 @@
    their places. Then they fade and rise space-4 in, one by one, motion-follow apart, the first a
    beat after the words (--cd-follow-from, 1), or at once with no words before them (0), each over
    motion-base, each card on its own beat (--cd-follow-card, its place among the cards, which
-   ClaudeMessage sets). Under reduced motion the reply shows whole, its cards at once. */
+   ClaudeMessage sets). motion-follow is never shorter than motion-base or motion-settle, so each
+   card starts once the last word has settled and the card before has come in. Under reduced
+   motion the reply shows whole, its cards at once. */
 .cd-claude-message--revealing > .cd-reply-card {
   visibility: hidden;
 }

@@ -466,8 +466,8 @@ describe('Today', () => {
       .filter((text) => ['Needs you', 'Live now', 'Since last night'].includes(text ?? ''));
     expect(order).toEqual(['Needs you', 'Live now', 'Since last night']);
 
-    // One held request, with what was asked. It went past an automatic rule's limit, so there is
-    // no "Held by your rule" line. The mock keeps the fixture's headline, which doesn't quote it.
+    // One held request, with what was asked. It went past an automatic rule's limit: its "Your
+    // rule" box names that rule (held_card_shows_the_rule_that_held_it), never "Held by your rule".
     await expect.element(needs.getByRole('img', { name: '1 needs you' })).toBeVisible();
     const card = heldCard(screen, SEEDED_REASON);
     expect(card.element().textContent).not.toContain('Held by your rule');
@@ -524,6 +524,51 @@ describe('Today', () => {
     const plain = region(none, 'Things to try').getByText('A request is waiting for your answer.', { exact: true });
     await expect.element(plain).toBeVisible();
     expect(plain.element().querySelector('[data-copy="user"]')).toBeNull();
+  });
+
+  it('held_card_shows_the_rule_that_held_it', async () => {
+    // REV-RULES-B5: each held card names the rule that held it in a "Your rule" box: its sentence
+    // led by Claude, the tools and who, and its outcome. Past an automatic rule's limit it is that
+    // rule's hold line, for that rule's own people; an Ask me first card is its own sentence; with
+    // no rule of the owner's behind it, there is no box.
+    const [seeded] = await heldItems();
+    if (!seeded?.decision?.action) throw new Error('the seed holds a request');
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    const LINK = 'A visitor asked for a payment link for $450.00.';
+    const GONE = 'A visitor asked to book Sunday at 10:00 pm.';
+    const link: NeedsYouItem = {
+      ...seeded,
+      held_by: null,
+      held_at: ago(3),
+      decision: {
+        ...seeded.decision,
+        decision_id: 'dec-held-link',
+        reason_plain: LINK,
+        card_ids: ['rv-link'],
+        action: { ...seeded.decision.action, tool: 'native.payment_link', effects: ['charge'], list_cents: null, discount_bp: null, amount_cents: 45_000 },
+      },
+    };
+    const refund: NeedsYouItem = { ...seeded, held_by: rivera.ruleCards['rv-refund'].reason, held_at: ago(2), decision: { ...rivera.heldRefund, session_id: seeded.decision.session_id } };
+    // An ask card the active rules no longer have.
+    const gone: NeedsYouItem = { ...seeded, held_by: 'Bookings wait for your answer.', held_at: ago(1), decision: { ...seeded.decision, decision_id: 'dec-held-gone', reason_plain: GONE } };
+    const { screen } = await renderRoute(TODAY, {
+      seed: 'rivera',
+      beforeRender: () => mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [seeded, link, refund, gone] }),
+    });
+    const ruleOf = (reason: string) => heldCard(screen, reason).getByRole('group', { name: 'Your rule', exact: true });
+    await expect.element(ruleOf(SEEDED_REASON)).toBeVisible();
+    // B5's held quote: 15% off went past the list-price quote rule.
+    expect(ruleOf(SEEDED_REASON).element().textContent).toBe('Your ruleClaude asks you before any discountQuote · AnyoneAsk me first');
+    expect([...ruleOf(SEEDED_REASON).element().querySelectorAll('strong')].map((key) => key.textContent)).toEqual(['any discount']);
+    expect(ruleOf(LINK).element().textContent).toBe('Your ruleClaude asks you before payment links over $300Payment link · AnyoneAsk me first');
+    expect(ruleOf(REFUND_REASON).element().textContent).toBe('Your ruleClaude asks you before any refundRefund · The customer, once verifiedAsk me first');
+    await expect.element(heldCard(screen, GONE)).toBeVisible();
+    expect(heldCard(screen, GONE).element().textContent).not.toContain('Your rule');
+    // The tools are the owner's words; the outcome is the rule's, with its dot.
+    expect(ruleOf(LINK).element().querySelector('.cd-user-name')?.textContent).toBe('Payment link');
+    expect(ruleOf(LINK).element().querySelector('.cd-rule-sentence__outcome .cd-status-dot--held')).not.toBeNull();
+    expect(screen.container.textContent).not.toContain('Held by your rule');
+    await expectScreenBasics(screen.container, { owner: true });
   });
 
   it('greeting_names_the_owner_only_when_they_gave_a_name', async () => {
@@ -611,6 +656,69 @@ describe('Today', () => {
     await expect.element(region(screen, 'Live now').getByRole('link')).toBeVisible();
     await expect.element(region(screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
     await expect.element(screen.getByRole('heading', { level: 2, name: 'Last 7 days' })).toBeVisible();
+    await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
+  });
+
+  it('a_failed_rules_read_says_so_over_the_held_card', async () => {
+    // The rules can't be read, so the held card can't name the rule that held it: Needs you says
+    // the read failed, with Try again, rather than leaving the box out as if no rule had held it.
+    // Try again reads them, and the box lands on the card.
+    const { screen } = await renderRoute(TODAY, {
+      seed: 'rivera',
+      retryScale: 0,
+      beforeRender: () => mockStore.inject({ route: 'rules', status: 503, times: 2 }),
+    });
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    const failed = needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    expect(card.getByRole('group', { name: 'Your rule', exact: true }).elements()).toHaveLength(0);
+    await needs.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await expect.poll(() => needs.getByRole('alert').elements().length).toBe(0);
+  });
+
+  it('a_failed_refresh_of_read_rules_says_so_over_the_held_card', async () => {
+    // The rules were read, then a later read of them fails: Needs you says so, with Try again, over
+    // the card's rule as it was last read, so an earlier read never passes for current.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    onTestFinished(() => mounted.mockRestore());
+    const { screen } = await renderRoute(TODAY, { seed: 'rivera', retryScale: 0 });
+    const needs = region(screen, 'Needs you');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    expect(needs.getByRole('alert').elements()).toHaveLength(0);
+
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    await queryClient.refetchQueries({ queryKey: ['rules', RIVERA.deskId, 'requests'] });
+    await expect.element(needs.getByRole('alert').getByText(UNAVAILABLE, { exact: true })).toBeVisible();
+    await expect.element(card.getByRole('group', { name: 'Your rule', exact: true })).toBeVisible();
+    await needs.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => needs.getByRole('alert').elements().length).toBe(0);
+  });
+
+  it('reload_waits_for_the_rules_a_held_card_names', async () => {
+    // A held card names the rule that held it, so with a request held, a reload's loading page
+    // stays until the rules are read too: Today then opens with the card's "Your rule" box drawn,
+    // rather than the box growing in and pushing Live now down.
+    await cleanup();
+    const pages = watchPages();
+    const rules = holdReads(ROUTES.rules.path.replace('{desk_id}', RIVERA.deskId));
+    const { screen } = await renderRoute(TODAY);
+    await vi.waitFor(() => expect(rules.held()).toBe(1));
+    await expect.poll(() => requests('needsYou').length).toBeGreaterThan(0);
+    // Time for Today to be drawn, had it opened without the rules.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expectLoadingPage();
+
+    rules.release();
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeVisible();
+    expect(card.getByRole('group', { name: 'Your rule', exact: true }).element().textContent).toBe(
+      'Your ruleClaude asks you before any discountQuote · AnyoneAsk me first',
+    );
     await vi.waitFor(() => expect(pages()).toEqual(['loading', 'today']));
   });
 
