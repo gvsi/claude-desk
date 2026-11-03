@@ -68,7 +68,8 @@ it('opens_the_latest_stopped_entry_with_its_trace_and_remembers_the_visit', asyn
   await expect.element(things().getByText('Done. You saw which check stopped it.', { exact: true })).toBeVisible();
   await expect.element(things().getByText('1 of 6 done. No real customer sees any of it.', { exact: true })).toBeVisible();
   expect(things().getByRole('link', { name: 'Open in Safety', exact: true }).elements()).toHaveLength(0);
-  expect([...things().element().querySelectorAll('.cd-things__segment')].map((segment) => segment.classList.contains('cd-things__segment--done'))).toEqual([false, false, false, true, false, false]);
+  // The bar fills from the left by count, whichever thing is done: the fourth thing done fills the first segment.
+  expect([...things().element().querySelectorAll('.cd-things__segment')].map((segment) => segment.classList.contains('cd-things__segment--done'))).toEqual([true, false, false, false, false, false]);
   await router.navigate(`/app/${RIVERA.deskId}/conversations`);
   await router.navigate(TODAY);
   await expect.element(things().getByText('Done. You saw which check stopped it.', { exact: true })).toBeVisible();
