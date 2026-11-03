@@ -29,7 +29,6 @@ import {
   clockNow,
   rowComingIn,
 } from '../../ds/index.ts';
-import { POLL_MS } from '../../app/poll.ts';
 import { formatClock } from '../../lib/format.ts';
 import { groupRows, opensAReply, withoutRepeatedCards, type CardsRow, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
 import { paymentLinkMemory } from '../../public/paymentLinks.ts';
@@ -226,17 +225,11 @@ function cardsAfter(rows: readonly (readonly OwnerReceiptSource[])[], heldIds: r
 }
 
 /**
- * The longest a held card waits for the reply before it: longer than any reply takes to come in
- * (its words in at most about 3 s, then its cards and lines), so a reveal that never finishes
- * can't keep a request unseen.
+ * The longest a held card waits, from when it was first drawn: for its reply to reach the page
+ * (live, 4 to 11 s after its hold) and come in, so a reply that never comes or a reveal that never
+ * finishes can't keep a request unseen (owner, 2026-11-02).
  */
-const LONGEST_WAIT_MS = 8_000;
-
-/**
- * The longest a held card whose hold came in before its reply waits for that reply: one
- * conversation poll, the time the next read takes to bring it (owner, 2026-11-02).
- */
-const REPLY_WAIT_MS = POLL_MS.conversation;
+const LONGEST_WAIT_MS = 15_000;
 
 /** The row a held card's slot follows, and the held cards' slots between them; null when no row is before it. */
 function partsBefore(slot: Element): { row: Element; held: Element[] } | null {
@@ -287,12 +280,10 @@ interface HeldAfterProps {
  * held it: it waits unseen in its place, not focusable and busy for assistive technology, until
  * that reply's words, cards and lines have all come in, then fades and rises in (Conversations.css).
  * When its hold came in while the owner watched but before the reply (after the visitor's
- * question), it waits there for the reply for at most `REPLY_WAIT_MS` from when it was first
- * drawn: the reply coming moves it after the reply, where it waits for it as above, and no reply
- * by then shows it at once where it is. Anything else shows it at once, and never later: a card
- * already seen, one from history, reduced motion, a hidden tab, where the browser can't list its
- * animations, and any wait past `LONGEST_WAIT_MS` from when it was first drawn. A reply replaced
- * or gone while it waits ends the wait: nothing before it is coming in.
+ * question), it waits there for the reply: the reply coming moves it after the reply, where it
+ * waits for it as above. Anything else shows it at once, and never later: a card already seen, one
+ * from history, one whose reply came and went, reduced motion, a hidden tab, where the browser
+ * can't list its animations, and any wait past `LONGEST_WAIT_MS` from when it was first drawn.
  */
 function HeldAfter({ seen, waitsForReply, since, onSeen, render }: HeldAfterProps) {
   const slot = useRef<HTMLDivElement>(null);
@@ -308,7 +299,7 @@ function HeldAfter({ seen, waitsForReply, since, onSeen, render }: HeldAfterProp
     const waits = (): boolean => {
       if (first.seen || typeof el.getAnimations !== 'function' || typeof CSSAnimation === 'undefined') return false;
       if (document.hidden || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
-      forReply.current = first.waitsForReply && performance.now() - first.since < REPLY_WAIT_MS;
+      forReply.current = first.waitsForReply;
       return forReply.current || (partsBefore(el)?.row.classList.contains('cd-transcript-row--live') === true && comingIn(el));
     };
     if (waits()) setPhase('waiting');
@@ -323,10 +314,8 @@ function HeldAfter({ seen, waitsForReply, since, onSeen, render }: HeldAfterProp
     };
     let frame = 0;
     const step = () => {
-      // Waiting for its reply, and for whatever before it is still coming in.
-      if ((forReply.current && performance.now() - first.since < REPLY_WAIT_MS) || comingIn(el)) frame = requestAnimationFrame(step);
-      // No reply came in time: it shows at once, where it is.
-      else if (forReply.current) come('shown');
+      // Waiting for its reply (until it comes, or `LONGEST_WAIT_MS`), and for whatever before it is still coming in.
+      if (forReply.current || comingIn(el)) frame = requestAnimationFrame(step);
       else come('landing');
     };
     frame = requestAnimationFrame(step);
@@ -364,14 +353,26 @@ function HeldAfter({ seen, waitsForReply, since, onSeen, render }: HeldAfterProp
  * waits again when it moves (after the reply, say), and one still waiting keeps counting from when
  * it was first drawn.
  */
-function useHeldCards(): { seen: (id: string) => boolean; markSeen: (id: string) => void; since: (id: string) => number } {
+function useHeldCards(): {
+  seen: (id: string) => boolean;
+  markSeen: (id: string) => void;
+  since: (id: string) => number;
+  replied: (id: string) => boolean;
+  markReplied: (id: string) => void;
+} {
   const shown = useRef(new Set<string>());
   const drawn = useRef(new Map<string, number>());
+  // The cards drawn after the reply that held them: a reply gone again isn't waited for twice.
+  const answered = useRef(new Set<string>());
   return useMemo(
     () => ({
       seen: (id) => shown.current.has(id),
       markSeen: (id) => {
         shown.current.add(id);
+      },
+      replied: (id) => answered.current.has(id),
+      markReplied: (id) => {
+        answered.current.add(id);
       },
       since: (id) => {
         const at = drawn.current.get(id) ?? performance.now();
@@ -593,11 +594,13 @@ export function OwnerTranscript({
   // that isn't Claude's reply (her question), under a reply older than the hold (a turn Claude
   // started itself, whose own reply hasn't come), or not yet in the conversation at all.
   const isReply = (row: OwnerRow) => row.item.kind === 'message' && row.item.ev.author !== 'owner';
-  const holdCameLive = (receipts: readonly OwnerReceiptSource[], id: string, under?: OwnerRow) =>
-    liveAfter !== null &&
-    receipts.some(
-      ({ event, n }) => event.type === 'held' && event.decision_id === id && n > liveAfter && (under === undefined || !isReply(under) || n > under.item.n),
-    );
+  // Its reply came once (the card was drawn after it): the card never waits for it again.
+  const holdCameLive = (receipts: readonly OwnerReceiptSource[], id: string, under?: OwnerRow) => {
+    const hold = receipts.find(({ event }) => event.type === 'held' && event.decision_id === id);
+    if (hold === undefined) return false;
+    if (under !== undefined && isReply(under) && hold.n < under.item.n) heldCards.markReplied(id);
+    return liveAfter !== null && !heldCards.replied(id) && hold.n > liveAfter && (under === undefined || !isReply(under) || hold.n > under.item.n);
+  };
   const held = (ids: readonly string[], waitsForReply: (id: string) => boolean): ReactNode[] =>
     ids.map((id) => (
       <HeldAfter
@@ -634,7 +637,7 @@ export function OwnerTranscript({
   });
   const rest = held(
     heldIds.filter((id) => !placed.has(id)),
-    () => liveAfter !== null,
+    (id) => liveAfter !== null && !heldCards.replied(id),
   );
 
   return (

@@ -2734,7 +2734,7 @@ describe('Conversations', () => {
     await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
   });
 
-  it('a_hold_whose_reply_never_comes_shows_its_card_within_a_poll', async () => {
+  it('a_hold_whose_reply_never_comes_shows_its_card_by_15_s', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
@@ -2742,8 +2742,8 @@ describe('Conversations', () => {
     await readsMore('conversation', 2);
     const held = heldSlots().length;
 
-    // Claude holds Dana's request and its turn ends with no reply: the card waits for one, at most
-    // one conversation poll (2 s), then shows at once where it is, after her question.
+    // Claude holds Dana's request and no reply comes: the card waits for one, at most 15 s from
+    // when it was first drawn, then shows at once where it is, after her question.
     const world = mockStore.world;
     const discount = SCRIPT.find((rule) => rule.name === 'discount');
     if (!discount) throw new Error('the script has its discount row');
@@ -2764,13 +2764,56 @@ describe('Conversations', () => {
       const slot = card();
       return slot !== undefined && slot.getAttribute('aria-busy') === null && getComputedStyle(slot).visibility === 'visible';
     };
-    await expect.poll(seen, { timeout: 4_000 }).toBe(true);
-    expect(performance.now() - drawn).toBeLessThan(2_500);
+    // Still waiting well past a poll: a live reply can take seconds to reach the owner's page.
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+    expect(seen()).toBe(false);
+    await expect.poll(seen, { timeout: 15_000 }).toBe(true);
+    expect(performance.now() - drawn).toBeLessThan(15_500);
     // At once, with no motion, still after her question.
     expect(card()?.className).toBe('cd-conversation__held');
     expect(card()?.previousElementSibling?.textContent).toContain(question);
     await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
-  });
+  }, 30_000);
+
+  it('a_hold_whose_reply_reaches_the_page_seconds_later_still_brings_its_card_in_last', async () => {
+    const chat = named(DANA_LIVE, DANA);
+    const { screen } = await renderRoute(conversation(DANA_LIVE));
+    const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
+    await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
+    await readsMore('conversation', 2);
+    const world = mockStore.world;
+    const discount = SCRIPT.find((rule) => rule.name === 'discount');
+    if (!discount) throw new Error('the script has its discount row');
+    const [writes, holds, replies] = discount.steps;
+    if (!writes || !holds || !replies) throw new Error('the discount row writes, holds, then replies');
+
+    // As live: the hold reaches the owner's page, and Claude's reply only 4 s, then 10.7 s, later.
+    for (const [question, lag] of [
+      ['Could I get 10% off as a returning customer?', 4_000],
+      ['And 10% off the next visit too?', 10_700],
+    ] as const) {
+      const held = heldSlots().length;
+      world.visitorText(chat, question);
+      const turn = world.context(chat, 'en', question);
+      world.emit(chat, writes(turn));
+      world.emit(chat, holds(turn));
+      await expect.poll(() => heldSlots().length).toBe(held + 1);
+      await new Promise((resolve) => setTimeout(resolve, lag));
+      expect(heldSlots().at(-1)?.getAttribute('aria-busy')).toBe('true');
+
+      const played = watchSequence();
+      world.emit(chat, replies(turn));
+      world.emit(chat, turnEnd(turn));
+      const sequence = await played;
+      const row = [...document.querySelectorAll('.cd-claude-message')].at(-1)?.closest('.cd-transcript-row');
+      const lines = [...(row?.querySelectorAll(':scope > .cd-transcript-row__margin > :not(.cd-margin-line--shown)') ?? [])].map(
+        (line) => `line ${line.textContent ?? ''}`,
+      );
+      expectInSequence(sequence, ['words', ...lines, 'held card']);
+      expect(heldSlots().at(-1)?.previousElementSibling).toBe(row);
+    }
+    await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
+  }, 45_000);
 
   it('a_hold_from_a_turn_claude_starts_itself_waits_for_its_own_reply', async () => {
     const chat = named(DANA_LIVE, DANA);
@@ -2839,7 +2882,7 @@ describe('Conversations', () => {
     expect(heldSlots().at(-1)?.contains(document.activeElement)).toBe(true);
   });
 
-  it('a_held_card_whose_reply_never_finishes_coming_in_shows_within_8_s', async () => {
+  it('a_held_card_whose_reply_never_finishes_coming_in_shows_within_15_s', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
@@ -2860,23 +2903,23 @@ describe('Conversations', () => {
     const drawn = performance.now();
     expect(heldSlots().at(-1)?.getAttribute('aria-busy')).toBe('true');
 
-    // Whatever happens to the reveal, the card shows within 8 s of being drawn, its answers there to press.
+    // Whatever happens to the reveal, the card shows within 15 s of being drawn, its answers there to press.
     const seen = () => {
       const slot = heldSlots().at(-1);
       return slot !== undefined && slot.getAttribute('aria-busy') === null && getComputedStyle(slot).visibility === 'visible';
     };
-    await expect.poll(seen, { timeout: 10_000 }).toBe(true);
-    expect(performance.now() - drawn).toBeLessThan(8_500);
+    await expect.poll(seen, { timeout: 17_000 }).toBe(true);
+    expect(performance.now() - drawn).toBeLessThan(15_500);
     await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
-  }, 20_000);
+  }, 30_000);
 
-  it('a_held_card_whose_reply_goes_while_it_waits_shows_within_a_poll', async () => {
+  it('a_held_card_whose_reply_goes_while_it_waits_shows_at_once', async () => {
     const chat = named(DANA_LIVE, DANA);
     const { screen } = await renderRoute(conversation(DANA_LIVE));
     const [first] = rivera.conversations.danaLive.turns.flatMap((t) => (t.kind === 'visitor' ? [t.text] : []));
     await expect.element(log(screen).getByText(first ?? '', { exact: true })).toBeVisible();
     await readsMore('conversation', 2);
-    // The reply's reveal would keep the card waiting until its 8 s cap.
+    // The reply's reveal would keep the card waiting until its 15 s cap.
     document.documentElement.style.setProperty('--motion-follow', '60s');
     onTestFinished(() => {
       document.documentElement.style.removeProperty('--motion-follow');
@@ -2890,19 +2933,17 @@ describe('Conversations', () => {
     await expect.poll(() => heldSlots().length).toBe(before.held + 1);
     expect(heldSlots().at(-1)?.getAttribute('aria-busy')).toBe('true');
 
-    // The reads stop bringing the reply while the card waits after it: with nothing before it coming
-    // in, the card shows within one conversation poll (2 s) of being drawn, after her question.
+    // The reads stop bringing the reply while the card waits after it: its reply came and went, so
+    // the card doesn't wait for another, and shows at once where it is, after her question.
     const read = await served<OwnerTranscript>('conversation', { session_id: DANA_LIVE });
     const reply = read.items.filter((item) => item.kind === 'delivered').at(-1);
     mockStore.inject({ route: 'conversation', status: 200, times: 100, body: { ...read, items: read.items.filter((item) => item !== reply) } });
-    const gone = performance.now();
     await expect.poll(replies).toBe(before.replies);
     const seen = () => {
       const slot = heldSlots().at(-1);
       return slot !== undefined && slot.getAttribute('aria-busy') === null && getComputedStyle(slot).visibility === 'visible';
     };
-    await expect.poll(seen, { timeout: 4_000 }).toBe(true);
-    expect(performance.now() - gone).toBeLessThan(2_500);
+    expect(seen()).toBe(true);
     expect(heldSlots().at(-1)?.previousElementSibling?.textContent).toContain('Could I get 10% off as a returning customer?');
     await expect.element(log(screen).getByRole('button', { name: 'Allow this time' }).last()).toBeEnabled();
   });
