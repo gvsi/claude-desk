@@ -156,14 +156,13 @@ function SetupInterview({ setupId }: { setupId: string }) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [search] = useSearchParams();
-  // The owner's own words, when the start on this page made the interview: their first message,
-  // its hand-off from setup's chat played once, as the start opens it (not on a reload or Back).
+  // The owner's own words, when the start on this page made the interview: their first message.
   const { state: arrived } = useLocation();
+  const [opening] = useState(() => startedWith(arrived));
+  // The hand-off from setup's chat plays once, as the start opens the questions (not on a reload or
+  // Back), and never again on this page: questions opened again ("Change something") draw it settled.
   const navigationType = useNavigationType();
-  const [opening] = useState(() => {
-    const words = startedWith(arrived);
-    return words === null ? null : { words, arrived: navigationType === 'REPLACE' };
-  });
+  const handoff = useRef(opening !== null && navigationType === 'REPLACE');
   const setup = useQuery({ ...setupQuery(setupId), staleTime: Infinity, refetchOnWindowFocus: false });
   const deskId = setup.data?.desk_id ?? null;
   // The business's name: the API names it from the owner's words, on the new Desk, so in an interview it's
@@ -358,6 +357,10 @@ function SetupInterview({ setupId }: { setupId: string }) {
   // Each step opens at its top, by the bar's step: Your rules' views open at their tops on their own
   // (RulesStep), and the preview going live stays the same screen.
   useOpensAtTop(state === undefined ? null : STEP_INDEX[closingQuestions || changing ? 'questions' : state.step]);
+  const questionsShown = state !== undefined && (closingQuestions || changing || state.step === 'questions');
+  useEffect(() => {
+    if (questionsShown) handoff.current = false;
+  }, [questionsShown]);
   // An interview outside this copy: the app's not-found screen.
   if (state === undefined && setup.error instanceof ApiError && setup.error.kind === 'not_found') return <NotFound />;
   if (state === undefined) {
@@ -398,7 +401,7 @@ function SetupInterview({ setupId }: { setupId: string }) {
   };
   switch (shownStep) {
     case 'questions':
-      body = <QuestionsStep state={state} hours={desk?.hours[0]} opening={opening} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
+      body = <QuestionsStep state={state} hours={desk?.hours[0]} opening={opening === null ? null : { words: opening, arrived: handoff.current }} onState={onState} reread={reread} changing={changing} onContinue={changing ? backToStep : () => setContinued(true)} />;
       break;
     case 'tools':
       body = <ToolsStep state={state} business={name} hours={desk?.hours ?? []} onContinue={() => moveTo('rules')} />;

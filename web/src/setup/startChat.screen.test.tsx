@@ -283,6 +283,48 @@ describe('setup start', () => {
     expect(panel.getAnimations().length, 'the question rising into the dock').toBe(1);
   });
 
+  it('the_handoff_plays_once_and_change_something_opens_the_chat_settled', async () => {
+    // The start's hand-off plays as its interview first opens. Past the questions and back in the
+    // chat with "Change something", no start is running: the owner's words and the read are there,
+    // settled, with no quieter line, no dots and nothing leaving.
+    const release = holdStart();
+    const { screen } = await renderRoute('/app/setup');
+    await screen.getByRole('textbox', { name: 'Your business' }).fill(DESCRIPTION);
+    await screen.getByRole('button', { name: 'Start' }).click();
+    await expect.element(conversation(screen).getByText('Claude is writing')).toBeInTheDocument();
+    await settle();
+    release();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Use your suggestions', exact: true }).click();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { name: 'What Claude can use', exact: true })).toBeVisible();
+    await screen.getByRole('button', { name: 'Continue', exact: true }).click();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await screen.getByRole('button', { name: 'Check real situations' }).click();
+    await expect.element(screen.getByRole('list', { name: 'Real situations' }).getByRole('listitem').first()).toBeVisible();
+
+    // From the press on, what the chat draws: nothing of the start's hand-off.
+    const drawn: string[] = [];
+    const record = () => {
+      for (const selector of ['.cd-setup-start-leaving', '.cd-setup-start-read--reading', '.cd-setup-start-read--settling', '.cd-setup-chat .cd-writing-indicator']) {
+        if (document.querySelector(selector) !== null && !drawn.includes(selector)) drawn.push(selector);
+      }
+    };
+    const observer = new MutationObserver(record);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    onTestFinished(() => observer.disconnect());
+    await screen.getByRole('button', { name: 'Change something', exact: true }).click();
+    await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
+    await expect.element(ownWords(screen)).toBeVisible();
+    const read = conversation(screen).getByText(SETUP_START_READING.read, { exact: true });
+    await expect.element(read).toBeVisible();
+    record();
+    expect(drawn).toEqual([]);
+    expect(screen.getByText(SETUP_START_READING.usually, { exact: true }).elements()).toHaveLength(0);
+    expect(read.element().closest('.cd-setup-start-read')!.getAnimations({ subtree: true })).toEqual([]);
+  });
+
   it('under_reduced_motion_every_part_is_at_its_end_at_once', async () => {
     await reduceMotion(true);
     onTestFinished(() => reduceMotion(false));
