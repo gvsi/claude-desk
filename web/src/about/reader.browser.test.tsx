@@ -93,10 +93,10 @@ afterEach(async () => {
   await page.viewport(DESKTOP.width, DESKTOP.height);
 });
 
-/** The design system's chat icon, as its paths draw it, to tell it apart from any other icon. */
-const CHAT_ICON = (() => {
+/** The design system's app window icon, as its paths draw it, to tell it apart from any other icon. */
+const APP_ICON = (() => {
   const holder = document.createElement('div');
-  holder.innerHTML = renderToStaticMarkup(<Icon name="conversations" />);
+  holder.innerHTML = renderToStaticMarkup(<Icon name="app-window" />);
   return holder.querySelector('svg')?.innerHTML;
 })();
 
@@ -656,7 +656,13 @@ describe('ReaderPage', () => {
   it('phone_top_bar_keeps_the_name_on_one_line', async () => {
     // The phone bar follows the signed phone top bar: the bell beside "Claude Desk" and no Preview
     // badge, the name on one line (the wordmark's 22 px line) and nothing past the window's width,
-    // down to a 320 px phone. The desktop bar keeps the badge.
+    // down to a 320 px phone. The desktop bar keeps the badge. Measured in the interface's web font, as the page
+    // ships; the sheet goes again after, so the other tests keep measuring as before.
+    onTestFinished(() => {
+      const want = new URL(FONT_SHEET_URL).href;
+      for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
+    });
+    await loadWebFonts();
     const phones = [PHONE, { width: 375, height: 812 }, { width: 360, height: 800 }, { width: 320, height: 640 }];
     for (const size of phones) {
       const where = `at ${size.width}`;
@@ -668,12 +674,17 @@ describe('ReaderPage', () => {
       expect(name?.getBoundingClientRect().height, where).toBe(22);
       expect(bar?.querySelector('.cd-pill'), where).toBeNull();
       expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
-      // The brand keeps the bar's 16 px side, and the link its words on one line. Below 360 px the
-      // link drops its chat icon, so the 32 px bell and the name still fit.
+      // The brand keeps the bar's 16 px side, and the link, the bar's primary button, its words on one line,
+      // clear of the brand. Below 360 px the link drops its icon, so the 32 px bell and the name still fit.
       expect(bar?.querySelector('.cd-about-brand')?.getBoundingClientRect().right, where).toBeLessThanOrEqual(size.width - 16);
       const link = bar?.querySelector<HTMLElement>('.cd-about-try');
       expect(link?.textContent, where).toBe('Try Desk prototype');
       expect(link?.getBoundingClientRect().height, where).toBe(32);
+      expect(link?.classList.contains('cd-button--primary'), where).toBe(true);
+      expect(link?.getBoundingClientRect().left, where).toBeGreaterThanOrEqual(16);
+      expect((link?.getBoundingClientRect().right ?? Infinity) + 8, where).toBeLessThanOrEqual(
+        bar?.querySelector('.cd-about-brand')?.getBoundingClientRect().left ?? 0,
+      );
       const icon = link?.querySelector('.cd-about-try__icon');
       expect(icon ? getComputedStyle(icon).display : null, where).toBe(size.width < 360 ? 'none' : 'block');
       await screen.unmount();
@@ -1496,12 +1507,19 @@ describe('ReaderPage', () => {
         const screen = await renderReader(id, { size, lastDesk });
         expect(document.title, where).toBe(`${PAGES[id].title} · Claude Desk`);
         // One link into the prototype, in the top bar, the same words at every width, never naming the
-        // business, with the chat icon: to this browser's Desk when it has opened one.
+        // business, with the app window icon: to this browser's Desk when it has opened one. It is the page's
+        // primary button: the design system's primary fill and words, in the paper's ink and on its paper.
         const back = [...(screen.container.querySelector('header')?.querySelectorAll('a') ?? [])].filter(
           (link) => !link.closest('nav'),
         );
         expect(back.map(readText), where).toEqual(['Try Desk prototype']);
-        expect(back[0]?.querySelector('svg')?.innerHTML, where).toBe(CHAT_ICON);
+        expect(back[0]?.querySelector('svg')?.innerHTML, where).toBe(APP_ICON);
+        const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
+        const button = getComputedStyle(back[0] as Element);
+        expect(back[0]?.classList.contains('cd-button--primary'), where).toBe(true);
+        expect([button.backgroundColor, button.color], where).toEqual([tokenColor('--text-primary', root), tokenColor('--bg-app', root)]);
+        expect(button.borderTopLeftRadius, where).toBe(getComputedStyle(root).getPropertyValue('--radius-control').trim());
+        expect(button.textDecorationLine, where).toBe('none');
         expect(back[0]?.getAttribute('href'), where).toBe(to);
         await userEvent.click(back[0] as HTMLElement);
         await expect.poll(() => at.path).toBe(to);
@@ -1599,10 +1617,17 @@ describe('ReaderPage', () => {
     const tryIt = screen.container.querySelector('.cd-about-try') as HTMLElement;
     const pill = screen.container.querySelector('nav[aria-label="About this prototype"] a') as HTMLElement;
     const item = screen.container.querySelector('.cd-about-contents__link') as HTMLElement;
-    for (const [name, el] of [['Try Desk prototype', tryIt], ['a page pill', pill], ['a contents item', item]] as const) {
+    for (const [name, el] of [['a page pill', pill], ['a contents item', item]] as const) {
       await keyboardFocus(el);
       expect.soft([getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow], name).toEqual(['none', edge]);
     }
+    // The way into the prototype is the page's primary button, whose ink fill would hide that edge: as the design
+    // system's primary, its edge is 2 px of the page's own paper.
+    await keyboardFocus(tryIt);
+    expect([getComputedStyle(tryIt).outlineStyle, getComputedStyle(tryIt).boxShadow]).toEqual([
+      'none',
+      `${tokenColor('--bg-app', root)} 0px 0px 0px 2px inset`,
+    ]);
     // A contents item reaches 8 px past its words on each side, so its edge clears the number, while the words
     // stay level with the list's own edge.
     const list = (item.closest('ol') as HTMLElement).getBoundingClientRect();

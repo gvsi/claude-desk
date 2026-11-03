@@ -38,12 +38,6 @@
   background: var(--va-bar);
 }
 
-/* The link into the prototype keeps a hairline edge in the bar, until keyboard focus turns it
-   line-focus (PrototypeLink.css). On a phone it has none. */
-.cd-about-top .cd-about-try:not(.cd-about-try--compact, :focus-visible) {
-  box-shadow: inset 0 0 0 1px var(--line-hairline);
-}
-
 /* On paper the bar is the page's first line, not laid over what follows. */
 @media print {
   .cd-about-top {

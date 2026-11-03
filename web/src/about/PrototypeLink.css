@@ -1,42 +1,25 @@
-/* PrototypeLink: a quiet pill with the chat icon, "Try Desk prototype". On a phone's top bar it drops the
-   outline. Its own file, so the error page can show it without loading the reading page's styles. */
+/* PrototypeLink: the About pages' way into the prototype, their one primary button. Its fill, words, corners,
+   hover and keyboard focus are design system v2's primary button (Button.css), on the About set's paper
+   (paper.css points the button's tokens at its ink). Here only what a button with a leading icon adds: the icon
+   side a little tighter, and the words on one line. Its own file, so the error page can show it without loading
+   the reading page's styles. */
 
-.cd-about-try {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-6);
-  height: var(--size-control);
-  padding: 0 var(--space-12) 0 var(--space-10);
-  border-radius: var(--radius-full);
-  box-shadow: inset 0 0 0 1px var(--line-control);
-  color: var(--text-primary);
-  text-decoration: none;
+.cd-button.cd-about-try {
+  padding-left: var(--space-10);
   white-space: nowrap;
-}
-
-.cd-about-try:hover {
-  background: var(--fill-hover);
-}
-
-/* Keyboard focus turns the pill's edge line-focus, the outline drawn inside it as its edge is; on a
-   phone's top bar, where it has no edge, the same 1 px edge shows inside it. */
-.cd-about-try:focus-visible {
-  box-shadow: inset 0 0 0 1px var(--line-focus);
 }
 
 .cd-about-try__icon {
   flex: none;
 }
 
-.cd-about-try--compact {
-  margin-left: calc(var(--space-4) * -1);
-  padding: 0 var(--space-8) 0 var(--space-4);
-  box-shadow: none;
-}
-
-/* On the narrowest phones the top bar holds the link, the 32 px bell and "Claude Desk" only without
-   the link's chat icon; its words say where it goes. */
+/* On the narrowest phones the top bar holds the button, the 32 px bell and "Claude Desk" only without the
+   button's icon, and with its sides a little tighter; its words say where it goes. */
 @media (max-width: 359.98px) {
+  .cd-button.cd-about-try--compact {
+    padding-inline: var(--space-8);
+  }
+
   .cd-about-try--compact .cd-about-try__icon {
     display: none;
   }
