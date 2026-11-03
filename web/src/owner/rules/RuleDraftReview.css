@@ -17,20 +17,6 @@
   min-width: 0;
 }
 
-/* The draft's rules by outcome, in Claude's serif. */
-.cd-rule-draft__summary {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-  min-width: 0;
-  color: var(--text-primary);
-}
-
-.cd-rule-draft__summary > p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 /* Once its confirm is answered in Ask Claude, the review fades out on motion-fast, and the receipt
    lands in its place. Under reduced motion the receipt is there at once. */
 .cd-rule-draft--leaving {

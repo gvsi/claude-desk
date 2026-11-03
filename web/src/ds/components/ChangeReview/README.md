@@ -12,6 +12,10 @@
 
 ## What it shows
 
+The app's draft and preset reviews pass `sentenceReview` (B3). Each side supplies `sentence: { parts, meta }` from the shared `ruleSentence`, `ruleMeta` and `ruleQualifiers` wording. A row has one left-column tag, "Changed", "New" or "Removed". Changed shows Before and After; New shows After alone; Removed shows Before alone. A tool activation keeps its "Turned on" tag and its tool title above After, set off as user text; its sentence meta names only that tool, even under a shared rule. Each side is a `RuleSentence` styled as the Rules page's rule cell: the sentence in primary text, then a secondary line with its tools (the review has no tool heading above it), who it is for and its qualifiers ("Payment link · Anyone · Checked by the reviewer · Over $300, it asks you first"), and its outcome, beside the refused or handled bar. Rule changes name tools once per side and keep their user-text treatment, including shared rules whose coverage changes. On phones the tag keeps its column and the outcome stacks under the sentence's meta. A successful check is the line "Checked against the always-on rules and your other rules before you confirm." below the card. Failed and unavailable checks retain their notices and disabled confirm.
+
+Without `sentenceReview`, the existing field review remains available to standalone design-system consumers:
+
 - A "Changes" card (`section`), a row per change under a hairline:
   - A tag in words in an outlined pill: "Added", "Removed", "Changed" or "Turned on".
   - `title` in weight 520, then a meta line: the `connector`'s name with no "Built in" and, for an app, its Mock badge (`ConnectorName`, so a mock is never named without "Mock"), then for an added, removed or turned-on rule its `words`, joined by " · ". The meta line never says what the rule applies to: the title names it, and a side's own line says it when it isn't the title. So a row names its tools once, as a changed row does, and no title sits mid-line. A rule for one person leads its words with who it is for ("Dana Whitfield, verified · Up to $50"), so the row reads as that person's rule.
@@ -32,7 +36,7 @@
 ## Types
 
 - `RuleTarget = ToolTitles | string`: what a rule is about. Tools are named by their titles, `{ titles: ['Payment link', 'Refund'] }`, drawn "Payment link and Refund" with each title its own `data-copy="user"` span (`ToolTitleList`), since a tool's title is its own words (a business's job from setup), not the app's. Each is set off as user text (`.cd-user-name`, text-primary at weight 520, isolated for text direction) and starts its line: a row's title and a side's target line. A string is the screen's own words for a group of tools, "Every tool that charges money", drawn as it is.
-- `ChangeSide = { appliesTo?: RuleTarget; mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }`. `appliesTo` is what the rule covers (`{ titles: ['Payment link'] }`, "Every tool that charges money"); the design system formats none.
+- `ChangeSide = { sentence?: Pick<RuleSentenceProps, 'parts' | 'meta'>; appliesTo?: RuleTarget; mode: RuleMode; limit?: string; reason: string; words: RuleWord[] }`. `appliesTo` is what the rule covers (`{ titles: ['Payment link'] }`, "Every tool that charges money"); the design system formats none.
 - `ChangeRowView = { key: string; change: 'added' | 'removed' | 'changed' | 'turned_on'; title: RuleTarget; connector?: ConnectorView; shared?: boolean; before: ChangeSide | null; after: ChangeSide | null; changed: RuleField[] }`. `shared` marks a rule on a group of tools, by the rule above; the screen decides it, as `RuleRow`'s `shared` does.
 
 ## Diffing rules: `ruleDiff`
@@ -59,6 +63,7 @@
 | Prop | Type | Notes |
 | --- | --- | --- |
 | `rows` | `ChangeRowView[]` | Required. |
+| `sentenceReview` | `boolean` | B3's one sentence per side and one change tag per row. Each side must supply `sentence`. |
 | `checks` | `{ status: 'checked' \| 'failed' \| 'unavailable'; lines: string[] }` | Required. |
 | `confirmLabel` | `string` | "Confirm change" by default. |
 | `cancelLabel` | `string` | "Keep my rules" by default. |

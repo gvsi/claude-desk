@@ -7,7 +7,7 @@ import { composeStories } from '@storybook/react-vite';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { fn } from 'storybook/test';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { rivera } from '../../fixtures';
 import { expectUserText } from '../../test/expectUserText.ts';
@@ -44,6 +44,12 @@ function confirmButton(): HTMLButtonElement {
 
 it('a_confirm_that_throws_releases_the_button', () => {
   const thrown = new Error('The screen could not send the confirm');
+  const expectedError = new Error('Uncaught Error: The screen could not send the confirm');
+  const originalError = console.error.bind(console);
+  const consoleError = vi.spyOn(console, 'error').mockImplementation((...args) => {
+    if (args.length === 1 && args[0] instanceof Error && args[0].message === expectedError.message) return;
+    originalError(...args);
+  });
   // The story's own kind of mock, so it takes the place of the story's onConfirm.
   const onConfirm = fn().mockImplementation(() => {
     throw thrown;
@@ -66,10 +72,12 @@ it('a_confirm_that_throws_releases_the_button', () => {
     onConfirm.mockImplementation(() => undefined);
     act(() => confirmButton().click());
     expect(onConfirm).toHaveBeenCalledTimes(2);
+    expect(consoleError.mock.calls).toEqual([[expectedError], [expectedError]]);
     // That press didn't throw, so it waits for its result: a third press sends nothing.
     act(() => confirmButton().click());
     expect(onConfirm).toHaveBeenCalledTimes(2);
   } finally {
+    consoleError.mockRestore();
     window.removeEventListener('error', onError);
   }
 });
