@@ -5369,7 +5369,10 @@ describe('consultant setup', () => {
     const rect = card.element().getBoundingClientRect();
     const bounds = pane.getBoundingClientRect();
     expect(rect.bottom).toBeLessThanOrEqual(bounds.bottom + 1);
-    expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    // The card shows whole where it fits; taller than the pane (545 px in a 520 px pane on this
+    // phone), it shows its end, with its buttons, and its title scrolls up.
+    if (rect.height <= bounds.height) expect(rect.top).toBeGreaterThanOrEqual(bounds.top - 1);
+    else expect(rect.top).toBeLessThan(bounds.top);
     expectNoHorizontalScroll();
     // Reading earlier messages cancels pinning, including across another resize.
     pane.scrollTop = 0;
