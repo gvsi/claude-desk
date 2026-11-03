@@ -7,7 +7,8 @@
  * as failed to open, and "Try again" reads again; one with no entry to mark, while a code is
  * awaited, says so in the inbox's place.
  *
- * On a window at least 1280 px wide it is a column beside the chat, once there is something in it.
+ * On a window at least 1280 px wide it is a column beside the chat, once there is something in it
+ * or while a code is awaited.
  * Below that it is the design system's `DemoInboxSheet`: its "Demo inbox" button under the
  * conversation, from the moment the chat asks for a code or a code's notice arrives, and the sheet
  * that rises from the bottom and opens itself on the first code.
@@ -121,9 +122,9 @@ function unreadable(view: VisitorInboxView, awaitingCode: boolean): boolean {
   return view.items.length === 0 && view.failed && awaitingCode;
 }
 
-/** Whether the inbox's column has a place beside the chat: once it has something in it, or says it couldn't be read. */
+/** Whether the inbox's column has a place beside the chat: once it has something in it, or while a code is awaited. */
 export function inboxShown(view: VisitorInboxView, awaitingCode: boolean): boolean {
-  return view.items.length > 0 || unreadable(view, awaitingCode);
+  return view.items.length > 0 || awaitingCode;
 }
 
 export interface VisitorInboxProps {
@@ -137,8 +138,9 @@ export interface VisitorInboxProps {
 }
 
 /**
- * The inbox in its place. As a column, nothing until it has something in it. As a sheet, its
- * button from the moment the chat asks for a code or a code's notice arrives. Either way, a read
+ * The inbox in its place. As a column, nothing until it has something in it or a code is
+ * awaited. As a sheet, its button from the moment the chat asks for a code or a code's notice
+ * arrives. Either way, a read
  * that failed with no entry to mark shows the inbox's title over that line and "Try again" while a
  * code is awaited, so the code never just isn't there.
  */
@@ -158,8 +160,10 @@ export function VisitorInbox({ view, awaitingCode, placement, language }: Visito
       </div>
     );
   }
-  if (view.items.length === 0) return null;
-  // The panel is a region named by its own title, so the place around it is a plain block.
+  if (view.items.length === 0 && !awaitingCode) return null;
+  // The panel is a region named by its own title, so the place around it is a plain block. While
+  // a code is awaited it shows even with nothing in it yet, saying so (owner, 2026-11-02): a
+  // contact not on record gets no code, and the inbox must still be there to look in.
   return (
     <div className="cd-public-chat__inbox-column">
       <DemoInboxPanel viewer="visitor" items={view.items} language={language} onRetry={view.retry} />

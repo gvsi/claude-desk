@@ -8,6 +8,8 @@ import type { CopyLanguage } from '../Notice/errorCopy.ts';
 export interface VerifyCopy {
   /** The field's label. */
   label: string;
+  /** What the empty field asks for: the code, which is always six digits. */
+  placeholder: string;
   /** The button that sends the code. It keeps these words while the code is checked. */
   confirm: string;
   /** Why the last code didn't work, alike for a wrong, expired or used-up code. */
@@ -21,6 +23,7 @@ export interface VerifyCopy {
 export const VERIFY_COPY = {
   en: {
     label: '6-digit code',
+    placeholder: 'Enter the 6-digit code',
     confirm: 'Confirm',
     failed: 'That code didn’t work. Check the newest code, or ask me for a new one.',
     cantGetCode: 'I can’t get the code',
@@ -28,6 +31,7 @@ export const VERIFY_COPY = {
   },
   es: {
     label: 'Código de 6 dígitos',
+    placeholder: 'Escribe el código de 6 dígitos',
     confirm: 'Confirmar',
     failed: 'Ese código no funcionó. Revisa el más reciente o pídeme uno nuevo.',
     cantGetCode: 'No me llega el código',
