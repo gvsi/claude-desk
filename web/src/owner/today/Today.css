@@ -110,43 +110,6 @@
   }
 }
 
-/* Today's outcomes wrap inside the presence words' column without setting its natural width. */
-.cd-how__today {
-  contain: inline-size;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-8) var(--space-16);
-  margin: var(--space-6) 0 0;
-  padding: 0;
-  border: 0;
-  color: var(--text-secondary);
-}
-
-.cd-how__outcome {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-6);
-}
-
-/* Each outcome's words stay quiet and its count stands out; the link's underline marks the whole. */
-.cd-how__link {
-  color: var(--text-secondary);
-  text-decoration: underline;
-  text-decoration-color: var(--line-control);
-  text-underline-offset: 3px;
-}
-
-.cd-how__link:hover {
-  text-decoration-color: currentColor;
-}
-
-.cd-how__count {
-  color: var(--text-primary);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Things to try */
 
 .cd-things {
@@ -854,10 +817,6 @@
 @container cd-approval-answers (max-width: 437.98px) {
   .cd-today-skeleton__answer { min-height: calc(var(--size-control-main) + var(--space-4)); }
 }
-/* The Today line's shapes keep its wrapping and the 8 px gap between rows. */
-.cd-today-skeleton__how-today { display: block; }
-.cd-today-skeleton__how-items { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); }
-.cd-today-skeleton__how-paint { gap: var(--space-8); }
 /* The "Not live yet" card: on a phone, where "Continue setup" drops under the words, the words keep
    the card's width, as the real title and line take it, rather than shrink to the shapes. */
 @media (max-width: 639.98px) {

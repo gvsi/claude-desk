@@ -18,8 +18,6 @@
   - "Copied" and the check are `aria-hidden`. The screen says it to screen readers in its own `role="status"` line ("Your Desk link is copied."), as Today does.
 - `actions`, the screen's own controls, after the link pill: usually one `Button`. Today puts "Chat as a customer" there (secondary, `href` and `external`). The design system draws no action of its own.
 
-- `children`, optional screen content below the presence line in the text column. Today places its outcome counts and links here.
-
 ## Layout
 
 - From 640 px the text sits at the left and the pill and the actions at the right of the greeting's line, 24 px apart at least, in a row 12 px apart that wraps. That row has a 4 px top, so the pill and a button sit level with the greeting's first line (TOD-04). On a line too narrow for both, the row drops under the text, 16 px under it.
@@ -33,7 +31,6 @@
 | `presence` | `{ line: string; people: PresenceGlyph[] }` | The line in `body` type, `text-secondary`. At most three glyphs. |
 | `link` | `{ label: string; onCopy: () => void; copied?: boolean }` | An outlined pill at the right; it drops under the text on a narrow line. `copied` says "Copied" with a check, at the same width. |
 | `actions` | `ReactNode` | After the pill, in the same row. |
-| `children` | `ReactNode` | Below the presence line, inside the text column. |
 
 ## Motion
 

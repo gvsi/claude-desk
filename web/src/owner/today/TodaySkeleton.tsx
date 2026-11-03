@@ -15,11 +15,8 @@ import {
   CONTINUE_SETUP_COPY,
   continueSetupLine,
   handledCount,
-  outcomeWords,
   steppedInCount,
   TODAY_COPY,
-  todayOutcomes,
-  type TodayOutcomesLine,
 } from './copy.ts';
 import { sinceLastNightLine } from './sinceLastNightLine.ts';
 
@@ -123,15 +120,12 @@ function GreetingWords({ setup }: { setup?: SkeletonSetup }) {
   const greeting = name ? `${said}, ${name}` : said;
   const title = useWordWidth(box, greeting, 'cd-greeting__title cd-type-greeting', true);
   const presence = useWordWidth(box, PRESENCE, 'cd-greeting__presence cd-type-body', true);
-  const outcomes = setup !== undefined ? QUIET_OUTCOMES : FRESH_OUTCOMES;
-  // Only the title and presence set the real greeting's natural width; outcomes wrap inside it.
   return <div ref={box} className="cd-greeting__text" style={{ width: `max(${title ?? 0}px, ${presence ?? 0}px)` }}>
     <TextLines words={greeting} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" lastWidth="100%" />
-    <div className="cd-greeting__presence cd-type-body">
+    <div className="cd-greeting__presence cd-type-body" data-skeleton-anchor="presence">
       <span className="cd-greeting__glyphs" aria-hidden="true"><span className="cd-today-skeleton__glyph-room" /></span>
       <div className="cd-greeting__presence-text">
         <TextLines words="One person is talking to your Desk right now." text="body" className="cd-greeting__presence-line" probeClassName="" lastWidth="80%" lineWidth="80%" singleLineClassName="cd-today-skeleton__presence" />
-        <TodayLineRows outcomes={outcomes} />
       </div>
     </div>
   </div>;
@@ -172,15 +166,6 @@ function Legend() {
     </div>
   </div>;
 }
-
-/**
- * The fresh copy's Today line (Decision 15): the night's answer and booking handled, its one request
- * held, nothing turned down.
- */
-const FRESH_OUTCOMES = todayOutcomes({ handled: 2, held: 1, turnedDown: 0 });
-
-/** A Desk whose setup isn't finished has most likely been asked nothing yet today. */
-const QUIET_OUTCOMES = todayOutcomes({ handled: 0, held: 0, turnedDown: 0 });
 
 /**
  * What a Desk whose setup isn't finished needs to be drawn as it will land: the "Not live yet" card's
@@ -277,34 +262,6 @@ function ContinueSetupShape({ step, answering, business }: SkeletonSetup) {
   );
 }
 
-/** The Today line: one quiet line in its real wrapping, or else its real flex items, unseen, then one pill on each row they take. */
-function TodayLineRows({ outcomes }: { outcomes: TodayOutcomesLine }) {
-  if (outcomes.quiet) {
-    return <div className="cd-how__today cd-today-skeleton__how-today" data-skeleton-anchor="today-line">
-      <TextLines words={outcomes.line} />
-    </div>;
-  }
-  return <TodayLineItems outcomes={outcomes} />;
-}
-
-function TodayLineItems({ outcomes }: { outcomes: Extract<TodayOutcomesLine, { quiet: false }> }) {
-  const box = useRef<HTMLDivElement>(null);
-  const rows = useRows(box);
-  return <div className="cd-how__today cd-today-skeleton__how-today" data-skeleton-anchor="today-line">
-    <div className="cd-today-skeleton__legend">
-      <div ref={box} className="cd-today-skeleton__how-items cd-type-meta cd-today-skeleton__legend-room">
-        <span><WordRoom words={outcomes.lead} /></span>
-        {outcomes.parts.map((part) => (
-          <span key={part.kind} className="cd-how__outcome"><span className="cd-status-dot" /><WordRoom words={outcomeWords(part)} /></span>
-        ))}
-      </div>
-      <div className="cd-today-skeleton__legend-paint cd-today-skeleton__how-paint">
-        {Array.from({ length: rows }, (_, i) => <Skeleton key={i} shape="line" text="meta" />)}
-      </div>
-    </div>
-  </div>;
-}
-
 /** A fresh hold's status and age can also wrap to two rows in the card's narrow column. */
 function ApprovalTop() {
   const box = useRef<HTMLDivElement>(null);
@@ -355,7 +312,7 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
 }
 
 /**
- * The first view of a fresh copy: the band (greeting, presence and today's line, link, "Chat as a customer"
+ * The first view of a fresh copy: the band (greeting, presence, link, "Chat as a customer"
  * and six things to try), one held request and the recorded night. Given a Desk whose setup isn't
  * finished (`setup`), the band draws its "Not live yet" card first under the greeting, as Today will.
  */
@@ -364,7 +321,7 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
     <div className="cd-today cd-today--skeleton">
       <div className="cd-today__band">
         <div className="cd-today__greeting">
-          <div className="cd-greeting">
+          <div className="cd-greeting" data-skeleton-anchor="greeting-header">
             <GreetingWords setup={setup} />
             <div className="cd-greeting__actions">
               <Skeleton

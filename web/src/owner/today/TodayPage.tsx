@@ -16,7 +16,6 @@ import { useRequestRules } from '../rules/useRequestRules.ts';
 import { firstName, heldOldestFirst, isLive, needsYouKey, useNeedsYou, useToday, useTodayOpening } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ContinueSetup } from './ContinueSetup.tsx';
-import { TodayOutcomes } from './TodayOutcomes.tsx';
 import { LiveNow } from './LiveNow.tsx';
 import { NeedsYou, type CallbackItem } from './NeedsYou.tsx';
 import { greetingPresence } from './presence.ts';
@@ -294,15 +293,7 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
                     Chat as a customer
                   </Button>
                 }
-              >
-                <TodayOutcomes
-                  deskId={deskId}
-                  today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
-                  heldCount={readWorked ? listed.length : undefined}
-                  callbackCount={callbacks.length}
-                  firstHeld={firstHeld}
-                />
-              </Greeting>
+              />
               <p className="cd-sr-only" role="status">
                 {linkCopy === 'idle' ? '' : LINK_COPY_LINE[linkCopy]}
               </p>

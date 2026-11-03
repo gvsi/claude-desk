@@ -2662,19 +2662,16 @@ describe('Today', () => {
     const live = region(screen, 'Live now');
     const column = await focusMarkDoneAtTheFoot(screen, live.element());
     const before = { column: column.scrollTop, window: window.scrollY };
-    // The page's own line: Today's loading shapes, while they fade out, draw one of their own.
     const greeting = document.querySelector('.cd-today:not(.cd-today--skeleton) .cd-greeting')!;
-    const todayLine = () => greeting.querySelector('.cd-how__today')!.getBoundingClientRect().height;
-    const lineBefore = todayLine();
+    const headerBefore = box(greeting).height;
 
     await userEvent.keyboard('{Enter}');
     await expect.element(region(screen, 'Needs you')).not.toBeInTheDocument();
     expect(document.activeElement).toBe(live.element());
-    // Callbacks aren't counted in the Today line, so marking one done leaves its height and the
-    // column's scroll unchanged; the focus scrolls nothing itself.
-    const shrunk = lineBefore - todayLine();
-    expect(shrunk).toBe(0);
-    expect(column.scrollTop).toBe(before.column - shrunk);
+    // Marking a callback done leaves the header and column's scroll unchanged;
+    // moving focus to Live now does not scroll the page.
+    expect(box(greeting).height).toBe(headerBefore);
+    expect(column.scrollTop).toBe(before.column);
     expect(window.scrollY).toBe(before.window);
   });
 
@@ -3379,7 +3376,7 @@ describe("Today's top band", () => {
     // The greeting has 16 px over it on a laptop, inside the page's own padding.
     expectComputed(band.querySelector('.cd-today__greeting')!, { paddingTop: '16px' });
 
-    // Things to try sits 32 px under the greeting and its outcome line, in the band:
+    // Things to try sits 32 px under the greeting, in the band:
     // six equal cards, three across in two rows, 16 px apart, across the band, each row's next steps on one line.
     expect(band.contains(things.element())).toBe(true);
     expect(box(things.element()).top - box(header).bottom).toBeCloseTo(32, 0);
@@ -3461,7 +3458,7 @@ describe("Today's top band", () => {
     await expect.element(screen.getByText('One person is talking to your Desk right now.')).toBeVisible();
     await skeletonGone();
 
-    // Title, presence, outcomes, link pill, then "Chat as a customer", from one left edge.
+    // Title, presence, link pill, then "Chat as a customer", from one left edge.
     const title = box(screen.getByRole('heading', { level: 1 }).element());
     const presence = box(document.querySelector('.cd-greeting__presence')!);
     const pill = box(document.querySelector('.cd-greeting__link')!);
@@ -3469,8 +3466,8 @@ describe("Today's top band", () => {
     const header = page.elementLocator(document.querySelector('.cd-greeting')!);
     const chat = box(header.getByRole('link', { name: 'Chat as a customer', exact: true }).element());
     expect(presence.top).toBeGreaterThanOrEqual(title.bottom);
-    const outcomes = box(header.element().querySelector('.cd-how__today')!);
-    expect(pill.top - outcomes.bottom).toBeCloseTo(16, 0);
+    expect(pill.top - presence.bottom).toBeCloseTo(16, 0);
+    expect(box(things.element()).top - box(header.element()).bottom).toBeCloseTo(32, 0);
     expect(chat.top).toBeGreaterThanOrEqual(pill.bottom);
     for (const each of [presence, pill, chat]) expect(each.left).toBeCloseTo(title.left, 0);
     // No extra room over the greeting on a phone.
@@ -3567,250 +3564,34 @@ describe("Today's top band", () => {
   });
 });
 
-describe("Today's outcomes under the greeting", () => {
+describe("Today's greeting", () => {
+  it.each(['desktop', 'phone'] as const)('today_has_no_outcomes_line_at_%s', async (viewport) => {
+    const { screen } = await renderRoute(TODAY, { viewport });
+    await expect.element(screen.getByText('One person is talking to your Desk right now.')).toBeVisible();
+    await skeletonGone();
+    expect(document.querySelector('.cd-how__today')).toBeNull();
+    expect(screen.getByRole('main').element().textContent).not.toContain('Today, Claude');
+  });
+
   it.each([1440, 1512].flatMap((width) => [1, 3].map((people) => ({ width, people }))))(
-    'today_outcomes_do_not_widen_the_header_with_$people people at $width', async ({ width, people }) => {
+    'greeting_keeps_actions_on_the_top_row_with_$people people at $width', async ({ width, people }) => {
     await injectToday((t) => ({
       ...t,
       live: Array.from({ length: people }, (_, i) => ({ ...t.live[0]!, session_id: `ses-presence-${i}` })),
     }));
     const { screen } = await renderRoute(TODAY, { viewport: { width, height: 900 } });
-    await expect.element(screen.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
     await skeletonGone();
     const greeting = document.querySelector('.cd-greeting')!;
     const text = greeting.querySelector('.cd-greeting__text')!;
     const title = greeting.querySelector('.cd-greeting__title')!;
     const actions = greeting.querySelector('.cd-greeting__actions')!;
-    const words = greeting.querySelector('.cd-greeting__presence-line')!;
-    const line = greeting.querySelector<HTMLElement>('.cd-how__today')!;
+    expect(greeting.querySelectorAll('.cd-greeting__glyph')).toHaveLength(people);
     expect(box(actions).top).toBe(box(title).top);
-    expect(box(line).left).toBe(box(words).left);
-    // The text grows into all remaining room beside the actions, even with inline containment.
     expect(box(actions).left - box(text).right).toBeCloseTo(24, 0);
-    const withOutcomes = box(text).width;
-    line.style.display = 'none';
-    expect(box(text).width).toBe(withOutcomes);
-    line.style.removeProperty('display');
-    if (people === 1) expect(box(line).height).toBe(19);
-    for (const outcome of line.children) {
-      expect(box(outcome).left).toBeGreaterThanOrEqual(box(words).left);
-      expect(box(outcome).right).toBeLessThanOrEqual(box(line).right);
-    }
+    expect(box(actions.querySelector('.cd-greeting__link')!).top - box(title).top).toBeCloseTo(4, 0);
+    expect(box(actions.querySelector('.cd-button')!).top - box(title).top).toBeCloseTo(4, 0);
     expectNoHorizontalScroll();
-  });
-
-  it.each([1512, 390].flatMap((width) => [0, 1, 3].map((people) => ({ width, people }))))(
-    'today_outcomes_follow_the_presence_words_with_$people_people_at_$width', async ({ width, people }) => {
-    if (people !== 1) await injectToday((t) => ({
-      ...t,
-      live: Array.from({ length: people }, (_, i) => ({ ...t.live[0]!, session_id: `ses-presence-${i}` })),
-    }));
-    const { screen } = await renderRoute(TODAY, { viewport: { width, height: 900 } });
-    await expect.element(screen.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
-    await skeletonGone();
-    expect(screen.getByRole('heading', { name: 'How your Desk works', exact: true }).elements()).toHaveLength(0);
-    const greeting = document.querySelector('.cd-greeting')!;
-    const presence = greeting.querySelector('.cd-greeting__presence')!;
-    const words = presence.querySelector('.cd-greeting__presence-line')!;
-    const line = greeting.querySelector('.cd-how__today')!;
-    expect(line).not.toBeNull();
-    expect(line.parentElement).toBe(words.parentElement);
-    expect(line.parentElement).toHaveClass('cd-greeting__presence-text');
-    expect(box(line).top - box(words).bottom).toBeCloseTo(12, 0);
-    expect(box(line).left).toBeCloseTo(box(words).left, 0);
-    expect(box(words).left - box(greeting).left).toBeCloseTo(people === 0 ? 0 : 2 + people * 22 + 10, 0);
-    const actions = greeting.querySelector('.cd-greeting__actions')!;
-    if (width === 390) expect(box(actions).top - box(line).bottom).toBeCloseTo(16, 0);
-    else expect(box(actions).top).toBeGreaterThanOrEqual(box(greeting).top);
-    expectNoHorizontalScroll();
-    expect(line.textContent).toBe('Today, Claude handled 2 on its own held 1 for you');
-    expect(box(region(screen, 'Things to try').element()).top - box(greeting).bottom).toBeCloseTo(32, 0);
-    await expectScreenBasics(screen.container, { owner: true });
-  });
-
-  it('today_line_counts_only_held_requests_like_safety', async () => {
-    openCallback();
-    openCallback('ses-visitor-web');
-    const items = await needsYouRead();
-    const seeded = items.find((item) => item.decision != null);
-    if (!seeded?.decision) throw new Error('the seed holds a request');
-    const newer: NeedsYouItem = {
-      ...seeded,
-      decision: { ...seeded.decision, decision_id: 'dec-newer', reason_plain: 'A visitor asked to book Sunday at 10:00 pm.' },
-      held_at: new Date().toISOString(),
-    };
-    // Two held requests and two callbacks: the aggregate remains four Needs you cards.
-    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: [newer, ...items] });
-    await injectToday((t) => ({ ...t, needs_you_count: 4 }));
-    const { screen, router } = await renderRoute(TODAY);
-    const how = screen.getByRole('main');
-    const held = how.getByRole('link', { name: 'held 2 for you', exact: true });
-    await expect.element(held).toBeVisible();
-    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
-    await expect.element(held).toHaveAttribute('href', `${DESK}/conversations/${seeded.decision.session_id}#request-${encodeURIComponent(seeded.decision.decision_id)}`);
-    await held.click();
-    expect(router.state.location.pathname).toBe(`${DESK}/conversations/${seeded.decision.session_id}`);
-    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    await router.navigate(`${DESK}/safety`);
-    await expect.element(screen.getByRole('link', { name: '2 held for you', exact: true })).toBeVisible();
-  });
-
-  it('today_line_counts_handled_and_refused_from_the_briefing', async () => {
-    // Handled is the night's answers and bookings; turned down, the requests refused. Held comes
-    // from Needs you's requests, even when Today's aggregate differs. Each links to where it is.
-    await injectToday((t) => ({ ...t, needs_you_count: 4, briefing: { ...t.briefing, answers: 3, bookings: 2, turned_down: 1 } }));
-    const { screen } = await renderRoute(TODAY);
-    const how = screen.getByRole('main');
-    const line = () => how.element().querySelector<HTMLElement>('.cd-how__today');
-    await vi.waitFor(() => expect(line()).not.toBeNull());
-    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-    expect(line()!.textContent).toBe('Today, Claude handled 5 on its own held 1 for you turned down 1 request');
-    const outcomes = [...line()!.querySelectorAll('.cd-how__outcome')];
-    expect(outcomes.map((o) => o.querySelector('.cd-status-dot')?.className)).toEqual([
-      'cd-status-dot cd-status-dot--handled',
-      'cd-status-dot cd-status-dot--held',
-      'cd-status-dot cd-status-dot--refused',
-    ]);
-    const links = outcomes.map((o) => o.querySelector('a'));
-    expect(links.map((a) => a?.textContent)).toEqual(['handled 5 on its own', 'held 1 for you', 'turned down 1 request']);
-    expect(links.map((a) => a?.getAttribute('href'))).toEqual([
-      `/app/${RIVERA.deskId}/conversations`,
-      `/app/${RIVERA.deskId}/conversations/${seededHold().session_id}#request-${encodeURIComponent(seededHold().decision_id)}`,
-      `/app/${RIVERA.deskId}/safety`,
-    ]);
-    // The line has no band or hairline; each outcome stays underlined in the secondary ink,
-    // with its count in the primary ink.
-    expectComputed(line()!, { borderTopWidth: '0px', paddingTop: '0px', marginTop: '6px', columnGap: '16px', rowGap: '8px' });
-    const link = links[0]!;
-    expectComputed(link, { textDecorationLine: 'underline', textUnderlineOffset: '3px' });
-    expect(getComputedStyle(link).color).toBe(getComputedStyle(line()!).color);
-    const count = link.querySelector('b')!;
-    expect(count.textContent).toBe('5');
-    expectComputed(count, { fontWeight: '600', fontVariantNumeric: 'tabular-nums' });
-    expect(getComputedStyle(count).color).not.toBe(getComputedStyle(line()!).color);
-
-    // "held 1 for you" opens the oldest held request in its conversation.
-    await how.getByRole('link', { name: 'held 1 for you', exact: true }).click();
-    await expect.element(heldCard(screen, SEEDED_REASON)).toBeVisible();
-  });
-
-  it('today_line_omits_held_when_only_callbacks_wait', async () => {
-    openCallback();
-    openCallback('ses-visitor-web');
-    const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
-    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
-    await injectToday((t) => ({ ...t, needs_you_count: 2 }));
-    const { screen, router } = await renderRoute(TODAY);
-    const how = screen.getByRole('main');
-    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
-    expect(how.element().querySelector('.cd-how__today')?.textContent).toBe('Today, Claude handled 2 on its own');
-    expect(how.element().querySelector('.cd-how__outcome .cd-status-dot--held')).toBeNull();
-    expect(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true }).elements()).toHaveLength(2);
-    await router.navigate(`${DESK}/safety`);
-    await expect.element(screen.getByRole('heading', { name: 'Safety', exact: true })).toBeVisible();
-    expect(screen.getByRole('link', { name: /held for you/ }).elements()).toHaveLength(0);
-  });
-
-  it('today_line_draws_no_quiet_line_when_a_callback_waits', async () => {
-    openCallback();
-    const callbacks = (await needsYouRead()).filter((item) => item.handoff != null);
-    mockStore.inject({ route: 'needsYou', status: 200, times: 10_000, body: callbacks });
-    await injectToday((t) => ({ ...t, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
-    const { screen } = await renderRoute(TODAY);
-    await expect.element(region(screen, 'Needs you').getByRole('article', { name: 'Wants you', exact: true })).toBeVisible();
-    expect(screen.getByRole('main').element().querySelector('.cd-how__today')).toBeNull();
-  });
-
-  it('today_line_says_a_quiet_day_and_waits_for_the_answers', async () => {
-    // A quiet day: one quiet line in place of the outcomes, with no dots or links.
-    mockStore.reset('rivera_quiet');
-    await injectToday((t) => ({ ...t, needs_you_count: 0, briefing: { ...t.briefing, answers: 0, bookings: 0, turned_down: 0 } }));
-    const quiet = await renderRoute(TODAY);
-    const how = quiet.screen.getByRole('main');
-    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')?.textContent).toBe("Today, Claude hasn't been asked anything yet."));
-    expect(how.element().querySelector('.cd-how__today a, .cd-how__today .cd-status-dot')).toBeNull();
-
-    // A server that doesn't send the answers yet shows no line rather than a count that says less.
-    await cleanup();
-    mockStore.reset('rivera');
-    await injectToday((t) => {
-      const briefing = { ...t.briefing };
-      delete briefing.answers;
-      return { ...t, briefing };
-    });
-    const older = await renderRoute(TODAY);
-    const steps = older.screen.getByRole('main');
-    await expect.element(region(older.screen, 'Since last night').getByRole('listitem').first()).toBeVisible();
-    expect(steps.element().querySelector('.cd-how__today')).toBeNull();
-  });
-
-  it('today_line_draws_no_line_when_today_cannot_be_read', async () => {
-    mockStore.inject({ route: 'today', status: 503, times: 10_000 });
-    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
-    await expect.element(region(screen, 'Since last night').getByRole('button', { name: 'Try again' })).toBeVisible();
-    const how = screen.getByRole('main');
-    expect(how.element().querySelector('.cd-how__today')).toBeNull();
-  });
-
-  it('today_line_keeps_counts_hidden_until_the_reconnected_read_succeeds', async () => {
-    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
-    const { screen } = await renderRoute(TODAY, { pollScale: 100 });
-    const how = screen.getByRole('main');
-    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
-    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
-    const read = holdReads(needsYouPath);
-    onTestFinished(() => onlineManager.setOnline(true));
-    onlineManager.setOnline(false);
-    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
-    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
-
-    mockStore.world.decisions.clear();
-    onlineManager.setOnline(true);
-    await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
-    await vi.waitFor(() => expect(queryClient.getQueryState(needsYouKey(RIVERA.deskId))?.fetchStatus).toBe('fetching'));
-    await nextFrames();
-    expect(how.element().querySelector('.cd-how__today')).toBeNull();
-    read.release();
-    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
-    expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0);
-
-    // An ordinary refresh keeps the current line while its response is pending.
-    const poll = holdReads(needsYouPath);
-    const refresh = queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
-    await vi.waitFor(() => expect(poll.held()).toBeGreaterThan(0));
-    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
-    poll.release();
-    await refresh;
-  });
-
-  it('today_line_hides_and_recovers_counts_after_a_needs_you_refresh_fails', async () => {
-    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
-    const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-    const how = screen.getByRole('main');
-    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
-    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
-    mockStore.inject({ route: 'needsYou', status: 503, times: 10_000 });
-    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
-    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
-
-    mockStore.reset('rivera');
-    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
-    await expect.element(how.getByRole('link', { name: 'held 1 for you', exact: true })).toBeVisible();
-    await allowTheSeededRequest(screen);
-    await queryClient.refetchQueries({ queryKey: needsYouKey(RIVERA.deskId) });
-    await vi.waitFor(() => expect(how.getByRole('link', { name: /held .* for you/ }).elements()).toHaveLength(0));
-    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
-  });
-
-  it('today_line_hides_kept_counts_when_a_refresh_fails', async () => {
-    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
-    const { screen } = await renderRoute(TODAY, { pollScale: 100, retryScale: 0 });
-    const how = screen.getByRole('main');
-    await expect.element(how.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
-    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
-    mockStore.inject({ route: 'today', status: 503, times: 10_000 });
-    await queryClient.refetchQueries({ queryKey: todayKey(RIVERA.deskId) });
-    await vi.waitFor(() => expect(how.element().querySelector('.cd-how__today')).toBeNull());
   });
 });
 
