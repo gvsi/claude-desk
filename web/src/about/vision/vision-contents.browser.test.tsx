@@ -2,7 +2,7 @@
  * The Vision article's "On this page" list, in a real browser inside a memory router: the reading pages' own list,
  * beside the article at a laptop's width, where it stays pinned and marks the section being read, and folded into
  * one row at the top on a phone. Following a link moves to its section. Also the cover band's phone headers, one
- * colour for each business. Expected words are written out here, never read from the page's code.
+ * colour for each business, and the top bar's Claude Desk lockup, drawn as the reading pages draw it. Expected words are written out here, never read from the page's code.
  */
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
@@ -11,6 +11,7 @@ import { render } from 'vitest-browser-react';
 
 import { contrastRatio } from '../../ds/contrast.ts';
 import { tokenColor } from '../../test/screen.ts';
+import { ReaderPage } from '../ReaderPage.tsx';
 import { VisionArticle } from './VisionArticle.tsx';
 
 const DESKTOP = { width: 1440, height: 900 };
@@ -249,5 +250,42 @@ describe('The Vision article’s contents', () => {
       expect(getComputedStyle(head).backgroundColor, name).toBe(byName.get(name));
     }
     await screen.unmount();
+  });
+
+  it('the_top_bar_carries_the_reading_pages_lockup', async () => {
+    // The bell and "Claude Desk", with the Preview badge on a laptop, in the same place and at the same size as on
+    // the reading pages: at the bar's left on a laptop, at its right on a phone.
+    const lockup = () => {
+      const brand = document.querySelector('header .cd-about-brand');
+      if (!brand) return null;
+      const box = brand.getBoundingClientRect();
+      return {
+        words: readText(brand),
+        bell: brand.querySelector('svg.cd-mark')?.getAttribute('width'),
+        box: [box.left, box.top, box.width, box.height].map(Math.round),
+      };
+    };
+    for (const size of [DESKTOP, PHONE]) {
+      const where = `at ${size.width}`;
+      const vision = await renderVision(size);
+      const onVision = lockup();
+      await vision.unmount();
+      await page.viewport(size.width, size.height);
+      const reader = await render(
+        <MemoryRouter initialEntries={['/about/prediction']}>
+          <Routes>
+            <Route path="/about/prediction" element={<ReaderPage id="prediction" />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      const onReader = lockup();
+      await reader.unmount();
+      expect(onVision, where).not.toBeNull();
+      expect(onVision?.words, where).toBe(size === DESKTOP ? 'Claude Desk Preview' : 'Claude Desk');
+      expect(onVision?.bell, where).toBe(size === DESKTOP ? '36' : '32');
+      expect(onVision, where).toEqual(onReader);
+      if (size === DESKTOP) expect(onVision?.box[0], where).toBe(80);
+      else expect((onVision?.box[0] ?? 0) + (onVision?.box[2] ?? 0), where).toBe(size.width - 16);
+    }
   });
 });
