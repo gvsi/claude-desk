@@ -656,7 +656,7 @@ describe('Settings against its boards', () => {
     content = await expectSettingsColumns(screen, 'Alerts');
     const vision = expectVisionNote(content, 'In this prototype, alerts arrive in Notifications.');
     const lead = main(screen).getByText(ALERTS_LEAD, { exact: true }).element();
-    expectComputed(lead, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(lead, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     expect(round(top(lead) - bottom(vision))).toBe(20);
     expect(round(top(alerts.element()) - bottom(lead))).toBe(20);
     await expect.element(alerts.getByText('From your business type', { exact: true })).toBeVisible();
@@ -716,7 +716,7 @@ describe('Settings against its boards', () => {
       const answering = main(screen).getByRole('region', { name: 'Claude acts for you' });
       await expect.element(answering).toBeVisible();
       const card = answering.element().getBoundingClientRect();
-      expect(card.height, `${viewport} Answering card height`).toBe(71);
+      expect(card.height, `${viewport} Answering card height`).toBe(73);
       const row = answering.getByRole('switch', { name: 'Claude acts for you' }).element().getBoundingClientRect();
       expect(row.top - card.top).toBe(11);
       expect(card.bottom - row.bottom).toBe(11);
@@ -773,7 +773,7 @@ function expectVisionNote(content: HTMLElement, words: string): HTMLElement {
   expect(pill.textContent).toBe('Mock');
   const note = first.querySelector('p') as HTMLElement;
   expect(note.textContent).toBe(words);
-  expectComputed(note, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(note, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
   expect(round(note.getBoundingClientRect().left - pill.getBoundingClientRect().right)).toBe(12);
   return first;
 }

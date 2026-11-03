@@ -119,7 +119,7 @@ export const Board: Story = {
     await expectOwnerFrame(canvasElement, 'Conversations');
     expectComputed(canvas.getByRole('heading', { level: 1, name: 'Conversations' }), SPEC.pageTitle);
     // The open conversation's name, in the section style the board sets it in.
-    expectComputed(canvas.getByRole('heading', { level: 2, name: lucia.name }), { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+    expectComputed(canvas.getByRole('heading', { level: 2, name: lucia.name }), { fontSize: '16px', lineHeight: '21px', fontWeight: '520' });
 
     // Today's conversations in one row across the top, Lucía's open.
     const strip = canvas.getByRole('navigation', { name: 'Today’s conversations' });

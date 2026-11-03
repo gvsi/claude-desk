@@ -14,6 +14,7 @@ import { TODAY_COPY } from '../../owner/today/copy.ts';
 import { SIDEBAR_ABOUT } from '../../owner/sidebarAbout.ts';
 
 import type { Effect, EvMessage, PublicDesk, RenderedBlock, RuleCard, StatusEvent, ToolName } from '../../api/contracts.ts';
+import { inRulesOrder } from '../../owner/rules/toolOrder.ts';
 import { AlwaysOnList } from '../components/AlwaysOnList/AlwaysOnList.tsx';
 import { Breadcrumb } from '../components/Breadcrumb/Breadcrumb.tsx';
 import { Composer } from '../components/Composer/Composer.tsx';
@@ -948,7 +949,7 @@ export function RulesPage({ hub, chips, notice, actions, aboveTools = {} }: Rule
       {notice ? <div className="board-rules__notice">{notice}</div> : null}
       <AskAboutRules placeholder="Ask Claude to change a rule" chips={chips} />
       <ConnectorList summary={hub.summary}>
-        {hub.sections.map((section) => (
+        {inRulesOrder(hub.sections).map((section) => (
           <ConnectorSection
             key={section.connector.id}
             {...section}

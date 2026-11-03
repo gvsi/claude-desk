@@ -544,10 +544,13 @@
 }
 
 /* Since last night: rows divided by hairlines, their three columns lined up across rows (the list
-   is the grid, and each row takes its columns), then "See all". */
+   is the grid, and each row takes its columns), then "See all". The time column's 96 px fits the
+   widest time today ("Today, 12:59 pm" in caption type, 13/18), whatever the hour. Its grid track
+   includes the row's 8 px left inset. */
 .cd-briefing {
+  --cd-today-time-width: calc(3 * var(--space-32));
   display: grid;
-  grid-template-columns: max-content max-content minmax(0, 1fr);
+  grid-template-columns: calc(var(--cd-today-time-width) + var(--space-8)) max-content minmax(0, 1fr);
   column-gap: var(--space-16);
   margin: 0;
   padding: 0;
@@ -807,7 +810,7 @@
 /* On a phone each briefing row puts its words under the time and the kind. */
 @media (max-width: 639.98px) {
   .cd-briefing {
-    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-columns: calc(var(--cd-today-time-width) + var(--space-8)) minmax(0, 1fr);
   }
 
   .cd-briefing-row__words {
@@ -824,6 +827,15 @@
   .cd-today--skeleton { --cd-today-approval-last-width: 75%; }
 }
 .cd-today-skeleton__link { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+/* From 640 px the public link is at most 380 px wide, a longer one cut off with an ellipsis, so it
+   and "Chat as a customer" stay beside the greeting from 1280 px. The usual link (about 367 px)
+   shows whole, and the link's own words still name and copy all of it. Its shape takes the cap. A
+   length, not a percentage, so the row's line breaking counts it; in a narrower row it still
+   shrinks. */
+@media (min-width: 640px) {
+  .cd-today__greeting .cd-greeting__link,
+  .cd-greeting .cd-today-skeleton__link { max-width: calc(var(--size-side-panel) - var(--space-20)); }
+}
 .cd-today-skeleton__text { display: block; min-width: 0; width: 100%; max-width: 100%; }
 .cd-today-skeleton__fixed-line { max-width: none; }
 .cd-today-skeleton__presence { min-height: calc(var(--size-avatar) - var(--space-6)); }

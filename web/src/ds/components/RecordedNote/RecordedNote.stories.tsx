@@ -42,7 +42,7 @@ export const Default: Story = {
 
     // Caption type in secondary ink; the 14 px history icon, hidden from screen readers, 2 px
     // down so it sits on the first line, 6 px before the words.
-    expectComputed(note, { fontSize: '12px', lineHeight: '17px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' });
+    expectComputed(note, { fontSize: '13px', lineHeight: '18px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' });
     await expect(icon).toHaveAttribute('aria-hidden', 'true');
     await expect(icon.getBoundingClientRect().height).toBe(14);
     expectComputed(icon, { marginTop: '2px' });
@@ -64,9 +64,9 @@ export const Wrapped: Story = {
   play: async ({ canvasElement }) => {
     const { icon, words } = partsOf(canvasElement);
     // Two lines, the second under the words, not under the icon; the icon stays on the first.
-    await expect(Math.round(words.getBoundingClientRect().height)).toBe(34);
+    await expect(Math.round(words.getBoundingClientRect().height)).toBe(36);
     const lines = [...words.getClientRects()];
     await expect(Math.round(Math.min(...lines.map((line) => line.left)))).toBe(Math.round(words.getBoundingClientRect().left));
-    await expect(icon.getBoundingClientRect().bottom).toBeLessThan(words.getBoundingClientRect().top + 17);
+    await expect(icon.getBoundingClientRect().bottom).toBeLessThan(words.getBoundingClientRect().top + 18);
   },
 };

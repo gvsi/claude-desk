@@ -91,7 +91,7 @@ export const Board: Story = {
 
     // list_drawn_as_shapes_under_the_header: after the wait, the loading words in a visually hidden
     // status, and the list's shapes where the list goes, under the real header: the first section's
-    // head 28 px under the header, over its hairline, then two 51 px rows 4 px under it, 2 px apart.
+    // head 28 px under the header, over its hairline, then two 53 px rows 4 px under it, 2 px apart.
     const main = canvas.getByRole('main');
     const status = canvas.getByRole('status');
     await waitFor(() => expect(status).toHaveTextContent(/^Loading your customers$/));
@@ -106,7 +106,7 @@ export const Board: Story = {
     const header = one(main, '.cd-page-header');
     await expect(Math.round(head.getBoundingClientRect().top - header.getBoundingClientRect().bottom)).toBe(28);
     const rows = [...layer.querySelectorAll<HTMLElement>('.cd-person-row')].map((row) => row.getBoundingClientRect());
-    await expect(rows.map((row) => row.height)).toEqual([51, 51]);
+    await expect(rows.map((row) => row.height)).toEqual([53, 53]);
     await expect(Math.round(rows[0]!.top - head.getBoundingClientRect().bottom)).toBe(4);
     await expect(Math.round(rows[1]!.top - rows[0]!.bottom)).toBe(2);
     for (const shape of layer.querySelectorAll<HTMLElement>('.cd-skeleton')) expectComputed(shape, { backgroundColor: 'rgba(250, 249, 245, 0.06)' });

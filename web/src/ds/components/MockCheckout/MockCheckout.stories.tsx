@@ -112,8 +112,8 @@ async function expectChrome(root: HTMLElement, language: 'en' | 'es') {
   const footnote = within(card).getByText(words.footnote);
   await expect(card.lastElementChild).toBe(footnote);
   expectComputed(footnote, {
-    fontSize: '12px',
-    lineHeight: '17px',
+    fontSize: '13px',
+    lineHeight: '18px',
     color: 'rgba(250, 249, 245, 0.64)',
     paddingTop: '12px',
     borderTopWidth: '1px',
@@ -150,15 +150,15 @@ export const Issued: Story = {
       borderTopLeftRadius: '12px',
       backgroundColor: 'rgba(250, 249, 245, 0.03)',
     });
-    expectComputed(merchant, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(title, { fontSize: '15px', lineHeight: '20px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)', marginTop: '0px' });
+    expectComputed(merchant, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(title, { fontSize: '16px', lineHeight: '21px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)', marginTop: '0px' });
 
     // The amount, large, exactly as the page gives it, with "This link works once." under it.
     const amount = within(card).getByText(AMOUNT);
     expectComputed(amount, { fontSize: '32px', lineHeight: '40px', fontWeight: '500', letterSpacing: '-0.3px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(box(amount).top - box(title).bottom).toBe(14);
     const once = within(card).getByText('This link works once.');
-    expectComputed(once, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(once, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(box(once).top - box(amount).bottom).toBe(2);
 
     // The test card, filled in and locked: it is shown, never asked for. With the customer's name
@@ -166,7 +166,7 @@ export const Issued: Story = {
     await expect(canvasElement.querySelector('form, input, textarea, select, [contenteditable]')).toBeNull();
     const information = canvas.getByRole('group', { name: words.information });
     const label = within(information).getByText(words.information);
-    expectComputed(label, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(label, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(box(label).top - box(once).bottom).toBe(14);
     const fields = information.querySelector<HTMLElement>('.cd-checkout__card-fields');
     if (!fields) throw new globalThis.Error('no card fields');
@@ -186,7 +186,7 @@ export const Issued: Story = {
     }
     const [number, expiry, code] = values as [HTMLElement, HTMLElement, HTMLElement];
     for (const field of values) {
-      expectComputed(field, { height: '40px', fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)', paddingLeft: '12px' });
+      expectComputed(field, { height: '40px', fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.64)', paddingLeft: '12px' });
     }
     // The number takes the whole row with a lock at its right; the expiry and the code share the
     // row under it, half each, split by the control line.
@@ -207,7 +207,7 @@ export const Issued: Story = {
     await expect(nameField.textContent).toBe(CUSTOMER_NAME);
     expectComputed(nameField, { height: '40px', borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.22)', borderTopLeftRadius: '8px' });
     const hint = within(name).getByText(words.hint);
-    expectComputed(hint, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(hint, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(hint.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
     await expect(box(hint).top - box(nameField).bottom).toBe(6);
 
@@ -303,14 +303,14 @@ export const IssuedUnverified: Story = {
     await expect(field).not.toHaveAttribute('readonly');
     await expect(field).toHaveAttribute('autocomplete', 'off');
     const label = canvasElement.querySelector(`label[for="${field.id}"]`) as HTMLElement;
-    expectComputed(label, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(label, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(box(field).top - box(label).bottom).toBe(6);
     expectComputed(field, {
       height: '40px',
       borderTopWidth: '1px',
       borderTopColor: 'rgba(250, 249, 245, 0.36)',
       borderTopLeftRadius: '8px',
-      fontSize: '14px',
+      fontSize: '15px',
       color: 'rgba(250, 249, 245, 0.92)',
       backgroundColor: 'rgba(0, 0, 0, 0)',
     });
@@ -319,7 +319,7 @@ export const IssuedUnverified: Story = {
     // under the one field that isn't.
     const nameHint = canvas.getByText(NAME_HINT.en);
     await expect(box(nameHint).top - box(field).bottom).toBe(6);
-    expectComputed(nameHint, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(nameHint, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(nameHint.querySelector('svg')).toBeNull();
     await expect(field).toHaveAccessibleDescription(NAME_HINT.en);
     const information = canvas.getByRole('group', { name: CARD_WORDS.en.information });
@@ -397,12 +397,12 @@ async function expectFinal(
   await expect(state.textContent).toBe(line);
   await expect(state.querySelectorAll('.cd-status-dot')).toHaveLength(1);
   await expect(state.querySelector(`.cd-status-dot--${dot}`)).not.toBeNull();
-  expectComputed(state, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.92)', marginTop: '0px' });
+  expectComputed(state, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.92)', marginTop: '0px' });
   // Under the title and over the footnote, 14 px from each, with the dot on its first line.
   await expect(box(state).top - box(title).bottom).toBe(14);
   await expect(box(footnote).top - box(state).bottom).toBe(14);
   const stateDot = state.querySelector('.cd-status-dot') as HTMLElement;
-  const firstLine = box(state).top + 10;
+  const firstLine = box(state).top + 10.5;
   await expect(box(stateDot).top + box(stateDot).height / 2).toBe(firstLine);
   return { card, state };
 }

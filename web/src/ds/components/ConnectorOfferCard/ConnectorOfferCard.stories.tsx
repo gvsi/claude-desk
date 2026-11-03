@@ -37,7 +37,7 @@ export const AddPayments: Story = {
     await expect(within(card).getByText('Built in')).toBeVisible();
     await expect(within(card).getByText(args.toolsLine)).toBeVisible();
     await expect(within(card).getByText(chen.paymentsOffer.coverage)).toBeVisible();
-    expectComputed(within(card).getByText(args.toolsLine), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(card).getByText(args.toolsLine), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     // offer_card_only_opens_the_review: one button, which only opens the review.
     const buttons = within(card).getAllByRole('button');
     await expect(buttons).toHaveLength(1);

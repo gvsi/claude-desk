@@ -100,9 +100,9 @@ export const Idle: Story = {
     // line, as tall as the field. "I can't get the code" is a ghost button under them, and the
     // whole form is no wider than the reply card above it.
     const label = canvasElement.querySelector(`label[for="${field.id}"]`) as HTMLElement;
-    expectComputed(label, { fontSize: '14px', lineHeight: '20px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(label, { fontSize: '15px', lineHeight: '21px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(field.getBoundingClientRect().top - label.getBoundingClientRect().bottom).toBe(6);
-    expectComputed(field, { height: '40px', borderTopWidth: '1px', borderTopLeftRadius: '8px', fontSize: '14px' });
+    expectComputed(field, { height: '40px', borderTopWidth: '1px', borderTopLeftRadius: '8px', fontSize: '15px' });
     // field_boundary_meets_contrast: an empty field has no words of its own to say what it is, so
     // its outline is its boundary, line-field at 3:1 against the page, at rest and on hover, as
     // every text field's is. The signed board draws it fainter; see the canvas note.

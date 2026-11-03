@@ -121,7 +121,7 @@ export const Desktop: Story = {
     for (const toggle of [tool, rule]) await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(canvasElement.querySelector('.cd-advanced-details__panel')).toBeNull();
     // A quiet button: control type in the secondary ink, no fill until it's hovered or open.
-    expectComputed(tool, { color: SECONDARY, backgroundColor: 'rgba(0, 0, 0, 0)', paddingTop: '2px', paddingLeft: '6px', height: '24px' });
+    expectComputed(tool, { color: SECONDARY, backgroundColor: 'rgba(0, 0, 0, 0)', paddingTop: '2px', paddingLeft: '6px', height: '25px' });
     await expect(tool).toHaveAccessibleDescription('Payment link');
     // The rule reads as RuleSentence draws it: its amount a key value, medium weight, tabular figures.
     expectComputed(canvasElement.querySelector<HTMLElement>('.cd-rule-sentence__key')!, { fontWeight: '520', fontVariantNumeric: 'tabular-nums' });

@@ -1836,6 +1836,26 @@ describe('Today', () => {
 });
 
 describe('Things to try ticks off', () => {
+  it('a_booking_closed_request_stays_on_today_without_ticking_answer_a_held_request', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const row = thingRow(screen, 'Answer a held request');
+    await expect.element(rowStep(row, 'Open the request', 'Answer a held request')).toBeVisible();
+    const { world } = mockStore;
+    const session = world.sessions.get(seededHoldNow().session_id)!;
+    const ledgerReads = requests('ledger').length;
+    world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+
+    await expect.element(heldCard(screen).getByText('The visitor booked before you answered, so this request closed.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Needs you' }).getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    // Let the signed record catch up as well as the retained card: neither source says Mike answered.
+    await expect.poll(() => requests('ledger').length, { timeout: 5_000 }).toBeGreaterThan(ledgerReads + 2);
+    await expect.element(row.getByText('When a request waits for your answer, it shows up here.', { exact: true })).toBeVisible();
+    expect(row.getByText('Done', { exact: true }).elements()).toHaveLength(0);
+    expect(row.getByText(ANSWERED_LINE, { exact: true }).elements()).toHaveLength(0);
+    expect(row.element().querySelector('.cd-things__check, .cd-pill, .cd-things__action')).toBeNull();
+    expect(requests('answer')).toHaveLength(0);
+  });
+
   it.each(['desktop', 'phone'] as const)('answering_in_the_conversation_ticks_the_held_request_%s', async (viewport) => {
     const { screen, router } = await renderRoute(TODAY, { viewport });
     const step = rowStep(thingRow(screen, 'Answer a held request'), 'Open the request', 'Answer a held request');

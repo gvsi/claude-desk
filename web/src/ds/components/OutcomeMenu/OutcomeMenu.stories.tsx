@@ -34,7 +34,7 @@ const MENU_BUTTON = {
   paddingLeft: '12px',
   paddingRight: '10px',
   color: 'rgba(250, 249, 245, 0.92)',
-  fontSize: '14px',
+  fontSize: '15px',
 } as const;
 
 export const ReadOnly: Story = {

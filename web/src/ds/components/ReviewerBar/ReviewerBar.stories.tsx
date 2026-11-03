@@ -33,8 +33,8 @@ export const Default: Story = {
       backgroundColor: 'rgb(46, 44, 38)',
       borderBottomWidth: '1px',
       borderBottomColor: 'rgba(250, 249, 245, 0.12)',
-      fontSize: '13px',
-      lineHeight: '18px',
+      fontSize: '14px',
+      lineHeight: '19px',
     });
     await expect(bar.getBoundingClientRect().width).toBe(document.documentElement.clientWidth);
     // The owner's name is a name someone chose, shown as written.

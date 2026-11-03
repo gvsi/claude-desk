@@ -40,7 +40,7 @@ const meta = {
     canvasNote: [
       'Built against the board in review; sign-off pending.',
       'The demo key, shown once: the key id and the private key, each a CopyField in its mono box, with “Copy key” and the warning beside it. The key is a placeholder.',
-      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 19 px where the renders draw an earlier 17 px line, and the title above it is larger too, so everything under it sits lower than the render.',
     ].join(' '),
   },
 } satisfies Meta;

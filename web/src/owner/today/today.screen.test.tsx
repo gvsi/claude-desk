@@ -22,7 +22,7 @@ import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatWhen } from '../../lib/format.ts';
 import { writeLocal } from '../../lib/storage.ts';
 import { worker } from '../../mocks/browser.ts';
-import { CALLBACK_REASON } from '../../mocks/script.ts';
+import { CALLBACK_REASON, DECISIONS } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { SETUP_QUESTIONS } from '../../mocks/setup.ts';
 import { mockStore } from '../../mocks/store.ts';
@@ -432,6 +432,64 @@ afterEach(() => {
 });
 
 describe('Today', () => {
+  it.each([
+    ['booking', 'The visitor booked before you answered, so this request closed.'],
+    ['expired', 'This request expired before you answered. Nothing was done.'],
+    ['cancelled', 'The visitor cancelled before you answered. Nothing was done.'],
+    ['allow_once', "You allowed this. It's done."],
+    ['deny_once', 'You denied this.'],
+  ] as const)('a_request_closed_elsewhere_by_%s_stays_only_for_this_view', async (ending, line) => {
+    const { screen } = await renderRoute(TODAY, { strict: true });
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const element = card.element();
+    const record = mockStore.world.decisions.get(seededHold().decision_id)!;
+    if (ending === 'booking') {
+      const { world } = mockStore;
+      const session = world.sessions.get(record.decision.session_id)!;
+      world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+    } else if (ending === 'cancelled') mockStore.world.cancel(record);
+    else if (ending === 'expired') record.decision = { ...record.decision, state: 'expired', answers: [] };
+    else {
+      const reply = await mockStore.dispatch('answer', { params: { decision_id: record.decision.decision_id }, body: { answer: ending } });
+      expect(reply).toMatchObject({ status: 200 });
+    }
+    await expect.element(card.getByText(line, { exact: true })).toBeVisible();
+    expect(card.element()).toBe(element);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+    expect(card.getByRole('button').elements()).toHaveLength(0);
+
+    // A fresh app reads only open requests; the undismissed closed card belongs to the old view.
+    const { screen: reloaded } = await renderRoute(TODAY);
+    await expect.element(region(reloaded, 'Since last night')).toBeVisible();
+    expect(heldCard(reloaded, SEEDED_REASON).elements()).toHaveLength(0);
+    expect(region(reloaded, 'Needs you').elements()).toHaveLength(0);
+  });
+
+  it('a_booking_elsewhere_keeps_the_held_card_until_dismissed', async () => {
+    const { screen } = await renderRoute(TODAY);
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeVisible();
+    const element = card.element();
+    const slot = element.closest('li');
+    const { world } = mockStore;
+    const session = world.sessions.get(seededHold().session_id)!;
+    world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+
+    await expect.element(card.getByText('The visitor booked before you answered, so this request closed.', { exact: true })).toBeVisible();
+    expect(card.element()).toBe(element);
+    expect(card.element().closest('li')).toBe(slot);
+    await expect.element(region(screen, 'Needs you').getByRole('button', { name: 'Dismiss' })).toBeVisible();
+    expect(region(screen, 'Needs you').getByRole('img', { name: /needs? you$/ }).elements()).toHaveLength(0);
+    expect(card.getByRole('button', { name: 'Allow this time' }).elements()).toHaveLength(0);
+    await dismissFromTheKeyboard(screen);
+    await expect.element(card).not.toBeInTheDocument();
+    await expect.poll(() => focusIsOn(region(screen, 'Live now').element())).toBe(true);
+    await aPollPasses();
+    expect(card.elements()).toHaveLength(0);
+  });
+
   it('request_opens_the_conversation_and_back_restores_todays_scroll', async () => {
     const held = seededHold();
     const { screen, router } = await renderRoute(TODAY);
@@ -1301,7 +1359,7 @@ describe('Today', () => {
     const el = line.element();
     expect(el.tagName).toBe('P');
     expect(el).toHaveClass('cd-type-summary');
-    expectComputed(el, { fontSize: '18px', lineHeight: '27px', marginTop: '0px', marginBottom: '0px' });
+    expectComputed(el, { fontSize: '20px', lineHeight: '30px', marginTop: '0px', marginBottom: '0px' });
     expect(getComputedStyle(el).fontFamily).toContain('Source Serif 4');
     const first = since.getByRole('listitem').first().element();
     expect(el.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1850,7 +1908,7 @@ describe('Today', () => {
     expect(watch.drawn()).toBe(false);
   });
 
-  it('since_last_night_keeps_its_night_while_its_read_fails', { timeout: 15_000 }, async () => {
+  it.each([[1280, 800], [1440, 900], [1512, 982]])('since_last_night_keeps_its_night_while_its_read_fails_at_%sx%s', { timeout: 15_000 }, async (width, height) => {
     // A night with things in it is read, then Today's refreshes fail. The card says so first, with
     // "Try again", over what it read: the night's line, its rows and "See all" stay, as Last 7
     // days' figures above zero do. Once a read works, the failure's line goes and the night stays.
@@ -1858,7 +1916,7 @@ describe('Today', () => {
       ...t,
       briefing: { ...t.briefing, total: 4, turned_down: 1, newest: { turned_down: REFUSAL, booking: BOOKING, lead_or_answer: ANSWER } },
     }));
-    const { screen } = await renderRoute(TODAY, { retryScale: 0 });
+    const { screen } = await renderRoute(TODAY, { retryScale: 0, viewport: { width, height } });
     const since = region(screen, 'Since last night');
     const night = since.getByText(
       '3 conversations since last night, all inside your rules. I booked one visit, answered one question and stopped one attempt.',
@@ -1878,8 +1936,7 @@ describe('Today', () => {
     expect(rows.elements()).toHaveLength(3);
     await expect.element(all).toHaveAttribute('href', `${DESK}/today/briefing`);
     // The failure's line comes first in the card, 16 px over the night's line, as Last 7 days' is
-    // over its parts, and inset to the night's edge: its dot starts where the night's words do, and
-    // "Try again" ends where they may.
+    // over its parts, and inset to the night's edge: its dot starts where the night's words do.
     const notice = since.getByRole('alert').element();
     expect(notice.parentElement).toHaveClass('cd-card');
     expect(notice.parentElement?.firstElementChild).toBe(notice);
@@ -1888,10 +1945,16 @@ describe('Today', () => {
     words.selectNodeContents(night.element());
     const dot = notice.querySelector('.cd-status-dot');
     expect(Math.abs((dot?.getBoundingClientRect().left ?? -1) - words.getBoundingClientRect().left)).toBeLessThanOrEqual(1);
+    // At these widths the failure's words and "Try again" don't fit on one line in the card, so, as
+    // a Notice does, "Try again" drops 8 px under the words, starting where they do, and stays inside
+    // the night's edge.
     const nightBox = night.element().getBoundingClientRect();
     const nightEnd = nightBox.right - Number.parseFloat(getComputedStyle(night.element()).paddingRight);
+    const message = notice.querySelector('.cd-notice__message')!.getBoundingClientRect();
     const retry = since.getByRole('button', { name: 'Try again' }).element().getBoundingClientRect();
-    expect(Math.abs(retry.right - nightEnd)).toBeLessThanOrEqual(1);
+    expect(Math.round(retry.top - message.bottom)).toBe(8);
+    expect(Math.abs(retry.left - (dot?.getBoundingClientRect().left ?? -1))).toBeLessThanOrEqual(1);
+    expect(retry.right).toBeLessThanOrEqual(nightEnd);
 
     failing.stop();
     await expect.element(line, { timeout: 4_000 }).not.toBeInTheDocument();

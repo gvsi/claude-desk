@@ -75,7 +75,7 @@ export function Greeting({ text, presence, link, actions, children }: GreetingPr
               {/* "Copied" is laid over the link's words, so the pill keeps its width. It and the check are
                   for sighted owners: the screen says it to screen readers in its own status line. */}
               <span className="cd-greeting__link-words">
-                <span className="cd-greeting__link-label">{link.label}</span>
+                <span className="cd-greeting__link-label" title={link.label}>{link.label}</span>
                 <span className="cd-greeting__copied" aria-hidden="true">
                   Copied
                 </span>

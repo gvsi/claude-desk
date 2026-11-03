@@ -75,7 +75,7 @@ it('narrow_public_pages_keep_status_on_its_header_line_and_about_below_chat', as
     expect(about.parentElement?.className).toBe('cd-public-shell__chat');
     expect(about.getBoundingClientRect().width).toBe(width);
     if (width === 390) {
-      expect(header.getBoundingClientRect().height).toBe(92);
+      expect(header.getBoundingClientRect().height).toBe(94);
       expect(status.getBoundingClientRect().left).toBe(16);
       expect(status.getBoundingClientRect().top - header.querySelector('.cd-public-shell__brand-text')!.getBoundingClientRect().bottom).toBe(8);
     }

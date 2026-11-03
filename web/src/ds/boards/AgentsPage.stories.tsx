@@ -100,7 +100,7 @@ const meta = {
       'N-R2-Agents-01-Page and N-R2-Agents-06-Phone were redrawn on 2026-11-02 (canvas v326) to match the card’s ten abilities, in the same order and words, the two customer lines with the kernel’s straight apostrophe.',
       'The page for people’s AI agents, /d/:slug/agents: the public page’s brand header on its own (PublicBrandHeader), the endpoint as a CopyField with “Copy address”, and the example request as a CodeBlock, both in the code type.',
       'The column, its title and the cards’ lists are page layout the web app (plan 04) owns.',
-      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 18 px where the renders draw an earlier 17 px line, so everything under it sits 1 px lower than the render.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 19 px where the renders draw an earlier 17 px line, and the title above it is larger too, so everything under it sits lower than the render.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -133,12 +133,12 @@ export const Board: Story = {
     expectComputed(address, { fontFamily: /^"JetBrains Mono"/, fontSize: '13px' });
     const copy = within(connect).getByRole('button', { name: 'Copy address' });
     await expect(Math.round(copy.getBoundingClientRect().right)).toBe(1119);
-    // The address in its outlined box, below the ten abilities: from 393 px, 32 px tall at 799,
-    // 144 px lower after adding six 20 px lines and their 4 px gaps;
+    // The address in its outlined box, below the ten abilities and their outcomes: from 393 px, 32 px
+    // tall at 822;
     // ending 8 px before the button (603 px wide once the interface font has loaded).
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents page fonts');
     const addressBox = address.getBoundingClientRect();
-    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 799, 32]);
+    await expect([Math.round(addressBox.left), Math.round(addressBox.top), Math.round(addressBox.height)]).toEqual([393, 822, 32]);
     await expect(Math.round(copy.getBoundingClientRect().left - addressBox.right)).toBe(8);
     expectComputed(address, { borderTopColor: 'rgba(250, 249, 245, 0.36)', borderTopLeftRadius: '8px' });
     const request = one(connect, 'pre');

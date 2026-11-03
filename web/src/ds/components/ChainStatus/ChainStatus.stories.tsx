@@ -48,7 +48,7 @@ export const Ok: Story = {
     const count = canvas.getByText('3 entries');
     await expect(count).toBeVisible();
     await expect(canvasElement.querySelector('.cd-count-pill')).toBeNull();
-    expectComputed(count, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(count, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(count.getBoundingClientRect().left).toBeGreaterThan(line.getBoundingClientRect().right);
     // The signing key sits at the end of the line, apart from the status.
     const key = canvas.getByText('Signed with a development key');

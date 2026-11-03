@@ -55,7 +55,7 @@ export const Colleague: Story = {
     const canHeading = canvas.getByText(/can open$/);
     const cantHeading = canvas.getByText('Can’t open');
     for (const heading of [canHeading, cantHeading]) {
-      expectComputed(heading, { fontSize: '14px', lineHeight: '20px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
+      expectComputed(heading, { fontSize: '15px', lineHeight: '21px', fontWeight: '420', color: 'rgba(250, 249, 245, 0.92)' });
     }
     await expect(Math.round(cantHeading.getBoundingClientRect().top - can.getBoundingClientRect().bottom)).toBe(16);
 
@@ -69,13 +69,18 @@ export const Colleague: Story = {
         borderTopColor: 'rgba(250, 249, 245, 0.22)',
         borderTopLeftRadius: '999px',
         backgroundColor: 'rgba(0, 0, 0, 0)',
-        fontSize: '13px',
+        fontSize: '14px',
         color: 'rgba(250, 249, 245, 0.92)',
       });
     }
-    // Chips wrap 6 px apart: the first two of "can open" share a line.
-    const [first, second] = within(can).getAllByRole('listitem') as [HTMLElement, HTMLElement];
-    await expect(Math.round(second.getBoundingClientRect().left - first.getBoundingClientRect().right)).toBe(6);
+    // Chips wrap 6 px apart, along a line and down to the next. Which chip starts the second line
+    // depends on the face's widths, so the check finds the pair on each side of the wrap.
+    const chips = within(can).getAllByRole('listitem').map((chip) => chip.getBoundingClientRect());
+    const along = chips.findIndex((box, i) => i > 0 && box.top === chips[i - 1]!.top);
+    const down = chips.findIndex((box, i) => i > 0 && box.top > chips[i - 1]!.top);
+    await expect(Math.min(along, down)).toBeGreaterThan(0);
+    await expect(Math.round(chips[along]!.left - chips[along - 1]!.right)).toBe(6);
+    await expect(Math.round(chips[down]!.top - chips[down - 1]!.bottom)).toBe(6);
 
     // One control: "Edit access", a secondary button, under the lists.
     const edit = canvas.getByRole('button', { name: 'Edit access' });
