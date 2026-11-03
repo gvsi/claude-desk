@@ -50,7 +50,7 @@ export interface Done {
 export interface DoneSignals {
   /** Each thing seen done in this view; a thing not done yet is missing. */
   done: Readonly<Partial<Record<Thing, Done>>>;
-  /** How many of the five are done. */
+  /** How many of the six are done. */
   count: number;
   /** Whether the list shows the Desk the copy started with. */
   onStartingDesk: boolean;
@@ -206,6 +206,7 @@ export function useDoneSignals({ enabled, deskId, answered, latest }: UseDoneSig
         record !== undefined &&
         (heldInPreview(record, previewIds) || (stopped !== undefined && stoppedInPreview(stopped, record, previewIds))),
     },
+    stopped: { settled: enabled, done: seen.stopped !== undefined },
     answer: {
       settled: reading && fresh(ledgerQuery(seeded ?? '').queryKey, ledger),
       done: reading && record !== undefined && answeredOnRecord(record),

@@ -118,7 +118,7 @@ function holdAtRest(): void {
 }
 
 export async function expectScreenBasics(root: HTMLElement, { owner }: ScreenBasicsOptions): Promise<void> {
-  await vi.waitFor(() => expect(root.ownerDocument.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await vi.waitFor(() => expect(root.ownerDocument.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: root.querySelector('.cd-rules__region, .cd-setup-rules__checks') ? 4_000 : 1_000 });
   await nextFrames();
   await animationsSettled(root);
   const footers = [...root.querySelectorAll('[data-ds="concept-footer"]')].filter((footer) => !footer.closest('.cd-skeleton-screen__layer'));

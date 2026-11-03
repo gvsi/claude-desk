@@ -209,6 +209,8 @@ export { ToolLabel, type ToolLabelProps } from './components/ToolLabel/ToolLabel
 export {
   TranscriptHeader,
   TranscriptRow,
+  clockNow,
+  rowComingIn,
   type TranscriptHeaderProps,
   type TranscriptRowProps,
 } from './components/TranscriptRow/TranscriptRow.tsx';

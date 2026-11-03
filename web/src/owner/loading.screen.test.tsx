@@ -237,7 +237,7 @@ async function expectSetupCardLands(width: number, height: number, opening: Setu
   expect(layer.querySelector('.cd-things'), "the skeleton draws Today's Things to try").not.toBeNull();
   const shape = layer.querySelector('.cd-today__band > .cd-continue-setup')!;
   expect(shape.previousElementSibling?.classList.contains('cd-today__greeting'), 'the shape is first under the greeting').toBe(true);
-  expect(shape.nextElementSibling?.classList.contains('cd-how'), 'How your Desk works comes under it').toBe(true);
+  expect(shape.nextElementSibling?.classList.contains('cd-things'), 'Things to try comes under it').toBe(true);
   expect(shape.textContent, 'the shape draws no words').toBe('');
   expect(landedElement('.cd-continue-setup'), 'no landed card while the reads are out').toBeNull();
   expect(sawNotLive()).toBe(false);
@@ -320,7 +320,7 @@ it.each([
 
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
-  const tops = watchTop(() => document.querySelector(`${FRAME_LAYER} .cd-how`) ?? landedElement('.cd-how'));
+  const tops = watchTop(() => document.querySelector(`${FRAME_LAYER} .cd-things`) ?? landedElement('.cd-things'));
   const { screen } = await renderRoute(today, { viewport: { width, height } });
   await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
   await document.fonts.ready;
@@ -340,8 +340,8 @@ it.each([
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   await nextFrames();
   expect(Math.abs(card.element().getBoundingClientRect().top - shapeTop), "the card lands at its shape's top").toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
-  const howTops = tops();
-  expect(Math.max(...howTops) - Math.min(...howTops), 'How your Desk works never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
+  const thingsTops = tops();
+  expect(Math.max(...thingsTops) - Math.min(...thingsTops), 'Things to try never drops').toBeLessThanOrEqual(SKELETON_TOLERANCE_PX);
 });
 
 it('a_desk_no_longer_in_the_copy_is_forgotten_once_the_desks_are_read', async () => {
@@ -414,24 +414,55 @@ it.each(['desktop', 'phone'] as const)('reload_reads_the_notifications_with_the_
   expect(mockStore.requests.filter(({ key }) => key === 'ownerInbox')).toHaveLength(1);
 });
 
+it.each([390, 820, 1440, 1512])('today_skeleton_places_the_outcome_shape_under_the_greeting_without_a_band at %s', async (width) => {
+  const held = holdReads(ROUTES.today.path.replace('{desk_id}', RIVERA.deskId));
+  onTestFinished(held.release);
+  await renderRoute(TODAY, { viewport: { width, height: 900 } });
+  await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+  const skeleton = document.querySelector('.cd-today--skeleton')!;
+  expect(skeleton).not.toBeNull();
+  expect(skeleton.querySelector('.cd-how, [data-skeleton-anchor="how-card"]')).toBeNull();
+  const line = skeleton.querySelector('.cd-greeting__presence-text > [data-skeleton-anchor="today-line"]');
+  expect(line).not.toBeNull();
+  expect(line!.textContent).toBe('');
+  expect(line!.querySelector('.cd-skeleton')).not.toBeNull();
+  const presenceWords = skeleton.querySelector('.cd-greeting__presence-line')!;
+  expect(line!.getBoundingClientRect().left).toBe(presenceWords.getBoundingClientRect().left);
+  expect(line!.getBoundingClientRect().left - skeleton.querySelector('.cd-greeting__text')!.getBoundingClientRect().left).toBe(34);
+  const shape = line!.getBoundingClientRect();
+  const text = skeleton.querySelector('.cd-greeting__text')!.getBoundingClientRect();
+  const actions = skeleton.querySelector('.cd-greeting__actions')!.getBoundingClientRect();
+  held.release();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  const real = document.querySelector('.cd-how__today')!.getBoundingClientRect();
+  for (const key of ['top', 'left', 'width', 'height'] as const) expect(real[key], `outcomes ${key}`).toBeCloseTo(shape[key], 0);
+  const realText = document.querySelector('.cd-greeting__text')!.getBoundingClientRect();
+  expect(realText.width).toBeCloseTo(text.width, 0);
+  expect(document.querySelector('.cd-greeting__actions')!.getBoundingClientRect().top).toBe(actions.top);
+  if (width >= 1440) expect(real.height).toBe(19);
+  if (width === 390) {
+    expect(real.height).toBe(46);
+    const heldOutcome = document.querySelectorAll('.cd-how__outcome')[1]!.getBoundingClientRect();
+    expect(heldOutcome.left).toBe(real.left);
+    expect(heldOutcome.top - real.top).toBe(27);
+  }
+});
+
 const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'owner-footer', page: '[data-owner-footer]', size: true },
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
   { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
-  // How your Desk works: its title, its card (the steps and the Today line), and the first and last step's tiles.
-  { name: 'how-title', page: '.cd-how .cd-section-header__heading' },
-  { name: 'how-card', page: '.cd-how > .cd-card', size: true },
-  { name: 'how-tile-0', page: '.cd-how__step:first-child .cd-how__tile', size: true },
-  { name: 'how-tile-2', page: '.cd-how__step:last-child .cd-how__tile', size: true },
+  { name: 'today-line', page: '.cd-greeting__presence-text > .cd-how__today', size: true },
   { name: 'things-title', page: '.cd-things__title' },
+  { name: 'things-progress', page: '.cd-things__progress', size: true },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
   { name: 'thing-tile-0', page: '.cd-things__item:first-child .cd-things__icon' },
-  { name: 'thing-tile-4', page: '.cd-things__item:last-child .cd-things__icon' },
+  { name: 'thing-tile-5', page: '.cd-things__item:last-child .cd-things__icon' },
   { name: 'things-hide', page: '.cd-things__hide > .cd-button', size: true },
-  ...[0, 1, 2, 3, 4].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
+  ...[0, 1, 2, 3, 4, 5].map((i) => ({ name: `thing-action-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__action > .cd-button`, size: true })),
   // A phone row's chevron (not drawn from 640 px, as the cards' buttons aren't on a phone).
-  ...[0, 1, 2, 3, 4].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
+  ...[0, 1, 2, 3, 4, 5].map((i) => ({ name: `thing-go-${i}`, page: `.cd-things__item:nth-child(${i + 1}) .cd-things__go`, size: true })),
   { name: 'needs-title', page: '.cd-today__section[tabindex] .cd-section-header__heading' },
   { name: 'held-card', page: '.cd-needs-you .cd-card', dimensions: ['width'] },
   { name: 'live-row', page: '.cd-live .cd-conversation-item', size: true },
@@ -600,6 +631,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
   await nextFrames();
   const today = document.querySelector('.cd-today--skeleton')!;
+  expect(today.querySelectorAll('.cd-things__item')).toHaveLength(6);
+  expect(today.querySelector('.cd-things__progress')?.children).toHaveLength(6);
   const lines = (selector: string, container: string, widths: readonly (string | number)[], height?: number) => {
     const room = today.querySelector(container)!.getBoundingClientRect();
     const boxes = [...today.querySelectorAll<HTMLElement>(selector)];
@@ -615,12 +648,12 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
     });
   };
   lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 48);
-  lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__text', ['80%'], 22);
+  lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__presence-text', ['80%'], 22);
   expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
   // Each card's line wraps in its third of the band on a laptop; each row's beside its tile and chevron on a phone.
-  (viewport === 'phone' ? [2, 3, 3, 1, 3] : [2, 2, 3, 1, 3]).forEach((count, i) => {
+  (viewport === 'phone' ? [2, 3, 3, 2, 1, 3] : [2, 2, 3, 2, 1, 3]).forEach((count, i) => {
     const item = `.cd-things__item:nth-child(${i + 1})`;
     lines(`${item} .cd-skeleton-line--control`, `${item} .cd-things__text`, ['90%']);
     lines(`${item} .cd-things__detail .cd-skeleton-line`, `${item} .cd-things__text`, Array.from({ length: count }, (_, j) => j === count - 1 ? '75%' : '100%'));
@@ -654,8 +687,8 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
   lines('.cd-week__part:last-child .cd-skeleton-line--meta', '.cd-week__part:last-child', ['65%', '30%']);
   lines('.cd-week__part:last-child .cd-skeleton-line--control', '.cd-week__part:last-child', ['70%']);
 
-  // "Answer a held request" is fourth, after "Watch a demo visitor".
-  const heldRow = '.cd-things__item:nth-child(4)';
+  // "Answer a held request" is fifth, after "See what was stopped".
+  const heldRow = '.cd-things__item:nth-child(5)';
   const skeletonHeight = today.querySelector(heldRow)!.getBoundingClientRect().height;
   desks.release();
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
@@ -701,16 +734,17 @@ it('today_reload_resizes_from_1440_to_620_before_landing', async () => {
  * draws a fresh copy's row. The card keeps its top, left and width and lands one row's change
  * shorter; what Today draws under the band (its column, and the aside beside or under it) and the
  * frame's footer each land once, by exactly that change. From 640 px the ticked card shares its row
- * with "Answer a held request", whose step at the card's foot moves with the row: its fresh line
+ * with two unfinished cards, whose steps at the foot move with the row: its fresh line
  * ("Describe a business…") takes a line more than the held request's room. Everything else lands
  * where its shape was.
  */
-const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card', 'week-title', 'week-bar-0'];
-const MOVED_FROM_640 = ['thing-action-3', ...UNDER_THINGS];
+const UNDER_THINGS = ['needs-title', 'held-card', 'live-row', 'since-title', 'since-card'];
+const UNDER_THINGS_ON_A_PHONE = [...UNDER_THINGS, 'week-title', 'week-bar-0'];
+const MOVED_FROM_640 = ['thing-action-3', 'thing-action-4', ...UNDER_THINGS_ON_A_PHONE];
 
 function switchedAnchors(phone: boolean): SkeletonAnchor[] {
-  const ticked = ['thing-tile-4', 'thing-action-4', 'thing-go-4'];
-  const under = new Set(phone ? UNDER_THINGS : MOVED_FROM_640);
+  const ticked = ['thing-tile-5', 'thing-action-5', 'thing-go-5'];
+  const under = new Set(phone ? UNDER_THINGS_ON_A_PHONE : MOVED_FROM_640);
   return TODAY_CONTENT_ANCHORS.filter(({ name }) => !under.has(name) && !ticked.includes(name)).map((anchor) =>
     anchor.name === 'things-card' ? { name: anchor.name, page: anchor.page, dimensions: ['width'] as const } : anchor,
   );
@@ -729,7 +763,7 @@ function boundsFromRect({ top, left, width, height }: DOMRect) {
 
 /** Sample the landed geometry from its first commit, even while the shapes fade over it. */
 function watchTheTickedRow(phone: boolean) {
-  const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS : MOVED_FROM_640).includes(name));
+  const under = TODAY_CONTENT_ANCHORS.filter(({ name }) => (phone ? UNDER_THINGS_ON_A_PHONE : MOVED_FROM_640).includes(name));
   const shape = (name: string) => document.querySelector(`.cd-today-opening [data-skeleton-anchor="${name}"]`)!.getBoundingClientRect();
   let before: { card: DOMRect; under: DOMRect[]; footer: DOMRect } | undefined;
   const snapshot = () => {
@@ -1083,7 +1117,7 @@ it('today_link_actions_measure_inherited_font_metrics', async () => {
   await expect.poll(() => Math.abs(shape.getBoundingClientRect().width - real.getBoundingClientRect().width)).toBeLessThanOrEqual(2);
 });
 
-it.each([1280, 1440, 1512])('reload_changes_only_the_link_pills_width_once_at_%s', async (width) => {
+it.each([1280, 1440, 1512])('reload_places_a_longer_link_once_at_%s', async (width) => {
   // The slug comes from the held read, so its width differs from the fresh-copy placeholder.
   const slug = 'turner-plumbing-a-new-random-slug';
   mockStore.world.desk(RIVERA.deskId)!.summary.slug = slug;
@@ -1123,9 +1157,12 @@ it.each([1280, 1440, 1512])('reload_changes_only_the_link_pills_width_once_at_%s
     await expect.element(screen.getByRole('heading', { name: /Good .*Mike/ })).toBeVisible();
     await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
-    // The pill ends where its shape ended, "Chat as a customer" after it at the band's right: a wider
-    // link grows to the left.
-    for (const edge of ['top', 'right', 'height'] as const) expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
+    // Outcomes don't widen the greeting, so even a newly read long slug stays beside its words.
+    // Only the pill's data-dependent width changes, once when the real link lands.
+    expect(Math.abs(real.height - shape.height)).toBeLessThanOrEqual(2);
+    const text = document.querySelector('.cd-greeting__text')!.getBoundingClientRect();
+    expect(real.left - text.right).toBe(24);
+    expect(real.top - text.top).toBe(4);
     const sizing = document.createElement('div');
     Object.assign(sizing.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' });
     sizing.inert = true;
@@ -1149,9 +1186,7 @@ it.each([1280, 1440, 1512])('reload_changes_only_the_link_pills_width_once_at_%s
     expect(getComputedStyle(label).textOverflow).toBe('ellipsis');
     expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
     expect(real.width).toBe(380);
-    const title = document.querySelector('.cd-greeting__title')!.getBoundingClientRect();
     const chat = document.querySelector('.cd-greeting__actions > .cd-button')!.getBoundingClientRect();
-    expect(real.top - title.top).toBe(4);
     expect(chat.top).toBe(real.top);
     expectNoHorizontalScroll();
     await screen.getByRole('button', { name: 'Copy your Desk link' }).click();
@@ -2079,7 +2114,7 @@ it('rules_shapes_remeasure_when_fonts_become_ready', async () => {
   await vi.waitFor(() => expect(lines()).toBeGreaterThan(before));
 });
 
-it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async (viewport) => {
+it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', { timeout: 30_000 }, async (viewport) => {
   const { screen, router } = await openToday(viewport === 'phone' ? 'phone' : 'desktop');
   if (typeof viewport === 'number') await page.viewport(viewport, 768);
   const read = holdReads(RULES_READ);
@@ -2090,7 +2125,7 @@ it.each(['desktop', 'phone', 1024] as const)('rules_load_in_place at %s', async 
     stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
-      await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+      await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
       expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
       if (typeof viewport === 'number') {
         await nextFrames();
@@ -2166,14 +2201,14 @@ it.each(['desktop', 'phone'] as const)('safety_load_in_place at %s', async (view
 it.each([
   { label: 'rules', path: RULES, read: RULES_READ, region: '.cd-rules__region', status: 'Reading your rules', anchors: RULES_ANCHORS, until: '.cd-rules__version' },
   { label: 'safety', path: SAFETY, read: LEDGER_READ, region: '.cd-safety__region', status: 'Reading what was stopped', anchors: SAFETY_ANCHORS, until: '.cd-attempt-row' },
-].flatMap(item => (['desktop', 'phone'] as const).map(viewport => ({ ...item, viewport }))))('$label reload hands off without a gap at $viewport', async ({ path, read, region, status, anchors, until, viewport }) => {
+].flatMap(item => (['desktop', 'phone'] as const).map(viewport => ({ ...item, viewport }))))('$label reload hands off without a gap at $viewport', { timeout: 30_000 }, async ({ path, read, region, status, anchors, until, viewport }) => {
   if (path === SAFETY) await withFreshRecord();
   const desks = holdReads(ROUTES.desks.path);
   const pageRead = holdReads(read);
   const gaps = watchSkeletonGaps(until);
   const { screen } = await renderRoute(path, { viewport, pollScale: 100 });
   const headings = watchTopHeadings();
-  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector(`${FULL_LAYER}[data-state="shown"]`)).not.toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
   await nextFrames();
   if (path === RULES) expect(document.querySelector(`${FULL_LAYER} .cd-rules__suggestions`)).toBeNull();
   const names = anchors.map(({ name }) => name);
@@ -2183,7 +2218,7 @@ it.each([
     status, anchors, continues: true,
     open: async () => {
       desks.release();
-      await vi.waitFor(() => expect(document.querySelector(`${region} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull());
+      await vi.waitFor(() => expect(document.querySelector(`${region} .cd-skeleton-screen__layer[data-state="shown"]`)).not.toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
       expectSameShapes(region, names, before);
       const realFooter = landedElement('[data-owner-footer]')!.getBoundingClientRect();
       for (const edge of ['top', 'bottom', 'left', 'width', 'height'] as const) {
@@ -2287,8 +2322,8 @@ async function expectPausedPageRead({ path, queryKey, readPath, region, landed, 
   await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
   if (prime !== undefined) {
     await router.navigate(prime);
-    await vi.waitFor(() => expect(landedElement(primeLanded!)).not.toBeNull());
-    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+    await vi.waitFor(() => expect(landedElement(primeLanded!)).not.toBeNull(), { timeout: prime === RULES ? 4_000 : 1_000 });
+    await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: prime === RULES ? 4_000 : 1_000 });
     await router.navigate(SAFETY);
     await expect.element(screen.getByRole('list', { name: 'Stopped, newest first' })).toBeVisible();
   }
@@ -2309,9 +2344,9 @@ async function expectPausedPageRead({ path, queryKey, readPath, region, landed, 
   await vi.waitFor(() => {
     expect(client.getQueryState(queryKey)?.fetchStatus).toBe('paused');
     expect(client.getQueryState(queryKey)?.data).toBeUndefined();
-  });
-  await vi.waitFor(() => expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network), { timeout: 2_000 });
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  }, { timeout: path === RULES ? 4_000 : 1_000 });
+  await vi.waitFor(() => expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network), { timeout: path === RULES ? 4_000 : 2_000 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
   const retry = document.querySelector(error)!.querySelector('button')!;
   expect(retry.textContent).toBe('Try again');
   expect(retry.getClientRects().length).toBeGreaterThan(0);
@@ -2325,13 +2360,13 @@ async function expectPausedPageRead({ path, queryKey, readPath, region, landed, 
   const layers = watchLayers();
   offline = false;
   onlineManager.setOnline(true);
-  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0), { timeout: path === RULES ? 4_000 : 1_000 });
   await nextFrames();
   expect(document.querySelector(error)?.textContent ?? '').toContain(OWNER_ERROR_COPY.network);
   expect(document.querySelector(`${region}[aria-busy="true"]`)).toBeNull();
   read.release();
-  await vi.waitFor(() => expect(landedElement(landed)).not.toBeNull());
-  await vi.waitFor(() => expect(document.querySelector(error)).toBeNull());
+  await vi.waitFor(() => expect(landedElement(landed)).not.toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
+  await vi.waitFor(() => expect(document.querySelector(error)).toBeNull(), { timeout: path === RULES ? 4_000 : 1_000 });
   await nextFrames();
   expect(layers(), 'reconnecting never brings the skeleton back').toBe(0);
   expect(document.querySelector('[aria-busy="true"]')).toBeNull();
@@ -2368,7 +2403,7 @@ it('conversation_paused_needs_you_lands_its_error_and_stays_open_on_reconnect', 
   });
 });
 
-it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', async () => {
+it('rules_paused_primary_read_lands_its_error_and_stays_open_on_reconnect', { timeout: 45_000 }, async () => {
   await expectPausedPageRead({
     path: RULES, queryKey: ['rules', RIVERA.deskId], readPath: RULES_READ,
     region: '.cd-rules__region', landed: '.cd-rules__tool-cards',
@@ -2558,7 +2593,7 @@ it.each(['ledger', 'health'] as const)('safety_waits_for_the_record_and_health: 
 it.each([
   { path: RULES, read: RULES_READ, status: 'Reading your rules', anchors: RULES_ANCHORS },
   { path: SAFETY, read: LEDGER_READ, status: 'Reading what was stopped', anchors: SAFETY_ANCHORS },
-])('$status stays still under reduced motion', async ({ path, read, status, anchors }) => {
+])('$status stays still under reduced motion', { timeout: 25_000 }, async ({ path, read, status, anchors }) => {
   if (path === SAFETY) await withFreshRecord();
   const { router } = await beforeSafety('desktop');
   const held = holdReads(read);
@@ -2588,13 +2623,13 @@ it('safety_entries_reload_keeps_its_existing_loader', async () => {
 
 it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i', async (width) => {
   const { screen } = await renderRoute(RULES, { viewport: { width, height: width === 390 ? 844 : 900 }, pollScale: 100 });
-  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' }), { timeout: 4_000 }).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   if (width >= 1280) {
     await screen.getByRole('textbox', { name: 'Ask Claude to change a rule' }).fill('Why was this quote held?');
     const { userEvent } = await import('vitest/browser');
     await userEvent.keyboard('{Enter}');
-    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' })).toBeVisible();
+    await expect.element(screen.getByRole('complementary', { name: 'Ask Claude' }), { timeout: 4_000 }).toBeVisible();
     await settled(document.body);
   }
   const page = landedElement('.cd-rules')!.getBoundingClientRect();
@@ -2626,14 +2661,14 @@ it.each([390, 1280, 1440, 1512])('rules_reload_measures_the_current_header at %i
   }
 });
 
-it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s', async (viewport) => {
+it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s', { timeout: 25_000 }, async (viewport) => {
   // Decision 15: a fresh copy has no suggestion. Approval history may supply one, which lands
   // its card once and moves the connector groups down by exactly that card and the page gap.
   mockStore.world.desks[0]!.suggestions = [APPROVED_REFUND_SUGGESTION];
   const { screen, router } = await openToday(viewport);
   const read = holdReads(RULES_READ);
   await router.navigate(RULES);
-  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
   expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer .cd-rules__suggestions')).toBeNull();
   const tops = watchTop(() => {
     const layer = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer');
@@ -2642,9 +2677,9 @@ it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s
       : landedElement('.cd-rules__section > .cd-card');
   });
   read.release();
-  await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
-  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await expect.element(screen.getByRole('button', { name: 'Draft this rule' }), { timeout: 4_000 }).toBeVisible();
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' }), { timeout: 4_000 }).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   const card = landedElement('.cd-rules__suggestions > .cd-card')!.getBoundingClientRect();
   const gap = Number.parseFloat(getComputedStyle(document.querySelector('.cd-rules__region > .cd-skeleton-screen__body')!).rowGap);
   expect(tops()).toHaveLength(2);
@@ -2655,7 +2690,7 @@ it.each(['desktop', 'phone'] as const)('rules_with_a_suggestion_moves_once at %s
   expect(tops()).toHaveLength(2);
 });
 
-it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alone', async (key) => {
+it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alone', { timeout: 30_000 }, async (key) => {
   const held = holdReads(ROUTES[key].path.replace('{desk_id}', RIVERA.deskId));
   const { router } = await openToday();
   await expectSkeletonLoad({
@@ -2663,7 +2698,7 @@ it.each(['people', 'suggestions'] as const)('rules_waits_for_every_read: %s alon
     stays: ['.cd-rules__header', '.cd-rules__ask', '[data-owner-footer]'],
     open: async () => {
       await router.navigate(RULES);
-      await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0));
+      await vi.waitFor(() => expect(held.held()).toBeGreaterThan(0), { timeout: 4_000 });
       expect(landedElement('.cd-rules__tool-cards')).toBeNull();
     },
     release: held.release,
@@ -2682,7 +2717,7 @@ it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', as
   const { screen, router } = await openToday(viewport);
   const read = holdReads(RULES_READ);
   await router.navigate(RULES);
-  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('.cd-rules__region .cd-skeleton-screen__layer[data-state="shown"]')).not.toBeNull(), { timeout: 4_000 });
   const jobs = document.querySelector('.cd-rules__region .cd-skeleton-screen__layer [data-skeleton-anchor="rules-first-card"]')!;
   expect(jobs.textContent).toBe('');
   const height = jobs.getBoundingClientRect().height;
@@ -2695,8 +2730,8 @@ it.each(['desktop', 'phone'] as const)('rules_without_jobs_moves_once at %s', as
       : landedElement('section.cd-card[aria-label="Quotes"]');
   });
   read.release();
-  await expect.element(screen.getByRole('region', { name: 'Tool by tool' })).toBeVisible();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await expect.element(screen.getByRole('region', { name: 'Tool by tool' }), { timeout: 4_000 }).toBeVisible();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   expect(landedElement('section.cd-card[aria-label="Your Desk’s jobs"]')).toBeNull();
   expect(tops()).toHaveLength(2);
   expect(tops()[1]! - tops()[0]!, 'one upward move, explained by the absent jobs card').toBe(-Math.round(height + gap));

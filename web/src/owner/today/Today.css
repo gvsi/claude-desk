@@ -110,87 +110,16 @@
   }
 }
 
-/* How your Desk works: three numbered steps in one card, each a 32 px icon tile beside "Step n", its
-   title and its line. Stacked 12 px apart; from 1000 px three columns side by side, 20 px apart, the
-   second and third each after a hairline with 20 px inside it. Under them, once Today is read, what
-   Claude did today on one line that wraps, under a hairline, each outcome a status dot and a link
-   with its count in the primary ink, or one quiet line on a day with nothing in it. */
-
-.cd-how__steps {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-12);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.cd-how__step {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-12);
-  min-width: 0;
-}
-
-.cd-how__tile {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: var(--size-control);
-  height: var(--size-control);
-  border-radius: var(--radius-control);
-  background: var(--fill-secondary);
-  color: var(--text-secondary);
-}
-
-.cd-how__words {
-  flex: 1;
-  min-width: 0;
-}
-
-.cd-how__label,
-.cd-how__title,
-.cd-how__line {
-  margin: 0;
-}
-
-.cd-how__label {
-  color: var(--text-tertiary);
-}
-
-.cd-how__title {
-  color: var(--text-primary);
-  font-weight: 520;
-}
-
-.cd-how__line {
-  color: var(--text-secondary);
-}
-
-@media (min-width: 1000px) {
-  .cd-how__steps {
-    flex-direction: row;
-    gap: var(--space-20);
-  }
-
-  .cd-how__step {
-    flex: 1 1 0;
-  }
-
-  .cd-how__step + .cd-how__step {
-    padding-left: var(--space-20);
-    border-left: 1px solid var(--line-hairline);
-  }
-}
-
+/* Today's outcomes wrap inside the presence words' column without setting its natural width. */
 .cd-how__today {
+  contain: inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-8) var(--space-16);
-  margin: var(--space-16) 0 0;
-  padding-top: var(--space-12);
-  border-top: 1px solid var(--line-hairline);
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  border: 0;
   color: var(--text-secondary);
 }
 
@@ -265,6 +194,29 @@
   align-self: center;
 }
 
+.cd-things__progress {
+  display: flex;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 280px;
+  margin-top: var(--space-6);
+}
+
+.cd-things__segment {
+  flex: 1 1 0;
+  height: var(--space-6);
+  border-radius: var(--radius-full);
+  background: var(--fill-secondary);
+}
+
+.cd-things__segment--done {
+  background: var(--status-handled);
+}
+
+.cd-things__progress > .cd-skeleton {
+  flex: 1 1 0;
+}
+
 .cd-things__hide,
 .cd-things__show {
   display: flex;
@@ -280,7 +232,7 @@
 }
 
 /* A row that ticks keeps the height it had while its check draws (a least height set as it ticks),
-   with its words and its pill together in the middle of it. */
+   with its check and words together in the middle of it. */
 .cd-things__item {
   display: grid;
   grid-template-columns: var(--size-control) minmax(0, 1fr) auto;
@@ -313,6 +265,13 @@
   color: var(--text-secondary);
 }
 
+.cd-things__icon--done {
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--status-handled);
+  color: var(--bg-app);
+}
+
 .cd-things__text {
   display: flex;
   flex-direction: column;
@@ -339,17 +298,6 @@
   margin-right: var(--space-6);
 }
 
-/* The waiting words and unseen longest end line share a cell, so an answer never grows the row. */
-.cd-things__detail[data-room] {
-  display: grid;
-}
-
-.cd-things__detail[data-room]::after {
-  content: attr(data-room);
-  grid-area: 1 / 1;
-  visibility: hidden;
-}
-
 .cd-things__detail-now {
   grid-area: 1 / 1;
   align-self: start;
@@ -367,7 +315,7 @@
 
 /* From 640 px: the card around the list goes, and each thing is a card of its own, its next step
    at the foot, so the steps of a row of cards share a line (grid rows stretch). Two to a row, three
-   from 1280 px, two rows for the five things, where the band is wide enough for each step's words. */
+   from 1280 px, two rows for the six things, where the band is wide enough for each step's words. */
 @media (min-width: 640px) {
   .cd-things > .cd-card {
     padding: 0;
@@ -392,6 +340,11 @@
     border: 1px solid var(--line-card);
     border-radius: var(--radius-card);
     background: var(--fill-card);
+  }
+
+  .cd-things__item.cd-things__item--done {
+    background: transparent;
+    border-color: var(--line-hairline);
   }
 
   .cd-things__action {
@@ -421,22 +374,16 @@
   transition: min-height var(--motion-base) var(--motion-ease-emphasis) var(--motion-base);
 }
 
-/* A done row: the Done pill in the next step's place. */
-.cd-things__done {
-  display: flex;
-}
-
 /* A row done in view: its check draws once, short arm first, as every check in the app does (the
    shared path starts at the long arm's tip, so the dash comes in from its end), and its done line
-   and pill come in. Without the animation (reduced motion), the check is drawn whole and the words
+   come in. Without the animation (reduced motion), the check is drawn whole and the words
    are there. */
 .cd-things__check--draws path {
   stroke-dasharray: 24;
   animation: cd-things-check-draw var(--motion-base) var(--motion-ease-emphasis);
 }
 
-.cd-things__detail--done,
-.cd-things__done--ticked {
+.cd-things__detail--done {
   animation: cd-things-done-in var(--motion-base) var(--motion-ease);
 }
 
@@ -483,7 +430,7 @@
 
 /* On a phone each row is its next step: the icon tile, the title and its line, and a chevron at the
    right, whose press area covers the row (its ideas, under it, keep their own presses), with the
-   focus edge just inside the row. The card's button isn't drawn; a done row keeps its pill at the right. */
+   focus edge just inside the row. The card's button isn't drawn; a done row has no next step. */
 @media (max-width: 639.98px) {
   .cd-things__item {
     position: relative;
@@ -491,7 +438,7 @@
     column-gap: var(--space-12);
   }
 
-  .cd-things__action:not(.cd-things__action--done) {
+  .cd-things__action {
     display: none;
   }
 
@@ -893,8 +840,9 @@
 .cd-today-skeleton__text { display: block; min-width: 0; width: 100%; max-width: 100%; }
 .cd-today-skeleton__fixed-line { max-width: none; }
 .cd-today-skeleton__presence { min-height: calc(var(--size-avatar) - var(--space-6)); }
-/* Unpainted glyph room is used only in the presence measurement, never as an avatar shape. */
-.cd-today-skeleton__glyph-room { flex: none; width: calc(var(--size-avatar) - var(--space-6) + var(--space-2)); height: calc(var(--size-avatar) - var(--space-6)); }
+/* Unpainted glyph room keeps the glyph width in both measurement and layout. */
+.cd-greeting__presence > .cd-today-skeleton__glyph-room { margin-left: var(--space-2); }
+.cd-today-skeleton__glyph-room { display: block; flex: none; width: calc(var(--size-avatar) - var(--space-6)); height: calc(var(--size-avatar) - var(--space-6)); }
 .cd-today-skeleton__legend { position: relative; }
 .cd-today-skeleton__legend-room { visibility: hidden; }
 .cd-today-skeleton__word-room { display: block; height: 1lh; }
@@ -906,8 +854,7 @@
 @container cd-approval-answers (max-width: 437.98px) {
   .cd-today-skeleton__answer { min-height: calc(var(--size-control-main) + var(--space-4)); }
 }
-/* How your Desk works: the tile's room keeps its size; the Today line's rows, 8 px apart as the line's. */
-.cd-today-skeleton__how-tile { flex: none; }
+/* The Today line's shapes keep its wrapping and the 8 px gap between rows. */
 .cd-today-skeleton__how-today { display: block; }
 .cd-today-skeleton__how-items { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); }
 .cd-today-skeleton__how-paint { gap: var(--space-8); }

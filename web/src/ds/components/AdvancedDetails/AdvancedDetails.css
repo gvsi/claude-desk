@@ -107,7 +107,7 @@
   color: var(--text-secondary);
 }
 
-/* The JSON as written: every line kept, a long one scrolling inside the block, never the page.
+/* The JSON as written: every line kept, with long values wrapping inside the block.
    No ligatures, so `!=` or `->` in a value reads as typed. */
 .cd-advanced-details__json {
   margin: 0;
@@ -115,9 +115,16 @@
   border-radius: var(--radius-control);
   background: var(--fill-secondary);
   color: var(--text-primary);
-  white-space: pre;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-variant-ligatures: none;
+}
+
+/* Leading spaces place the first line; padding keeps continuations at that same text start. */
+.cd-advanced-details__json-line {
+  display: block;
+  padding-inline-start: calc(var(--indent) * 1ch);
+  text-indent: calc(var(--indent) * -1ch);
 }
 
 /* The tint: keys in the accent blue, strings in the primary ink, other values in the secondary,

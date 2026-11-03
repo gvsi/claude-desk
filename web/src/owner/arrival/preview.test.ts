@@ -9,12 +9,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { DemoInboxEntry } from '../../api/contracts.ts';
-import type { BriefingItem, NeedsYouItem, Today } from '../../api/views.ts';
+import type { Attempt, BriefingItem, NeedsYouItem, Today } from '../../api/views.ts';
 import { formatClock, formatDay, formatWhen, relativeWait } from '../../lib/format.ts';
-import { needsYou, today } from '../../mocks/readModels.ts';
+import { attempts, needsYou, today } from '../../mocks/readModels.ts';
 import { seedWorld } from '../../mocks/seed.ts';
 import { MockWorld } from '../../mocks/world.ts';
 import { needsYouKey, OWNER_INBOX_KEY, todayKey } from '../useDesks.ts';
+import { attemptsQuery } from '../safety/queries.ts';
 import { previewClock, stillToday } from './preview.ts';
 
 const TIMEZONE = 'America/Los_Angeles';
@@ -24,6 +25,7 @@ interface Reads {
   today: Today;
   needsYou: NeedsYouItem[];
   inbox: DemoInboxEntry[];
+  stopped: Attempt[];
 }
 
 /** What a new copy of the mock's Turner seed, opened at `opened`, reads at `readAt`. */
@@ -32,7 +34,7 @@ function mockCopy(opened: number, readAt: number): Reads {
   world.at(opened, () => seedWorld(world));
   const desk = world.desk(world.ids.deskId);
   if (!desk) throw new Error('the seed has its main Desk');
-  return world.at(readAt, () => ({ today: today(world, desk), needsYou: needsYou(world, desk), inbox: world.inbox.map((r) => r.entry) }));
+  return world.at(readAt, () => ({ today: today(world, desk), needsYou: needsYou(world, desk), inbox: world.inbox.map((r) => r.entry), stopped: attempts(world, desk) }));
 }
 
 /** What the preview holds for a copy opened at `opened`, read at `readAt`, by read. */
@@ -47,6 +49,7 @@ function preview(opened: number, readAt: number): Reads {
     today: read<Today>(todayKey(desk.desk_id)),
     needsYou: read<NeedsYouItem[]>(needsYouKey(desk.desk_id)),
     inbox: read<DemoInboxEntry[]>(OWNER_INBOX_KEY),
+    stopped: read<Attempt[]>(attemptsQuery(desk.desk_id).queryKey),
   };
 }
 
@@ -55,10 +58,11 @@ function preview(opened: number, readAt: number): Reads {
  * and the briefing's start, which is drawn only on a night with nothing in it. Times are compared
  * as instants: the mock writes them to the microsecond, the preview to the millisecond.
  */
-function drawn({ today: t, needsYou: held, inbox }: Reads) {
+function drawn({ today: t, needsYou: held, inbox, stopped }: Reads) {
   const when = (iso: string | null) => (iso === null ? null : new Date(Date.parse(iso)).toISOString());
   const event = (item: BriefingItem | null) => item && { kind: item.kind, at: when(item.at), display_name: item.display_name, line: item.line, cause: item.cause };
   return {
+    canOpenStopped: stopped.length > 0,
     greeting_name: t.greeting_name,
     needs_you_count: t.needs_you_count,
     live: t.live.map((s) => ({

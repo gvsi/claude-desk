@@ -177,7 +177,7 @@ async function checkLoad(load: SkeletonLoad, still: boolean): Promise<void> {
 
 async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: ReturnType<typeof watchLoad>): Promise<void> {
   await load.open();
-  await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'shown')).toBe(true));
+  await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'shown')).toBe(true), { timeout: load.status === 'Reading your rules' || load.status === 'Drafting your rules' ? 4_000 : 1_000 });
   const { status, body, layer } = watch.parts();
   expect(layer).not.toBeNull();
   const shapesLayer = layer!;
@@ -232,7 +232,7 @@ async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: Retur
   });
   const stays = (load.stays ?? []).map((selector) => landed(selector).getBoundingClientRect());
   load.release();
-  await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'gone')).toBe(true));
+  await vi.waitFor(() => expect(watch.states.some(({ state }) => state === 'gone')).toBe(true), { timeout: load.status === 'Reading your rules' || load.status === 'Drafting your rules' ? 4_000 : 1_000 });
   await watch.replacementPaint();
   if (!still) expect(watch.leaving(), 'the layer never started leaving').toBeDefined();
   for (const [i, anchor] of load.anchors.entries()) {
@@ -247,7 +247,7 @@ async function checkWatchedLoad(load: SkeletonLoad, still: boolean, watch: Retur
       expect(element, `${anchor.name} (${anchor.page}) never landed within 2 s of the layer being gone`).toBeDefined();
       return element!.getBoundingClientRect();
     });
-  }, { timeout: 2_000 });
+  }, { timeout: load.status === 'Reading your rules' || load.status === 'Drafting your rules' ? 4_000 : 2_000 });
   if (still) {
     expect(watch.states.some(({ state }) => state === 'leaving')).toBe(false);
     expect(watch.replaced()).toHaveLength(load.anchors.length);

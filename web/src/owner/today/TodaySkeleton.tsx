@@ -6,8 +6,8 @@ import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
 import { givenOwnerName } from '../../public/brand.ts';
 import { HeldRuleShape } from '../approvals/HeldRuleShape.tsx';
-import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY } from '../arrival/ideas.ts';
-import { doneCaption } from '../arrival/doneSignals.ts';
+import { DEMO_VISITOR_THING, STOPPED_THING, THINGS_TO_TRY } from '../arrival/ideas.ts';
+import { doneCaption, THINGS } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
 import { firstName, isLive } from '../useDesks.ts';
@@ -15,9 +15,7 @@ import {
   CONTINUE_SETUP_COPY,
   continueSetupLine,
   handledCount,
-  howItWorksSteps,
   outcomeWords,
-  stepLabel,
   steppedInCount,
   TODAY_COPY,
   todayOutcomes,
@@ -35,6 +33,7 @@ const DETAILS = [
   TODAY_COPY.chatDetail,
   DEMO_VISITOR_THING.detail,
   TODAY_COPY.breakDetail,
+  STOPPED_THING.detail,
   // The seed's hold went past an automatic rule's limit, so Things to try names no rule
   // (`owner_reads._held_by`); its card's "Your rule" box names that rule (`HeldRuleShape`).
   TODAY_COPY.waiting,
@@ -43,7 +42,7 @@ const DETAILS = [
 
 /** The things' titles in the list's order: the intro dialog's four, with "Watch a demo visitor" second. */
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
-const THING_TITLES = [CHAT.title, DEMO_VISITOR_THING.title, BREAK.title, ANSWER.title, CREATE.title] as const;
+const THING_TITLES = [CHAT.title, DEMO_VISITOR_THING.title, BREAK.title, STOPPED_THING.title, ANSWER.title, CREATE.title] as const;
 
 /** The fresh copy's night (Decision 15): three conversations, Dana's booking and the agent's answer. */
 const FRESH_NIGHT = sinceLastNightLine({ conversations: 3, bookings: 1, answers: 1, turned_down: 0 }) ?? '';
@@ -116,7 +115,7 @@ const PRESENCE: readonly TextPart[] = [
   'One person is talking to your Desk right now.',
 ];
 
-/** The greeting's words: a Desk whose setup isn't finished greets its own owner, any other the fresh copy's. */
+/** The greeting's words follow the unfinished setup's owner and time zone. */
 function GreetingWords({ setup }: { setup?: SkeletonSetup }) {
   const box = useRef<HTMLDivElement>(null);
   const said = greetingFor(new Date(), setup?.timezone ?? 'America/Los_Angeles');
@@ -124,10 +123,17 @@ function GreetingWords({ setup }: { setup?: SkeletonSetup }) {
   const greeting = name ? `${said}, ${name}` : said;
   const title = useWordWidth(box, greeting, 'cd-greeting__title cd-type-greeting', true);
   const presence = useWordWidth(box, PRESENCE, 'cd-greeting__presence cd-type-body', true);
-  // The words' own width: the greeting's basis beside the link from 640 px, and its width on a phone.
-  return <div ref={box} className="cd-greeting__text" style={{ width: Math.max(title ?? 0, presence ?? 0) }}>
+  const outcomes = setup !== undefined ? QUIET_OUTCOMES : FRESH_OUTCOMES;
+  // Only the title and presence set the real greeting's natural width; outcomes wrap inside it.
+  return <div ref={box} className="cd-greeting__text" style={{ width: `max(${title ?? 0}px, ${presence ?? 0}px)` }}>
     <TextLines words={greeting} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" lastWidth="100%" />
-    <TextLines words={PRESENCE} text="body" probeClassName="cd-greeting__presence" lastWidth="80%" lineWidth="80%" singleLineClassName="cd-today-skeleton__presence" />
+    <div className="cd-greeting__presence cd-type-body">
+      <span className="cd-greeting__glyphs" aria-hidden="true"><span className="cd-today-skeleton__glyph-room" /></span>
+      <div className="cd-greeting__presence-text">
+        <TextLines words="One person is talking to your Desk right now." text="body" className="cd-greeting__presence-line" probeClassName="" lastWidth="80%" lineWidth="80%" singleLineClassName="cd-today-skeleton__presence" />
+        <TodayLineRows outcomes={outcomes} />
+      </div>
+    </div>
   </div>;
 }
 
@@ -271,38 +277,10 @@ function ContinueSetupShape({ step, answering, business }: SkeletonSetup) {
   );
 }
 
-/**
- * How your Desk works: the three steps, in their real wrapping, then the Today line's rows: the
- * fresh copy's, or for a Desk whose setup isn't finished (`quiet`) the one line of a day nobody has
- * asked it anything yet.
- */
-function HowItWorksShape({ quiet }: { quiet: boolean }) {
-  return (
-    <div className="cd-today__section cd-how">
-      <SectionTitle anchor="how-title" />
-      <SkeletonCard anchor="how-card">
-        <div className="cd-how__steps">
-          {howItWorksSteps(rivera.business.name).map((step, i) => (
-            <div key={step.title} className="cd-how__step">
-              <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" className="cd-today-skeleton__how-tile" anchor={`how-tile-${i}`} />
-              <div className="cd-how__words">
-                <TextLines words={stepLabel(i + 1)} className="cd-how__label" intrinsic lineWidth="100%" lastWidth="100%" />
-                <TextLines words={step.title} text="control" className="cd-how__title" intrinsic lineWidth="100%" lastWidth="100%" />
-                <TextLines words={step.line} className="cd-how__line" />
-              </div>
-            </div>
-          ))}
-        </div>
-        <TodayLineRows outcomes={quiet ? QUIET_OUTCOMES : FRESH_OUTCOMES} />
-      </SkeletonCard>
-    </div>
-  );
-}
-
 /** The Today line: one quiet line in its real wrapping, or else its real flex items, unseen, then one pill on each row they take. */
 function TodayLineRows({ outcomes }: { outcomes: TodayOutcomesLine }) {
   if (outcomes.quiet) {
-    return <div className="cd-how__today cd-today-skeleton__how-today">
+    return <div className="cd-how__today cd-today-skeleton__how-today" data-skeleton-anchor="today-line">
       <TextLines words={outcomes.line} />
     </div>;
   }
@@ -312,7 +290,7 @@ function TodayLineRows({ outcomes }: { outcomes: TodayOutcomesLine }) {
 function TodayLineItems({ outcomes }: { outcomes: Extract<TodayOutcomesLine, { quiet: false }> }) {
   const box = useRef<HTMLDivElement>(null);
   const rows = useRows(box);
-  return <div className="cd-how__today cd-today-skeleton__how-today">
+  return <div className="cd-how__today cd-today-skeleton__how-today" data-skeleton-anchor="today-line">
     <div className="cd-today-skeleton__legend">
       <div ref={box} className="cd-today-skeleton__how-items cd-type-meta cd-today-skeleton__legend-room">
         <span><WordRoom words={outcomes.lead} /></span>
@@ -377,8 +355,8 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
 }
 
 /**
- * The first view of a fresh copy: the band (greeting, link, "Chat as a customer", how the Desk works
- * and four things to try), one held request and the recorded night. Given a Desk whose setup isn't
+ * The first view of a fresh copy: the band (greeting, presence and today's line, link, "Chat as a customer"
+ * and six things to try), one held request and the recorded night. Given a Desk whose setup isn't
  * finished (`setup`), the band draws its "Not live yet" card first under the greeting, as Today will.
  */
 export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
@@ -407,7 +385,6 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
           </div>
         </div>
         {setup === undefined ? null : <ContinueSetupShape {...setup} />}
-        <HowItWorksShape quiet={setup !== undefined} />
         <div className="cd-things">
           <div className="cd-things__head">
             <div className="cd-things__head-line">
@@ -417,25 +394,22 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
               </div>
             </div>
             <TextLines words={doneCaption(0)} className="cd-things__caption" />
+            <div className="cd-things__progress" data-skeleton-anchor="things-progress">
+              {THINGS.map((thing) => <Skeleton key={thing} shape="block" radius="full" height="var(--space-6)" />)}
+            </div>
           </div>
           <SkeletonCard padding={16} anchor="things-card">
             <div className="cd-things__list">
-              {['Open your public page', DEMO_VISITOR_THING.start, 'Show me ideas', 'Open the request', 'Start a Desk'].map((label, i) => (
+              {['Open your public page', DEMO_VISITOR_THING.start, 'Show me ideas', STOPPED_THING.start, 'Open the request', 'Start a Desk'].map((label, i) => (
                 <div key={i} className={`cd-things__item cd-today-skeleton__thing-${i}`}>
                   <Skeleton shape="block" width="var(--size-control)" height="var(--size-control)" anchor={`thing-tile-${i}`} />
                   <div className="cd-things__text">
                     <TextLines words={THING_TITLES[i]!} text="control" className="cd-things__item-title" lineWidth="90%" lastWidth="90%" />
-                    {label === 'Open the request' ? (
-                      <span className="cd-things__detail cd-type-meta" data-room={ANSWER_ROOM}>
-                        <span className="cd-things__detail-now">
-                          <TextLines words={DETAILS[i]!} probeClassName="cd-things__detail" />
-                        </span>
-                      </span>
-                    ) : <TextLines words={DETAILS[i]!} className="cd-things__detail" />}
+                    <TextLines words={DETAILS[i]!} className="cd-things__detail" />
                   </div>
                   {/* From 640 px each card's button at its foot; on a phone each row's chevron. */}
                   <div className="cd-things__action">
-                    <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 4 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
+                    <Skeleton shape="block" measure={{ label, className: BUTTON, tagName: i === 0 || i === 3 || i === 5 ? 'a' : 'button' }} height="var(--size-control)" anchor={`thing-action-${i}`} />
                   </div>
                   <span className="cd-things__go">
                     <Skeleton shape="block" width={16} height={16} anchor={`thing-go-${i}`} />

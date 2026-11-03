@@ -46,6 +46,7 @@ A live row whose message reveals itself (`ClaudeMessage`'s `reveal`, Claude's re
 - The parts come in strictly one after another: the words, then each card, then each line, each starting once the one before has finished (`motion-follow` is never shorter than `motion-base` or `motion-settle`). A line attached while they come in (a newer status, say) waits its turn after whatever is still coming in, and never comes in with it.
 - A line already shown before its row arrived (`MarginReceipt`'s `shownBefore`) is already read: it doesn't wait.
 - Once the last line has come in, the row is like any other, as after a landing.
+- What follows the row can wait for it: `rowComingIn(row)` says whether anything in it is still coming in, on the page's animation clock (`clockNow()`). The owner's held request card waits on it to come in last.
 - Under reduced motion the reply shows whole and everything attached shows at once.
 
 ## Props

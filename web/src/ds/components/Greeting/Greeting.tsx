@@ -30,6 +30,8 @@ export interface GreetingProps {
    * `Button`, such as Today's "Chat as a customer".
    */
   actions?: ReactNode;
+  /** Additional content below the presence words, sharing their text column after any glyphs. */
+  children?: ReactNode;
 }
 
 /** At most this many glyphs: the line carries the count, the glyphs only the feeling of company. */
@@ -40,14 +42,14 @@ const MAX_GLYPHS = 3;
  * Desk right now, and at the right of its line the public link with a button to copy it, then the
  * screen's own actions. On a phone the link and the actions go under the presence line.
  */
-export function Greeting({ text, presence, link, actions }: GreetingProps) {
+export function Greeting({ text, presence, link, actions, children }: GreetingProps) {
   const glyphs = presence?.people.slice(0, MAX_GLYPHS) ?? [];
   return (
     <header className="cd-greeting">
       <div className="cd-greeting__text">
         <h1 className="cd-greeting__title cd-type-greeting">{text}</h1>
         {presence ? (
-          <p className="cd-greeting__presence cd-type-body">
+          <div className="cd-greeting__presence cd-type-body">
             {glyphs.length > 0 ? (
               <span className="cd-greeting__glyphs" aria-hidden="true">
                 {glyphs.map((glyph, index) => (
@@ -61,9 +63,12 @@ export function Greeting({ text, presence, link, actions }: GreetingProps) {
                 ))}
               </span>
             ) : null}
-            <span>{presence.line}</span>
-          </p>
-        ) : null}
+            <div className="cd-greeting__presence-text">
+              <p className="cd-greeting__presence-line">{presence.line}</p>
+              {children}
+            </div>
+          </div>
+        ) : children}
       </div>
       {link || actions ? (
         <div className="cd-greeting__actions">

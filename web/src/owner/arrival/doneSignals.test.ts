@@ -1,5 +1,5 @@
 /**
- * The four things on Today's list, each done only on what the reads show the owner did in this
+ * The six things on Today's list, each done only on what the reads show the owner did in this
  * copy: never on replayed history, the seed's own stopped reply, an answer the kernel refused, a
  * request that expired or was cancelled, or the owner's own words.
  */
@@ -364,7 +364,7 @@ describe('create your own Desk', () => {
 /** What the reads show for each thing now: nothing settled and nothing done, unless given. */
 function reading(fields: Partial<Record<Thing, Partial<Reading>>> = {}): Record<Thing, Reading> {
   const one = (thing: Thing): Reading => ({ done: false, settled: false, ...fields[thing] });
-  return { chat: one('chat'), demo: one('demo'), break: one('break'), answer: one('answer'), create: one('create') };
+  return { chat: one('chat'), demo: one('demo'), break: one('break'), stopped: one('stopped'), answer: one('answer'), create: one('create') };
 }
 
 describe('what this view remembers', () => {
@@ -414,11 +414,11 @@ describe('what this view remembers', () => {
 });
 
 describe("the list's line", () => {
-  it('says how long it takes until something is done, then counts of 5', () => {
+  it('says how long it takes until something is done, then counts of 6', () => {
     expect(doneCaption(0)).toBe('About 10 minutes. No real customer sees any of it.');
-    expect(doneCaption(1)).toBe('1 of 5 done. No real customer sees any of it.');
-    expect(doneCaption(4)).toBe('4 of 5 done. No real customer sees any of it.');
-    expect(doneCaption(5)).toBe('All 5 done. No real customer sees any of it.');
+    expect(doneCaption(1)).toBe('1 of 6 done. No real customer sees any of it.');
+    expect(doneCaption(3)).toBe('3 of 6 done. No real customer sees any of it.');
+    expect(doneCaption(6)).toBe('All 6 done. No real customer sees any of it.');
   });
 });
 

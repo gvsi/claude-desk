@@ -33,10 +33,27 @@
 
 .cd-greeting__presence {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-10);
   margin: 0;
   color: var(--text-secondary);
+}
+
+/* Presence words and the screen's second line share one column after however many glyphs show. */
+.cd-greeting__presence-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+.cd-greeting__presence-line {
+  margin: 0;
+}
+
+.cd-greeting__glyphs + .cd-greeting__presence-text > .cd-greeting__presence-line {
+  min-height: calc(var(--size-avatar) - var(--space-6));
 }
 
 .cd-greeting__glyphs {
@@ -47,7 +64,7 @@
 }
 
 /* 22 px circles on the raised surface, side by side, each ringed in the app background against
-   the next. None covers another's icon or initials (the count type, 11 px). */
+   the next. None covers another's icon or initials (the count type, 12 px). */
 .cd-greeting__glyph {
   display: flex;
   flex: none;

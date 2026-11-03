@@ -45,7 +45,7 @@ const SIGNING = [
 
 /**
  * The card’s ten abilities, in the order redrawn on 2026-11-02, the two customer lines with the
- * kernel’s straight apostrophe (canvas v326).
+ * kernel’s straight apostrophe (canvas v380).
  */
 const ABILITIES = [
   'Get a quote from the price list',
@@ -120,17 +120,17 @@ function AgentsPage() {
 const meta = {
   title: 'Boards/Agents page',
   render: () => <AgentsPage />,
-  // The outcome rows extend the page: draw it at a 14-inch laptop's width and its own 1800 px.
-  globals: { viewport: { value: 'laptop-1800', isRotated: false } },
+  // Redrawn at canvas v380: a 14-inch laptop's width and the full page's own 2200 px.
+  globals: { viewport: { value: 'laptop-2200', isRotated: false } },
   parameters: {
     layout: 'fullscreen',
     canvas: 'N-R2-Agents-01-Page',
     canvasNote: [
       'Built against the board in review; sign-off pending.',
-      'The story now draws each ability’s outcome under its words, with StatusLabel and the live page’s styles, as the live page has since #948. The ten abilities keep their order and words from the existing mock fixture, the two customer lines with the kernel’s straight apostrophe. N-R2-Agents-01-Page and N-R2-Agents-06-Phone are to be redrawn to match, the laptop page now 1800 px tall and the phone 2100 px tall to fit the outcome rows at the new type scale.',
+      'N-R2-Agents-01-Page and N-R2-Agents-06-Phone were redrawn at canvas v380 and match these stories at the new type scale: the full laptop page is 1512 × 2200 and the phone page is 390 × 2740. Each ability’s outcome sits under its words, with StatusLabel and the live page’s styles, as the live page has since #948. The ten abilities keep their order and words from the existing mock fixture, the two customer lines with the kernel’s straight apostrophe.',
       'The page for people’s AI agents, /d/:slug/agents: the public page’s brand header on its own (PublicBrandHeader), the endpoint as a CopyField with “Copy address”, and the example request as a CodeBlock, both in the code type.',
       'The column, its title and the cards’ lists are page layout the web app (plan 04) owns.',
-      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; it is 19 px where the renders draw an earlier 17 px line, and the title above it is larger too, so everything under it sits lower than the render.',
+      'The AI disclosure under the title is DisclosureLine, as the agents boards say it since a ruling on 2026-10-30; the v380 boards match its 19 px type and the larger title above it.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -141,7 +141,7 @@ type Story = StoryObj<typeof meta>;
 
 export const Board: Story = {
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 1800]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([1512, 2200]);
     await expectAgentsDisclosure(canvasElement);
     await withinDeadline(document.fonts.load('13px "JetBrains Mono"'), FONT_TIMEOUT, 'Agents page JetBrains Mono');
     // The brand header, 76 px with its rule, is the page's banner; the page's title is its one h1.
@@ -198,11 +198,11 @@ export const Board: Story = {
 };
 
 export const Phone: Story = {
-  // Drawn at a phone's width and the page's own 2100 px, its footer at the foot, as the board draws it.
-  globals: { viewport: { value: 'phone-2100', isRotated: false } },
+  // Redrawn at canvas v380: a phone's width and the full page's own 2740 px, its footer at the foot.
+  globals: { viewport: { value: 'phone-2740', isRotated: false } },
   parameters: { canvas: 'N-R2-Agents-06-Phone' },
   play: async ({ canvas, canvasElement, userEvent }) => {
-    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 2100]);
+    await expect([window.innerWidth, window.innerHeight]).toEqual([390, 2740]);
     await withinDeadline(document.fonts.ready, FONT_TIMEOUT, 'Agents phone fonts');
     await expectAgentsDisclosure(canvasElement);
     const column = one(canvas.getByRole('main'), '.board-agents__cards');
