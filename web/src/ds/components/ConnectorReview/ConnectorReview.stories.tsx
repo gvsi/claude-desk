@@ -67,7 +67,7 @@ export const ChenPayments: Story = {
     await expect(canvas.getByText(HINT)).toBeVisible();
     // The outcome is a menu: a pick goes to the screen with the tool's key.
     await userEvent.click(within(rows[0] as HTMLElement).getByRole('button', { name: /^Ask me first/ }));
-    await userEvent.click(canvas.getByRole('menuitemradio', { name: 'Automatic' }));
+    await userEvent.click(canvas.getByRole('menuitemradio', { name: 'Allow' }));
     await expect(args.onChangeOutcome).toHaveBeenCalledWith('native.payment_link', 'auto');
     // Two clicks on "Turn it on" turn it on once; it waits with a spinner on the pressed button only.
     const turnOn = canvas.getByRole('button', { name: 'Turn it on' });
@@ -133,7 +133,7 @@ export const CoveredByARule: Story = {
   },
   play: async ({ canvas }) => {
     await expect(
-      canvas.getByText('Covered by your rule: Payment links up to $300, checked by the reviewer. · Automatic up to $300; over $300, ask me first'),
+      canvas.getByText('Covered by your rule: Payment links up to $300, checked by the reviewer. · Allow'),
     ).toBeVisible();
     await expect(canvas.getByText('Covered by your always-on rule: Private data only to its verified owner')).toBeVisible();
     await expect(canvas.queryByText(/No rule of yours/)).toBeNull();

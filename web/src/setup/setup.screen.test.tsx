@@ -2404,15 +2404,15 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Add Payments' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Payments/ })).toBeVisible();
     expect(reviewOutcomes(screen)).toEqual([
-      ['Payment link', 'Automatic'],
-      ['Charge within a signed limit', 'Automatic'],
+      ['Payment link', 'Allow'],
+      ['Charge within a signed limit', 'Allow'],
     ]);
     expect(reviewOutcomes(screen)).toEqual(asRules(['Payment link', 'Charge within a signed limit']));
 
     await screen.getByRole('button', { name: 'Cancel' }).click();
     await screen.getByRole('button', { name: 'Add Documents' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: /^Review what Claude could do with Documents/ })).toBeVisible();
-    expect(reviewOutcomes(screen)).toEqual([['Share a document', 'Automatic']]);
+    expect(reviewOutcomes(screen)).toEqual([['Share a document', 'Allow']]);
     expect(reviewOutcomes(screen)).toEqual(asRules(['Share a document']));
   });
 

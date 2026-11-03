@@ -74,9 +74,8 @@ describe('ask claude', () => {
   });
 
   it('the_page_under_the_header_has_no_vertical_jump', async () => {
-    // Beside the panel at 1440 px, the header's subtitle takes a second line, so everything under
-    // the header sits 21 px lower; closing, it goes back up. That move is a glide too: on the first
-    // frame of the open and of the close, the first group is where it was.
+    // Beside the panel at 1440 px, the header keeps its lines, so nothing under it moves: on the
+    // first frame of the open and of the close, and once each settles, the first section is where it was.
     await cdp().send('Animation.enable');
     onTestFinished(async () => {
       await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
@@ -84,8 +83,8 @@ describe('ask claude', () => {
     const { screen } = await renderRoute(RULES);
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await expect.element(composer).toBeVisible();
-    // The loading layer also has these classes; wait for the page's own group.
-    const group = () => [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section__header')].find((el) => !el.closest('.cd-skeleton-screen__layer')) ?? null;
+    // The loading layer also has these classes; wait for the page's own first section.
+    const group = () => [...screen.container.querySelectorAll<HTMLElement>('.cd-rules__section')].find((el) => !el.closest('.cd-skeleton-screen__layer')) ?? null;
     await expect.poll(() => group()).not.toBeNull();
     const top = () => (group() as HTMLElement).getBoundingClientRect().top;
     const closed = top();
@@ -99,7 +98,7 @@ describe('ask claude', () => {
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
     await settled(screen.container);
     const opened = top();
-    expect(opened - closed).toBeCloseTo(21, 0);
+    expect(opened - closed).toBeCloseTo(0, 0);
 
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 0 });
     await panel.getByRole('button', { name: 'Close' }).click();
@@ -110,11 +109,9 @@ describe('ask claude', () => {
   });
 
   it('nothing_in_the_payments_rows_jumps_at_1512', async () => {
-    // At 1512 px, beside the panel and the header's two actions, the subtitle takes a second line,
-    // above the rows scrolled to here, and the browser keeps them where they are on screen. Inside
-    // the Payments and Stripe rows, whose own height stays the same, the summary lines move when
-    // the column narrows. On the first frame of the open and of the close, every part of those rows
-    // is where it was in them.
+    // At 1512 px, beside the panel and the header's action, the subtitle keeps its line above the
+    // rows scrolled to here, and the browser keeps them where they are on screen. On the first frame
+    // of the open and of the close, every part of the Payments and Stripe cards is where it was in them.
     await cdp().send('Animation.enable');
     onTestFinished(async () => {
       await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });
@@ -123,16 +120,16 @@ describe('ask claude', () => {
     const composer = screen.getByRole('textbox', { name: 'Ask Claude to change a rule' });
     await expect.element(composer).toBeVisible();
     const sections = () =>
-      [...screen.container.querySelectorAll<HTMLElement>('.cd-connector-section')].filter((section) =>
-        /^(Payments|Stripe)/.test(section.querySelector('.cd-connector-section__header')?.textContent?.trim() ?? ''),
-      );
+      [...screen.container.querySelectorAll<HTMLElement>('section.cd-card[aria-label="Payments"], section.cd-card[aria-label="Stripe"]')]
+        .filter((section) => !section.closest('.cd-skeleton-screen__layer'));
     await expect.poll(() => sections().length).toBe(2);
     // The words go in first, since typing brings the composer into view; then the rows are scrolled to.
     await composer.fill(ASK);
     (sections()[0] as HTMLElement).scrollIntoView({ block: 'start' });
     const main = screen.container.querySelector('main') as HTMLElement;
     expect(main.scrollTop).toBeGreaterThan(0);
-    const parts = () => sections().flatMap((section) => [...section.querySelectorAll<HTMLElement>('*')]);
+    // What shows: a closed Details panel takes no room.
+    const parts = () => sections().flatMap((section) => [...section.querySelectorAll<HTMLElement>('*')]).filter((part) => part.getBoundingClientRect().height > 0);
     const header = screen.container.querySelector('.cd-rules__header') as HTMLElement;
     // Where each part is from the top of the Payments rows, wherever the page is scrolled (closing
     // returns focus to the composer, which scrolls) and however many lines the header takes; the
@@ -153,7 +150,7 @@ describe('ask claude', () => {
     await userEvent.keyboard('{Enter}');
     const panel = screen.getByRole('complementary', { name: 'Ask Claude' });
     await expect.element(panel).toBeVisible();
-    expect(header.getBoundingClientRect().height - lines, "the subtitle's second line").toBe(21);
+    expect(header.getBoundingClientRect().height - lines, 'the subtitle fits beside the panel').toBe(0);
     expect(onScreen(), 'the rows stay where they are on screen').toBe(seen);
     expect(jumps(closed), 'opening').toEqual([]);
     await cdp().send('Animation.setPlaybackRate', { playbackRate: 1 });

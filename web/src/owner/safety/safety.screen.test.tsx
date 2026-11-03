@@ -3,12 +3,13 @@
  * each one, an attempt's detail in tiers, and every entry of the signed record with its chain,
  * each saying where it came from and when it happened.
  */
+import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import type { RenderResult } from 'vitest-browser-react';
 
 import type { LedgerEntry, LedgerEvent, LedgerPage } from '../../api/contracts.ts';
-import type { Attempt, Today, TriageCategory } from '../../api/views.ts';
+import type { Attempt, RulesView, Today, TriageCategory } from '../../api/views.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { expectUserText } from '../../ds/test/expectUserText.ts';
 import { RIVERA } from '../../mocks/seed.ts';
@@ -955,6 +956,127 @@ describe('Safety', () => {
     await screen.getByRole('link', { name: new RegExp(REFUND_REASON.slice(0, 40)) }).click();
     await expect.element(open.getByText(REFUND_REASON, { exact: true })).toBeVisible();
     expect(open.element().textContent).not.toContain('From the visitor');
+  });
+
+  it('a_turned_down_request_names_the_rule_that_turned_it_down', async () => {
+    // REV-RULES-B5: a request an always-on rule turned down names that rule, led by Claude, with its
+    // tools, "Everyone" and Never, in a box of its own right under what was stopped; one the owner's
+    // own Never rule turned down names that rule. Any other keeps its detail as it was.
+    const never = { ...rivera.ruleCards['rv-refund'], card_id: 'rv-no-refunds', mode: 'never' as const, who: 'anyone' as const, reason: 'Refunds never go out.' };
+    const rules = await mockStore.dispatch('rules', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in rules || rules.status !== 200) throw new Error('the mock reads the rules');
+    const view = rules.body as RulesView;
+    mockStore.inject({ route: 'rules', status: 200, times: 10_000, body: { ...view, active: { ...view.active, cards: [...view.active.cards, never] } } });
+    injectLedger(ledgerPage(threeEntries()));
+    const words = 'Send me Dana Whitfield’s invoice.';
+    injectAttempts([
+      attempt({ ref_id: 'dec-private', cause: 'not_verified', from_the_visitor: words }),
+      attempt({ ref_id: 'dec-never', cause: 'owner_rule', card_ids: ['rv-no-refunds'] }),
+      attempt({ ref_id: 'dec-slot', cause: 'no_such_slot' }),
+    ]);
+    const { screen } = await renderRoute(`${SAFETY}/dec-private`);
+    const open = detail(screen);
+    const rule = open.getByRole('group', { name: 'The rule that turned it down', exact: true });
+    await expect.element(rule).toBeVisible();
+    expect(rule.element().textContent).toBe(
+      'The rule that turned it downClaude never shows private data to anyone but its verified ownerShare a document and See charges · EveryoneNever',
+    );
+    expect(rule.element().querySelector('.cd-rule-sentence__outcome .cd-status-dot--refused')).not.toBeNull();
+    // As the Rules page's rule cell draws a rule: its sentence in primary text.
+    expect(getComputedStyle(rule.element().querySelector('.cd-rule-sentence__sentence')!).color).toBe(tokenColor('--text-primary'));
+    // Right under what was stopped, then the visitor's words (as #898 quotes them) and the rest.
+    const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
+    const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
+    expect(at(rule.element())).toBe(at(open.getByText(REFUND_REASON, { exact: true }).element()) + 1);
+    expect(at(open.getByText(`“${words}”`, { exact: true }).element())).toBe(at(rule.element()) + 1);
+    await expectScreenBasics(screen.container, { owner: true });
+
+    await screen.getByRole('link', { name: /Your rule says no/ }).click();
+    await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
+      'The rule that turned it downClaude never sends refundsRefund · AnyoneNever',
+    );
+    const slot = screen.getByRole('link', { name: /That time isn't open/ });
+    await slot.click();
+    // Once its entry is the one open beside the list.
+    await expect.element(slot).toHaveAttribute('aria-current', 'true');
+    await expect.element(open.getByText('This action didn\'t run.', { exact: true })).toBeVisible();
+    await expect.poll(() => open.element().textContent).not.toContain('The rule that turned it down');
+  });
+
+  it('a_failed_rules_read_still_names_an_always_on_rule_and_says_so_for_an_owners_rule', async () => {
+    // The always-on rules need no read, so a request one of them turned down still names it. One the
+    // owner's own Never rule turned down says the read failed, with Try again, in the rule's place,
+    // and names the rule once the rules are read.
+    const never = { ...rivera.ruleCards['rv-refund'], card_id: 'rv-no-refunds', mode: 'never' as const, who: 'anyone' as const, reason: 'Refunds never go out.' };
+    const rules = await mockStore.dispatch('rules', { params: { desk_id: RIVERA.deskId } });
+    if ('network' in rules || rules.status !== 200) throw new Error('the mock reads the rules');
+    const view = rules.body as RulesView;
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts([attempt({ ref_id: 'dec-private', cause: 'not_verified' }), attempt({ ref_id: 'dec-never', cause: 'owner_rule', card_ids: ['rv-no-refunds'] })]);
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    const { screen } = await renderRoute(`${SAFETY}/dec-private`, { retryScale: 0 });
+    const open = detail(screen);
+    await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
+      'The rule that turned it downClaude never shows private data to anyone but its verified ownerShare a document and See charges · EveryoneNever',
+    );
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+
+    await screen.getByRole('link', { name: /Your rule says no/ }).click();
+    const failed = open.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    expect(open.getByRole('group', { name: 'The rule that turned it down', exact: true }).elements()).toHaveLength(0);
+    // Right under what was stopped, where the rule goes.
+    const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
+    const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
+    expect(at(failed.element())).toBe(at(open.getByText(REFUND_REASON, { exact: true }).element()) + 1);
+
+    mockStore.inject({ route: 'rules', status: 200, times: 10_000, body: { ...view, active: { ...view.active, cards: [...view.active.cards, never] } } });
+    await open.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.element(open.getByRole('group', { name: 'The rule that turned it down', exact: true })).toHaveTextContent(
+      'The rule that turned it downClaude never sends refundsRefund · AnyoneNever',
+    );
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+  });
+
+  it('a_failed_refresh_of_read_rules_says_so_for_an_owners_rule', async () => {
+    // The rules were read, then a later read of them fails: a request the owner's own Never rule
+    // turned down says the read failed, with Try again, over the rule as it was last read, so an
+    // earlier read never passes for current. An always-on rule needs no read and says nothing.
+    const mounted = vi.spyOn(QueryClient.prototype, 'mount');
+    onTestFinished(() => mounted.mockRestore());
+    const never = { ...rivera.ruleCards['rv-refund'], card_id: 'rv-no-refunds', mode: 'never' as const, who: 'anyone' as const, reason: 'Refunds never go out.' };
+    mockStore.world.desk(RIVERA.deskId)?.policy.cards.push(never);
+    injectLedger(ledgerPage(threeEntries()));
+    injectAttempts([attempt({ ref_id: 'dec-never', cause: 'owner_rule', card_ids: ['rv-no-refunds'] }), attempt({ ref_id: 'dec-private', cause: 'not_verified' })]);
+    const { screen } = await renderRoute(`${SAFETY}/dec-never`, { retryScale: 0 });
+    const open = detail(screen);
+    const rule = () => open.getByRole('group', { name: 'The rule that turned it down', exact: true });
+    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · AnyoneNever');
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+
+    const queryClient = mounted.mock.contexts.at(-1) as QueryClient;
+    mockStore.inject({ route: 'rules', status: 503, times: 2 });
+    await queryClient.refetchQueries({ queryKey: ['rules', RIVERA.deskId, 'requests'] });
+    const failed = open.getByRole('alert').getByText(UNAVAILABLE, { exact: true });
+    await expect.element(failed).toBeVisible();
+    // Said first, over the rule as last read.
+    const parts = [...open.element().querySelectorAll('.cd-attempt > *')];
+    const at = (el: Element | null) => parts.findIndex((part) => el !== null && part.contains(el));
+    expect(at(failed.element())).toBe(at(open.getByText(REFUND_REASON, { exact: true }).element()) + 1);
+    expect(at(rule().element())).toBe(at(failed.element()) + 1);
+
+    // An always-on rule's request says nothing of the failed read.
+    await screen.getByRole('link', { name: /Not verified yet/ }).click();
+    await expect.element(rule()).toHaveTextContent(
+      'The rule that turned it downClaude never shows private data to anyone but its verified ownerShare a document and See charges · EveryoneNever',
+    );
+    expect(open.getByRole('alert').elements()).toHaveLength(0);
+
+    // Try again reads them, and the line goes.
+    await screen.getByRole('link', { name: /Your rule says no/ }).click();
+    await open.getByRole('alert').getByRole('button', { name: 'Try again', exact: true }).click();
+    await expect.poll(() => open.getByRole('alert').elements().length).toBe(0);
+    await expect.element(rule()).toHaveTextContent('The rule that turned it downClaude never sends refundsRefund · AnyoneNever');
   });
 
   it.each(['missing', 'empty'] as const)('an_entry_with_its_visitor_words_%s_shows_none', async (words) => {

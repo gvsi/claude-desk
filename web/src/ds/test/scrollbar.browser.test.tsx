@@ -1,7 +1,7 @@
 import { expect, it, onTestFinished } from 'vitest';
-import { page, userEvent } from 'vitest/browser';
+import { cdp, page, userEvent } from 'vitest/browser';
 
-import { tokenColor } from '../../test/screen.ts';
+import { nextFrames, tokenColor } from '../../test/screen.ts';
 import { chooseTheme } from './theme.ts';
 
 /** Both axes overflow, as a transcript or a code block does. */
@@ -26,6 +26,80 @@ async function expectStandardScrollbar(area: HTMLElement) {
   await expect.poll(() => getComputedStyle(area).scrollbarColor).toBe(`${tokenColor('--text-tertiary')} rgba(0, 0, 0, 0)`);
   expect(area.offsetWidth - area.clientWidth).toBe(gutter);
 }
+
+/** Read the solid centre of each thumb from Chromium's paint, not its stale pseudo CSSOM. */
+async function paintedThumbs(area: HTMLElement): Promise<number[][]> {
+  const base64 = await page.screenshot({ element: area, save: false });
+  const blob = await (await fetch(`data:image/png;base64,${base64}`)).blob();
+  const bitmap = await createImageBitmap(blob, { colorSpaceConversion: 'none' });
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext('2d')!;
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const scale = canvas.width / area.offsetWidth;
+  return [[area.clientWidth + 6, 16], [16, area.clientHeight + 6]].map(([x, y]) => {
+    return [...context.getImageData(Math.floor(x! * scale), Math.floor(y! * scale), 1, 1).data].slice(0, 3);
+  });
+}
+
+/** Tokens contain alpha, so compare their painted RGB over the same app background. */
+function paintedToken(token: string): number[] {
+  const context = document.createElement('canvas').getContext('2d')!;
+  context.fillStyle = getComputedStyle(document.body).backgroundColor;
+  context.fillRect(0, 0, 1, 1);
+  context.fillStyle = tokenColor(token);
+  context.fillRect(0, 0, 1, 1);
+  return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
+}
+
+async function expectPaintedThumbs(area: HTMLElement, expected: number[], phase: string): Promise<void> {
+  const actual = await paintedThumbs(area);
+  // Canvas and the compositor can round alpha blending one RGB level apart.
+  for (const pixel of actual) {
+    for (const [i, channel] of pixel.entries()) {
+      expect(Math.abs(channel - expected[i]!), `${phase}: painted ${pixel}, expected ${expected}`).toBeLessThanOrEqual(1);
+    }
+  }
+}
+
+it.each(['dark', 'light'] as const)('painted_thumbs_return_to_rest_after_area_hover_in_%s', async (theme) => {
+  chooseTheme(theme);
+  const area = scrollArea();
+  const rest = paintedToken('--line-control');
+  const hover = paintedToken('--text-tertiary');
+  const geometry = () => [area.offsetWidth, area.offsetHeight, area.clientWidth, area.clientHeight, area.scrollLeft, area.scrollTop];
+  const before = geometry();
+  // Raw pointer moves avoid Playwright auto-scrolling a target point on a scrollbar.
+  const move = (x: number, y: number) => cdp().send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+  await move(1, 1);
+  await nextFrames();
+  await expectPaintedThumbs(area, rest, 'initial thumb pixels');
+  await move(180, 180);
+  await nextFrames();
+  await expectPaintedThumbs(area, hover, 'content-hover thumb pixels');
+  expect(geometry()).toEqual(before);
+  await move(1, 1);
+  await nextFrames();
+  await expectPaintedThumbs(area, rest, 'content-hover-out thumb pixels');
+  // Enter through the thumb, then move into content while the area remains hovered.
+  // Chromium repaints when the pointer crosses the scrollbar itself.
+  await move(294, 116);
+  await nextFrames();
+  await move(116, 294);
+  await nextFrames();
+  await move(180, 180);
+  expect(area.matches(':hover')).toBe(true);
+  await nextFrames();
+  await expectPaintedThumbs(area, hover, 'hovered thumb pixels');
+  expect(geometry()).toEqual(before);
+  await move(1, 1);
+  expect(area.matches(':hover')).toBe(false);
+  await nextFrames();
+  await expectPaintedThumbs(area, rest, 'hover-out thumb pixels');
+  expect(geometry()).toEqual(before);
+});
 
 it.each(['dark', 'light'] as const)('S1_keeps_its_size_and_uses_the_theme_tokens_in_%s', async (theme) => {
   chooseTheme(theme);
