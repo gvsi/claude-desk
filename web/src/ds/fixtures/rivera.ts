@@ -1124,7 +1124,7 @@ const connectorViews = {
     id: 'leads',
     name: 'Leads and callbacks',
     icon: 'leads',
-    description: "Saves visitors' details and asks you to call back.",
+    description: "Saves visitors’ details and asks you to call back.",
     source: { kind: 'built_in' },
   },
   verification: {
@@ -1138,7 +1138,7 @@ const connectorViews = {
     id: 'documents',
     name: 'Documents',
     icon: 'documents',
-    description: "Sends customers their own documents after they confirm it's them.",
+    description: "Sends customers their own documents after they confirm it’s them.",
     source: { kind: 'built_in' },
   },
   payments: {
@@ -1152,7 +1152,7 @@ const connectorViews = {
     id: 'stripe',
     name: 'Stripe',
     icon: 'stripe',
-    description: "Your customers' charges and refunds. Test mode, no money moves.",
+    description: "Your customers’ charges and refunds. Test mode, no money moves.",
     source: { kind: 'external', mock: true },
   },
 } satisfies Record<string, ConnectorView>;
@@ -1183,7 +1183,7 @@ const hubSections = [
       {
         key: 'native.find_slots',
         name: 'Find open times',
-        description: "Reads the times you're free. Changes nothing.",
+        description: "Reads the times you’re free. Changes nothing.",
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
@@ -1207,7 +1207,7 @@ const hubSections = [
       {
         key: 'native.capture_lead',
         name: 'Save a lead',
-        description: "Keeps a visitor's details for you. Can be undone.",
+        description: "Keeps a visitor’s details for you. Can be undone.",
         summary: 'Anyone',
         mode: 'auto',
         status: 'enabled',
@@ -1230,7 +1230,7 @@ const hubSections = [
     tools: [
       {
         key: 'native.start_verification',
-        name: "Confirm it's them",
+        name: "Confirm it’s them",
         description: 'Sends a code to the contact on record.',
         summary: 'Always on',
         mode: 'auto',
@@ -1271,7 +1271,7 @@ const hubSections = [
       {
         key: 'native.charge_mandate',
         name: 'Charge within a signed limit',
-        description: "Lets a visiting agent pay from its owner's signed limit. Charges money. Can't be undone.",
+        description: "Lets a visiting agent pay from its owner’s signed limit. Charges money. Can't be undone.",
         summary: '2 rules · 1 shared',
         mode: 'auto',
         limit: '$20',
