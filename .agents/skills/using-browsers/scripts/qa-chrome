@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""The QA Chrome: a separate Chrome that agents drive, never the project owner's everyday one.
+"""The QA Chrome: a separate Chrome that agents drive, never a person's own browser.
 
-It has its own profile (~/.claude-desk/qa-chrome), its own sign-ins and its own
-debugging port, so agents attach without an Allow prompt, overnight runs work
-unattended, and the everyday Chrome never needs a debugging port.
+It has its own profile (QA_CHROME_PROFILE), its own sign-ins and its own
+debugging port (QA_CHROME_PORT), so agents attach without an Allow prompt,
+unattended runs work, and a person's own browser never needs a debugging port.
 
     .agents/skills/using-browsers/scripts/qa-chrome up       # start it (or confirm it's running)
     .agents/skills/using-browsers/scripts/qa-chrome status
     .agents/skills/using-browsers/scripts/qa-chrome down     # shut it; sign-ins stay in the profile
 
-Agents attach with `agent-browser --cdp 19232 --pin-tab`.
+Agents attach with `agent-browser --cdp <port> --pin-tab`, the port `status` prints.
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ import urllib.request
 from pathlib import Path
 
 HOST = "127.0.0.1"
-# 9222 is Chrome's usual debugging port, and 19222 and 19333 are used by other local tools.
-# up() refuses a port another process holds.
-PORT = int(os.environ.get("QA_CHROME_PORT", "19232"))
-PROFILE = Path(os.environ.get("QA_CHROME_PROFILE", Path.home() / ".claude-desk" / "qa-chrome")).expanduser()
+# One above Chrome's usual debugging port, 9222; set QA_CHROME_PORT to choose another. up() refuses a port another
+# process holds.
+PORT = int(os.environ.get("QA_CHROME_PORT", "9223"))
+PROFILE = Path(os.environ.get("QA_CHROME_PROFILE", Path.home() / ".qa-chrome")).expanduser()
 CHROME = os.environ.get("QA_CHROME_BINARY", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 

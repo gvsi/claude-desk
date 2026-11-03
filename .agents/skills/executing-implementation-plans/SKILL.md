@@ -13,7 +13,7 @@ The plan runner for this repo. Adapted from obra/superpowers 6.4.1 (MIT, `LICENS
 
 | Seat | Model | How |
 |---|---|---|
-| Implementer | Opus 5.5; Fable 5.1 at `xhigh` for a very complex or critical task (the kernel, the kernel/API trust boundary, money, verification, the evals gate, the master plan) | the `plan-implementer` agent via the Agent tool with `model: opus` (`model: fable` for those), a fresh agent per task; fix rounds resume the same agent (SendMessage). Fable: paused, see AGENTS.md, Agents. |
+| Implementer | Opus 5.5; Fable 5.1 at `xhigh` for a very complex or critical task (the kernel, the kernel/API trust boundary, money, verification, the evals gate, the master plan) | the `plan-implementer` agent via the Agent tool with `model: opus` (`model: fable` for those), a fresh agent per task; fix rounds resume the same agent (SendMessage). |
 | Task reviewer and re-reviewer | GPT-6.1 Sol at `xhigh` | `codex exec`, launched and checked as in `orchestrating-review-subagents`, a fresh run each time; fallback: the `plan-task-reviewer` agent with `model: opus` |
 | PR gate | Opus 5.5 and GPT-6.1 Sol at `xhigh`, plus Fable 5.1 at `xhigh` for critical work | the panel in `orchestrating-review-subagents` |
 

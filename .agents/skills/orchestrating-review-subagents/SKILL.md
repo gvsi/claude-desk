@@ -12,8 +12,8 @@ This skill is the single source of truth for running plan and code reviews throu
 Every plan and code review uses two seats at `xhigh`, dispatched in parallel, without asking the project owner to choose a panel (`AGENTS.md`, **Agents**), and a third for critical work:
 
 - **Opus 5.5**, native: the Agent tool with `model: opus`, from a Claude Code session running at `xhigh` (native subagents inherit the session's effort). Claude Code never shells out to `claude -p` for this seat.
-- **GPT-6.1 Sol**: `codex exec -C <repo root> -s danger-full-access -c model=gpt-6.1-sol -c model_reasoning_effort=xhigh --json "<prompt>" < /dev/null`.
-- **Fable 5.1**, the third seat, for very complex or critical reviews: the kernel, the kernel/API trust boundary, money, verification, the evals gate and the master plan. Native: the Agent tool with `model: fable`, from a Claude Code session running at `xhigh`. When a review touches any of these, run all three seats in parallel. Paused: see AGENTS.md, Agents.
+- **GPT-6.1 Sol**: `codex exec -C <repo root> -c model=gpt-6.1-sol -c model_reasoning_effort=xhigh --json "<prompt>" < /dev/null`, with a sandbox setting as below.
+- **Fable 5.1**, the third seat, for very complex or critical reviews: the kernel, the kernel/API trust boundary, money, verification, the evals gate and the master plan. Native: the Agent tool with `model: fable`, from a Claude Code session running at `xhigh`. When a review touches any of these, run all three seats in parallel.
 - From a Codex session the transports swap: Sol runs natively, and Opus and Fable run as `claude -p --model opus --effort xhigh --output-format json "<prompt>" < /dev/null` (`--model fable` for Fable) from the repo root.
 
 The project owner's explicit choices (models, panel, round cap) override these defaults. If one seat is unavailable (CLI, authentication or usage limit), run the round with the others and report the reduced panel and the reason. The gate stays incomplete until every seat it needs finishes or the project owner waives it.
@@ -27,7 +27,7 @@ A reviewer never edits the review target and never changes external state: no de
 ## CLI seats: completion and waiting
 
 - Launch from the repo root so the seat loads `AGENTS.md`. Run it as a long-lived foreground process through the orchestrator's exec facility: no shell `&`, and keep `< /dev/null` so it can't block on stdin.
-- `danger-full-access` is deliberate: the sandboxed modes block the `uv` cache and the localhost sockets tests need. The no-edit boundary above still applies.
+- Give a CLI seat a sandbox that allows the `uv` cache and the localhost sockets the tests need. The no-edit boundary above still applies.
 - A Codex seat is complete only with process exit `0`, a final `item.completed` agent message containing a valid reviewer status, and `turn.completed`. A Claude CLI seat needs exit `0`, `is_error: false`, a success subtype and a `result` containing a valid status. A transcript that ends in a tool call without a status is incomplete: rerun that seat in the same round.
 - **Usage limits are a hard stop, not a hang.** Codex can print `ERROR: You've hit your usage limit … try again at <time>` and exit. Never retry in a loop. In the panel, continue with the other seat and note when Codex can be retried. For a single-seat review, report the blocker and ask the project owner before substituting another model.
 - Wait on the process handle and resume when it exits; if only polling is available, use the longest blocking wait the harness allows (3–5 minutes), not 30-second polls. Never kill a seat because it is slow or quiet; `xhigh` reasoning can stay silent for a long time while healthy. No `timeout` wrappers or broad `pkill`. Authentication errors, usage limits, process failures and malformed output follow the rules above; none of them counts as completion.
