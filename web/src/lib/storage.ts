@@ -9,9 +9,9 @@
  * seen (`notifications/seen.ts`), and, for each Desk whose setup isn't finished, what the loading
  * page needs to draw its "Not live yet" card before the Desks are read again after a reload
  * (`todaySetupMemory.ts`), and the preview session this browser opened for each Desk, so an owner's
- * preview resumes only that chat (`PublicChatProvider.tsx`). Nothing else is stored in the browser.
- * Storage can be missing or blocked (a private window, blocked site data), so neither function
- * ever throws.
+ * preview resumes only that chat when storage works (`PublicChatProvider.tsx`). A temporary probe
+ * checks that writes read back. Nothing else is stored in the browser.
+ * Storage can be missing or blocked (a private window, blocked site data), so these helpers never throw.
  */
 const KEYS = {
   thingsToTryHidden: 'claude-desk.things-to-try-hidden',
@@ -23,6 +23,7 @@ const KEYS = {
   notificationsSeen: 'claude-desk.notifications-seen',
   todaySetup: 'claude-desk.today-setup',
   previewSessions: 'claude-desk.preview-sessions',
+  storageProbe: 'claude-desk.storage-probe',
 } as const;
 
 export type LocalKey = keyof typeof KEYS;
@@ -30,6 +31,23 @@ export type LocalKey = keyof typeof KEYS;
 /** The key a value is stored under, as a storage event from another tab names it. */
 export function storageKey(key: LocalKey): string {
   return KEYS[key];
+}
+
+/** Whether a fresh value can be written and read back; checks silent write failures as well. */
+export function canUseLocal(): boolean {
+  try {
+    const value = crypto.randomUUID();
+    window.localStorage.setItem(KEYS.storageProbe, value);
+    return window.localStorage.getItem(KEYS.storageProbe) === value;
+  } catch {
+    return false;
+  } finally {
+    try {
+      window.localStorage.removeItem(KEYS.storageProbe);
+    } catch {
+      // Storage may refuse cleanup too.
+    }
+  }
 }
 
 /** The stored value, or null when there is none or storage can't be read. */

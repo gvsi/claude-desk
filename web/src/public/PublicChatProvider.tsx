@@ -26,7 +26,7 @@ import { apiPath } from '../api/routes.ts';
 import { openStream, type StreamState } from '../api/stream.ts';
 import type { VisitorSession, VisitorTranscript } from '../api/views.ts';
 import { browserLanguage, type BrowserLanguage } from '../lib/language.ts';
-import { readLocal, writeLocal } from '../lib/storage.ts';
+import { canUseLocal, readLocal, writeLocal } from '../lib/storage.ts';
 import { paymentLinkMemory, type PaymentLinkMemory } from './paymentLinks.ts';
 import {
   chatReducer,
@@ -133,7 +133,7 @@ function previewSessions(): Record<string, unknown> {
  * visitor cookie names, or opens a new one when there is none. With `previewDeskId`, it always opens a
  * new owner's preview and remembers its session ID for that Desk in this browser. The API grants
  * previews only to the owner of its copy; for anyone else it fails, and a plain chat opens instead.
- * `openChat` reads `visitorSession` first and comes here unless it matches the remembered preview.
+ * `openChat` reads `visitorSession` first and comes here only when it cannot resume that chat.
  */
 export async function ensureSession(slug: string, previewDeskId?: string): Promise<VisitorSession> {
   if (previewDeskId !== undefined && previewDeskId !== '') {
@@ -165,13 +165,14 @@ export interface OpenedChat {
  * owner's preview reads first, resuming the cookie's chat only when its session ID matches the
  * preview this browser remembers for that Desk. Otherwise it asks for a new preview, which replaces
  * the cookie's chat. A reload or another "Chat as a customer" tab thus resumes the same preview;
- * an ordinary visitor chat or unreadable storage opens a new preview. The API still checks ownership.
+ * an ordinary visitor chat opens a new preview when storage works. Without usable storage, it resumes
+ * the cookie's chat instead, so a reload keeps the conversation. The API still checks ownership.
  */
 export async function openChat(slug: string, previewDeskId?: string): Promise<OpenedChat> {
   if (previewDeskId !== undefined && previewDeskId !== '') {
     try {
       const transcript = await request('visitorSession', { params: { slug } });
-      if (transcript.state.session_id === previewSessions()[previewDeskId]) {
+      if (!canUseLocal() || transcript.state.session_id === previewSessions()[previewDeskId]) {
         return { session: transcript.state, transcript };
       }
     } catch (err) {

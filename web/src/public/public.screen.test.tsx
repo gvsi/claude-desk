@@ -3518,6 +3518,29 @@ describe('public chat page', () => {
     expect(opening).toEqual(['visitorSession', 'openPreview', 'visitorSession', 'visitorSession']);
   });
 
+  it('preview_reload_resumes_its_chat_when_storage_throws', async () => {
+    const blocked = () => { throw new DOMException('Storage is blocked.', 'SecurityError'); };
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(blocked);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(blocked);
+    onTestFinished(() => {
+      getItem.mockRestore();
+      setItem.mockRestore();
+    });
+
+    const path = `${PAGE}?preview=${RIVERA.deskId}`;
+    const first = await renderRoute(path);
+    await ready(first.screen);
+    await say(first.screen, 'How much is drain clearing?');
+    const session = mockStore.visitorSession(RIVERA.slug);
+    expect(session?.ownerPreview).toBe(true);
+
+    const reloaded = await renderRoute(path);
+    await ready(reloaded.screen);
+    expect(mockStore.visitorSession(RIVERA.slug)?.state.session_id).toBe(session?.state.session_id);
+    expect(requests('openPreview')).toHaveLength(1);
+    await expect.element(reloaded.screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
+  });
+
   it.each(['desktop', 'phone'] as const)('preview_bar_takes_the_owner_back_on_%s', async (viewport) => {
     // The owner's own preview, from "Chat as a customer": a slim bar over the brand header says what
     // the page is, the short line on a phone, and takes them back to the Desk's Today.
