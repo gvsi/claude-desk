@@ -110,8 +110,9 @@
   }
 }
 
-/* Today's outcomes sit below the presence line in the greeting's text column. */
+/* Today's outcomes wrap inside the presence words' column without setting its natural width. */
 .cd-how__today {
+  contain: inline-size;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -855,8 +856,6 @@
 }
 /* The Today line's shapes keep its wrapping and the 8 px gap between rows. */
 .cd-today-skeleton__how-today { display: block; }
-/* Only the natural-width probe: each outcome reserves its dot before its words. */
-.cd-today-skeleton__outcome-room::before { content: ''; flex: none; width: var(--size-dot); }
 .cd-today-skeleton__how-items { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-8) var(--space-16); }
 .cd-today-skeleton__how-paint { gap: var(--space-8); }
 /* The "Not live yet" card: on a phone, where "Continue setup" drops under the words, the words keep

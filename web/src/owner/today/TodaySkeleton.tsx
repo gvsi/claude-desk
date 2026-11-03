@@ -124,12 +124,8 @@ function GreetingWords({ setup }: { setup?: SkeletonSetup }) {
   const title = useWordWidth(box, greeting, 'cd-greeting__title cd-type-greeting', true);
   const presence = useWordWidth(box, PRESENCE, 'cd-greeting__presence cd-type-body', true);
   const outcomes = setup !== undefined ? QUIET_OUTCOMES : FRESH_OUTCOMES;
-  const outcomeWidth = useWordWidth(box, outcomes.quiet ? outcomes.line : [
-    { text: outcomes.lead, className: '' },
-    ...outcomes.parts.map((part) => ({ text: outcomeWords(part), className: 'cd-how__outcome cd-today-skeleton__outcome-room' })),
-  ], 'cd-today-skeleton__how-items cd-type-meta', true);
-  // All three lines set the real greeting's natural width, including its outcome dots and gaps.
-  return <div ref={box} className="cd-greeting__text" style={{ width: `max(${title ?? 0}px, ${presence ?? 0}px, calc(${outcomeWidth ?? 0}px + var(--size-avatar) - var(--space-6) + var(--space-2) + var(--space-10)))` }}>
+  // Only the title and presence set the real greeting's natural width; outcomes wrap inside it.
+  return <div ref={box} className="cd-greeting__text" style={{ width: `max(${title ?? 0}px, ${presence ?? 0}px)` }}>
     <TextLines words={greeting} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" lastWidth="100%" />
     <div className="cd-greeting__presence cd-type-body">
       <span className="cd-greeting__glyphs" aria-hidden="true"><span className="cd-today-skeleton__glyph-room" /></span>

@@ -3568,6 +3568,37 @@ describe("Today's top band", () => {
 });
 
 describe("Today's outcomes under the greeting", () => {
+  it.each([1440, 1512].flatMap((width) => [1, 3].map((people) => ({ width, people }))))(
+    'today_outcomes_do_not_widen_the_header_with_$people people at $width', async ({ width, people }) => {
+    await injectToday((t) => ({
+      ...t,
+      live: Array.from({ length: people }, (_, i) => ({ ...t.live[0]!, session_id: `ses-presence-${i}` })),
+    }));
+    const { screen } = await renderRoute(TODAY, { viewport: { width, height: 900 } });
+    await expect.element(screen.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
+    await skeletonGone();
+    const greeting = document.querySelector('.cd-greeting')!;
+    const text = greeting.querySelector('.cd-greeting__text')!;
+    const title = greeting.querySelector('.cd-greeting__title')!;
+    const actions = greeting.querySelector('.cd-greeting__actions')!;
+    const words = greeting.querySelector('.cd-greeting__presence-line')!;
+    const line = greeting.querySelector<HTMLElement>('.cd-how__today')!;
+    expect(box(actions).top).toBe(box(title).top);
+    expect(box(line).left).toBe(box(words).left);
+    // The text grows into all remaining room beside the actions, even with inline containment.
+    expect(box(actions).left - box(text).right).toBeCloseTo(24, 0);
+    const withOutcomes = box(text).width;
+    line.style.display = 'none';
+    expect(box(text).width).toBe(withOutcomes);
+    line.style.removeProperty('display');
+    if (people === 1) expect(box(line).height).toBe(19);
+    for (const outcome of line.children) {
+      expect(box(outcome).left).toBeGreaterThanOrEqual(box(words).left);
+      expect(box(outcome).right).toBeLessThanOrEqual(box(line).right);
+    }
+    expectNoHorizontalScroll();
+  });
+
   it.each([1512, 390].flatMap((width) => [0, 1, 3].map((people) => ({ width, people }))))(
     'today_outcomes_follow_the_presence_words_with_$people_people_at_$width', async ({ width, people }) => {
     if (people !== 1) await injectToday((t) => ({
