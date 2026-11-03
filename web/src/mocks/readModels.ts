@@ -61,7 +61,9 @@ const BLOCKED_REPLY_REASON =
 
 /** The copy's Desks, none with an unfinished setup: setup's own Desks name theirs (`withSetupDesks`). */
 function deskSummaries(world: MockWorld): DeskSummary[] {
-  return world.desks.map((desk) => ({ ...desk.summary, hours: desk.summary.hours.map((h) => ({ ...h })), setup: null }));
+  return world.desks.map((desk) => ({ ...desk.summary, hours: desk.summary.hours.map((h) => ({ ...h })), setup: null,
+    unread_conversations: world.sessionsOf(desk.summary.desk_id).filter((session) => world.isUnread(session)).length,
+  }));
 }
 
 export function copyOut(world: MockWorld): CopyOut {
@@ -306,6 +308,7 @@ export function conversationSummary(world: MockWorld, session: SessionRecord): C
     last_activity: isoTime(session.lastActivity),
     outcome_counts: counts,
     owner_preview: session.ownerPreview,
+    unread: world.isUnread(session),
     latest_visitor_text: latestVisitorText(session),
     demo_visitor: session.demoVisitor != null,
     demo_visitor_run_id: session.demoVisitorRun ?? null,
@@ -376,7 +379,7 @@ export function decidingCard(desk: DeskRecord, decision: Decision): RuleCard | n
 export function needsYou(world: MockWorld, desk: DeskRecord): NeedsYouItem[] {
   const deskId = desk.summary.desk_id;
   const held = decisionsOf(world, deskId)
-    .filter((d) => d.decision.state === 'held')
+    .filter((d) => world.supersedeIfBooked(d).state === 'held')
     .map((d) => {
       const session = world.sessions.get(d.decision.session_id);
       return {

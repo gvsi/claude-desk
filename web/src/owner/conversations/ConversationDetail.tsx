@@ -49,6 +49,7 @@ import { OwnerTranscript } from './OwnerTranscript.tsx';
 import { nameOf, whoLabel } from './status.ts';
 import { useEndInView } from './useEndInView.ts';
 import { useOwnerTyping } from './useOwnerTyping.ts';
+import { useConversationRead } from './useConversationRead.ts';
 import { conversationKey, useTakeOver } from './useTakeOver.ts';
 
 /** Plan 02's limit on the owner's words. */
@@ -271,6 +272,10 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   const heldHere = (needsYou.data ?? []).some((item) => item.decision?.session_id === sessionId);
   const loading =
     (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || (heldHere && !rules.settled) || !listRead;
+  // The owner's own preview is never unread, and the API answers 404 for its marker, so it isn't marked.
+  useConversationRead(deskId, sessionId, !loading && readSinceOpened && summary?.owner_preview !== true
+    ? chat.data.items.reduce((max, item) => Math.max(max, item.n), 0)
+    : undefined);
   const opened = useRef(false);
   useLayoutEffect(() => {
     if (loading || chat.data === undefined || opened.current) return;

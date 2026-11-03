@@ -12,7 +12,7 @@
  * notifications are the whole copy's, so each such request is read for the Desk it was held on,
  * and so is that Desk's Needs you. The alert links only while its request is still in that Needs
  * you, as read since the page opened by a read that worked. A request answered anywhere, on Today
- * too before its card is dismissed, shows its alert with no link.
+ * too before its card is dismissed, shows its alert with the card’s ending line and no link.
  *
  * The notifications are read as the page opens and every few seconds while it is open, with each
  * linked Desk's Needs you that is no longer fresh; the page sends no new read once the owner leaves
@@ -20,13 +20,13 @@
  * sidebar's count of unread ones goes as the page draws them. A read that fails, the first or a
  * later one, says so above the entries, with "Try again", never letting entries pass for current.
  */
-import { focusManager, hashKey, useQueries, useQueryClient } from '@tanstack/react-query';
+import { focusManager, hashKey, queryOptions, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { pollMs } from '../../app/poll.ts';
-import type { DemoInboxEntry } from '../../api/contracts.ts';
-import { Button, EmptyState, INBOX_COPY, Notice, PageHeader } from '../../ds/index.ts';
+import type { Decision, DemoInboxEntry } from '../../api/contracts.ts';
+import { ApprovalStatus, Button, EmptyState, INBOX_COPY, Notice, PageHeader } from '../../ds/index.ts';
 import { formatClock, formatDate, localDate } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
 import { decisionQuery } from '../conversations/ownerReceipt.ts';
@@ -58,6 +58,7 @@ interface Row {
   time: string;
   unread: boolean;
   requestHref: string | undefined;
+  ended: Decision | undefined;
 }
 
 /** The rows of one day on the business's clock: "Today", or the date, "Nov 1". */
@@ -137,11 +138,30 @@ export function NotificationsPage() {
   // The held requests the alerts name, each read for its Desk. A read that hasn't answered, failed,
   // or names no action draws no link. One that failed is read again each time the page opens.
   const decisionIds = [...new Set((inbox.data ?? []).flatMap((entry) => (entry.decision_id ? [entry.decision_id] : [])))];
-  const decisions = useQueries({ queries: decisionIds.map((id) => ({ ...decisionQuery(id), retryOnMount: true })) });
+  const decisions = useQueries({
+    queries: decisionIds.map((id) => queryOptions({
+      ...decisionQuery(id),
+      retryOnMount: true,
+      refetchOnMount: 'always',
+      // Holds can end elsewhere; an allowed answer can still be finishing its action.
+      refetchInterval: (query) => query.state.data?.action && ['held', 'approved', 'unknown'].includes(query.state.data.state)
+        ? pollMs('inbox')
+        : false,
+    })),
+  });
+  const ended = new Map<string, Decision>();
+  decisions.forEach(({ data, isSuccess, isFetching }, index) => {
+    const id = decisionIds[index];
+    if (id !== undefined && isSuccess && !isFetching && data?.decision_id === id && data.state !== 'held') ended.set(id, data);
+  });
   const deskOf = new Map<string, string>();
+  const heldDecisions = new Set<string>();
   decisions.forEach(({ data }, index) => {
     const id = decisionIds[index];
-    if (id !== undefined && data?.decision_id === id && data.action) deskOf.set(id, data.action.desk_id);
+    if (id !== undefined && data?.decision_id === id && data.action) {
+      deskOf.set(id, data.action.desk_id);
+      if (data.state === 'held') heldDecisions.add(id);
+    }
   });
   // And each of those Desks' Needs you, Today's own read: read as the page opens unless it is
   // fresh, then on the page's poll once it no longer is. An alert links only while its request is
@@ -163,7 +183,7 @@ export function NotificationsPage() {
     }
   });
   const hrefFor = (decisionId: string | null | undefined): string | undefined => {
-    const deskId = decisionId && waiting.has(decisionId) ? deskOf.get(decisionId) : undefined;
+    const deskId = decisionId && heldDecisions.has(decisionId) && waiting.has(decisionId) ? deskOf.get(decisionId) : undefined;
     return decisionId && deskId !== undefined ? requestPath(deskId, decisionId) : undefined;
   };
 
@@ -182,6 +202,7 @@ export function NotificationsPage() {
     // The held request the kernel's alert names, by its id, never by anything the entry says. Only
     // an alert links.
     requestHref: entry.kind === 'alert' ? hrefFor(entry.decision_id) : undefined,
+    ended: entry.kind === 'alert' ? ended.get(entry.decision_id ?? '') : undefined,
   }));
   const days = daysOf(rows, business.timezone, new Date());
 
@@ -247,7 +268,7 @@ function headingOf(entry: DemoInboxEntry): string {
  * at the right. An alert whose request
  * still waits is a link as a whole, "Open the request" under its body.
  */
-function NotificationRow({ entry, time, unread, requestHref }: Row) {
+function NotificationRow({ entry, time, unread, requestHref, ended }: Row) {
   const content = (
     <>
       <span className={unread ? 'cd-notifications__dot cd-notifications__dot--unread' : 'cd-notifications__dot'} aria-hidden="true" />
@@ -259,6 +280,7 @@ function NotificationRow({ entry, time, unread, requestHref }: Row) {
         </p>
         {/* A ledger checkpoint is a signed record, so it reads in the trace's monospace. */}
         <p className={`cd-notifications__entry ${entry.kind === 'head_checkpoint' ? 'cd-type-trace' : 'cd-type-body'}`}>{entry.body}</p>
+        {ended === undefined ? null : <ApprovalStatus decision={ended} />}
         {requestHref === undefined ? null : (
           <p className="cd-notifications__request cd-type-meta">
             <span className="cd-text-link">{COPY.openRequest}</span>

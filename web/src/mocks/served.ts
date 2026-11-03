@@ -610,6 +610,7 @@ const SERVED: ServedRoutes = {
     if (!record) return NOT_FOUND;
     const answer = isRecord(req.body) ? req.body.answer : undefined;
     if (typeof answer !== 'string' || !ANSWERS.has(answer)) return failWith(422, 'kernel', { code: 'invalid' });
+    sv.world.supersedeIfBooked(record);
     if (record.decision.state !== 'held') return failWith(409, 'already_resolved', { decision: record.decision });
     const given = answer as ApprovalAnswer;
     if (!(record.decision.answers ?? []).includes(given)) return failWith(422, 'kernel', { code: 'invalid' });
@@ -656,6 +657,16 @@ const SERVED: ServedRoutes = {
     if (isFailure(session)) return session;
     if (session.state.mode === 'owner') return failWith(409, 'kernel', { code: 'mode_owner' });
     return ok(sv.world.takeOver(session));
+  },
+  markConversationRead(sv, req) {
+    if (!req.cookies.owner) return NO_OWNER;
+    const session = sv.world.sessions.get(req.params.session_id ?? '');
+    if (!session || session.ownerPreview) return NOT_FOUND;   // the owner's own preview is never unread, as the API says
+    if (sv.world.deletedDesks.has(session.deskId)) return CLOSED;
+    const through = isRecord(req.body) ? req.body.through : undefined;
+    if (req.malformed || typeof through !== 'number' || !Number.isSafeInteger(through) || through < 0) return INVALID;
+    sv.world.markRead(session, through);
+    return NO_CONTENT;
   },
   handback(sv, req) {
     const session = ownerSession(sv, req);
@@ -711,7 +722,7 @@ const SERVED: ServedRoutes = {
     if (!req.cookies.owner) return NO_OWNER;
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
     if (!record) return NOT_FOUND;
-    return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(record.decision);
+    return sv.world.deletedDesks.has(record.deskId) ? CLOSED : ok(sv.world.supersedeIfBooked(record));
   },
   startDemoVisitor(sv, req) {
     const desk = sv.ownerDesk(req.params.desk_id, req.cookies);
@@ -937,6 +948,7 @@ const SERVED: ServedRoutes = {
     const record = sv.world.decisions.get(req.params.decision_id ?? '');
     // Only a decision of this browser's own session: anyone else's is not found.
     if (!record || record.decision.session_id !== visitor.session.state.session_id) return NOT_FOUND;
+    sv.world.supersedeIfBooked(record);
     if (record.decision.state !== 'held') return failWith(409, 'kernel', { code: 'conflict' });
     // The kernel cancels it; the outcome reaches the chat as the resolved receipt.
     sv.world.cancel(record);

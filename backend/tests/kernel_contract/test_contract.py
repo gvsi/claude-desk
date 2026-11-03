@@ -1292,12 +1292,12 @@ async def test_public_desk_carries_the_agent_card(kernel, ro_read):
 
     assert await card("en") == [
         "Get a quote from the price list", "Find open times", "Book a visit", "Get a payment link for a quote",
-        "Pay for a quote within the limit of a signed mandate", "Leave contact details", "Ask for a callback",
+        "Pay for a quote within a signed limit", "Leave contact details", "Ask for a callback",
         "Verify a customer with a code sent to their contact on record", "Receive a verified customer's own documents",
         "List a verified customer's own charges"]
     assert await card("es") == [
         "Pedir una cotización de la lista de precios", "Buscar horarios libres", "Reservar una visita",
-        "Pedir un enlace de pago para una cotización", "Pagar una cotización dentro del límite de un mandato firmado",
+        "Pedir un enlace de pago para una cotización", "Pagar una cotización dentro de un límite firmado",
         "Dejar datos de contacto", "Pedir que te devuelvan la llamada",
         "Verificar a un cliente con un código enviado a su contacto registrado",
         "Recibir los documentos propios de un cliente verificado", "Ver los cargos propios de un cliente verificado"]
@@ -1306,6 +1306,48 @@ async def test_public_desk_carries_the_agent_card(kernel, ro_read):
                                             path={"id": copy.desk_ids[0]})
     assert await card("en") == ["Leave contact details", "Ask for a callback"]
     assert await card("es") == ["Dejar datos de contacto", "Pedir que te devuelvan la llamada"]
+
+
+AGENT_OUTCOME_WORDS = {"en": {"allowed": "Allowed", "asks_first": "Asks first", "never": "Never"},
+                       "es": {"allowed": "Permitido", "asks_first": "Pregunta primero", "never": "Nunca"}}
+
+
+@pytest.mark.kernel_plan("01c")
+async def test_public_agent_card_carries_each_abilitys_outcome_for_anyone(kernel, ro_read):
+    """Each Agent Card block carries what happens when an agent with no standing of its own asks for it, by the active
+    version's cards for anyone: `allowed` (an auto card), `never` (a never card on the tool or its effect) or
+    `asks_first` (anything else), with the kernel's fixed words for it in the language asked for. The two abilities
+    whose label names a verified customer (their own documents and charges) read cards for verified people and
+    record owners too. A card for one person changes nothing there, and nothing of it reaches the page."""
+    http, ro_schema, _ = kernel
+    copy = await new_copy(http)
+    owner, desk_id, slug = http.owner(copy.owner_token), copy.desk_ids[0], desk_slug(ro_read, ro_schema, copy)
+    seeded = ["allowed"] * 10      # the record owners' cards allow a verified customer's documents and charges
+    for lang in ("en", "es"):
+        blocks = (await public_page(http, slug, lang)).agent_card
+        assert [(block.outcome, block.outcome_text) for block in blocks] == [
+            (outcome, AGENT_OUTCOME_WORDS[lang][outcome]) for outcome in seeded]
+
+    (dana,) = ro_read(ro_schema, copy.copy_id, "SELECT person_id FROM {ro}.people WHERE desk_id = %s"
+                                               " AND display_name = 'Dana Whitfield'", (desk_id,))
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    # without the record owners' documents card, so documents ask first and Dana's own card would flip them if read
+    cards = [*(card for card in owner_cards(active) if card.applies_to != "native.release_document"),
+             RuleCard(card_id="card-no-book", applies_to="native.book", mode="never", who="anyone",
+                      reason="No bookings this week."),
+             RuleCard(card_id="card-dana-docs", applies_to="native.release_document", mode="auto", who="person",
+                      person_id=dana["person_id"], reason="Dana Whitfield gets her documents.")]
+    drafted = await draft(owner, desk_id, cards, active["version"])
+    proved_or_skip(drafted)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=drafted.version))
+    for lang in ("en", "es"):
+        page = await public_page(http, slug, lang)
+        assert [block.outcome for block in page.agent_card] == [         # "Book a visit", then documents
+            {2: "never", 8: "asks_first"}.get(index, outcome) for index, outcome in enumerate(seeded)]
+        assert page.agent_card[2].outcome_text == AGENT_OUTCOME_WORDS[lang]["never"]
+        served = page.model_dump_json()
+        for private in ("card-dana-docs", "Dana", dana["person_id"], "card-no-book", "No bookings"):
+            assert private not in served, (lang, private)
 
 
 @pytest.mark.kernel_plan("01a")
@@ -2739,11 +2781,31 @@ async def test_charge_mandate_bounds_and_commits(kernel, ro_read):
     assert mandate == {"committed_cents": 10_000, "reserved_cents": 0}
 
 
+async def no_payment_links(owner: CredentialView, ro_read, ro_schema: str, copy: CopyCreated) -> int:
+    """The owner's rules change: payment links are never allowed on the copy's first Desk, a `never` card in place of
+    the cards that covered them, drafted, proved and confirmed (it skips when the kernel can't prove drafts). The
+    version confirmed."""
+    desk_id = copy.desk_ids[0]
+    active = active_version(ro_read, ro_schema, copy.copy_id, desk_id)
+    cards = [card for card in owner_cards(active) if card.applies_to != "native.payment_link"] + [RuleCard(
+        card_id="no-links", applies_to="native.payment_link", mode="never", who="anyone",
+        reason="No payment links for now.")]
+    draft = await owner.call("POST /policy/draft", PolicyDraftRequest(desk_id=desk_id, cards=cards,
+                                                                      expected_parent=active["version"]))
+    proved_or_skip(draft)
+    await owner.call("POST /policy/confirm", PolicyConfirmRequest(desk_id=desk_id, version=draft.version))
+    return draft.version
+
+
 @pytest.mark.kernel_plan("01c")
-async def test_a_link_whose_quote_a_mandate_charge_paid_reads_cancelled(kernel, ro_read):
+@pytest.mark.parametrize("first", ["read", "complete", "activation"])
+async def test_a_link_whose_quote_a_mandate_charge_paid_reads_cancelled(kernel, ro_read, first):
     """A quote is paid once. An agent gets a payment link to its deposit quote, then pays the same quote within its
-    mandate: the link can never be paid now, so the checkout reads it `cancelled`, naming no rule change, and
-    completing it is 409 `conflict`. The mandate holds the one $20 charge and nothing more."""
+    mandate: the link can never be paid now. Whether the checkout reads it first, completes it first, or a rule
+    change that no longer allows the link reaches it first, it is cancelled once, ledgered `payment`
+    `{link_id, state: "cancelled", reason: "quote_paid"}` (naming the activation's version, for an activation) with
+    nothing more for the move, and then reads `cancelled`, naming no rule change: the rule change lists no cancelled
+    link for its chat. Completing it is 409 `conflict`. The mandate holds the one $20 charge and nothing more."""
     http, ro_schema, state = kernel
     copy = await new_copy(http)
     slug = desk_slug(ro_read, ro_schema, copy)
@@ -2754,16 +2816,29 @@ async def test_a_link_whose_quote_a_mandate_charge_paid_reads_cancelled(kernel, 
     owner = http.owner(copy.owner_token) if state is None else None      # the real kernel holds it for the owner
     token, _ = await issue_payment_link(view, session_id, item_id(ro_read, ro_schema, copy, "Service call deposit"), 1,
                                         owner=owner)
-    (link,) = ro_read(ro_schema, copy.copy_id, "SELECT quote_id FROM {ro}.payment_links WHERE session_id = %s",
-                      (session_id,))
+    (link,) = ro_read(ro_schema, copy.copy_id, "SELECT link_id, quote_id FROM {ro}.payment_links"
+                                               " WHERE session_id = %s", (session_id,))
     view = turn_view(http, issued, slug, session_id, "Charge the deposit to the signed limit")
     charging = await decide(view, session_id, 0, "call-charge", "native.charge_mandate", {"quote_id": link["quote_id"]})
     assert charging.outcome == "allow"
     assert (await execute(view, charging, 0)).state == "succeeded"
 
     get, complete, _ = LINK_ROUTES
+    moved_by: dict = {}
+    if first == "complete":
+        assert await refused(checkout(http, complete, token)) == (409, "conflict")
+    elif first == "activation":
+        version = await no_payment_links(http.owner(copy.owner_token), ro_read, ro_schema, copy)
+        assert await http.owner(copy.owner_token).call(
+            "GET /policy/{version}/cancelled_links?desk_id=", path={"version": version},
+            query={"desk_id": copy.desk_ids[0]}) == []
+        moved_by = {"version": version}
     shown = await checkout(http, get, token)
     assert (shown.state, shown.cancel_reason, shown.customer_name) == ("cancelled", None, None)
+    page = await ledger_page(http.owner(copy.owner_token), copy.desk_ids[0])
+    moved = [entry.event.summary for entry in page.entries if entry.event.kind == "payment"
+             and entry.event.summary.get("link_id") == link["link_id"] and entry.event.summary.get("state") != "issued"]
+    assert moved == [{"link_id": link["link_id"], "state": "cancelled", "reason": "quote_paid", **moved_by}]
     assert await refused(checkout(http, complete, token)) == (409, "conflict")
     assert (await checkout(http, get, token)).state == "cancelled"
     (row,) = ro_read(ro_schema, copy.copy_id, "SELECT state FROM {ro}.payment_links WHERE session_id = %s",

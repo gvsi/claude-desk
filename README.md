@@ -63,7 +63,7 @@ Claude proposes every action and every reply; a separate kernel process decides 
 
 A bug in the chat layer's visitor and agent paths can't move money outside the owner's rules, change rules, approve anything, verify anyone or forge the ledger: those paths never hold the owner's token, and each of these needs it or a check that only the kernel holds. On the owner's own requests the chat layer carries the owner's token, so a bug there could misdirect an approval or a rule confirmation to another held request or proved draft of the same Desk; browser-signed approvals, on the roadmap, close that. This covers a buggy chat layer, not a compromised one.
 
-Talking Claude around can't make it act past the owner's rules. Within them, it can still be talked into actions the rules allow, and into text that is wrong or unflattering but carries no price, date or promise.
+Prompt injection and social engineering can't make Claude act past the owner's rules. Within them, it can still be talked into actions the rules allow, and into text that is wrong or unflattering but carries no price, date or promise.
 
 **Demo limits.** Verification codes are simulated: the Demo inbox shows codes to whoever entered the contact, so demo verification shows that codes go only to the contact on record, but it does not establish possession of the contact. The inbox also reveals whether a contact is on record, and because limits count per contact, a stranger can cancel a contact's live challenge and use up its hourly limit; each lockout is logged and shown to the owner. Payments are mocked, and no payment provider is involved.
 
@@ -75,13 +75,13 @@ Two eval suites run against the real kernel and Claude: an attack suite of hosti
 
 | Measure | Result |
 |---|---|
-| Baseline violations | 0 unwaived in 260 judged runs; 2 AI-denial flags waived by Giovanni Alcantara, one message at a time |
-| Legitimate tasks completed | 70 of 72 held-out runs (97.2%; Wilson 95% interval 90.4% to 99.2%) |
-| Tool decisions held for the owner that the task expected the Desk to make alone | 0 of 78 decisions the held-out tasks expected allowed (0.0%) |
-| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | 1,229 / 3,909 ms (n = 60) |
-| Model cost per conversation | $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies |
+| Baseline violations | 0 unwaived in 261 judged runs; 2 AI-denial flags waived by Giovanni Alcantara, one message at a time |
+| Legitimate tasks completed | 72 of 72 held-out runs (100.0%; Wilson 95% interval 94.9% to 100.0%) |
+| Tool decisions held for the owner that the task expected the Desk to make alone | 0 of 79 decisions the held-out tasks expected allowed (0.0%) |
+| From Claude's finished reply to the visitor seeing it, p50 and p95, measured locally (the hosted demo wasn't measured) | 1,520 / 4,558 ms (n = 60) |
+| Model cost per conversation | $0.047 mean, $0.044 p50, $0.088 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies |
 
-From the [final eval pass's report](evals/reports/2026-11-02-20261102-193659-72c3a2.md): pass 20261102-193659-72c3a2, 2026-11-02.
+From the [final eval pass's report](evals/reports/2026-11-02-20261102-221455-c74e16.md): pass 20261102-221455-c74e16, 2026-11-02.
 
 The attack suite tests the attacks we thought of: a clean run means none of those got through, not that no attack can.
 

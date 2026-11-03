@@ -19,6 +19,7 @@ import { ApiError, isUncertain, ownerErrorCopy, request } from '../api/http.ts';
 import type { BusinessOut, CopyOut, DeskSummary } from '../api/views.ts';
 import { startingDeskFor } from './arrival/keptCopy.ts';
 import { SIDEBAR_ABOUT } from './sidebarAbout.ts';
+import { useUnreadConversations } from './conversations/useConversationRead.ts';
 import { givenOwnerName } from '../public/brand.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
@@ -329,8 +330,9 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
-  // Mounted with Today on a reload: a failed read of it is Today's to show, not to send again.
-  const today = useToday(deskId, { retryOnMount: false });
+  // Mounted with every page, so Today opens drawn from a warm read; mounted with Today on a reload, a failed read of
+  // it is Today's to show, not to send again.
+  useToday(deskId, { retryOnMount: false });
   // Ask Claude, beside the page that opened it (the Rules page, a tool's page).
   const askClaude = useAskClaudeHost(deskId, business.owner_display_name);
   // A rule change confirmed on Rules waits to land there only while the owner stays.
@@ -422,7 +424,6 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
     void navigate(todayPath((picked && lastOrFirst(picked.desks)) ?? first));
   };
 
-  const live = today.data?.live.length ?? 0;
   const unread = useUnreadNotifications();
   const current = currentNav(location.pathname);
   // Conversations lays out its own columns from the sidebar's edge, as its boards draw it; Settings
@@ -446,7 +447,6 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
       business={business}
       desk={desk}
       current={current}
-      liveCount={live}
       unreadCount={unread}
       switching={switching}
       onToggleSwitcher={() => setSwitching((open) => !open)}
@@ -515,7 +515,6 @@ export interface OwnerSidebarProps {
   business: BusinessOut;
   desk: DeskSummary;
   current: NavKey;
-  liveCount: number;
   /** How many of the owner's notifications they haven't seen. */
   unreadCount: number;
   switching: boolean;
@@ -532,7 +531,8 @@ export interface OwnerSidebarProps {
  * preview of Today draws it too, so the frame it shows is the one Today opens in.
  */
 export function OwnerSidebar(props: OwnerSidebarProps) {
-  const { businesses, business, desk, liveCount, unreadCount } = props;
+  const { businesses, business, desk, unreadCount } = props;
+  const unreadConversations = useUnreadConversations(desk.desk_id, desk.unread_conversations ?? 0);
   const ref = useRef<HTMLDivElement>(null);
   return (
     <div ref={ref} className="cd-owner-layout__sidebar">
@@ -546,8 +546,8 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         hrefs={hrefsFor(desk.desk_id)}
         peopleLabel="Customers"
         counts={{
-          ...(liveCount > 0
-            ? { conversations: { n: liveCount, label: `${liveCount} live ${liveCount === 1 ? 'conversation' : 'conversations'}` } }
+          ...(unreadConversations > 0
+            ? { conversations: { n: unreadConversations, label: `${unreadConversations} unread` } }
             : {}),
           ...(unreadCount > 0 ? { notifications: { n: unreadCount, label: `${unreadCount} unread` } } : {}),
         }}

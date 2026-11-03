@@ -6,7 +6,7 @@ Giovanni Alcantara · October 29, 2026
 
 Claude Desk gives a person or small business a public, always-on Claude that strangers and other people's agents can talk to. It answers, quotes, books, releases documents to verified people and takes payments. Requests that need the owner are held for a one-tap answer. The longer view, shown only as vision screens: every business and person has a Desk, and other people's agents talk to Desks.
 
-Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown. The kernel holds every business credential. Talking Claude around can't make it act past the owner's rules. Within what the rules allow, Claude can still be talked into actions the rules permit, and into free text that is wrong or unflattering but carries no price, date or promise. Promises without numbers or words like "guarantee" rely on a model check, which can miss.
+Claude proposes every action and every reply; a separate kernel process decides whether each action runs and whether each reply can be shown. The kernel holds every business credential. Prompt injection and social engineering can't make Claude act past the owner's rules. Within what the rules allow, Claude can still be talked into actions the rules permit, and into free text that is wrong or unflattering but carries no price, date or promise. Promises without numbers or words like "guarantee" rely on a model check, which can miss.
 
 ## Who it's for and the problem
 
@@ -18,7 +18,7 @@ Bots get talked around: [Meta's AI support assistant](https://www.helpnetsecurit
 
 ## Why Anthropic
 
-A Desk speaks as Claude, for an owner, to people the owner doesn't know. The [capability prediction](capability-prediction.md) expects models to gain that agency by October 2027 without matching robustness, so a Desk's limits sit in code, and until then more requests go to the owner.
+A Desk speaks as Claude, for an owner, to people the owner doesn't know. The [capability prediction](capability-prediction.md) expects models to gain that agency by Q4 2027 without matching robustness, so a Desk's limits sit in code, and until then more requests go to the owner.
 
 [Claude's constitution](https://www.anthropic.com/constitution) anticipates Claude "negotiating on behalf of a person with a different AI agent". On a Desk, the owner directs Claude only through rules, approvals and taking over the chat; a visitor is someone Claude serves with limited trust; and a visiting agent acts for someone else, never for the owner.
 
@@ -47,11 +47,11 @@ Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs
 
 | Measure | What it shows | Prototype |
 | --- | --- | --- |
-| Baseline violations | money moved, private data released or a verification code leaked outside the rules; a number in prose, or a card the records don't back; a reply denying it's an AI; a ledger that doesn't verify | 0 unwaived in 260 runs; the owner waived 2 AI-denial flags in calibration runs, one message at a time, and none of the 78 held-out attack runs was flagged (95% upper bound 3.9% per run); the gate requires 0 |
-| Legitimate tasks completed | a visitor's task done correctly, alone or after the owner's approval | 70 of 72 held-out runs (97.2%; Wilson 95% interval 90.4% to 99.2%) |
-| False holds | the owner was asked about an action the task expected the Desk to take alone | 0 of 78 decisions the held-out tasks expected allowed (0.0%) |
-| Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; measured: $0.048 mean, $0.048 p50, $0.100 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md)) |
-| Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 1.1 s p50, 2.8 s p95; measured: 1,229 / 3,909 ms (n = 60) ([pass 20261102-193659-72c3a2, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-193659-72c3a2.md), latency run 20261102-201826-a45c6b) |
+| Baseline violations | money moved, private data released or a verification code leaked outside the rules; a number in prose, or a card the records don't back; a reply denying it's an AI; a ledger that doesn't verify | 0 unwaived in 261 runs; the owner waived 2 AI-denial flags, each a correct refusal, one message at a time; 1 of the 78 held-out attack runs had one, so flagged runs are at most 6.9% per run (Wilson 95% upper bound); the gate requires 0 |
+| Legitimate tasks completed | a visitor's task done correctly, alone or after the owner's approval | 72 of 72 held-out runs (100.0%; Wilson 95% interval 94.9% to 100.0%) |
+| False holds | the owner was asked about an action the task expected the Desk to take alone | 0 of 79 decisions the held-out tasks expected allowed (0.0%) |
+| Cost per conversation | what a Desk costs to run | `estimate:` $0.20 for 10 turns, 4 tool calls and 10 checked replies, warm cache; measured: $0.047 mean, $0.044 p50, $0.088 p95, over 117 legitimate-task conversations, both splits; held-out ones averaged about 2 Desk replies ([pass 20261102-221455-c74e16, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-221455-c74e16.md)) |
+| Reveal delay, p50 and p95, measured locally | the wait for a checked reply | `estimate:` 1.1 s p50, 2.8 s p95; measured: 1,520 / 4,558 ms (n = 60) ([pass 20261102-221455-c74e16, 2026-11-02](https://github.com/gvsi/claude-desk/blob/main/evals/reports/2026-11-02-20261102-221455-c74e16.md), latency run 20261102-225713-890d8a) |
 
 Limits: we wrote the scenarios, real attackers adapt, 24 held-out legitimate tasks make a small sample, and CI can't prove results came from a real run. With real owners, v1 tracks requests closed without the owner, holds and blocked attempts. It suggests loosening a kind of action only on that action's record, for the owner to confirm.
 
@@ -59,7 +59,7 @@ Limits: we wrote the scenarios, real attackers adapt, 24 held-out legitimate tas
 
 **Who pays and why.** The owner, through their Claude plan; visitors and their agents never pay to ask. Owners already pay to have requests answered: [Ruby](https://www.ruby.com/pricing/)'s live receptionists start at $250 a month for 50 minutes. A Desk sells requests closed while the owner works.
 
-**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: about $0.025 a Desk reply in the final eval pass, its checks included; `estimate:` a ten-reply conversation would cost about $0.25, so about 80 of them use all of [Pro](https://claude.com/pricing)'s $20 monthly price.
+**Unit economics.** A Desk comes with Claude's paid plans and a monthly conversation allowance; the allowance and the price above it are open. Model use is most of the cost: about $0.024 a Desk reply in the final eval pass, its checks included; `estimate:` a ten-reply conversation would cost about $0.24, so about 80 of them use all of [Pro](https://claude.com/pricing)'s $20 monthly price.
 
 **Market.** The US has [36.2 million small businesses](https://advocacy.sba.gov/wp-content/uploads/2026/02/FINAL_FAQsAboutSmallBusiness_2026_012826.pdf), 29.8 million of them with no employees. Their options today answer for them: answering services such as Ruby, AI receptionists such as [Jobber](https://www.getjobber.com/pricing/)'s $29 a month add-on, and AI support agents such as [Fin](https://fin.ai/pricing) at $0.99 per outcome. None of their pages mentions serving other people's agents.
 

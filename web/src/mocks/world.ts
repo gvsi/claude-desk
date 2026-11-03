@@ -116,6 +116,8 @@ export interface SessionRecord {
   lastActivity: number;
   /** The owner's view: the visitor's view leaves out whispers. */
   items: TranscriptItem[];
+  /** The newest transcript cursor the owner marked read. */
+  readThrough: number;
   /** Every event the session's stream has carried, `seq` from 1 with no gaps. */
   events: { seq: number; ev: SseEvent }[];
   listeners: Set<Listener>;
@@ -384,8 +386,8 @@ export class MockWorld {
     const policy = activePolicy(fields.desk_id);
     const desk: DeskRecord = {
       brand: { ...BUSINESS.brand },
-      // The copy's first Desk is the seed, which keeps its own words; one added later has no setup type. The mock
-      // keeps no read markers yet, so it counts no unread conversations.
+      // The copy's first Desk is the seed, which keeps its own words; one added later has no setup type.
+      // Read models fill the unread count from the sessions' current markers.
       summary: {
         ...summary, business_name: BUSINESS.name, answering: true, business_type: this.desks.length === 0 ? 'rivera' : 'other',
         unread_conversations: 0,
@@ -436,6 +438,7 @@ export class MockWorld {
       language: 'en',
       lastActivity: this.now(),
       items: [],
+      readThrough: 0,
       events: [],
       listeners: new Set(),
       typingUntil: null,
@@ -470,6 +473,16 @@ export class MockWorld {
     };
     desk.ledger.push(entry);
     return entry;
+  }
+
+  isUnread(session: SessionRecord): boolean {
+    return !session.ownerPreview && session.items.some((item) =>
+      item.n > session.readThrough && (item.kind === 'visitor_text' || item.kind === 'agent_text'));
+  }
+
+  markRead(session: SessionRecord, through: number): void {
+    const newest = session.items.reduce((max, item) => Math.max(max, item.n), 0);
+    session.readThrough = Math.max(session.readThrough, Math.min(through, newest));
   }
 
   private addItem(session: SessionRecord, kind: TranscriptKind, text: string | null, event: TranscriptItem['event']): void {
@@ -867,23 +880,40 @@ export class MockWorld {
     return record.decision;
   }
 
-  /** The visitor cancels their held request, as the kernel records it: no answer can run it now. */
-  cancel(record: DecisionRecord): Decision {
+  /** A later confirmed booking closes this session's earlier held discount quotes, lazily as in the kernel. */
+  supersedeIfBooked(record: DecisionRecord): Decision {
+    const { decision } = record;
+    if (decision.state !== 'held' || decision.action?.tool !== 'native.quote' || !decision.action.discount_bp) return decision;
+    const booking = [...this.decisions.values()].find((candidate) =>
+      candidate.deskId === record.deskId && candidate.decision.session_id === decision.session_id &&
+      candidate.createdAt > record.createdAt && candidate.decision.state === 'executed' && candidate.decision.action?.tool === 'native.book',
+    );
+    return booking ? this.cancel(record, booking) : decision;
+  }
+
+  /** The visitor cancels their held request, or their booking replaces it: no answer can run it now. */
+  cancel(record: DecisionRecord, booking?: DecisionRecord): Decision {
     const desk = this.desk(record.deskId);
     const session = this.sessions.get(record.decision.session_id);
     if (!desk || !session) throw new Error(`decision ${record.decision.decision_id} has no Desk or session`);
     const { decision_id: decisionId, session_id: sessionId } = record.decision;
     const cancelled = this.appendLedger(desk, {
-      kind: 'approval',
+      kind: booking ? 'decide' : 'approval',
       origin: 'kernel',
       session_id: sessionId,
       ref_id: decisionId,
-      summary: { state: 'cancelled', by: 'visitor' },
+      summary: booking
+        ? { state: 'cancelled', cancelled_by: 'booking', booking_id: booking.decision.action?.action_id }
+        : { state: 'cancelled', by: 'visitor' },
     });
     record.decision = {
       ...record.decision,
       state: 'cancelled',
-      visitor_plain: statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null, deskOwner(desk)),
+      visitor_plain: booking
+        ? visitorLine(session.language, 'closed_by_booking', deskOwner(desk))
+        : statusLine(session.language, 'cancelled', record.decision.action?.tool ?? null, deskOwner(desk)),
+      owner_plain: booking ? rivera.cancelledByBooking.owner_plain : null,
+      answers: [],
       inbox: [],
       ledger_seq: cancelled.seq,
       signature: sign(`${decisionId}:cancelled`),

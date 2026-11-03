@@ -5,7 +5,7 @@
  * a way back to the list. The list is polled.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useId, useLayoutEffect, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 import { useLocation, useNavigate, useNavigationType, useParams } from 'react-router';
 
 import { request } from '../../api/http.ts';
@@ -23,6 +23,7 @@ import { entriesPath } from '../today/SinceLastNight.tsx';
 import { firstName, useDesks, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { ConversationDetail } from './ConversationDetail.tsx';
+import { syncUnreadCount } from './useConversationRead.ts';
 import { agentLine } from './copy.ts';
 import { ConversationsSkeleton } from './ConversationsSkeleton.tsx';
 import { CONVERSATIONS_SINGLE_COLUMN } from './layout.ts';
@@ -104,6 +105,10 @@ export function ConversationsPage() {
     queryFn: () => request('conversations', { params: { desk_id: deskId } }),
     refetchInterval: pollMs('list'),
   });
+  // Each read of the list carries its unread count to the sidebar, which every page shows.
+  useEffect(() => {
+    if (list.data !== undefined) syncUnreadCount(queryClient, deskId);
+  }, [list.data, list.dataUpdatedAt, deskId, queryClient]);
   const needsYou = useNeedsYou(deskId);
   // The rules a held request's card names, read with the list: a chat with a request held opens
   // with its rule, and Today, opened next, finds them with Needs you and opens drawn.
@@ -148,6 +153,7 @@ export function ConversationsPage() {
                 status={conversationListStatus(s, s.outcome_counts.held ?? 0, handoffs.has(s.session_id), firstName(business.owner_display_name)) ?? undefined}
                 href={conversationPath(deskId, s.session_id)}
                 current={s.session_id === sessionId}
+                unread={s.unread}
                 recorded={s.replayed === true}
                 demoVisitor={s.demo_visitor === true}
                 quote={s.kind === 'visitor' && !s.owner_preview ? s.latest_visitor_text ?? undefined : undefined}
