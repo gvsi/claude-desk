@@ -17,6 +17,7 @@
  * `opensAReply` finds such a turn by what follows a decision's status, and both the visitor's chat
  * and the owner's conversation view read it the same way.
  */
+import type { RenderedBlock } from '../api/contracts.ts';
 import type { TranscriptItem } from '../api/views.ts';
 
 export interface GroupedRow<Row, R> {
@@ -187,4 +188,45 @@ export function groupRows<T, Row, R>(
     groups = addPart(groups, part);
   });
   return settle(groups);
+}
+
+/**
+ * How a row reads for `withoutRepeatedCards`: someone's own words or a line about the chat, or
+ * Claude's reply. A view that draws no row for what started a turn (the owner's, for a take-over
+ * and hand-back) gives each reply its turn's number instead: a new number starts a new turn.
+ */
+export type CardsRow = { kind: 'words' } | { kind: 'reply'; blocks: readonly RenderedBlock[]; turn?: number };
+
+/** A card as it is drawn: its template, its fact and every word on it. */
+function cardKey(block: RenderedBlock): string {
+  return JSON.stringify([block.template, block.fact_id ?? null, block.title ?? null, block.text, block.lines ?? [], block.href ?? null, block.options ?? []]);
+}
+
+/**
+ * Each reply's blocks without the cards an earlier reply in the same turn already drew, the same
+ * card word for word, so a confirming reply's Booked card isn't drawn twice. Someone's own words or
+ * a line about the chat start a new turn; a turn Claude started on its own, as the follow-up when a
+ * booking closes a held request, doesn't. Display only: the signed messages and their checks are
+ * as they were. Null for rows that aren't replies, in the rows' order.
+ */
+export function withoutRepeatedCards(rows: readonly CardsRow[]): (RenderedBlock[] | null)[] {
+  let drawn = new Set<string>();
+  let turn: number | undefined;
+  return rows.map((row) => {
+    if (row.kind === 'words') {
+      drawn = new Set();
+      return null;
+    }
+    if (row.turn !== undefined && row.turn !== turn) {
+      drawn = new Set();
+      turn = row.turn;
+    }
+    return row.blocks.filter((block) => {
+      if (block.kind !== 'card') return true;
+      const key = cardKey(block);
+      if (drawn.has(key)) return false;
+      drawn.add(key);
+      return true;
+    });
+  });
 }

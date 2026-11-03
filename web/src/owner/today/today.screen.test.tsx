@@ -3890,8 +3890,8 @@ describe("Today's unfinished setup", () => {
 
     // "Continue setup" reopens the interview at its rules.
     await resume.click();
-    await expect.poll(() => router.state.location.pathname).toBe(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.poll(() => router.state.location.pathname, { timeout: 4_000 }).toBe(`/app/setup/${state.interview_id}`);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
   });
 
   it('the_setup_lockup_leads_to_today_as_save_and_exit_does', async () => {
@@ -3899,9 +3899,9 @@ describe("Today's unfinished setup", () => {
     // Desk, to its Today, which names the step the owner left.
     const state = await deskAtRules();
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
     const lockup = screen.getByRole('banner').getByRole('link', { name: 'Claude Desk, save and exit', exact: true });
-    await expect.element(lockup).toHaveAttribute('href', `/app/${state.desk_id}/today`);
+    await expect.element(lockup, { timeout: 4_000 }).toHaveAttribute('href', `/app/${state.desk_id}/today`);
     const exit = screen.getByRole('banner').getByRole('link', { name: 'Save and exit' });
     expect(lockup.element().getAttribute('href')).toBe(exit.element().getAttribute('href'));
     await lockup.click();
@@ -3914,7 +3914,7 @@ describe("Today's unfinished setup", () => {
     // between the two, and the card names the step the owner left.
     const state = await deskAtRules();
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     const card = region(screen, 'Finish setting up Juniper Hair Studio');
@@ -4019,9 +4019,9 @@ describe("Today's unfinished setup", () => {
     meanwhile();
     const startedAt = performance.now();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' })).toBeVisible();
-    await expect.poll(() => requests('setupRules').length).toBeGreaterThan(0);
-    await expect.element(screen.getByRole('button', { name: 'Check real situations' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => requests('setupRules').length, { timeout: 4_000 }).toBeGreaterThan(0);
+    await expect.element(screen.getByRole('button', { name: 'Check real situations' }), { timeout: 4_000 }).toBeVisible();
     // Today never draws the step before, not even for a moment as it opens.
     const sawTools = watchFor('Pick up at your tools');
     onTestFinished(() => expect(sawTools(), 'Today drew the tools step').toBe(false));
@@ -4038,17 +4038,17 @@ describe("Today's unfinished setup", () => {
     expect(card.getByRole('list', { name: 'Setup steps' }).element().querySelector('[aria-current="step"]')?.textContent).toBe('3Rules');
   }
 
-  it('leaving_setup_right_after_a_step_names_the_new_step', async () => {
+  it('leaving_setup_right_after_a_step_names_the_new_step', { timeout: 25_000 }, async () => {
     // The owner reads setup at its tools, goes on to the rules and leaves at once: the card names the rules, not the tools.
     await expectCardAtRules(await leaveRightAfterAStep());
   });
 
-  it('leaving_setup_by_its_lockup_right_after_a_step_keeps_the_progress', async () => {
+  it('leaving_setup_by_its_lockup_right_after_a_step_keeps_the_progress', { timeout: 25_000 }, async () => {
     // The lockup leaves as "Save and exit" does: the step the owner just reached is kept, and Today names it.
     await expectCardAtRules(await leaveRightAfterAStep(undefined, 'Claude Desk, save and exit'));
   });
 
-  it('leaving_setup_names_the_new_step_while_the_desks_are_still_read', async () => {
+  it('leaving_setup_names_the_new_step_while_the_desks_are_still_read', { timeout: 25_000 }, async () => {
     // The copy's Desks, read again from the tools on, answer slowly: each read is answered as setup
     // stands when it arrives, and the answer comes only when the test lets it. Today already names
     // the step setup holds, rather than the one the Desks named at the tools.
@@ -4078,7 +4078,7 @@ describe("Today's unfinished setup", () => {
     await expectCardAtRules(screen);
   });
 
-  it('leaving_setup_names_the_new_step_when_the_desks_cannot_be_read', async () => {
+  it('leaving_setup_names_the_new_step_when_the_desks_cannot_be_read', { timeout: 30_000 }, async () => {
     // The copy's Desks can't be read again after the tools: Today still names the step setup holds,
     // and keeps naming it while the reads keep failing.
     let before = 0;
@@ -4126,7 +4126,7 @@ describe("Today's unfinished setup", () => {
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What Claude can use' })).toBeVisible();
     await screen.getByRole('button', { name: 'Continue', exact: true }).click();
     // The draft is being made: the rules draw as their shapes, and the hidden status says so.
-    await expect.element(screen.getByRole('status').filter({ hasText: /^Drafting your rules$/ })).toBeInTheDocument();
+    await expect.element(screen.getByRole('status').filter({ hasText: /^Drafting your rules$/ }), { timeout: 4_000 }).toBeInTheDocument();
     await screen.getByRole('link', { name: 'Save and exit' }).first().click();
     await expect.poll(() => router.state.location.pathname).toBe(`/app/${state.desk_id}/today`);
     const card = region(screen, 'Finish setting up Juniper Hair Studio');

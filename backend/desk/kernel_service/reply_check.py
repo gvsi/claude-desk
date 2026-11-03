@@ -77,11 +77,12 @@ the session-state rows ("Session state responses": token, copy, closed, generati
    asked for in the reply's language, named from the request's tool (`render.RECEIPT_SUBJECTS`, a
    business tool's by its block; a tool named in neither has no receipt, nor has one the owner
    has replaced since the request), then the decision's status line: each held request awaiting
-   the owner ("Quote request: Waiting for Mike Turner to approve"), and each request that has left
-   `held` since
-   Claude's latest reply in the session that passed, in ledger order ("Quote request: Closed: your
-   booking replaced this request", when the visitor's booking closed a held discount). Only the
-   owner's approval runs a held request, so one that ran reads that approval before what it did
+   the owner ("Quote request: Waiting for Mike Turner to approve"), and the five requests that left
+   `held` most recently by ledger order, whenever they left it (`RESOLVED_RECEIPTS`; "Quote
+   request: Closed: your booking replaced this request", when the visitor's booking closed a held
+   discount): the chat keeps showing each status, so a reply may say it many replies later, and a
+   reply in flight when the owner answered can't take it from the one that tells the visitor. Only
+   the owner's approval runs a held request, so one that ran reads that approval before what it did
    ("Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"), as the chat
    showed them. A receipt backs what it says and nothing
    more: never another request, a follow-up, an outcome, a time or an approval it doesn't state.
@@ -158,7 +159,6 @@ from desk.db.models import Booking, Business, CalendarSlot, Desk, Handoff, Ledge
 from desk.db.models import Action as ActionRow
 from desk.db.models import Decision as DecisionRow
 from desk.db.models import Fact as FactRow
-from desk.db.models import LedgerEntry as LedgerRow
 from desk.kernel_api import CheckReplyRequest, OwnerMessageRequest
 from desk.kernel_service import agents, auth, context, demo_inbox, jev, labels, lang, ledger, render, sessions
 from desk.kernel_service.auth import AuthError, Named, OwnerCtx, SessionRow
@@ -1588,15 +1588,10 @@ async def awaits_the_owner(ctx: KernelCtx, session_row: SessionRow) -> bool:
         return False
 
 
-async def _last_passed_reply(ctx: KernelCtx, session_row: SessionRow, *, after: int) -> int | None:
-    """The ledger sequence of Claude's latest reply in the session that passed the check (its `reply`
-    entry: author `claude`, `ok`), when one came after `after`, else None. Read without a lock, from the
-    Desk's newest entry back to `after` at most."""
-    event = LedgerRow.event
-    return (await ctx.db.execute(ctx.repo.scoped(select(LedgerRow.seq).where(
-        LedgerRow.desk_id == session_row.desk_id, LedgerRow.seq > after, event["kind"].astext == "reply",
-        event["session_id"].astext == session_row.session_id, event["summary"]["author"].astext == "claude",
-        event["summary"]["ok"].astext == "true").order_by(LedgerRow.seq.desc()).limit(1)))).scalar_one_or_none()
+# The most requests that have left `held` whose receipts the soft checks read beside a reply, the latest by
+# ledger order: a long chat's input stays small, and so does the room for a reply to borrow another
+# request's receipt (issue #776).
+RESOLVED_RECEIPTS = 5
 
 
 async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tuple[str, str, str | None]]:
@@ -1604,20 +1599,20 @@ async def _request_receipts(ctx: KernelCtx, session_row: SessionRow) -> list[tup
     `render.RECEIPT_SUBJECTS`), its decision's status line (`visitor_plain`) and, for one that ran, the
     owner who approved it (only an owner's approval runs a held request), read without a lock:
     each held request awaiting the owner, as `_awaiting_holds` reads them (held and not expired), and
-    each request that has left `held` (answered, cancelled, timed out, run or settled) after Claude's
-    latest reply in the session that passed the check, by ledger order (its decision's `ledger_seq`,
-    `_last_passed_reply`). A hold past its expiry that no read has expired yet is neither, and so is a
-    request whose tool names no subject (`_receipt_asked`)."""
+    the `RESOLVED_RECEIPTS` requests that left `held` most recently (answered, cancelled, timed out, run
+    or settled), by ledger order (its decision's `ledger_seq`), whenever they left it: the chat keeps
+    showing each one's status, so a reply may say it however many replies later, and a reply in flight
+    when the owner answered can't take it from the one that tells the visitor. A hold past its expiry
+    that no read has expired yet is neither, and so is a request whose tool names no subject
+    (`_receipt_asked`)."""
     rows = (await ctx.db.execute(ctx.repo.scoped(select(
         DecisionRow.tool, DecisionRow.action_id, DecisionRow.state, DecisionRow.visitor_plain, DecisionRow.expires_at,
         DecisionRow.ledger_seq).where(
         DecisionRow.session_id == session_row.session_id, DecisionRow.outcome == "hold")
         .order_by(DecisionRow.created_at, DecisionRow.decision_id)))).all()
-    left = [row.ledger_seq for row in rows if row.state != "held"]
-    passed = await _last_passed_reply(ctx, session_row, after=min(left)) if left else None
+    recent = set(sorted((row.ledger_seq for row in rows if row.state != "held"), reverse=True)[:RESOLVED_RECEIPTS])
     now = ctx.clock.now()
-    shown = [row for row in rows
-             if (row.expires_at > now if row.state == "held" else passed is None or row.ledger_seq > passed)]
+    shown = [row for row in rows if (row.expires_at > now if row.state == "held" else row.ledger_seq in recent)]
     asked = await _receipt_asked(ctx, session_row, shown)
     owner = ((await _desk_info(ctx, session_row.desk_id)).owner
              if any(row.state == "executed" for row in shown) else None)

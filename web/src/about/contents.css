@@ -1,0 +1,117 @@
+/* The About pages' "On this page" list (Contents.tsx), which the two reading pages and the Vision article share:
+   beside the article on a laptop, pinned below the top bar, and folded into one row that opens on a phone. Every
+   rule sits under .cd-about-set, the root class all three pages carry, so the list draws the same on each, and over
+   the Vision article's own link rule, which would otherwise underline its links in the article's link colour.
+   Where the list sits on the page is each page's own (reader.css, VisionArticle.css). Every color, space and size is
+   a token, which the page's root points at the About set's paper (paper.css); the only raw lengths are hairlines. */
+
+.cd-about-set .cd-about-side-label {
+  margin: 0 0 var(--space-14);
+  font-weight: 520;
+  color: var(--text-secondary);
+}
+
+.cd-about-set .cd-about-contents {
+  position: sticky;
+  top: calc(var(--about-top) + var(--space-24));
+  align-self: start;
+  width: var(--size-article-side);
+}
+
+.cd-about-set .cd-about-contents__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-set .cd-about-contents__list li {
+  border-top: 1px solid var(--line-hairline);
+}
+
+.cd-about-set .cd-about-contents__link {
+  display: flex;
+  gap: var(--space-14);
+  /* Give the inset edge room beside the numbers without moving the contents at rest. */
+  padding: var(--space-10) var(--space-8);
+  margin-inline: calc(-1 * var(--space-8));
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+/* Beside the article, the list marks the section being read (Contents.tsx's SideContents): its words in
+   text-primary, the others' in text-secondary, and a 2 px bar in text-primary beside its words, in the gutter.
+   The bar is one element, moved to the current row; it slides there in motion-base, and moves at once under
+   reduced motion. The folded list on a phone marks nothing. */
+.cd-about-set .cd-about-contents--side .cd-about-contents__link {
+  color: var(--text-secondary);
+}
+
+.cd-about-set .cd-about-contents--side .cd-about-contents__link[aria-current='location'] {
+  color: var(--text-primary);
+}
+
+.cd-about-set .cd-about-contents .cd-about-contents__link:hover {
+  color: var(--accent-blue);
+}
+
+.cd-about-set .cd-about-contents__bar {
+  position: absolute;
+  top: 0;
+  left: calc(var(--space-12) * -1);
+  width: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+  transition:
+    transform var(--motion-base) var(--motion-ease-emphasis),
+    height var(--motion-base) var(--motion-ease-emphasis);
+}
+
+.cd-about-set .cd-about-contents__number {
+  flex: none;
+  width: var(--space-20);
+  font-family: var(--font-mono);
+  line-height: var(--space-20);
+  color: var(--text-secondary);
+}
+
+.cd-about-set .cd-about-contents--compact {
+  position: static;
+  width: auto;
+  border-top: 1px solid var(--line-hairline);
+  border-bottom: 1px solid var(--line-hairline);
+}
+
+.cd-about-set .cd-about-contents__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-height: calc(var(--space-24) * 2);
+  font-weight: 520;
+  color: var(--text-primary);
+  list-style: none;
+  cursor: pointer;
+}
+
+.cd-about-set .cd-about-contents__row::-webkit-details-marker {
+  display: none;
+}
+
+.cd-about-set .cd-about-contents__count {
+  margin-left: auto;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.cd-about-set .cd-about-contents__chevron {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.cd-about-set .cd-about-contents__fold[open] .cd-about-contents__chevron {
+  transform: rotate(180deg);
+}
+
+.cd-about-set .cd-about-contents--compact .cd-about-contents__list {
+  border-bottom: 0;
+}

@@ -1,7 +1,7 @@
 /**
  * An About this prototype reading page: the product proposal or the capability prediction, laid out as the
- * reader boards draw them. The proposal opens with a centered title, its summary and the lead figure; the
- * prediction with its title and summary at the top of the article's column, and its claim as a card. Then the
+ * reader boards draw them. Each opens with its meta line, title and summary centred, then its hero figure: the
+ * proposal's architecture under its app icon, the prediction's claim as a card. Then the
  * numbered contents list, the document in a serif column and the author, date and reading time beside it; then
  * "Read next", the next page in the About set. On a phone the contents list folds into one row and the details
  * into a line under the summary.
@@ -10,20 +10,13 @@
  * three pages read as one. The page is static: it reads its document from `documents.ts`, which only it loads,
  * and makes no request.
  */
-import {
-  Fragment,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type MouseEvent,
-  type RefObject,
-} from 'react';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Fragment } from 'react';
+import { Link } from 'react-router';
 
 import { AUTHOR_NAME, AUTHOR_URL, Card, ConceptFooter, Icon, MarkAppIcon, TextLink } from '../ds/index.ts';
 import { inApp, useDocumentTitle } from '../lib/useDocumentTitle.ts';
 import { AboutBar, useAboutNarrow } from './AboutBar.tsx';
+import { Contents } from './Contents.tsx';
 import { ABOUT_DOCUMENTS, readingMinutes, type AboutDocument, type Block, type FigureName } from './documents.ts';
 import { ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
 import { ClaimCard } from './figures/ClaimCard.tsx';
@@ -33,8 +26,6 @@ import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { Inlines } from './Inlines.tsx';
 import { readNext, VISION_ARTICLE, type AboutId, type AboutPage } from './links.ts';
 import { MONTHS } from './months.ts';
-import { prefersReducedMotion } from './motion.ts';
-import { moveToSection, useCurrentSection } from './useCurrentSection.ts';
 import { useNoIndex } from './useNoIndex.ts';
 import { usePagePlace } from './usePagePlace.ts';
 
@@ -43,16 +34,23 @@ import './reader.css';
 
 type Heading = Extract<Block, { kind: 'heading' }>;
 
-/** The byline, "Name · Month D, YYYY", as the author, the date as the boards print it, and the date's day. */
-function bylineOf(blocks: Block[]): { author: string; date: string; day?: string } {
+/** Each document's kind, which its meta line names first, as the Vision article's names "Vision". */
+const KINDS: Record<AboutId, string> = { prediction: 'Prediction', proposal: 'Proposal' };
+
+/**
+ * The byline, "Name · Month D, YYYY", as the author, the date as the boards print it, the date as the byline writes
+ * it, and the date's day.
+ */
+function bylineOf(blocks: Block[]): { author: string; date: string; written: string; day?: string } {
   const text = blocks.find((block) => block.kind === 'byline')?.text ?? '';
   const [author = '', written = ''] = text.split(' · ');
   const [, month = '', date = '', year = ''] = /^(\w+) (\d{1,2}), (\d{4})$/.exec(written) ?? [];
   const index = MONTHS.findIndex((name) => name === month);
-  if (index < 0) return { author, date: written };
+  if (index < 0) return { author, date: written, written };
   return {
     author,
     date: `${month.slice(0, 3)} ${date}, ${year}`,
+    written,
     day: `${year}-${String(index + 1).padStart(2, '0')}-${date.padStart(2, '0')}`,
   };
 }
@@ -156,8 +154,8 @@ function ArticleBlock({ blocks, index, hero, columns, compact }: ArticleBlockPro
 }
 
 /**
- * The document's blocks, with the pull quote, if it has one, after the first section, and its claim, if it has one,
- * as a card: the claim's blocks render inside it, as the article would draw them, and nowhere else.
+ * The document's blocks, with the pull quote, if it has one, after the first section. Its claim, if it has one, is the
+ * hero's figure (`Opening`), so its blocks render there and not here.
  */
 function Article({ document, compact }: { document: AboutDocument; compact: boolean }) {
   const { blocks, hero, pullQuote, claim, columns } = document;
@@ -174,17 +172,11 @@ function Article({ document, compact }: { document: AboutDocument; compact: bool
   return (
     <article className={`cd-about-article ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}>
       {blocks.map((_, i) => {
-        if (claim && i > claim.first && i <= claim.last) return null;
+        if (claim && i >= claim.first && i <= claim.last) return null;
         return (
           <Fragment key={i}>
             {i === quoteAt ? quote : null}
-            {claim?.first === i ? (
-              <ClaimCard compact={compact}>
-                {Array.from({ length: claim.last - claim.first + 1 }, (_, n) => block(claim.first + n))}
-              </ClaimCard>
-            ) : (
-              block(i)
-            )}
+            {block(i)}
           </Fragment>
         );
       })}
@@ -194,16 +186,30 @@ function Article({ document, compact }: { document: AboutDocument; compact: bool
 }
 
 /**
- * How the page opens: "About this prototype", the title, the summary and, on a phone, the byline. In the `hero`
- * layout, centred, with the app icon above and the lead figure below; in the `column` layout, left-aligned on the
- * article's edge, with neither.
+ * The meta line above the title, as the Vision article opens: the document's kind, then its date and reading time,
+ * the same as the details beside the article say, spaced apart by the line's gaps so they read as three.
  */
-function Opening({ document, compact }: { document: AboutDocument; compact: boolean }) {
-  const hero = document.layout === 'hero';
+function MetaLine({ document, kind }: { document: AboutDocument; kind: string }) {
+  const { written, day } = bylineOf(document.blocks);
   return (
-    <div className={`cd-about-hero${hero ? '' : ' cd-about-hero--column'}`} data-hero="">
-      {hero ? <MarkAppIcon size={compact ? 'compact' : 'large'} /> : null}
-      <p className="cd-about-hero__kicker cd-type-meta">About this prototype</p>
+    <p className="cd-about-hero__kicker cd-about-hero__meta cd-type-meta" data-meta="">
+      <strong>{kind}</strong> {day ? <time dateTime={day}>{written}</time> : <span>{written}</span>}{' '}
+      <span>{`${readingMinutes(document.blocks)} min read`}</span>
+    </p>
+  );
+}
+
+/**
+ * How the page opens, centred: the app icon if the document has one, the meta line, the title, the summary and, on a
+ * phone, the byline; then the hero figure, the document's lead figure or its claim as a card, drawn in the article's
+ * type as the article would draw its blocks.
+ */
+function Opening({ document, kind, compact }: { document: AboutDocument; kind: string; compact: boolean }) {
+  const { blocks, claim } = document;
+  return (
+    <div className="cd-about-hero" data-hero="">
+      {document.icon ? <MarkAppIcon size={compact ? 'compact' : 'large'} /> : null}
+      <MetaLine document={document} kind={kind} />
       <h1 className={`cd-about-hero__title ${compact ? 'cd-type-greeting' : 'cd-type-article-title'}`}>{document.title}</h1>
       <p
         className={`cd-about-hero__summary ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}
@@ -212,163 +218,22 @@ function Opening({ document, compact }: { document: AboutDocument; compact: bool
         {document.summary}
       </p>
       {compact ? <BylineLine document={document} /> : null}
-      {hero && document.hero ? (
+      {document.hero ? (
         <div className="cd-about-hero__figure">
           <Figure name={document.hero} compact={compact} />
         </div>
       ) : null}
+      {claim ? (
+        <div className={`cd-about-hero__figure ${compact ? 'cd-type-article-body-phone' : 'cd-type-article-body'}`}>
+          <ClaimCard compact={compact}>
+            {Array.from({ length: claim.last - claim.first + 1 }, (_, n) => (
+              <ArticleBlock key={n} blocks={blocks} index={claim.first + n} compact={compact} />
+            ))}
+          </ClaimCard>
+        </div>
+      ) : null}
     </div>
   );
-}
-
-interface ContentsListProps {
-  sections: Heading[];
-  /** The section being read, which the list marks; null marks none. */
-  current: string | null;
-  /** Told of each link followed, as the jump to its section starts. */
-  onFollow?: (id: string) => void;
-}
-
-/**
- * Follows a contents link within the page, in place of the browser's jump: the address names the section, the
- * window scrolls to its heading, smoothly unless the reader asked for reduced motion, and focus moves to the
- * heading, so the next Tab goes on from the section. A click that opens the link elsewhere (a new tab or window),
- * or that something else has handled, is left to the browser.
- */
-function useFollowSection(onFollow?: (id: string) => void): (event: MouseEvent<HTMLAnchorElement>, id: string) => void {
-  const navigate = useNavigate();
-  const { pathname, search, hash } = useLocation();
-  // The last move's watch, and the address it moved to. Navigation that changes the reading place (Back to where
-  // the reader was, the other document) cancels it, so a correction still waiting on the type can't take the window
-  // back to the section; so does the list going away.
-  const moved = useRef<{ at: string; cancel: () => void } | null>(null);
-  const here = `${pathname}${search}${hash}`;
-  useEffect(() => {
-    if (moved.current && moved.current.at !== here) {
-      moved.current.cancel();
-      moved.current = null;
-    }
-  }, [here]);
-  useEffect(() => () => moved.current?.cancel(), []);
-  return (event, id) => {
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    const heading = document.getElementById(id);
-    if (!heading) return;
-    event.preventDefault();
-    onFollow?.(id);
-    // The address first, as the browser's own jump does: the entry being left keeps the reader's place for Back. A
-    // link to the section the address already names replaces it, as the browser's would.
-    navigate({ pathname, search, hash: `#${id}` }, { replace: hash === `#${id}` });
-    // Only this scroll glides: the page's own (opening a document, Back and Forward) stay instant. The heading's
-    // scroll margin keeps it clear of the pinned bar.
-    moved.current?.cancel();
-    moved.current = { at: `${pathname}${search}#${id}`, cancel: moveToSection(heading, prefersReducedMotion() ? 'instant' : 'smooth') };
-    heading.focus({ preventScroll: true });
-  };
-}
-
-/** The numbered list of the document's sections. */
-function ContentsList({ sections, current, onFollow }: ContentsListProps) {
-  const follow = useFollowSection(onFollow);
-  return (
-    <ol className="cd-about-contents__list">
-      {sections.map((section, i) => (
-        <li key={section.id}>
-          <a
-            className="cd-about-contents__link cd-type-body"
-            href={`#${section.id}`}
-            aria-current={section.id === current ? 'location' : undefined}
-            onClick={(event) => follow(event, section.id)}
-          >
-            {/* The list numbers its items for a screen reader; the page draws the number. */}
-            <span className="cd-about-contents__number cd-type-caption" aria-hidden="true">
-              {String(i + 1).padStart(2, '0')}
-            </span>
-            <span>{section.text}</span>
-          </a>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-/** Where the bar beside the current row's words goes, from the top of the list's column. */
-interface BarPlace {
-  top: number;
-  height: number;
-}
-
-/**
- * Where the bar goes for the section `current` names, measured from its row's words, which may wrap; measured
- * again when the column changes size. Null when no section is current, so the bar isn't drawn. A bar drawn afresh
- * starts on its row; one already drawn slides to the next (reader.css).
- */
-function useBarPlace(column: RefObject<HTMLElement>, current: string | null): BarPlace | null {
-  const [place, setPlace] = useState<BarPlace | null>(null);
-  useLayoutEffect(() => {
-    const root = column.current;
-    if (!root || current === null) {
-      setPlace(null);
-      return;
-    }
-    const measure = () => {
-      const words = root.querySelector(`a[href="#${CSS.escape(current)}"] > span:last-child`);
-      if (!words) return setPlace(null);
-      const box = words.getBoundingClientRect();
-      const next = { top: box.top - root.getBoundingClientRect().top, height: box.height };
-      setPlace((was) => (was && was.top === next.top && was.height === next.height ? was : next));
-    };
-    measure();
-    if (typeof window.ResizeObserver !== 'function') return;
-    const resized = new ResizeObserver(measure);
-    resized.observe(root);
-    return () => resized.disconnect();
-  }, [column, current]);
-  return place;
-}
-
-/** The list as a column beside the article, which marks the section being read. */
-function SideContents({ sections }: { sections: Heading[] }) {
-  const [current, follow] = useCurrentSection(sections.map((section) => section.id));
-  const column = useRef<HTMLElement>(null);
-  const bar = useBarPlace(column, current);
-  return (
-    <nav ref={column} className="cd-about-contents cd-about-contents--side" aria-label="On this page">
-      <p className="cd-about-side-label cd-type-caption">On this page</p>
-      <ContentsList sections={sections} current={current} onFollow={follow} />
-      {bar ? (
-        <span
-          className="cd-about-contents__bar"
-          data-contents-bar=""
-          aria-hidden="true"
-          style={{ height: `${bar.height}px`, transform: `translateY(${bar.top}px)` }}
-        />
-      ) : null}
-    </nav>
-  );
-}
-
-/** The list folded into one row that opens, on a phone. It marks nothing. */
-function FoldedContents({ sections }: { sections: Heading[] }) {
-  return (
-    <nav className="cd-about-contents cd-about-contents--compact" aria-label="On this page">
-      <details className="cd-about-contents__fold">
-        <summary className="cd-about-contents__row cd-type-control">
-          On this page{' '}
-          <span className="cd-about-contents__count">
-            {`${sections.length} ${sections.length === 1 ? 'section' : 'sections'}`}
-          </span>
-          <Icon name="chevron-down" size={16} className="cd-about-contents__chevron" />
-        </summary>
-        <ContentsList sections={sections} current={null} />
-      </details>
-    </nav>
-  );
-}
-
-/** The numbered contents list: a column beside the article, or one row that opens on a phone. */
-function Contents({ sections, compact }: { sections: Heading[]; compact: boolean }) {
-  return compact ? <FoldedContents sections={sections} /> : <SideContents sections={sections} />;
 }
 
 /** The author, the date, the reading time and related About pages, beside the article. */
@@ -407,12 +272,15 @@ function Details({ document, alsoRead }: { document: AboutDocument; alsoRead: Ab
   );
 }
 
-/** The same details as one line under the summary, on a phone. */
+/**
+ * The author, under the summary on a phone, where there are no details beside the article: the meta line above the
+ * title has the date and the reading time.
+ */
 function BylineLine({ document }: { document: AboutDocument }) {
-  const { author, date, day } = bylineOf(document.blocks);
+  const { author } = bylineOf(document.blocks);
   return (
     <p className="cd-about-hero__byline cd-type-meta" data-byline="">
-      <Author name={author} /> · {day ? <time dateTime={day}>{date}</time> : date} · {`${readingMinutes(document.blocks)} min read`}
+      <Author name={author} />
     </p>
   );
 }
@@ -459,22 +327,17 @@ export function ReaderPage({ id }: ReaderPageProps) {
   // The tab names the document while it is open, and goes back to what it said when it closes.
   useDocumentTitle(inApp(about.title));
 
-  // In the column layout on a laptop the opening moves into the article's column, level with the contents list
-  // and the details; on a phone it keeps its place above the folded contents, left-aligned.
-  const inColumn = about.layout === 'column' && !compact;
-  const layout = about.layout === 'column' ? ' cd-about-page--column' : '';
 
   return (
     <div
-      className={`cd-about-paper cd-about-paper--app cd-about-set cd-about-page${layout}${compact ? ' cd-about-page--compact' : ''}`}
+      className={`cd-about-paper cd-about-paper--app cd-about-set cd-about-page${compact ? ' cd-about-page--compact' : ''}`}
     >
       <AboutBar current={id} />
       <main className="cd-about-main">
-        {inColumn ? null : <Opening document={about} compact={compact} />}
+        <Opening document={about} kind={KINDS[id]} compact={compact} />
         <div className="cd-about-body">
           <Contents sections={sections} compact={compact} />
           <div className="cd-about-column">
-            {inColumn ? <Opening document={about} compact={compact} /> : null}
             <Article document={about} compact={compact} />
             <ReadNext next={readNext(id)} compact={compact} />
           </div>

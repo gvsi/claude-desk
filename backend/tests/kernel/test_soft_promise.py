@@ -895,6 +895,9 @@ async def test_soft_check_makes_one_try_and_ledgers_it(app, client, reviewer, st
 
 # a held quote's receipt as the check reads it: its label, what was asked for, then the decision's status line
 HELD_SEEN = "Request receipt card: Quote request: Waiting for Mike Turner to approve"
+# the same request once the owner said no, and once the visitor's own booking closed it
+DENIED_SEEN = "Request receipt card: Quote request: Mike Turner decided not to go ahead"
+CLOSED_SEEN = "Request receipt card: Quote request: Closed: your booking replaced this request"
 
 
 async def test_the_soft_check_reads_a_held_requests_receipt(app, client, reviewer):
@@ -920,8 +923,7 @@ async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app
     """A held discount quote the visitor's own booking closed (`decide.supersede_if_booked`, settled by
     the next read of it) is no longer a held request: the check is shown its update's receipt ("Closed: your
     booking replaced this request")
-    beside the booking's card, so "your earlier request was closed" is backed, until Claude's next reply
-    that passes has told the visitor."""
+    beside the booking's card, so "your earlier request was closed" is backed."""
     from .test_approvals import read_id
 
     copy, visitor = await visitor_of(app, client)
@@ -938,36 +940,21 @@ async def test_the_soft_check_reads_the_update_of_a_request_a_booking_closed(app
     assert verdict.ok and [(block.kind, block.template) for block in verdict.blocks] == [
         ("prose", None), ("card", "booking_confirmed")]
 
-    assert (await checked(client, visitor, CLEAN)).ok            # the reply that passed told the visitor
-    assert reviewer.soft_inputs[-1].cards == []
 
-
-@pytest.mark.parametrize("session", ["no hold", "hold past its day", "update told"])
-async def test_the_soft_check_reads_no_receipt_without_a_held_or_just_resolved_request(app, client, reviewer,
-                                                                                       frozen_clock, session):
-    """No receipt backs a reply in a session with no held request and none resolved since Claude's last
-    reply that passed: none asked for (an allowed quote is no request), a hold past its day that no read
-    has expired yet (the owner can no longer answer it), or an update a reply that passed has told. A
-    reply the check blocked tells the visitor nothing, so the update still backs the next one."""
-    from .test_approvals import answered
+@pytest.mark.parametrize("session", ["no hold", "hold past its day"])
+async def test_the_soft_check_reads_no_receipt_without_a_held_or_resolved_request(app, client, reviewer,
+                                                                                  frozen_clock, session):
+    """No receipt backs a reply in a session with no held request and none resolved: none asked for (an
+    allowed quote is no request), or a hold past its day that no read has expired yet (the owner can no
+    longer answer it)."""
     from .test_reply_check import keep_alive_until
 
     copy, visitor = await visitor_of(app, client)
     if session == "no hold":
         await own_quote(client, visitor)
-    elif session == "hold past its day":
+    else:
         await held_quote(client, visitor)
         await keep_alive_until(client, frozen_clock, visitor, 24)
-    else:
-        held = await held_quote(client, visitor)
-        await answered(client, copy.owner, held.decision_id, "deny_once")
-        update = "Request receipt card: Quote request: Mike Turner decided not to go ahead"
-        reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=True, denies_being_ai=False)
-        assert not (await checked(client, visitor, CLEAN)).ok
-        assert reviewer.soft_inputs[-1].cards == [update]
-        reviewer.soft_answer = SoftPromiseVerdict(promises_beyond_cards=False, denies_being_ai=False)
-        assert (await checked(client, visitor, CLEAN)).ok          # still backed after the blocked reply
-        assert reviewer.soft_inputs[-1].cards == [update]
     assert (await checked(client, visitor, CLEAN)).ok
     assert reviewer.soft_inputs[-1].cards == []
 
@@ -1076,7 +1063,7 @@ async def test_a_receipt_names_what_was_asked_for_and_an_unknown_tool_adds_none(
 async def test_a_hold_the_owner_approved_and_that_ran_reads_his_approval_then_what_it_did(app, client, reviewer):
     """A held request the owner approved, which then ran, shows what it did (`executed_status`); the check
     reads the approval before that line, as the chat showed it, so "Mike Turner approved it; your quote is
-    below" is backed, until a reply that passes has told the visitor."""
+    below" is backed, on every later reply too, as the chat keeps showing it."""
     from .test_approvals import answered
 
     copy, visitor = await visitor_of(app, client)
@@ -1084,16 +1071,16 @@ async def test_a_hold_the_owner_approved_and_that_ran_reads_his_approval_then_wh
     result = await answered(client, copy.owner, held.decision_id, "allow_once")
     assert result.decision.state == "executed", result
     assert (await checked(client, visitor, CLEAN)).ok
-    assert reviewer.soft_inputs[-1].cards == [
-        "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"]
+    ran = "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"
+    assert reviewer.soft_inputs[-1].cards == [ran]
     assert (await checked(client, visitor, CLEAN)).ok
-    assert reviewer.soft_inputs[-1].cards == []
+    assert reviewer.soft_inputs[-1].cards == [ran]
 
 
-async def test_a_denied_hold_backs_the_reply_after_it_until_a_reply_passes(app, client, reviewer):
+async def test_a_denied_hold_backs_the_replies_after_it(app, client, reviewer):
     """The order a live conversation takes: a reply passes on the held quote's receipt, the owner says no,
-    the next reply is shown exactly the denial's receipt (no longer the held one), and once a reply has
-    passed with it, the next is shown none."""
+    and the next reply is shown exactly the denial's receipt (no longer the held one), as is the one after
+    it."""
     from .test_approvals import answered
 
     copy, visitor = await visitor_of(app, client)
@@ -1107,4 +1094,67 @@ async def test_a_denied_hold_backs_the_reply_after_it_until_a_reply_passes(app, 
         "Request receipt card: Quote request: Mike Turner decided not to go ahead"]
 
     assert (await checked(client, visitor, CLEAN)).ok
-    assert reviewer.soft_inputs[-1].cards == []
+    assert reviewer.soft_inputs[-1].cards == [
+        "Request receipt card: Quote request: Mike Turner decided not to go ahead"]
+
+
+async def test_a_reply_in_flight_when_the_owner_answers_leaves_the_answer_backing_the_next(app, client, reviewer):
+    """The live race: the owner says no while Claude is answering the visitor's next message, and that reply,
+    drafted before the answer and saying nothing of it, passes after it. The reply that then tells the visitor is
+    still shown the denial's receipt, so its honest "Mike Turner decided not to go ahead" isn't stopped as a
+    promise no card backs."""
+    from .test_approvals import answered
+
+    copy, visitor = await visitor_of(app, client)
+    held = await held_quote(client, visitor)
+    await answered(client, copy.owner, held.decision_id, "deny_once")
+    assert (await checked(client, visitor, CLEAN)).ok                 # the reply in flight, drafted before the answer
+    assert reviewer.soft_inputs[-1].cards == [DENIED_SEEN]
+
+    told = "I'm sorry, Mike Turner decided not to go ahead with your earlier request."
+    assert (await checked(client, visitor, told)).ok
+    assert reviewer.soft_inputs[-1].cards == [DENIED_SEEN]
+
+
+async def test_a_request_a_booking_closed_backs_the_replies_long_after_it(app, client, reviewer, frozen_clock):
+    """The live QA chat: the visitor's booking closed their held discount quote, the reply with the booking
+    passed, and the visitor kept asking whether Mike Turner had decided. Every later reply is still shown the
+    closed request's receipt, since the chat still shows that status, so "That request closed when your visit
+    was booked." is backed two passed replies on."""
+    from .test_approvals import read_id
+
+    copy, visitor = await visitor_of(app, client)
+    held = await held_quote(client, visitor)
+    frozen_clock.advance(60)                                     # the booking is decided after the discount
+    booking = await own_booking(client, reviewer, visitor)
+    assert (await read_id(client, visitor.headers, held.decision_id)).state == "cancelled"
+    assert (await checked(client, visitor, "Your booking is below.", [clause("booking_confirmed", booking.fact_id)])).ok
+    for prose in ("Your earlier request from this chat has closed.", "That request closed when your visit was booked."):
+        assert (await checked(client, visitor, prose)).ok
+        assert reviewer.soft_inputs[-1].cards == [CLOSED_SEEN]
+
+
+async def test_the_check_reads_the_five_latest_answers_beside_every_request_still_held(app, client, reviewer,
+                                                                                      frozen_clock):
+    """However long the chat, the check reads the receipts of at most the five requests that left `held` most
+    recently, by ledger order, beside every request still awaiting the owner, oldest request first: a sixth,
+    older answer is dropped, though its request is newer than theirs, while an older approval among the five
+    stays beside the newer requests."""
+    from .test_approvals import answered
+
+    copy, visitor = await visitor_of(app, client)
+    holds = []
+    for n in range(7):
+        frozen_clock.advance(60)
+        held = await decided(client, visitor, "native.quote", quote_args(("drain", 1), discount_bp=1500),
+                             call_id=f"call-held-{n}")
+        assert held.state == "held", held.reason_plain
+        holds.append(held)
+    await answered(client, copy.owner, holds[5].decision_id, "deny_once")              # the oldest answer
+    ran = await answered(client, copy.owner, holds[0].decision_id, "allow_once")
+    assert ran.decision.state == "executed", ran
+    for held in holds[1:5]:
+        await answered(client, copy.owner, held.decision_id, "deny_once")
+    assert (await checked(client, visitor, CLEAN)).ok
+    approved = "Request receipt card: Quote request: Mike Turner approved this; Quoted from Mike Turner's price list"
+    assert reviewer.soft_inputs[-1].cards == [approved] + [DENIED_SEEN] * 4 + [HELD_SEEN]

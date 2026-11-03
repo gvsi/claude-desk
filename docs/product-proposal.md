@@ -1,6 +1,6 @@
 # Product proposal: Claude Desk
 
-Giovanni Alcantara · October 29, 2026
+Giovanni Alcantara · November 2, 2026
 
 ## The product
 

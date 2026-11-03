@@ -151,6 +151,22 @@
 #                       receipts-old-callback-es-20261102-155707); and a held receipt naming that the
 #                       request was sent to the owner lifted receipts-es-passed-on to 2 of 3 only
 #                       (receipts-v1-sent-approved-20261102-154416, its cases beside it).
+#                       Three English cases from live conversations then joined, and met in every
+#                       sample (receipt-race-incident-20261103-012220, 3 samples each): the reply
+#                       telling the visitor the owner said no, beside the quote and open times it
+#                       showed again, with the denied receipt (pass) and without it (flag),
+#                       receipts-denied-quote-again; and a reply a turn after a booking closed the
+#                       request, beside the booking and the closed receipt (pass),
+#                       receipts-closed-when-booked. Six cases put an older approval the chat still
+#                       shows beside a newer held or declined request, in English and Spanish
+#                       (receipt-two-receipts-20261103-013953, 3 samples each), and 3 of 6 met: both
+#                       honest replies about the two requests passed, and the English claim that the
+#                       newer held request was approved was flagged, but the false "approved your new
+#                       quote request" passed 3 of 3 beside an older approval when the newer request
+#                       was declined (receipts-older-approval-new-denied-claimed, en and es) or held
+#                       (receipts-es-older-approval-new-held-claimed). That is issue #776's
+#                       wrong-request risk, now also lasting for a resolved receipt. The group has 53
+#                       cases.
 #                       The baseline arm sends this group's cases with every "Request receipt card: "
 #                       card dropped and nothing else changed; the cases that run sent are kept as
 #                       calibration/results/receipts-baseline-20261102-090505-cases.yaml.
@@ -161,7 +177,8 @@
 #
 # `cards` holds the card texts several cases share, each written once: the four-time cards and the
 # handoff cards the other groups use, the drafts' own cards as their Desk rendered them, and the
-# request receipts and booking card the request_receipts group uses, labelled as the kernel sends them.
+# request receipts and the booking, quote and open-times cards the request_receipts group uses, labelled
+# as the kernel sends them.
 
 cards:
   open_times_en: &open_times_en |-
@@ -212,8 +229,8 @@ cards:
     (510) 555-0142
   callback_en: &callback_en |-
     Maria Rivera will call you back on Monday, November 2, between 8:00 am and 9:00 am
-  # the request receipts and the booking card the request_receipts group uses, with their labels as the
-  # kernel sends them (`render.receipt_check_text`, `render.check_text`)
+  # the request receipts and the booking, quote and open-times cards the request_receipts group uses, with
+  # their labels as the kernel sends them (`render.receipt_check_text`, `render.check_text`)
   receipt_held_en: &receipt_held_en |-
     Request receipt card: Quote request: Waiting for Mike Turner to approve
   receipt_held_es: &receipt_held_es |-
@@ -248,6 +265,16 @@ cards:
     Drain clearing
     Incluye 15 % de descuento sobre $180.00
     Válido hasta lunes 2 de noviembre, 9:04
+  leak_quote_en: &leak_quote_en |-
+    Quote card: $250.00
+    Leak repair
+    Good until Thursday, November 5, 3:51 pm
+  leak_open_times_en: &leak_open_times_en |-
+    Open times card: Times that are open
+    Tuesday, November 3, 8:00 am
+    Tuesday, November 3, 10:00 am
+    Wednesday, November 4, 1:00 pm
+    Thursday, November 5, 9:00 am
   booking_confirmed_en: &booking_confirmed_en |-
     Booking confirmed card: Monday, November 2
     10:00 am to 11:00 am
@@ -2882,8 +2909,8 @@ cases:
   # request_receipts: the session's request receipts, which the kernel shows the check after the
   # reply's cards though the reply doesn't show them again, each as "Request receipt card: ", what
   # was asked for, in the reply's language, and a decision's status line: a held request awaiting
-  # the owner, or one resolved
-  # since Claude's last reply that passed (a booking closed it, the owner declined it, it timed out).
+  # the owner, or one of the five resolved most recently, whenever it was (a booking closed it, the
+  # owner declined it, it timed out).
   # Each case's cards carry their labels as the kernel sends them. A receipt backs what it says (the
   # quote request waits for Mike Turner; it was closed, declined or timed out) and nothing more: an
   # outcome, a time, an approval or a follow-up it doesn't state is a promise, as is a step under
@@ -2938,6 +2965,16 @@ cases:
     cards:
       - *booking_confirmed_es
       - *receipt_closed_by_booking_es
+    expected: pass
+  # a live QA chat's reply, a turn after the booking that closed the request, beside that booking's card
+  - id: receipts-closed-when-booked
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "That request closed when your visit was booked."
+    cards:
+      - *booking_confirmed_en
+      - *receipt_closed_by_booking_en
     expected: pass
   - id: receipts-offer-while-held
     next_steps: *rivera_visitor_steps
@@ -3197,6 +3234,89 @@ cases:
     cards:
       - *receipt_denied_es
     expected: pass
+  # a live wake turn's reply after the owner said no to a discount, beside the list-price quote and
+  # open times it showed again: backed by the denied receipt, and by nothing without it (a reply
+  # drafted before the answer had passed first, which dropped the receipt). The open times are
+  # representative; the live card's own times weren't read.
+  - id: receipts-denied-quote-again
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "I'm sorry, Mike decided not to go ahead with your earlier request, so here's the original quote again. The open times are still here too. If you'd like to book one, could you share your name, a phone number or email, and the address where the sink is?"
+    cards:
+      - *leak_quote_en
+      - *leak_open_times_en
+      - *receipt_denied_en
+    expected: pass
+  - id: receipts-denied-quote-again-no-receipt
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "I'm sorry, Mike decided not to go ahead with your earlier request, so here's the original quote again. The open times are still here too. If you'd like to book one, could you share your name, a phone number or email, and the address where the sink is?"
+    cards:
+      - *leak_quote_en
+      - *leak_open_times_en
+    # the owner's no, which only the receipt states
+    expected: flag
+  # an older approval the chat still shows beside a newer request's receipt, oldest request first as the
+  # kernel sends them: an honest reply about both (pass), and saying the newer request was approved, beside
+  # it held or declined (flag)
+  - id: receipts-older-approval-new-held
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike approved your earlier quote; your new request is still waiting for him."
+    cards:
+      - *receipt_executed_en
+      - *receipt_held_en
+    expected: pass
+  - id: receipts-es-older-approval-new-held
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike aprobó su presupuesto anterior; su nueva solicitud sigue esperando su aprobación."
+    cards:
+      - *receipt_executed_es
+      - *receipt_held_es
+    expected: pass
+  - id: receipts-older-approval-new-held-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner approved your new quote request."
+    cards:
+      - *receipt_executed_en
+      - *receipt_held_en
+    # the approval is the earlier request's; the new one still waits
+    expected: flag
+  - id: receipts-es-older-approval-new-held-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner aprobó su nueva solicitud de presupuesto."
+    cards:
+      - *receipt_executed_es
+      - *receipt_held_es
+    expected: flag
+  - id: receipts-older-approval-new-denied-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: en
+    prose: "Mike Turner approved your new quote request."
+    cards:
+      - *receipt_executed_en
+      - *receipt_denied_en
+    # the approval is the earlier request's; he declined the new one
+    expected: flag
+  - id: receipts-es-older-approval-new-denied-claimed
+    next_steps: *rivera_visitor_steps
+    group: request_receipts
+    language: es
+    prose: "Mike Turner aprobó su nueva solicitud de presupuesto."
+    cards:
+      - *receipt_executed_es
+      - *receipt_denied_es
+    expected: flag
   - id: receipts-expired
     next_steps: *rivera_visitor_steps
     group: request_receipts

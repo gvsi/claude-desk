@@ -181,7 +181,7 @@ describe('the About documents', () => {
       title: 'Product proposal',
       summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
       pullQuote: 'Prompt injection and social engineering can’t make Claude act past the owner’s rules.',
-      layout: 'hero',
+      icon: true,
       hero: 'architecture',
       next: 'prediction',
     });
@@ -191,8 +191,8 @@ describe('the About documents', () => {
       title: 'Capability prediction',
       summary:
         'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
-      layout: 'column',
       claim: { first: 3, last: 5 },
+      icon: true,
       columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] },
       next: 'proposal',
     });

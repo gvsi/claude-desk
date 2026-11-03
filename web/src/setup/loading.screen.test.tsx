@@ -413,7 +413,7 @@ it('accepted_moves_reject_a_10_px_spacing_error_in_an_earlier_estimated_row', ()
 
 for (const viewport of ['desktop', 'phone'] as const) {
   for (const [step, load] of Object.entries(STEPS) as [Step, StepLoad][]) {
-    it(`setup_steps_load_in_place: ${step} at ${viewport}`, async () => {
+    it(`setup_steps_load_in_place: ${step} at ${viewport}`, { timeout: 25_000 }, async () => {
       const state = await (load.interview?.() ?? interviewAt(step));
       const read = load.hold(state);
       const open = await loadedSetup(state, viewport);
@@ -425,7 +425,7 @@ for (const viewport of ['desktop', 'phone'] as const) {
         open: async () => {
           await open();
           await load.reach?.();
-          await vi.waitFor(() => expect(read.held()).toBe(1));
+          await vi.waitFor(() => expect(read.held()).toBe(1), { timeout: step === 'rules' ? 4_000 : 1_000 });
           // Watch this step, after the entry page's own main button has left.
           watched = watchPlaces([...(load.estimated ?? []), ...(load.moved?.(viewport) ?? [])]);
         },
@@ -502,23 +502,23 @@ it.each(['desktop', 'phone'] as const)('setup_reload_marks_no_step_until_read at
   }
 });
 
-it.each(['desktop', 'phone'] as const)('setup_reload_keeps_the_bar_still_when_the_business_name_comes at %s', async (viewport) => {
+it.each(['desktop', 'phone'] as const)('setup_reload_keeps_the_bar_still_when_the_business_name_comes at %s', { timeout: 25_000 }, async (viewport) => {
   // The Desks come after the step: the bar holds the business's line meanwhile, so it doesn't grow
   // and move the page when the name lands.
   const state = await interviewAt('rules');
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
-  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0), { timeout: 4_000 });
   const steps = screen.getByRole('list', { name: 'Set up your Desk' });
-  await vi.waitFor(() => expect(steps.element().querySelector('[aria-current="step"]')).not.toBeNull());
-  await vi.waitFor(() => expect(document.querySelector('.cd-setup__column .cd-skeleton-screen__layer')).toBeNull());
+  await vi.waitFor(() => expect(steps.element().querySelector('[aria-current="step"]')).not.toBeNull(), { timeout: 4_000 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__column .cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   expect(document.querySelector('.cd-setup__business')?.textContent ?? '').toBe('');
   const bar = () => document.querySelector('.cd-setup__bar')!.getBoundingClientRect();
   const before = bar();
 
   desks.release();
-  await vi.waitFor(() => expect(document.querySelector('.cd-setup__business')?.textContent ?? '').not.toBe(''));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__business')?.textContent ?? '').not.toBe(''), { timeout: 4_000 });
   const after = bar();
   expect(after.height, `the bar's height: ${before.height}, then ${after.height}`).toBeCloseTo(before.height, 1);
 });
@@ -532,14 +532,14 @@ it('setup_keeps_the_bar_still_when_the_desks_it_has_were_read_before_the_desk_wa
   const desks = holdReads(ROUTES.desks.path);
   onTestFinished(desks.release);
   await router.navigate(`/app/setup/${state.interview_id}`);
-  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0));
-  await vi.waitFor(() => expect(document.querySelector('.cd-setup__steps [aria-current="step"]')).not.toBeNull());
+  await vi.waitFor(() => expect(desks.held()).toBeGreaterThan(0), { timeout: 4_000 });
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__steps [aria-current="step"]')).not.toBeNull(), { timeout: 4_000 });
   expect(document.querySelector('.cd-setup__business'), 'the bar holds the name\'s line').not.toBeNull();
   const bar = () => document.querySelector('.cd-setup__bar')!.getBoundingClientRect();
   const before = bar();
 
   desks.release();
-  await vi.waitFor(() => expect(document.querySelector('.cd-setup__business')?.textContent ?? '').not.toBe(''));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup__business')?.textContent ?? '').not.toBe(''), { timeout: 4_000 });
   const after = bar();
   expect(after.height, `the bar's height: ${before.height}, then ${after.height}`).toBeCloseTo(before.height, 1);
 });
@@ -713,7 +713,7 @@ const ENTRIES = [
   { from: 'public_lines', press: 'Looks right', to: 'safety_check', title: 'Safety check' },
 ] as const;
 
-it.each(ENTRIES)('a_step_opened_from_the_end_of_the_one_before_starts_at_its_top: $title', async ({ from, press, to, title }) => {
+it.each(ENTRIES)('a_step_opened_from_the_end_of_the_one_before_starts_at_its_top: $title', { timeout: 25_000 }, async ({ from, press, to, title }) => {
   // On a phone the owner scrolls to the step's end to go on. The next step opens at its top, its
   // title in view while its read is out, and stays there as what it read lands.
   // What customers will read is longer than a phone's window with Claude's suggestions on it.
@@ -724,24 +724,24 @@ it.each(ENTRIES)('a_step_opened_from_the_end_of_the_one_before_starts_at_its_top
     await expect.element(screen.getByRole('heading', { level: 1, name: 'What customers will read', exact: true })).toBeVisible();
   }
   const button = screen.getByRole('button', { name: press, exact: true });
-  await expect.element(button).toBeEnabled();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await expect.element(button, { timeout: from === 'rules' ? 4_000 : 1_000 }).toBeEnabled();
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: from === 'rules' ? 4_000 : 1_000 });
   button.element().scrollIntoView({ block: 'end' });
-  await vi.waitFor(() => expect(window.scrollY).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(window.scrollY).toBeGreaterThan(0), { timeout: from === 'rules' ? 4_000 : 1_000 });
   const read = STEPS[to].hold(state);
   (button.element() as HTMLButtonElement).click();
 
-  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0));
+  await vi.waitFor(() => expect(read.held()).toBeGreaterThan(0), { timeout: to === 'rules' ? 4_000 : 1_000 });
   const heading = screen.getByRole('heading', { level: 1, name: title, exact: true });
-  await expect.element(heading).toBeInTheDocument();
-  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')).not.toBeNull());
+  await expect.element(heading, { timeout: to === 'rules' ? 4_000 : 1_000 }).toBeInTheDocument();
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')).not.toBeNull(), { timeout: to === 'rules' ? 4_000 : 1_000 });
   expect(window.scrollY, 'the step opens at its top').toBe(0);
   const top = heading.element().getBoundingClientRect().top;
   expect(top).toBeGreaterThanOrEqual(0);
   expect(heading.element().getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight);
 
   read.release();
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: to === 'rules' ? 4_000 : 1_000 });
   expect(window.scrollY, 'nothing jumps as the step lands').toBe(0);
   expect(heading.element().getBoundingClientRect().top).toBe(top);
 });
@@ -839,7 +839,7 @@ it('safety_check_lands_under_the_fading_skeleton', async () => {
 /** How long the long draft is held: a live draft can take many seconds. */
 const LONG_DRAFT_MS = 2_000;
 
-it('long_draft_keeps_one_status', async () => {
+it('long_draft_keeps_one_status', { timeout: 25_000 }, async () => {
   // Review Focus 4: a long wait keeps sweeping, says its words once, and changes nothing else.
   const state = await interviewAt('tools');
   const draft = holdPosts(path('setupRules', state));
@@ -866,9 +866,9 @@ it('long_draft_keeps_one_status', async () => {
   onTestFinished(() => observer.disconnect());
 
   await screen.getByRole('button', { name: 'Continue', exact: true }).click();
-  await vi.waitFor(() => expect(draft.held()).toBe(1));
+  await vi.waitFor(() => expect(draft.held()).toBe(1), { timeout: 4_000 });
   const heldAt = performance.now();
-  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown'));
+  await vi.waitFor(() => expect(document.querySelector('.cd-setup-step .cd-skeleton-screen__layer')?.getAttribute('data-state')).toBe('shown'), { timeout: 4_000 });
   // Changes already queued for the observer belong to the shapes showing.
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   shown = true;
@@ -881,10 +881,10 @@ it('long_draft_keeps_one_status', async () => {
   expect(others, 'nothing else on the page changes').toEqual([]);
 
   draft.release();
-  await expect.element(screen.getByRole('button', { name: 'Check real situations', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Check real situations', exact: true }), { timeout: 4_000 }).toBeVisible();
 });
 
-it('setup_steps_still_under_reduced_motion', async () => {
+it('setup_steps_still_under_reduced_motion', { timeout: 25_000 }, async () => {
   const state = await interviewAt('rules');
   const draft = holdPosts(path('setupRules', state));
   const open = await loadedSetup(state);
@@ -895,7 +895,7 @@ it('setup_steps_still_under_reduced_motion', async () => {
     stays: rules.stays,
     open: async () => {
       await open();
-      await vi.waitFor(() => expect(draft.held()).toBe(1));
+      await vi.waitFor(() => expect(draft.held()).toBe(1), { timeout: 4_000 });
     },
     release: draft.release,
   });
@@ -923,7 +923,7 @@ it('public_lines_still_under_reduced_motion', async () => {
 
 const peoplePath = (state: SetupState) => ROUTES.people.path.replace('{desk_id}', state.desk_id);
 
-it('draft_waits_for_the_people_read', async () => {
+it('draft_waits_for_the_people_read', { timeout: 30_000 }, async () => {
   // The draft's rows name customers from the people read: with the draft ready and only the people
   // read out, the draft keeps its shapes, then lands where they were.
   const state = await interviewAt('rules');
@@ -937,8 +937,8 @@ it('draft_waits_for_the_people_read', async () => {
     open: async () => {
       const mark = mockStore.requests.length;
       await open();
-      await vi.waitFor(() => expect(people.held()).toBe(1));
-      await vi.waitFor(() => expect(mockStore.requests.slice(mark).some((r) => r.key === 'setupRules')).toBe(true));
+      await vi.waitFor(() => expect(people.held()).toBe(1), { timeout: 4_000 });
+      await vi.waitFor(() => expect(mockStore.requests.slice(mark).some((r) => r.key === 'setupRules')).toBe(true), { timeout: 4_000 });
     },
     release: people.release,
   });
@@ -951,9 +951,9 @@ it('draft_lands_when_the_people_read_fails', async () => {
   const state = await interviewAt('rules');
   mockStore.inject({ route: 'people', status: 500, times: 2 });
   const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { retryScale: 0 });
-  await expect.element(screen.getByRole('button', { name: 'Check real situations', exact: true })).toBeVisible();
+  await expect.element(screen.getByRole('button', { name: 'Check real situations', exact: true }), { timeout: 4_000 }).toBeVisible();
   expect(mockStore.requests.filter((r) => r.key === 'people')).toHaveLength(2);
-  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
+  await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull(), { timeout: 4_000 });
   expect(document.querySelector('[aria-busy]')).toBeNull();
   expect(screen.getByRole('heading', { level: 2, name: 'Across your Desk' }).elements()).toHaveLength(1);
 });

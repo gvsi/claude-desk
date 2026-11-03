@@ -24,6 +24,8 @@
   --va-line-strong: rgba(28, 27, 25, 0.28);
   /* A control in the bar while pointed at. */
   --va-hover: rgba(28, 27, 25, 0.06);
+  /* The primary button (the way into the prototype) while pointed at: a step lighter than the ink. */
+  --va-ink-hover: #3a3833;
   /* Status, as a dot beside the words that say it. */
   --va-done: #4f8a3b;
   --va-held: #c79a16;
@@ -52,6 +54,10 @@
   --fill-secondary: var(--va-band);
   --accent-blue: var(--va-link);
   --line-focus: var(--va-ink-2);
+  /* The primary button: the ink, with the paper's own words on it. */
+  --button-primary: var(--va-ink);
+  --button-primary-hover: var(--va-ink-hover);
+  --button-primary-text: var(--va-paper);
   /* No text entry is drawn on the paper. If one ever is, map line-field here too, so its outline and the
      composer's focused edge reach 3:1 on the paper. */
   --status-handled: var(--va-done);

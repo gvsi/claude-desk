@@ -144,11 +144,13 @@ describe('The Vision article', () => {
     await expect.element(screen.getByText(END_NOTE, { exact: true })).toBeVisible();
 
     // The meta line's read time is the article's words at the About pages' speed: its own text and the words
-    // on its screens, but not the meta line itself or the decorative cover.
+    // on its screens, but not the meta line itself, the decorative cover or the "On this page" list.
     const article = screen.getByRole('article').element();
     const meta = article.querySelector('[data-meta]');
     expect(meta, 'the meta line is in the article').not.toBeNull();
-    const words = readWords(article, meta ? [meta] : []);
+    const contents = article.querySelector('nav[aria-label="On this page"]');
+    expect(contents, 'the contents list is in the article').not.toBeNull();
+    const words = readWords(article, [meta, contents].filter((el): el is Element => el !== null));
     const minutes = Math.max(1, Math.round(words / WORDS_PER_MINUTE));
     expect(flat(meta)).toBe(`Vision October 30, 2026 ${minutes} min read`);
     expect(meta?.querySelector('time')?.getAttribute('datetime')).toBe('2026-10-30');

@@ -28,7 +28,7 @@ import {
   Whisper,
 } from '../../ds/index.ts';
 import { formatClock } from '../../lib/format.ts';
-import { groupRows, opensAReply, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
+import { groupRows, opensAReply, withoutRepeatedCards, type CardsRow, type GroupedRow, type RowPart } from '../../lib/transcript.ts';
 import { paymentLinkMemory } from '../../public/paymentLinks.ts';
 import { usePaymentLinks } from '../../public/usePaymentLinks.ts';
 import { ledgerQuery } from '../safety/queries.ts';
@@ -46,9 +46,15 @@ type OwnerRowItem =
   | { kind: 'visitor'; n: number; text: string; translation: string | null }
   | { kind: 'agent'; n: number; text: string; request: number }
   | { kind: 'whisper'; n: number; text: string; at: string }
-  | { kind: 'message'; n: number; ev: EvMessage };
+  /** `turn` counts what started a turn before it, a take-over and hand-back included, which draw no row here. */
+  | { kind: 'message'; n: number; ev: EvMessage; turn: number };
 
 type OwnerRow = GroupedRow<OwnerRowItem, OwnerReceiptSource>;
+
+/** How a row reads for `withoutRepeatedCards`: Claude's reply, or someone's words, which start a turn. */
+function cardsRowOf({ item }: OwnerRow): CardsRow {
+  return item.kind === 'message' && item.ev.author !== 'owner' ? { kind: 'reply', blocks: item.ev.blocks, turn: item.turn } : { kind: 'words' };
+}
 
 export interface OwnerTranscriptProps {
   items: readonly OwnerTranscriptItem[];
@@ -79,6 +85,9 @@ export interface OwnerTranscriptProps {
   readSinceOpened: boolean;
 }
 
+/** What starts a turn, with the owner's own messages: someone's words, and the owner joining or leaving. A stopped draft doesn't. */
+const TURN_STARTS: ReadonlySet<OwnerTranscriptItem['kind']> = new Set(['visitor_text', 'agent_text', 'whisper', 'owner_joined', 'owner_left']);
+
 /** Cards that report something done: their executed receipt draws the check. */
 const DONE_CARDS: ReadonlySet<string> = new Set(['booking_confirmed', 'payment_confirmed', 'charge_confirmed']);
 
@@ -103,8 +112,10 @@ function rowsOf(items: readonly OwnerTranscriptItem[]) {
   const sorted = [...items].sort((a, b) => a.n - b.n);
   const firsts = new Map<string, OwnerReceiptSource>();
   let requests = 0;
+  let turns = 0;
   const partOf = (item: OwnerTranscriptItem): RowPart<OwnerRowItem, OwnerReceiptSource> | null => {
     const { event } = item;
+    if (TURN_STARTS.has(item.kind) || (item.kind === 'delivered' && event?.type === 'message' && event.author === 'owner')) turns += 1;
     switch (item.kind) {
       case 'visitor_text':
         return { kind: 'turn', row: { kind: 'visitor', n: item.n, text: item.text ?? '', translation: item.owner_translation ?? null } };
@@ -115,7 +126,7 @@ function rowsOf(items: readonly OwnerTranscriptItem[]) {
         return { kind: 'turn', row: { kind: 'whisper', n: item.n, text: item.text ?? '', at: item.created_at } };
       case 'delivered':
         if (event?.type !== 'message') return null;
-        return { kind: 'reply', row: { kind: 'message', n: item.n, ev: event }, receipt: { event, first: false } };
+        return { kind: 'reply', row: { kind: 'message', n: item.n, ev: event, turn: turns }, receipt: { event, first: false } };
       case 'status': {
         if (!isStatus(event)) return null;
         const earlier = firsts.get(event.decision_id);
@@ -225,16 +236,21 @@ interface RowViewProps {
   cards: readonly string[];
   /** The receipts shown so far, by ledger seq. */
   shown: ReadonlySet<number>;
+  /** Claude's reply's blocks to draw, without the cards its turn already drew; null for other rows. */
+  blocks: readonly RenderedBlock[] | null;
   agentName: string;
   ownerName: string;
   timezone: string;
   onOpenTrace: (ledgerSeq: number) => void;
 }
 
-function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
+function RowView({ row, paymentBlock, live, cards, shown, blocks, agentName, ownerName, timezone, onOpenTrace }: RowViewProps) {
   const { item } = row;
   const done = item.kind === 'message' && item.ev.blocks.some((block) => block.kind === 'card' && DONE_CARDS.has(block.template ?? ''));
-  const margin = row.receipts.map((source, index) => (
+  // A reply with nothing its turn hasn't drawn already isn't drawn, nor its own check, the check
+  // of nothing shown. Any other receipt under it stays.
+  const hidden = item.kind === 'message' && item.ev.author !== 'owner' && blocks?.length === 0;
+  const margin = row.receipts.filter((source) => !hidden || source.event.type !== 'message').map((source, index) => (
     <ReceiptLine
       key={`${source.event.ledger_seq}-${index}`}
       source={source}
@@ -260,13 +276,14 @@ function RowView({ row, paymentBlock, live, cards, shown, agentName, ownerName, 
         item.ev.author === 'owner' ? (
           <PersonMessage name="You" initials={initialsOf(ownerName)} blocks={item.ev.blocks} language={item.ev.language} />
         ) : (
-          <ClaudeMessage blocks={item.ev.blocks.map(paymentBlock)} language={item.ev.language} ownerName={ownerName} reveal={live} />
+          <ClaudeMessage blocks={(blocks ?? item.ev.blocks).map(paymentBlock)} language={item.ev.language} ownerName={ownerName} reveal={live} />
         );
       break;
   }
+  if (hidden && margin.length === 0) return null;
   return (
     <TranscriptRow margin={margin} live={live}>
-      {message}
+      {hidden ? null : message}
     </TranscriptRow>
   );
 }
@@ -291,6 +308,8 @@ export function OwnerTranscript({
   readSinceOpened,
 }: OwnerTranscriptProps) {
   const groups = useMemo(() => rowsOf(items), [items]);
+  // Each reply's blocks without the cards its turn already drew.
+  const replyBlocks = useMemo(() => withoutRepeatedCards(groups.rows.map(cardsRowOf)), [groups]);
   const messages = useMemo(() => groups.rows.flatMap(({ item }) => item.kind === 'message' ? [item.ev] : []), [groups]);
   const [paymentLinks] = useState(paymentLinkMemory);
   const paymentBlock = usePaymentLinks(messages, paymentLinks, focusTarget);
@@ -394,6 +413,7 @@ export function OwnerTranscript({
           live={arrived(row)}
           cards={cards}
           shown={shown}
+          blocks={replyBlocks[index] ?? null}
           agentName={agentName}
           ownerName={ownerName}
           timezone={timezone}
