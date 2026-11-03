@@ -192,6 +192,7 @@ describe('the About documents', () => {
       summary:
         'What a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.',
       claim: { first: 3, last: 5 },
+      icon: true,
       columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] },
       next: 'proposal',
     });

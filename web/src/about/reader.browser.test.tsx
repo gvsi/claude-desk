@@ -384,13 +384,13 @@ describe('ReaderPage', () => {
   it('article_opens_with_the_app_icon', async () => {
     // The mark on its white tile is the proposal's app icon (owner, 2026-10-30): a clay field with
     // corners a quarter of its size and the tiled bell at two thirds of it, centred above the meta
-    // line and the title. 120 px on the desktop layout, 88 px on the phone's. The prediction
-    // opens without it, in its reading column (prediction_opens_in_the_reading_column).
+    // line and the title. 120 px on the desktop layout, 88 px on the phone's. The prediction opens
+    // with it too (owner, 2026-11-02).
     for (const [size, field, radius, bell, gap, top] of [
       [DESKTOP, 120, '30px', '80', 36, '88px'],
       [PHONE, 88, '22px', '58', 28, '36px'],
     ] as const) {
-      for (const id of ['proposal'] as const) {
+      for (const id of ['proposal', 'prediction'] as const) {
         const where = `${id} at ${size.width}`;
         const screen = await renderReader(id, { size });
         const hero = screen.container.querySelector<HTMLElement>('[data-hero]');
@@ -427,8 +427,8 @@ describe('ReaderPage', () => {
 
   it('prediction_opens_with_the_proposals_hero', async () => {
     // The prediction opens as the proposal does (owner, 2026-11-02): the meta line, the title and the summary
-    // centred above the body, then its hero figure at the proposal's hero width, which is the claim card. No app icon:
-    // the bar names the product. The body under it, the contents list, the article and the details, is laid out the
+    // centred above the body under the proposal's app icon, then its hero figure at the proposal's hero width, which
+    // is the claim card. The body under it, the contents list, the article and the details, is laid out the
     // same; the article opens with "Capability" and the paragraph after the claim.
     for (const size of [DESKTOP, PHONE]) {
       const opening = async (id: AboutId) => {
@@ -463,7 +463,7 @@ describe('ReaderPage', () => {
         size === PHONE ? { ...proposal.placed, figureBelowSummary: prediction.placed.figureBelowSummary } : proposal.placed,
       );
       expect(prediction.placed.inBody, where).toBe(false);
-      expect(root.querySelector('.cd-mark-app-icon'), where).toBeNull();
+      expect(hero.querySelector('.cd-mark-app-icon'), where).not.toBeNull();
       // Its hero figure is the claim card, and only that.
       const figure = hero.querySelector('.cd-about-hero__figure') as Element;
       expect([...figure.children].map((child) => child.hasAttribute('data-claim')), where).toEqual([true]);

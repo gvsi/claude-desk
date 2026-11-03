@@ -94,7 +94,8 @@ const SOURCES: Record<AboutId, Source> = {
     next: 'proposal',
     forThePage: (markdown) => markdown,
     // The safety results' model columns need room for their figures and notes (design lane, 2026-11-02).
-    words: { columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] } },
+    // It opens with the proposal's app icon above its meta line (owner, 2026-11-02).
+    words: { icon: true, columns: { 'why-the-limits-stay-in-code': [22, 28, 20, 30] } },
     claimCard: true,
   },
 };
