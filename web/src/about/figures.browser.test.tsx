@@ -4,9 +4,8 @@
  * written out here, never read from the components.
  */
 import axe from 'axe-core';
-import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
 import { contrastRatio } from '../ds/contrast.ts';
@@ -15,13 +14,15 @@ import { loadWebFonts } from '../ds/test/fonts.ts';
 import { placeholderTexts } from '../test/about.ts';
 import { AXE_TAGS, tokenColor } from '../test/screen.ts';
 import { ABOUT_DOCUMENTS, inlineText, type Block, type Inline } from './documents.ts';
-import { ReaderPage } from './ReaderPage.tsx';
 import { ARCHITECTURE_LABELS, ArchitectureFigure } from './figures/ArchitectureFigure.tsx';
+import { LaunchFilm } from './figures/LaunchFilm.tsx';
 import { MeasuresTable } from './figures/MeasuresTable.tsx';
 import { ReadinessScale, readinessRows } from './figures/ReadinessScale.tsx';
 import { Tau3Chart } from './figures/Tau3Chart.tsx';
 import { forgetPlayedFigures } from './figures/usePlayOnce.ts';
 
+// The reading page's stylesheets: the paper, and the top bar's, which sets the page's side gutter.
+import './AboutBar.css';
 import './paper.css';
 
 const DESKTOP = { width: 1440, height: 900 };
@@ -487,10 +488,22 @@ describe('ArchitectureFigure', () => {
     // Measured on /about/proposal at d14424d6b, before emphasizing the technology names (124 px each at 1440,
     // 120 at 390), then at the raised type scale, where the name and every caption line is a pixel taller. The two
     // checks are stacked, not a row, so on a phone each box keeps its own height: Check reply's first line takes
-    // two lines there.
+    // two lines there. Drawn where the proposal drew it until the launch film took its place: the reading page's
+    // hero figure, at its width.
     for (const [size, heights] of [[DESKTOP, [129, 129]], [PHONE, [123, 141]]] as const) {
       await page.viewport(size.width, size.height);
-      const screen = await render(<MemoryRouter><ReaderPage id="proposal" /></MemoryRouter>);
+      const compact = size === PHONE;
+      const screen = await render(
+        <div className={`${PAPER} cd-about-set cd-about-page${compact ? ' cd-about-page--compact' : ''}`}>
+          <main className="cd-about-main">
+            <div className="cd-about-hero">
+              <div className="cd-about-hero__figure">
+                <ArchitectureFigure compact={compact} />
+              </div>
+            </div>
+          </main>
+        </div>,
+      );
       const checks = screen.container.querySelector('.cd-about-arch__checks') as HTMLElement;
       expect(getComputedStyle(checks).flexDirection, `${size.width} wide: checks stack`).toBe('column');
       const boxes = [...screen.container.querySelectorAll('.cd-about-arch__check > .cd-about-arch__box')];
@@ -626,6 +639,103 @@ describe('ArchitectureFigure', () => {
       }
       await screen.unmount();
     }
+  });
+});
+
+/** The launch film's words: its name, as a screen reader reads the player, and what it shows, under it. */
+const FILM_NAME = 'Claude Desk launch film, 2 minutes';
+const FILM_SHOWS =
+  'Mike’s Desk quotes and books a repair at 11:46 pm, asks Mike before an emergency visit, takes a booking and ' +
+  'deposit from a customer’s AI assistant within the limit they signed, and won’t be talked into a refund. Music, no voice.';
+
+describe('LaunchFilm', () => {
+  it('film_waits_for_a_reader_to_play_it', async () => {
+    // A native player with the film's poster and its controls, inline on a phone, reading only the film's length and
+    // size until it is played. It never starts by itself: the film's music carries it, so a reader starts it. One
+    // file serves every width.
+    for (const compact of [false, true]) {
+      const where = `compact ${compact}`;
+      const screen = await render(<LaunchFilm compact={compact} />);
+      const videos = [...screen.container.querySelectorAll('video')];
+      expect(videos, where).toHaveLength(1);
+      const video = videos[0] as HTMLVideoElement;
+      expect(video.getAttribute('poster'), where).toMatch(/\/launch-film-poster(?:-[\w-]+)?\.jpg$/);
+      expect(video.controls, where).toBe(true);
+      expect(video.hasAttribute('playsinline'), where).toBe(true);
+      expect(video.getAttribute('preload'), where).toBe('metadata');
+      expect([video.autoplay, video.hasAttribute('autoplay'), video.muted, video.loop], where).toEqual([false, false, false, false]);
+      const sources = [...video.querySelectorAll('source')];
+      expect(sources.map((source) => [source.getAttribute('type'), source.hasAttribute('media')]), where).toEqual([['video/mp4', false]]);
+      expect(sources[0]?.getAttribute('src'), where).toMatch(/\/launch-film-1080(?:-[\w-]+)?\.mp4$/);
+      // Once the page has settled, still waiting at the start.
+      await frames(10);
+      expect([video.paused, video.currentTime], where).toEqual([true, 0]);
+      await screen.unmount();
+    }
+  });
+
+  it('film_has_its_name_and_says_what_it_shows', async () => {
+    // The film has music and no voice, so the words under it say what it shows, and the player is named and
+    // described by them. On the reading pages' paper it passes the copy check and axe.
+    for (const [size, compact] of [
+      [DESKTOP, false],
+      [PHONE, true],
+    ] as const) {
+      const where = `${size.width} wide`;
+      await page.viewport(size.width, size.height);
+      const screen = await render(
+        <main className={PAPER}>
+          <LaunchFilm compact={compact} />
+        </main>,
+      );
+      const video = screen.getByLabelText(FILM_NAME, { exact: true });
+      await expect.element(video, { message: where }).toBeInTheDocument();
+      const player = video.element() as HTMLVideoElement;
+      expect(player.localName, where).toBe('video');
+      const described = document.getElementById(player.getAttribute('aria-describedby') ?? '');
+      expect(described?.textContent?.replace(/\s+/g, ' ').trim(), where).toBe(FILM_SHOWS);
+      // The words are the figure's caption, under the player, where everyone can read them.
+      const figure = player.closest('figure') as HTMLElement;
+      const caption = figure.querySelector('figcaption') as HTMLElement;
+      expect(caption.contains(described), where).toBe(true);
+      expect(caption.checkVisibility(), where).toBe(true);
+      expect(caption.getBoundingClientRect().top, where).toBeGreaterThanOrEqual(player.getBoundingClientRect().bottom);
+      expect(getComputedStyle(caption).color, where).toBe(tokenColor('--text-secondary', caption));
+
+      assertCleanCopy(screen.container);
+      const results = await axe.run(screen.container, { runOnly: { type: 'tag', values: [...AXE_TAGS] } });
+      const violations = results.violations.flatMap((v) => v.nodes.map((n) => `${v.id}: ${v.help} at ${n.target.join(' ')}`));
+      expect(violations, where).toEqual([]);
+      expect(document.documentElement.scrollWidth, where).toBeLessThanOrEqual(size.width);
+      await screen.unmount();
+    }
+  });
+
+  it('film_draws_keyboard_focus_on_its_own_edge', async () => {
+    // Keyboard focus on the player draws the paper's focus edge, 1 px of its secondary ink just inside the player
+    // and over the picture, where the page's usual inset edge would sit under the film; never a ring outside it.
+    const screen = await render(
+      <main className={PAPER}>
+        <LaunchFilm />
+      </main>,
+    );
+    const root = screen.container.querySelector('main') as HTMLElement;
+    const video = screen.container.querySelector('video') as HTMLVideoElement;
+    const frame = video.parentElement as HTMLElement;
+    const overlay = () => getComputedStyle(frame, '::after');
+    expect(overlay().boxShadow).toBe('none');
+    await userEvent.keyboard('{Shift}');
+    video.focus();
+    expect(video.matches(':focus-visible')).toBe(true);
+    expect([getComputedStyle(video).outlineStyle, overlay().boxShadow]).toEqual([
+      'none',
+      `${tokenColor('--line-focus', root)} 0px 0px 0px 1px inset`,
+    ]);
+    // The edge lies over the player's whole box, rounded as it is, and lets a click through to the player.
+    expect(overlay().pointerEvents).toBe('none');
+    expect(overlay().borderTopLeftRadius).toBe(getComputedStyle(video).borderTopLeftRadius);
+    expect(frame.getBoundingClientRect().toJSON()).toEqual(video.getBoundingClientRect().toJSON());
+    await screen.unmount();
   });
 });
 
@@ -793,6 +903,7 @@ describe('the figures together', () => {
       // On the paper the reading pages draw them on, so axe reads their text against it.
       const screen = await render(
         <main className={PAPER}>
+          <LaunchFilm compact={compact} />
           <ArchitectureFigure compact={compact} />
           <Tau3Chart compact={compact} />
           <ReadinessScale table={readiness} compact={compact} />

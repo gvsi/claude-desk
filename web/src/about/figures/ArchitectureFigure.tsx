@@ -1,5 +1,7 @@
 /**
- * The product proposal's lead figure: v1's two processes and two checkpoints. A visitor or their agent talks
+ * The first release's architecture, drawn for the reading page's hero width: v1's two processes and two checkpoints.
+ * It opened the product proposal until the launch film took its place (owner, 2026-11-02), and a document can still
+ * open with it (`documents.ts`); its side-by-side layout doesn't fit the article's column. A visitor or their agent talks
  * to the chat layer, where Claude proposes; the kernel, its own process, decides each action and checks each
  * reply, and signs a ledger of both. Built from boxes, with the connectors drawn in SVG and hidden from screen
  * readers, so the words read in order.
