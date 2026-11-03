@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { Link } from 'react-router';
 
-import type { Today } from '../../api/views.ts';
+import type { NeedsYouItem, Today } from '../../api/views.ts';
 import { Card, Icon, SectionHeader, StatusDot, type IconName, type StatusTone } from '../../ds/index.ts';
 import { conversationsPath } from '../conversations/ConversationsPage.tsx';
 import { todayPath } from '../useDesks.ts';
@@ -39,24 +39,24 @@ export interface HowItWorksProps {
   heldCount: number | undefined;
   /** Callbacks and handoffs in Needs you, which rule out a quiet day. */
   callbackCount: number;
-  /** The oldest request still held, which "held N for you" opens in Needs you; null when none is. */
-  firstHeldId: string | null;
+  /** The oldest request still held, which "held N for you" opens in its conversation; null when none is. */
+  firstHeld: NeedsYouItem | null;
 }
 
 /**
  * "How your Desk works": the three steps a conversation takes (someone asks, Claude answers, the
  * owner's rules decide), then, once Today is read, what Claude did today on one line under a
  * hairline, each outcome a link to where it is: what it handled to Conversations, what it held to
- * Needs you, what it turned down to Safety.
+ * its conversation, what it turned down to Safety.
  */
-export function HowItWorks({ deskId, business, today, heldCount, callbackCount, firstHeldId }: HowItWorksProps) {
+export function HowItWorks({ deskId, business, today, heldCount, callbackCount, firstHeld }: HowItWorksProps) {
   const titleId = useId();
   const counts = todayCounts(today, heldCount);
   const outcomes = counts === null ? null : todayOutcomes(counts);
   const hrefs: Readonly<Record<TodayOutcomeKind, string>> = {
     handled: conversationsPath(deskId),
     // Keep a Needs you landing if the oldest request disappears while an answer settles.
-    held: firstHeldId === null ? `${todayPath(deskId)}#needs-you` : requestPath(deskId, firstHeldId),
+    held: firstHeld?.decision ? requestPath(deskId, firstHeld.decision.decision_id, firstHeld.session) : `${todayPath(deskId)}#needs-you`,
     turnedDown: `/app/${encodeURIComponent(deskId)}/safety`,
   };
   return (

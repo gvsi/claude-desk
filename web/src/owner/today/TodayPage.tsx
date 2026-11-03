@@ -61,9 +61,9 @@ export { COPIED_FOR_MS } from '../../ds/index.ts';
  * the Desk's setup hasn't gone live, "How your Desk works" with what Claude did today under it, and
  * "Things to try"; under it two columns: in this order "Needs
  * you" and "Live now" when they have something, and "Since last night" always; at the right the last
- * 7 days. Today opens no visitor chat itself, and
+ * 7 days. Today has no inline visitor chat; its request links open the conversation page, and it
  * has no composer: changing a rule by asking Claude lives on Rules. An address that names a held
- * request (`#request-<id>`, as Notifications links an owner's alert) brings that request's card
+ * request (`#request-<id>`, for old links and requests without a conversation) brings that request's card
  * into view and focus. Until what the page first shows is read, it holds its own shapes, so it
  * opens drawn however the owner came to it.
  */
@@ -141,8 +141,6 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
     if (el) cards.current.set(decisionId, el);
     else cards.current.delete(decisionId);
   }, []);
-  // Focus brings the card into view too. A request with no card here is left alone.
-  const focusCard = useCallback((decisionId: string) => cards.current.get(decisionId)?.focus(), []);
   // Share the post-commit landing for dismissed answers and completed callbacks. A cached hold
   // can keep Needs you mounted, and a closed callback stays until its refreshed list commits.
   const needsYouSection = useRef<HTMLElement>(null);
@@ -203,11 +201,8 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
       (liveNow.current ?? sinceLastNight.current)?.focus({ preventScroll: true });
     }
   });
-  const focusFirstHeld = () => {
-    if (firstHeld !== null) focusCard(firstHeld.decision.decision_id);
-  };
 
-  // An arrival at `#request-<id>` lands on that card once, as "Open the request" does: on the held
+  // An arrival at `#request-<id>` lands on that card once: on the held
   // request's card, whether it is still held or was answered here. It lands once the latest
   // read of Needs you has worked (a list kept from before a failed read may be missing the request),
   // and once the page has drawn its sections. A request that isn't in the list gets one more read
@@ -308,9 +303,9 @@ export function TodayPage({ namesTheTab = true }: TodayPageProps) {
               today={today.errorUpdatedAt > today.dataUpdatedAt || today.isPaused ? undefined : today.data}
               heldCount={readWorked ? listed.length : undefined}
               callbackCount={callbacks.length}
-              firstHeldId={firstHeld?.decision.decision_id ?? null}
+              firstHeld={firstHeld}
             />
-            <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} onFocusRequest={focusFirstHeld} />
+            <ThingsToTry firstHeld={firstHeld} answered={answeredDecisions} latestAnswer={answers.latest} />
           </div>
           <div className="cd-today__main">
             {/* Drawn while it lists something or a read has failed: its Dismiss sends focus on when neither is left. */}
