@@ -1,7 +1,7 @@
 /**
  * The Vision article's "On this page" list, in a real browser inside a memory router: the reading pages' own list,
  * beside the article at a laptop's width, where it stays pinned and marks the section being read, and folded into
- * one row at the top on a phone. Following a link moves to its section. Also the opening trio's phone headers, one
+ * one row at the top on a phone. Following a link moves to its section. Also the cover band's phone headers, one
  * colour for each business. Expected words are written out here, never read from the page's code.
  */
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFunction } from 'react-router';
@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
 import { render } from 'vitest-browser-react';
 
+import { contrastRatio } from '../../ds/contrast.ts';
 import { tokenColor } from '../../test/screen.ts';
 import { VisionArticle } from './VisionArticle.tsx';
 
@@ -221,6 +222,31 @@ describe('The Vision article’s contents', () => {
       expect([getComputedStyle(section).outlineStyle, getComputedStyle(section).boxShadow], name).toEqual(['none', 'none']);
       await expect.poll(() => at.path, { message: name }).toBe(`/about/vision#${anchor}`);
       await expect.poll(marked, { message: name }).toEqual([`${name} (location)`]);
+    }
+    await screen.unmount();
+  });
+
+  it('each_business_has_its_own_header_colour', async () => {
+    const screen = await renderVision();
+    // The cover band's three chats, in its order: Meridian Bay Permits, Sam Patel's Desk at Lumen Labs, Turner Plumbing.
+    const heads = [...document.querySelectorAll<HTMLElement>('[data-cover] [data-screen-head]')];
+    expect(heads.map((head) => flat(head.querySelector('.ph-name')?.textContent))).toEqual([
+      'Meridian Bay Permits',
+      'Sam Patel’s Desk',
+      'Turner Plumbing',
+    ]);
+    const colours = heads.map((head) => getComputedStyle(head).backgroundColor);
+    expect(new Set(colours).size, colours.join(', ')).toBe(3);
+    for (const head of heads) {
+      // The header's words hold 4.5:1 on its colour.
+      const name = flat(head.querySelector('.ph-name')?.textContent);
+      expect(contrastRatio(getComputedStyle(head).color, getComputedStyle(head).backgroundColor), name).toBeGreaterThanOrEqual(4.5);
+    }
+    // The same business keeps its colour wherever its screen is drawn: in the article and on its card.
+    const byName = new Map(heads.map((head) => [flat(head.querySelector('.ph-name')?.textContent), getComputedStyle(head).backgroundColor]));
+    for (const head of document.querySelectorAll<HTMLElement>('article [data-screen-head]')) {
+      const name = flat(head.querySelector('.ph-name')?.textContent);
+      expect(getComputedStyle(head).backgroundColor, name).toBe(byName.get(name));
     }
     await screen.unmount();
   });

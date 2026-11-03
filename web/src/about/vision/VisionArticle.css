@@ -20,8 +20,10 @@
   --va-card-shadow: 0 1px 2px rgba(28, 27, 25, 0.06);
   --va-control-edge: rgba(28, 27, 25, 0.14);
   --va-tab-line: rgba(28, 27, 25, 0.1);
-  /* The businesses' own header colors, and what sits on them. */
+  /* The businesses' own header colors, one each, and what sits on them: the Permit Center's navy, Lumen Labs' plum
+     and Turner Plumbing’s teal. Each holds white words at over 9:1. */
   --va-city: #16324d;
+  --va-lumen: #4a2c52;
   --va-rivera: #1f4e4a;
   --va-on-field: #ffffff;
   --va-on-field-tile: rgba(255, 255, 255, 0.16);
@@ -480,6 +482,10 @@
 
 .vision-article .ph-head--city {
   background: var(--va-city);
+}
+
+.vision-article .ph-head--lumen {
+  background: var(--va-lumen);
 }
 
 .vision-article .ph-head--rivera {
