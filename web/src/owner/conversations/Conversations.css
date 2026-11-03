@@ -537,10 +537,11 @@
   height: calc(var(--size-control) + 2 * var(--space-10));
 }
 
-/* The visitor's bubble at the right, no wider than a bubble can be (85 % of the row). */
+/* The visitor's bubble at the left, as the owner's view draws it (board REV-FLIP), no wider than a
+   bubble can be (85 % of the row). */
 .cd-conversation-skeleton__bubble {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   width: 85%;
 }
 

@@ -445,7 +445,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
         ) : null}
         {/* A demo visitor's note opens the transcript, over its opening lines, and scrolls away with them. */}
         {demo ? <DemoVisitorNote deskId={deskId} phase={demoRun} onStopped={() => nameRef.current?.focus({ preventScroll: true })} /> : null}
-        <Transcript label={`Conversation with ${who}`} logRef={transcriptRef}>
+        <Transcript variant="owner" label={`Conversation with ${who}`} logRef={transcriptRef}>
           <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
             items={read.items}

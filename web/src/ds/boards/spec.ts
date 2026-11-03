@@ -199,8 +199,9 @@ export function expectCards(root: HTMLElement): void {
 /**
  * receipts_sit_under_their_message: every receipt or note is attached space-8 under the message it
  * belongs to, on its side: from the left edge of Claude's or a person's words, or ending at the
- * right edge of a visitor's or an agent's bubble. Its line is caption type in text-secondary, and
- * its dot is 6 px. Returns how many rows carry receipts.
+ * right edge of a visitor's or an agent's bubble (starting at its left edge in the owner's own
+ * conversation view, where the bubble is on the left). Its line is caption type in text-secondary,
+ * and its dot is 6 px. Returns how many rows carry receipts.
  */
 export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<number> {
   const rows = [...root.querySelectorAll<HTMLElement>('.cd-transcript-row:not(.cd-transcript-header)')].filter((row) =>
@@ -213,7 +214,9 @@ export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<nu
     const marginBox = margin.getBoundingClientRect();
     await expect(Math.round(marginBox.top - mainBox.bottom), 'space between a message and its receipts').toBe(8);
     const bubble = main.querySelector<HTMLElement>('.cd-visitor-message__bubble, .cd-agent-message__bubble');
-    if (bubble) {
+    if (bubble && row.closest(OWNER_LOG) !== null) {
+      await expect(Math.round(marginBox.left), 'receipts start at the bubble').toBe(Math.round(bubble.getBoundingClientRect().left));
+    } else if (bubble) {
       await expect(Math.round(marginBox.right), 'receipts end at the bubble').toBe(Math.round(bubble.getBoundingClientRect().right));
     } else {
       const words = main.firstElementChild as HTMLElement;
@@ -225,6 +228,50 @@ export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<nu
     for (const dot of margin.querySelectorAll<HTMLElement>('.cd-status-dot')) expectComputed(dot, SPEC.dot);
   }
   return rows.length;
+}
+
+/** The log in the owner's own conversation view (`Transcript`'s owner variant). */
+const OWNER_LOG = '.cd-transcript--owner';
+
+/** The other side's parts in the owner's view: a visitor's bubble, an agent's request, a visitor typing. */
+const THEIR_SIDE = '.cd-visitor-message__bubble, .cd-agent-message__who, .cd-agent-message__bubble, .cd-writing-indicator__bubble';
+
+/** A row from the Desk's side: Claude's reply, the owner's whisper, or the owner's own message. */
+const OUR_SIDE = ':scope > .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper, .cd-person-message)';
+
+/**
+ * The owner's own conversation view (board REV-FLIP), the sides flipped from the visitor's chat, so
+ * each side reads its own words on the right: the other side's bubbles start at the log's left
+ * edge, and every row from the Desk's side sits in one column min(520 px, 88%) of the log wide, flush
+ * with its right edge, its receipts with it. Inside the column each message, its first part and each
+ * receipt start at the column's left edge, and a reply's cards fill it. Returns how many rows sit in
+ * the column.
+ */
+export async function expectOwnerSides(log: HTMLElement): Promise<number> {
+  await expect(log.matches(OWNER_LOG), "the log is the owner's variant").toBe(true);
+  const box = log.getBoundingClientRect();
+  const column = Math.min(520, box.width * 0.88);
+  for (const part of log.querySelectorAll(THEIR_SIDE)) {
+    await expect(Math.abs(part.getBoundingClientRect().left - box.left), `${part.className} starts at the log's left edge`).toBeLessThanOrEqual(1);
+  }
+  const ours = [...log.querySelectorAll<HTMLElement>('.cd-transcript-row')].filter((row) => row.querySelector(OUR_SIDE) !== null);
+  for (const row of ours) {
+    for (const part of row.querySelectorAll<HTMLElement>(':scope > :is(.cd-transcript-row__main, .cd-transcript-row__margin)')) {
+      const rect = part.getBoundingClientRect();
+      await expect(Math.abs(rect.width - column), `${part.className} is min(520 px, 88%) of the log`).toBeLessThanOrEqual(1);
+      await expect(Math.abs(rect.right - box.right), `${part.className} ends at the log's right edge`).toBeLessThanOrEqual(1);
+      for (const child of part.children) {
+        await expect(Math.abs(child.getBoundingClientRect().left - rect.left), `${child.className} starts at the column's left edge`).toBeLessThanOrEqual(1);
+      }
+    }
+    const first = one(row, OUR_SIDE).firstElementChild;
+    if (!first) throw new Error('the message has parts');
+    await expect(Math.abs(first.getBoundingClientRect().left - (box.right - column)), `${first.className} starts at the column's left edge`).toBeLessThanOrEqual(1);
+    for (const card of row.querySelectorAll('.cd-reply-card')) {
+      await expect(Math.abs(card.getBoundingClientRect().width - column), 'a reply card fills the column').toBeLessThanOrEqual(1);
+    }
+  }
+  return ours.length;
 }
 
 /** The footer's one link, the author's name, under `root`. */

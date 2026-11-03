@@ -11,7 +11,7 @@ import { WritingIndicator } from '../components/WritingIndicator/WritingIndicato
 import { rivera } from '../fixtures/index.ts';
 import { expectComputed } from '../test/expectComputed.ts';
 import { ConversationsPage, PUBLIC_LINK, RiveraFrame, TurnRows } from './parts.tsx';
-import { SPEC, expectConversationType, expectFooter, expectOwnerFrame, expectReceiptsUnderMessages, expectTabOrder, one } from './spec.ts';
+import { SPEC, expectConversationType, expectFooter, expectOwnerFrame, expectOwnerSides, expectReceiptsUnderMessages, expectTabOrder, one } from './spec.ts';
 
 const dana = rivera.conversations.danaLive;
 const DANA = rivera.people.dana.name;
@@ -35,7 +35,7 @@ function ConversationLive() {
             <Pill>Public</Pill>
             <p className="board-conversation-head__latest cd-type-meta">Latest: Booked for Tuesday</p>
           </header>
-          <Transcript label={`Conversation with ${DANA}`}>
+          <Transcript variant="owner" label={`Conversation with ${DANA}`}>
             <TranscriptHeader
               left={`Today at 12:04 pm, web chat from ${PUBLIC_LINK}`}
               right="Notes from the checks sit under each message. Select one for the full trace."
@@ -69,6 +69,7 @@ const meta = {
     canvasNote: [
       "The conversation is the Turner fixture's live chat with Dana: a drain, a quote, a whisper, open times and a booking, where the board has a water heater, a leak repair quote, a booking with a sooner time, and then a discount held for Mike's answer in the chat.",
       'Its receipts are the kernel’s status lines from the fixture, attached under each message on its side; the board writes some in owner wording.',
+      "Board REV-FLIP (signed 2026-11-02) flips the sides of the owner's conversation from this board's: the visitor's bubbles start at the left, and Claude's replies, the whisper and the owner's own messages sit in one column min(520 px, 88%) wide at the right, their receipts with them and their cards across it.",
       '"Dana is typing" is the signed typing bubble (N-Typing-Bubble-Run1) where the board writes a line.',
       'The list column, the conversation head and its "Latest" line are page layout the web app (plan 04) owns, composed here from ConversationListItem, Pill and the tokens; the page fills the main area (AppShell fill), so the list starts where the sidebar ends.',
       'In the app, from 1024 px the list grows with the window, 24% of it between 280 and 400 px (board REV-CNVW B); this board keeps its own fixed column.',
@@ -99,6 +100,8 @@ export const Board: Story = {
     const log = canvas.getByRole('log', { name: `Conversation with ${DANA}` });
     expectConversationType(log);
     await expect(await expectReceiptsUnderMessages(log)).toBeGreaterThanOrEqual(3);
+    // Board REV-FLIP: the visitor on the left, Claude, the whisper and the owner in one column at the right.
+    await expect(await expectOwnerSides(log)).toBeGreaterThanOrEqual(3);
     await expect(within(log).getByText(WHISPER_NOTE)).toBeVisible();
     await expect(within(log).getByRole('status')).toHaveTextContent('Dana is typing');
 
