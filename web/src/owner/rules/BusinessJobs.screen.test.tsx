@@ -61,21 +61,19 @@ it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order with 
   await page.screenshot({ path: `../../.vitest/attachments/task-3/rules-${width}.png` });
 });
 
-it.each([1440, 1512, 390])('at %i px, All rules starts with the same jobs, rules and default ask before its connectors', async (width) => {
+it.each([1440, 1512, 390])('at %i px, Your tools lists jobs with sentence rules before its connectors', async (width) => {
   seedJobs();
   const { screen } = await renderRoute(`${DESK}/rules/all`, { connectorPages: true, viewport: { width, height: width === 390 ? 844 : 900 } });
   const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
   await expect.element(jobs).toBeVisible();
-  expect([...jobs.element().querySelectorAll('.cd-tool-rules__tool-name')].map((el) => el.textContent)).toEqual([
+  expect([...jobs.element().querySelectorAll('.cd-house-rules__tool-name')].map((el) => el.textContent)).toEqual([
     'Book a free intro call', 'New client intake',
   ]);
   await expect.element(jobs.getByText('Free intro call, 20 minutes, in your opening hours')).toBeVisible();
   await expect.element(jobs.getByText('Asks: Is this for you or for a business? Which tax years do you need help with? Do you already have a bookkeeper?')).toBeVisible();
-  await expect.element(jobs.getByText(INTAKE_RULE.reason)).toBeVisible();
-  await expect.element(jobs.getByText('Allow', { exact: true })).toBeVisible();
-  await expect.element(jobs.getByText('Not covered by a rule you set, so I ask you.')).toBeVisible();
-  await expect.element(jobs.getByText('Ask me first', { exact: true })).toBeVisible();
-  expect(jobs.getByText('Anything else here: ask me.').elements()).toHaveLength(1);
+  await expect.element(jobs.getByText('Claude can use new client intake', { exact: true })).toBeVisible();
+  await expect.element(jobs.getByText('Claude asks you before using book a free intro call', { exact: true })).toBeVisible();
+  expect(jobs.getByText('Anything else here: ask me.').elements()).toHaveLength(0);
   expect(jobs.getByRole('link').elements()).toHaveLength(0);
   const first = screen.getByRole('main').element().querySelector('.cd-house-rules > section');
   expect(first).toBe(jobs.element());
@@ -115,7 +113,9 @@ it('renders business titles and questions as literal text with no links or injec
   for (const path of ['rules', 'rules/all']) {
     const { screen } = await renderRoute(`${DESK}/${path}`);
     const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
-    await expect.element(jobs.getByText(title, { exact: true })).toBeVisible();
+    const titleSelector = path === 'rules' ? '.cd-tool-rules__tool-name' : '.cd-house-rules__tool-name';
+    await expect.element(jobs).toBeVisible();
+    expect([...jobs.element().querySelectorAll(titleSelector)].some((name) => name.textContent === title)).toBe(true);
     await expect.element(jobs.getByText(`Asks: ${question}`, { exact: true })).toBeVisible();
     expect(jobs.element().querySelectorAll('img, a, script')).toHaveLength(0);
   }
@@ -147,19 +147,25 @@ it('keeps active jobs and their rules with safe fallback names and descriptions 
     const { screen } = await renderRoute(`${DESK}/${path}`);
     const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
     await expect.element(jobs).toBeVisible();
-    expect([...jobs.element().querySelectorAll('.cd-tool-rules__tool-name')].map((el) => el.textContent)).toEqual([
+    const prefix = path === 'rules' ? '.cd-tool-rules' : '.cd-house-rules';
+    expect([...jobs.element().querySelectorAll(`${prefix}__tool-name`)].map((el) => el.textContent)).toEqual([
       'Book a free intro call', 'New client intake', 'Changed intro call',
       'A connected tool', 'A connected tool', 'A connected tool',
       'Unknown configuration job', 'Malformed configuration job',
     ]);
     const untitled = jobs.getByRole('region', { name: 'A connected tool', exact: true }).elements();
-    expect(untitled.map((card) => card.querySelector('.cd-tool-rules__tool-description')?.textContent)).toEqual([
+    expect(untitled.map((card) => card.querySelector(`${prefix}__tool-description`)?.textContent)).toEqual([
       undefined, 'Free intro call, 20 minutes, in your opening hours', 'Free intro call, 20 minutes, in your opening hours',
     ]);
     for (const [index, card] of untitled.entries()) {
-      expect(card.querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_RULE.reason);
-      expect(card.querySelectorAll('.cd-rule-row')).toHaveLength(1);
-      expect(card.textContent).toContain(['Allow', 'Never', 'Ask me first'][index]);
+      if (path === 'rules') {
+        expect(card.querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_RULE.reason);
+        expect(card.querySelectorAll('.cd-rule-row')).toHaveLength(1);
+        expect(card.textContent).toContain(['Allow', 'Never', 'Ask me first'][index]);
+      } else {
+        expect(card.querySelectorAll('.cd-house-rules__rule')).toHaveLength(1);
+        expect(card.textContent).toContain(['Claude can use a connected tool', 'Claude never uses a connected tool', 'Claude asks you before using a connected tool'][index]);
+      }
       expect(card.querySelectorAll('a')).toHaveLength(0);
     }
     expect(jobs.element().textContent).not.toMatch(/desk\./);
@@ -169,10 +175,11 @@ it('keeps active jobs and their rules with safe fallback names and descriptions 
       if (name === 'Malformed configuration job') {
         await expect.element(job.getByText(BUSINESS_OWNER_LINES.intake, { exact: true })).toBeVisible();
       } else {
-        expect(job.element().querySelector('.cd-tool-rules__tool-description')).toBeNull();
+        expect(job.element().querySelector(`${prefix}__tool-description`)).toBeNull();
       }
       expect([...job.element().querySelectorAll('p')].every((paragraph) => paragraph.textContent?.trim())).toBe(true);
-      await expect.element(job.getByText('Not covered by a rule you set, so I ask you.')).toBeVisible();
+      if (path === 'rules') await expect.element(job.getByText('Not covered by a rule you set, so I ask you.')).toBeVisible();
+      else expect(job.element().querySelector('.cd-status-dot--held')).not.toBeNull();
       expect(job.getByRole('link').elements()).toHaveLength(0);
     }
     expect(screen.container.querySelector('.cd-app-error')).toBeNull();
@@ -198,13 +205,21 @@ it('shows a job title that reads like the app’s own words only as user text on
     await expect.element(jobs.getByRole('region', { name: title })).toBeVisible();
     // On the job's card and in every shared rule's line, the title is its own user-text element.
     expectUserText(screen.container, title);
-    const shared = [...screen.container.querySelectorAll('.cd-rule-row__shared')];
-    expect(shared.length).toBeGreaterThan(0);
-    // The app's words end in a colon, and the tools it covers start a line of their own under them.
-    for (const line of shared) {
-      expect(line.textContent).toBe(`Shared rule. Applies to every tool that changes something:${CHANGE_TOOLS}`);
-      expect(line.querySelector('br + [data-copy="user"]')).not.toBeNull();
-      expect([...line.querySelectorAll('[data-copy="user"]')].map((el) => el.textContent)).toEqual(CHANGE_TOOL_TITLES);
+    if (path === 'rules/all') {
+      const shared = [...screen.container.querySelectorAll('[data-rule-id="changes-ask"] .cd-house-rules__shared')];
+      expect(shared).toHaveLength(1);
+      expect(shared[0]?.textContent).toBe('Shared rule. Also applies to:Quote, Book a visit, Save a lead and Request a callback');
+      expect(shared[0]?.querySelector('br + [data-copy="user"]')).not.toBeNull();
+      expect(screen.container.querySelectorAll('.cd-house-rules__rule--reference[data-rule-id="changes-ask"]')).toHaveLength(4);
+    } else {
+      const shared = [...screen.container.querySelectorAll('.cd-rule-row__shared')];
+      expect(shared.length).toBeGreaterThan(0);
+      // The app's words end in a colon, and the tools it covers start a line of their own under them.
+      for (const line of shared) {
+        expect(line.textContent).toBe(`Shared rule. Applies to every tool that changes something:${CHANGE_TOOLS}`);
+        expect(line.querySelector('br + [data-copy="user"]')).not.toBeNull();
+        expect([...line.querySelectorAll('[data-copy="user"]')].map((el) => el.textContent)).toEqual(CHANGE_TOOL_TITLES);
+      }
     }
     await expectScreenBasics(screen.container, { owner: true });
   }

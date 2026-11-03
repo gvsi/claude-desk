@@ -228,7 +228,7 @@ describe('rules page', () => {
     await expectScreenBasics(screen.container, { owner: true });
 
     await userEvent.click(all!);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules/all`);
   });
 
@@ -368,8 +368,8 @@ describe('rules page', () => {
     const house = await renderRoute(`${DESK}/rules/all`);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
     const main = house.screen.getByRole('main').element();
-    expect(main.querySelectorAll('.cd-tool-rules__tool')).toHaveLength(12);
-    expect(main.querySelectorAll('a.cd-tool-rules__tool, .cd-tool-rules__chevron')).toHaveLength(0);
+    expect(main.querySelectorAll('.cd-house-rules__tool-header')).toHaveLength(12);
+    expect(main.querySelectorAll('a.cd-house-rules__tool-name, .cd-house-rules__chevron')).toHaveLength(0);
     expect(house.screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' }).getByText('Payment link', { exact: true })).toBeVisible();
   });
@@ -395,9 +395,9 @@ describe('rules page', () => {
     // All rules links each tool's name and line to its page.
     const house = await renderRoute(`${DESK}/rules/all`, { connectorPages: true });
     await expect.element(house.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
-    const link = house.screen.getByRole('region', { name: 'Payment link' }).element().querySelector('a.cd-tool-rules__tool');
+    const link = house.screen.getByRole('region', { name: 'Payment link' }).element().querySelector('a.cd-house-rules__tool-name');
     expect(link?.getAttribute('href')).toBe(`${DESK}/connectors/payments/native.payment_link`);
-    expect(house.screen.getByRole('main').element().querySelectorAll('a.cd-tool-rules__tool')).toHaveLength(11);
+    expect(house.screen.getByRole('main').element().querySelectorAll('a.cd-house-rules__tool-name')).toHaveLength(11);
 
     // On a Connectors page, the sidebar marks its row as the current one, and only that row.
     const connectors = await renderRoute(`${DESK}/connectors`, { connectorPages: true, routes: withConnectorsPage() });
@@ -808,43 +808,36 @@ describe('rules page', () => {
     scroller.scrollTop = scroller.scrollHeight;
     expect(scroller.scrollTop).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'See all rules' }).last().click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     expect(router.state.location.pathname).toBe(`${DESK}/rules/all`);
     // All rules opens at its top, its trail and title in view.
     expect(screen.getByRole('main').element().scrollTop).toBe(0);
-    expect(inView(screen.getByRole('heading', { level: 1, name: 'All rules' }).element(), screen.getByRole('main').element())).toBe(true);
+    expect(inView(screen.getByRole('heading', { level: 1, name: 'Your tools' }).element(), screen.getByRole('main').element())).toBe(true);
 
     const link = screen.getByRole('region', { name: 'Payment link' });
-    await expect.element(link.getByText('Anyone · Up to $400 · Checked by the reviewer', { exact: true })).toBeVisible();
-    await expect.element(link.getByText('Allow', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Refund' }).getByText('Never', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Allow', { exact: true })).toBeVisible();
+    await expect.element(link.getByText('Claude can send payment links up to $400', { exact: true })).toBeVisible();
+    await expect.element(link.getByText('Over $400, Claude asks you first', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Refund' }).getByText('Claude never sends refunds', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Claude can show your open times', { exact: true })).toBeVisible();
     // A tool no rule covers asks.
     const quote = screen.getByRole('region', { name: 'Quote' });
-    await expect.element(quote.getByText('Not covered by a rule you set, so I ask you.', { exact: true })).toBeVisible();
-    await expect.element(quote.getByText('Ask me first', { exact: true })).toBeVisible();
+    await expect.element(quote.getByText('Claude asks you before any quote', { exact: true })).toBeVisible();
+    expect(quote.element().querySelector('.cd-status-dot--held')).not.toBeNull();
     // Read-only, in the outcomes' own words.
     const main = screen.container.querySelector('main');
     expect(main?.querySelectorAll('.cd-outcome-menu__button')).toHaveLength(0);
     expect(main?.textContent).not.toMatch(/Do it|Ask me(?! first)/);
-    await expect.element(screen.getByRole('region', { name: 'Always on' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Always on' }).elements()).toHaveLength(0);
     await expectScreenBasics(screen.container, { owner: true });
   });
 
-  it('all_rules_says_once_under_its_subtitle_what_the_reviewer_is', async () => {
+  it('your_tools_explains_coverage_without_the_reviewer_note', async () => {
     const { screen } = await renderRoute(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
-    // Under the subtitle, in the header's text: one quieter line.
-    const lines = [...screen.container.querySelectorAll<HTMLElement>('.cd-house-rules__header .cd-page-header__text > p')];
-    expect(lines.map((line) => line.textContent)).toEqual(['Every rule on this Desk, by connector and tool. To change one, ask Claude on Rules.', REVIEWER_LINE]);
-    const line = lines[1]!;
-    expect(line.classList.contains('cd-type-meta')).toBe(true);
-    const style = getComputedStyle(line);
-    expect(style.color).toBe(getComputedStyle(lines[0]!).color);
-    expect(style.marginTop).toBe('8px');
-    expect(parseFloat(style.maxWidth)).toBeGreaterThan(0);
-    // Once on the page.
-    expect(screen.container.textContent?.split(REVIEWER_LINE)).toHaveLength(2);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
+    const header = screen.container.querySelector('.cd-house-rules__header');
+    expect(header?.textContent).toContain('Your connectors, their tools, and the rules that cover each.');
+    expect(header?.textContent).toContain('Each connector brings tools; each tool lists the rules that cover it.');
+    expect(screen.container.textContent).not.toContain(REVIEWER_LINE);
   });
 
   it('always_on_ends_with_a_link_to_safety_where_every_attempt_is_shown', async () => {
@@ -1018,7 +1011,7 @@ describe('rules page', () => {
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await screen.getByRole('link', { name: 'See all rules' }).last().click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     expect(main.scrollTop).toBe(0);
     await router.navigate(-1);
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
@@ -1052,7 +1045,7 @@ describe('rules page', () => {
     const reads = when === 'after' ? holdNeedsYou() : null;
     if (reads !== null) await expect.poll(reads.held, { timeout: 2_000 }).toBeGreaterThan(0);
     await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await router.navigate(-1);
     if (reads !== null) {
       const layer = () => document.querySelector('.cd-rules__region > .cd-skeleton-screen__body > .cd-skeleton-screen__layer');
@@ -1207,7 +1200,7 @@ describe("Ask Claude's question about a hold", () => {
     expect(connectorTops(), 'neither late read moves the connectors').toEqual(before);
 
     await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
@@ -1448,7 +1441,7 @@ describe("Ask Claude's question about a hold", () => {
     expect(sectionTops(), 'late Needs you cannot move the first section').toEqual(before);
 
     await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     await router.navigate(`${DESK}/rules`);
     await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
   });
@@ -1531,7 +1524,7 @@ describe("Ask Claude's question about a hold", () => {
     if (!held) throw new Error('the seed holds a quote');
     mockStore.world.answer(held, 'deny_once');
     await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     // Counted before Rules opens again: the page's own read may reach the server before or after
     // the page draws, and once it's out no other read is sent until it comes back.
     const before = reads.held();
@@ -1561,7 +1554,7 @@ describe("Ask Claude's question about a hold", () => {
     const before = requests('needsYou').length;
     await expect.poll(() => requests('needsYou').length).toBeGreaterThan(before);
     await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
     const held = [...mockStore.world.decisions.values()].find((record) => record.decision.state === 'held');
     if (!held) throw new Error('the seed holds a quote');
     mockStore.world.answer(held, 'deny_once');
@@ -1966,7 +1959,7 @@ describe("Turner's fixed suggestions", () => {
     const end = main.scrollTop;
     expect(end).toBeGreaterThan(0);
     await router.navigate(`${DESK}/rules/all`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'All rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Your tools' })).toBeVisible();
 
     // Back while Needs you is read again: the page waits for it, drawn short, then returns to its place.
     const reads = holdNeedsYou();
