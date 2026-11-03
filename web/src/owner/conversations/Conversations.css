@@ -41,9 +41,44 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  /* The caption line and both padded edges of the stuck day band stay above keyboard focus. */
-  scroll-padding-top: calc(var(--size-caption-line) + 2 * var(--space-8));
+  /* The list's head stays at the top of its column while the rows scroll under it (owner,
+     2026-11-02): the title band, from the column's top edge, then the recorded-history caption
+     when there is one. Its heights are the lines its type draws (the page title's and the body's,
+     around the caption-sized link), which a screen test checks. */
+  --cd-list-title-line: 34px;
+  --cd-list-caption-line: 21px;
+  --cd-list-head: calc(var(--space-24) + var(--cd-list-title-line) + var(--space-4));
+  /* The head, then the caption line and both padded edges of the day band stuck under it, stay
+     above keyboard focus. */
+  scroll-padding-top: calc(var(--cd-list-head) + var(--size-caption-line) + 2 * var(--space-8));
   padding: var(--space-24) var(--space-12);
+}
+
+.cd-conversations__list:has(.cd-conversations__under:not(.cd-conversations-skeleton__list) > .cd-conversations__caption) {
+  --cd-list-head: calc(var(--space-24) + var(--cd-list-title-line) + var(--space-4) + var(--cd-list-caption-line));
+}
+
+/* The head on the column's ground, over the rows: the title's band reaches up over the column's
+   top padding and down over the 4 px to the caption, so nothing shows through. The loading
+   shapes keep their places: their caption doesn't stick, and their day labels stick at the top. */
+.cd-conversations__list > .cd-conversations__title {
+  position: sticky;
+  top: calc(-1 * var(--space-24));
+  z-index: 2;
+  margin-block: calc(-1 * var(--space-24)) calc(-1 * var(--space-4));
+  padding-block: var(--space-24) var(--space-4);
+  background: var(--bg-app);
+}
+
+.cd-conversations__under:not(.cd-conversations-skeleton__list) > .cd-conversations__caption {
+  position: sticky;
+  top: calc(var(--cd-list-title-line) + var(--space-4));
+  z-index: 2;
+  background: var(--bg-app);
+}
+
+.cd-conversations-skeleton__list {
+  --cd-list-head: 0px;
 }
 
 .cd-conversations__title,
@@ -111,7 +146,7 @@
 
 .cd-conversations__day {
   position: sticky;
-  top: calc(-1 * var(--space-24));
+  top: calc(var(--cd-list-head) - var(--space-24));
   z-index: 1;
   display: flex;
   align-items: center;
