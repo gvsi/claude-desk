@@ -839,8 +839,9 @@
 .cd-today-skeleton__text { display: block; min-width: 0; width: 100%; max-width: 100%; }
 .cd-today-skeleton__fixed-line { max-width: none; }
 .cd-today-skeleton__presence { min-height: calc(var(--size-avatar) - var(--space-6)); }
-/* Unpainted glyph room is used only in the presence measurement, never as an avatar shape. */
-.cd-today-skeleton__glyph-room { flex: none; width: calc(var(--size-avatar) - var(--space-6) + var(--space-2)); height: calc(var(--size-avatar) - var(--space-6)); }
+/* Unpainted glyph room keeps the glyph width in both measurement and layout. */
+.cd-greeting__presence > .cd-today-skeleton__glyph-room { margin-left: var(--space-2); }
+.cd-today-skeleton__glyph-room { display: block; flex: none; width: calc(var(--size-avatar) - var(--space-6)); height: calc(var(--size-avatar) - var(--space-6)); }
 .cd-today-skeleton__legend { position: relative; }
 .cd-today-skeleton__legend-room { visibility: hidden; }
 .cd-today-skeleton__word-room { display: block; height: 1lh; }

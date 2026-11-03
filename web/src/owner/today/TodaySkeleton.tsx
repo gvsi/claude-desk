@@ -129,10 +129,15 @@ function GreetingWords({ setup }: { setup?: SkeletonSetup }) {
     ...outcomes.parts.map((part) => ({ text: outcomeWords(part), className: 'cd-how__outcome cd-today-skeleton__outcome-room' })),
   ], 'cd-today-skeleton__how-items cd-type-meta', true);
   // All three lines set the real greeting's natural width, including its outcome dots and gaps.
-  return <div ref={box} className="cd-greeting__text" style={{ width: Math.max(title ?? 0, presence ?? 0, outcomeWidth ?? 0) }}>
+  return <div ref={box} className="cd-greeting__text" style={{ width: `max(${title ?? 0}px, ${presence ?? 0}px, calc(${outcomeWidth ?? 0}px + var(--size-avatar) - var(--space-6) + var(--space-2) + var(--space-10)))` }}>
     <TextLines words={greeting} text="greeting" probeClassName="cd-greeting__title" anchor="greeting" lastWidth="100%" />
-    <TextLines words={PRESENCE} text="body" probeClassName="cd-greeting__presence" lastWidth="80%" lineWidth="80%" singleLineClassName="cd-today-skeleton__presence" />
-    <TodayLineRows outcomes={outcomes} />
+    <div className="cd-greeting__presence cd-type-body">
+      <span className="cd-greeting__glyphs" aria-hidden="true"><span className="cd-today-skeleton__glyph-room" /></span>
+      <div className="cd-greeting__presence-text">
+        <TextLines words="One person is talking to your Desk right now." text="body" className="cd-greeting__presence-line" probeClassName="" lastWidth="80%" lineWidth="80%" singleLineClassName="cd-today-skeleton__presence" />
+        <TodayLineRows outcomes={outcomes} />
+      </div>
+    </div>
   </div>;
 }
 

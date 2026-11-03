@@ -422,10 +422,13 @@ it('today_skeleton_places_the_outcome_shape_under_the_greeting_without_a_band', 
   const skeleton = document.querySelector('.cd-today--skeleton')!;
   expect(skeleton).not.toBeNull();
   expect(skeleton.querySelector('.cd-how, [data-skeleton-anchor="how-card"]')).toBeNull();
-  const line = skeleton.querySelector('.cd-greeting__text > [data-skeleton-anchor="today-line"]');
+  const line = skeleton.querySelector('.cd-greeting__presence-text > [data-skeleton-anchor="today-line"]');
   expect(line).not.toBeNull();
   expect(line!.textContent).toBe('');
   expect(line!.querySelector('.cd-skeleton')).not.toBeNull();
+  const presenceWords = skeleton.querySelector('.cd-greeting__presence-line')!;
+  expect(line!.getBoundingClientRect().left).toBe(presenceWords.getBoundingClientRect().left);
+  expect(line!.getBoundingClientRect().left - skeleton.querySelector('.cd-greeting__text')!.getBoundingClientRect().left).toBe(34);
 });
 
 const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
@@ -433,7 +436,7 @@ const TODAY_ANCHORS: readonly SkeletonAnchor[] = [
   { name: 'greeting', page: '.cd-greeting__title' },
   { name: 'link-pill', page: '.cd-greeting__link', dimensions: ['height'] },
   { name: 'header-action', page: '.cd-greeting__actions > .cd-button', size: true },
-  { name: 'today-line', page: '.cd-greeting__text > .cd-how__today', size: true },
+  { name: 'today-line', page: '.cd-greeting__presence-text > .cd-how__today', size: true },
   { name: 'things-title', page: '.cd-things__title' },
   { name: 'things-progress', page: '.cd-things__progress', size: true },
   { name: 'things-card', page: '.cd-things > .cd-card', size: true },
@@ -628,7 +631,7 @@ it.each(['desktop', 'phone'] as const)('today_paints_the_signed_pill_widths at %
     });
   };
   lines('.cd-greeting .cd-skeleton-line--greeting', '.cd-greeting__text', ['100%'], 48);
-  lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__text', ['80%'], 22);
+  lines('.cd-greeting .cd-skeleton-line--body', '.cd-greeting__presence-text', ['80%'], 22);
   expect(today.querySelector('.cd-greeting .cd-skeleton--block:not(.cd-today-skeleton__link, .cd-today-skeleton__action)')).toBeNull();
   lines('.cd-things__head .cd-skeleton-line--section', '.cd-things__head', [85]);
   lines('.cd-things__caption .cd-skeleton-line', '.cd-things__caption', ['75%']);
@@ -1137,17 +1140,12 @@ it.each([1280, 1440, 1512])('reload_places_a_longer_link_once_at_%s', async (wid
     await expect.element(screen.getByRole('heading', { name: /Good .*Mike/ })).toBeVisible();
     await vi.waitFor(() => expect(document.querySelector('.cd-skeleton-screen__layer')).toBeNull());
     const real = document.querySelector('.cd-greeting__link')!.getBoundingClientRect();
-    // At the narrow laptop width the longer, newly read slug takes the actions below the
-    // greeting once. On wider laptops it grows left, keeping the actions' top and right edge.
-    const wraps = width === 1280;
-    for (const edge of wraps ? ['height'] as const : ['top', 'right', 'height'] as const) {
-      expect(Math.abs(real[edge] - shape[edge])).toBeLessThanOrEqual(2);
-    }
-    if (wraps) {
-      const text = document.querySelector('.cd-greeting__text')!.getBoundingClientRect();
-      expect(real.left).toBe(text.left);
-      expect(real.top - text.bottom).toBe(20);
-    }
+    // With the outcome line inset, the newly read long slug puts the actions below the words.
+    // The normal link can fit beside them at the wider widths; this data-dependent move lands once.
+    expect(Math.abs(real.height - shape.height)).toBeLessThanOrEqual(2);
+    const text = document.querySelector('.cd-greeting__text')!.getBoundingClientRect();
+    expect(real.left).toBe(text.left);
+    expect(real.top - text.bottom).toBe(20);
     const sizing = document.createElement('div');
     Object.assign(sizing.style, { position: 'absolute', visibility: 'hidden', pointerEvents: 'none' });
     sizing.inert = true;
@@ -1171,9 +1169,7 @@ it.each([1280, 1440, 1512])('reload_places_a_longer_link_once_at_%s', async (wid
     expect(getComputedStyle(label).textOverflow).toBe('ellipsis');
     expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
     expect(real.width).toBe(380);
-    const title = document.querySelector('.cd-greeting__title')!.getBoundingClientRect();
     const chat = document.querySelector('.cd-greeting__actions > .cd-button')!.getBoundingClientRect();
-    if (!wraps) expect(real.top - title.top).toBe(4);
     expect(chat.top).toBe(real.top);
     expectNoHorizontalScroll();
     await screen.getByRole('button', { name: 'Copy your Desk link' }).click();

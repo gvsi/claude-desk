@@ -134,7 +134,7 @@ export const WithActionsOnAPhone: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(window.innerWidth).toBe(390);
     const heading = canvas.getByRole('heading', { level: 1, name: 'Good morning, Mike' }).getBoundingClientRect();
-    const presence = canvas.getByText('One person is talking to your Desk right now.').closest('p')!.getBoundingClientRect();
+    const presence = canvasElement.querySelector<HTMLElement>('.cd-greeting__presence')!.getBoundingClientRect();
     const link = canvasElement.querySelector<HTMLElement>('.cd-greeting__link')!.getBoundingClientRect();
     const action = canvas.getByRole('link', { name: 'Chat as a customer' }).getBoundingClientRect();
     // In that order down the page, from the same left edge, the pill 16 px under the presence line.

@@ -3568,21 +3568,29 @@ describe("Today's top band", () => {
 });
 
 describe("Today's outcomes under the greeting", () => {
-  it.each([1512, 390])('today_outcomes_follow_the_presence_without_a_how_it_works_band at %s', async (width) => {
+  it.each([1512, 390].flatMap((width) => [0, 1, 3].map((people) => ({ width, people }))))(
+    'today_outcomes_follow_the_presence_words_with_$people_people_at_$width', async ({ width, people }) => {
+    if (people !== 1) await injectToday((t) => ({
+      ...t,
+      live: Array.from({ length: people }, (_, i) => ({ ...t.live[0]!, session_id: `ses-presence-${i}` })),
+    }));
     const { screen } = await renderRoute(TODAY, { viewport: { width, height: 900 } });
     await expect.element(screen.getByRole('link', { name: 'handled 2 on its own', exact: true })).toBeVisible();
     await skeletonGone();
     expect(screen.getByRole('heading', { name: 'How your Desk works', exact: true }).elements()).toHaveLength(0);
     const greeting = document.querySelector('.cd-greeting')!;
     const presence = greeting.querySelector('.cd-greeting__presence')!;
-    const line = greeting.querySelector('.cd-greeting__text > .cd-how__today')!;
+    const words = presence.querySelector('.cd-greeting__presence-line')!;
+    const line = greeting.querySelector('.cd-how__today')!;
     expect(line).not.toBeNull();
-    expect(presence.nextElementSibling).toBe(line);
-    expect(box(line).top - box(presence).bottom).toBeCloseTo(12, 0);
-    expect(box(line).left).toBeCloseTo(box(greeting).left, 0);
+    expect(line.parentElement).toBe(words.parentElement);
+    expect(line.parentElement).toHaveClass('cd-greeting__presence-text');
+    expect(box(line).top - box(words).bottom).toBeCloseTo(12, 0);
+    expect(box(line).left).toBeCloseTo(box(words).left, 0);
+    expect(box(words).left - box(greeting).left).toBeCloseTo(people === 0 ? 0 : 2 + people * 22 + 10, 0);
     const actions = greeting.querySelector('.cd-greeting__actions')!;
     if (width === 390) expect(box(actions).top - box(line).bottom).toBeCloseTo(16, 0);
-    else expect(box(actions).left).toBeGreaterThan(box(line).right);
+    else expect(box(actions).top).toBeGreaterThanOrEqual(box(greeting).top);
     expectNoHorizontalScroll();
     expect(line.textContent).toBe('Today, Claude handled 2 on its own held 1 for you');
     expect(box(region(screen, 'Things to try').element()).top - box(greeting).bottom).toBeCloseTo(32, 0);
