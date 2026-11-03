@@ -814,6 +814,46 @@ async def test_waits_for_the_owners_answer_to_a_held_request_and_claudes_follow_
     assert sleeps.timers == []
 
 
+async def test_an_outcome_that_comes_while_its_model_thinks_is_read_before_it_finishes(
+        app, browser, fake, visitors, visitor_model, desk_model, engine, copy, sleeps, monkeypatch):
+    owner = owner_of(app, browser, copy)
+    release, followed_up = asyncio.Event(), asyncio.Event()
+    thinking = gated(step("", done=True), release)
+    ends = 0
+    push = demo_visitors_module._Feed.push
+
+    def observed(feed, at, event):
+        nonlocal ends
+        push(feed, at, event)
+        ends += event.type == "turn_end"
+        if ends == 3:                                              # the opening's, the quote's and the follow-up's
+            followed_up.set()
+
+    monkeypatch.setattr(demo_visitors_module._Feed, "push", observed)
+    visitor_model.add(step(DISCOUNT_ASK), thinking, step("", done=True))
+    desk_model.add(say("Yes, we fix leaks like that."),
+                   response(tool_use("native__quote", DISCOUNTED_QUOTE), reply("I've asked Mike to look at this.")),
+                   say("Mike couldn't offer that discount this time, sorry."))
+    started = await start(visitors, fake, copy)
+    await asyncio.wait_for(thinking.entered.wait(), 5)
+    try:
+        # While its model thinks about the held quote, the owner denies it and Claude's follow-up comes and ends.
+        denied = await deny(owner, fake, started.session_id)
+        await asyncio.wait_for(followed_up.wait(), 5)
+    finally:
+        release.set()
+    await asyncio.wait_for(visitors.drain(), 5)
+
+    # Its model said it was done having read only the held quote: it reads the outcome and the follow-up first.
+    run = visitors.run(started.run_id, copy.copy_id)
+    assert (run.state, run.ended, run.messages_sent) == ("done", "finished", 2)
+    assert len(visitor_model.requests) == 3
+    assert last_input(visitor_model.requests[2]) == wrap(DESK_REPLY_TAG, "\n".join([
+        RECEIPT_LINE.format(state="denied", text=denied["visitor_plain"]),
+        "Claude (the business's AI): Mike couldn't offer that discount this time, sorry."]))
+    assert sleeps.timers == []
+
+
 async def test_a_turn_running_as_the_answer_comes_isnt_claudes_follow_up(
         app, browser, fake, visitors, visitor_model, desk_model, engine, copy):
     owner = owner_of(app, browser, copy)

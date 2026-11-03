@@ -37,13 +37,14 @@ credential is present. After the opening, each step:
 Its persona is the fixed line of the Desk's set (`prompts.DEMO_VISITORS`, chosen by the caller with
 `agents.demo_task_set`), so no business's, owner's or visitor's words reach its model except the chat it is shown.
 
-A run ends `done` once its brief is done and no held request waits on the owner (`finished`), at a cap (`limit`: ten
-messages, twelve model calls or fifteen minutes) or when the owner stays quiet (`owner_silent`); `stopped` when the
-owner stops it (`stopped_by_owner`, with no further model call, and its stream closed) or the chat's session is gone
-(`chat_ended`: a 401 `no_session`, a closed stream or the stream's `session` error); `failed` for today's budget
-(`budget`) or a model or HTTP failure (`failed`, logged by type only, never with the Desk's text). Runs live in this
-process's memory (`DemoVisitors`): the 50 newest that have ended, for an hour, and every one still running, each
-readable by its copy alone.
+A run ends `done` once its brief is done, no held request waits on the owner and nothing has come that its model
+hasn't read (`finished`; else it reads what came, step 2), at a cap (`limit`: ten messages, twelve model calls or
+fifteen minutes) or when the owner stays quiet (`owner_silent`); `stopped` when the owner stops it
+(`stopped_by_owner`, with no further model call, and its stream closed) or the chat's session is gone (`chat_ended`: a
+401 `no_session`, a closed stream or the stream's `session` error); `failed` for today's budget (`budget`) or a model
+or HTTP failure (`failed`, logged by type only, never with the Desk's text). Runs live in this process's memory
+(`DemoVisitors`): the 50 newest that have ended, for an hour, and every one still running, each readable by its copy
+alone.
 """
 
 import asyncio
@@ -635,8 +636,6 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
         step = await chat.active(_step(model, messages, record))
         calls += 1
         if step.done:
-            if chat.deciding() is None:
-                raise _Ended("finished")
             await chat.decided(shown)             # a held request's outcome, and Claude's follow-up to it
             nudged = False
         elif not step.message.strip():
@@ -645,7 +644,7 @@ async def _converse(chat: _Chat, model: ModelClient, task_set: DemoTaskSet, *, r
             mark = await chat.active(chat.write(step.message, read=read))
             nudged = await chat.answered(mark, chat.clock())
         lines = _lines(chat.feed.events, shown)
-        if step.done and not lines:               # its brief is done, and the wait brought nothing new
+        if step.done and not lines:               # its brief is done, and nothing came that its model hasn't read
             raise _Ended("finished")
         shown, read = len(chat.feed.events), sum(len(line) for line in lines)
         messages += [{"role": "assistant", "content": [{"type": "text", "text": step.model_dump_json()}]},
