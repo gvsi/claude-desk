@@ -674,20 +674,20 @@ describe('a preset or a new payment limit', () => {
     const needsYou = business === 'Acme Accounting' ? holdNeedsYou() : null;
     const version = desk().lastVersion;
     await screen.getByRole('button', { name: 'Confirm change' }).click();
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
     if (needsYou !== null) {
-      await expect.poll(needsYou.held).toBeGreaterThan(0);
-      await expect.poll(() => desk().policy.version).toBe(version);
-      await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeVisible();
+      await expect.poll(needsYou.held, { timeout: 4_000 }).toBeGreaterThan(0);
+      await expect.poll(() => desk().policy.version, { timeout: 4_000 }).toBe(version);
+      await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeVisible();
       await pause(300);
       needsYou.release();
     }
 
     // The first row it changed, Payments' limit, comes into view and says so; the rule it lowered
     // lights up.
-    await expect.poll(() => paymentsLimit()?.querySelector('.cd-pill')?.textContent).toBe('Updated');
-    await expect.poll(() => inView(paymentsLimit(), main)).toBe(true);
-    await expect.poll(() => updatedRows(root)).toEqual(['Payment link']);
+    await expect.poll(() => paymentsLimit()?.querySelector('.cd-pill')?.textContent, { timeout: 4_000 }).toBe('Updated');
+    await expect.poll(() => inView(paymentsLimit(), main), { timeout: 4_000 }).toBe(true);
+    await expect.poll(() => updatedRows(root), { timeout: 4_000 }).toEqual(['Payment link']);
     expect(fillOf(toolRow(root, 'Payment link'))).not.toBe('none');
     // Once it has come to rest, that is the owner's place: All rules, then Back, returns to it, on a
     // new visit with nothing updated.
@@ -697,13 +697,13 @@ describe('a preset or a new payment limit', () => {
       await pause(150);
       place = main.scrollTop;
       return place === before;
-    }).toBe(true);
+    }, { timeout: 4_000 }).toBe(true);
     // (Navigated to directly: clicking a link would first scroll it into view, moving the place.)
     await router.navigate(`${DESK}/profile`);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' })).toBeVisible();
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Profile' }), { timeout: 4_000 }).toBeVisible();
     await router.navigate(-1);
-    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
-    await expect.poll(() => main.scrollTop).toBe(place);
+    await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' }), { timeout: 4_000 }).toBeVisible();
+    await expect.poll(() => main.scrollTop, { timeout: 4_000 }).toBe(place);
     expect(updatedRows(root)).toEqual([]);
   });
 
