@@ -3,11 +3,16 @@ import { useRef, useState } from 'react';
 import type { LedgerEntry, LedgerPage } from '../../api/contracts.ts';
 import { EmptyState, FullTrace } from '../../ds/index.ts';
 import { formatWhen } from '../../lib/format.ts';
+import type { RequestRules } from '../rules/useRequestRules.ts';
 import { REPLAYED_LABEL, entryCopy, entryTime, originCopy, replayedOf } from './copy.ts';
 import { focusTrace, useSideBySide } from './focusTrace.ts';
+import { ToolCallSection } from './ToolCallSection.tsx';
+import { toolCallFor, type ToolCall } from './toolCall.ts';
 
 export interface RecordListProps {
   page: LedgerPage;
+  /** The existing rules read supplies business tool titles and the allowing card. */
+  rules?: RequestRules | null;
   /** `Health.dev_signing_key`, for the trace. */
   devKey: boolean;
   /** The business's time zone, which every time is read in. */
@@ -17,6 +22,7 @@ export interface RecordListProps {
 }
 
 interface RecordRowProps {
+  toolCall: ToolCall | null;
   entry: LedgerEntry;
   timezone: string;
   /** Its trace is open. */
@@ -25,9 +31,9 @@ interface RecordRowProps {
 }
 
 /** One entry's row: its number, what it records, who wrote it and when it happened, as one button that opens its trace. */
-function RecordRow({ entry, timezone, open, onOpen }: RecordRowProps) {
+function RecordRow({ entry, toolCall, timezone, open, onOpen }: RecordRowProps) {
   const replayed = replayedOf(entry) !== null;
-  const kind = entryCopy(entry.event);
+  const kind = toolCall === null ? entryCopy(entry.event) : `Tool call: ${toolCall.name}`;
   const who = originCopy(entry.event.origin);
   const when = formatWhen(entryTime(entry), timezone, new Date());
   // Read as one line, the words shown in order: "Entry 48, Action checked, Recorded by your Desk, Today, 9:52 am".
@@ -36,7 +42,11 @@ function RecordRow({ entry, timezone, open, onOpen }: RecordRowProps) {
     <button type="button" className="cd-record__row" aria-label={name} aria-expanded={open} onClick={(event) => onOpen(event.currentTarget)}>
       <span className="cd-record__seq cd-type-meta">{entry.seq}</span>
       <span className="cd-record__what">
-        <span className="cd-record__kind cd-type-control">{kind}</span>
+        <span className="cd-record__kind cd-type-control">
+          {toolCall === null ? kind : (
+            <>Tool call: <span className={toolCall.mono ? 'cd-type-trace' : undefined} data-copy="user">{toolCall.name}</span></>
+          )}
+        </span>
         {replayed ? <span className="cd-record__replayed cd-type-caption">{REPLAYED_LABEL}</span> : null}
       </span>
       <span className="cd-record__who cd-type-caption">{who}</span>
@@ -51,7 +61,7 @@ function RecordRow({ entry, timezone, open, onOpen }: RecordRowProps) {
  * it on a narrow window), with the chain's check and the signing key; closing the trace returns to
  * the row.
  */
-export function RecordList({ page, devKey, timezone, onOpenEntry }: RecordListProps) {
+export function RecordList({ page, rules = null, devKey, timezone, onOpenEntry }: RecordListProps) {
   const [openSeq, setOpenSeq] = useState<number | null>(null);
   const trace = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLButtonElement | null>(null);
@@ -59,6 +69,8 @@ export function RecordList({ page, devKey, timezone, onOpenEntry }: RecordListPr
   const scrollsItself = useSideBySide();
   const entries = [...page.entries].sort((a, b) => b.seq - a.seq);
   const open = openSeq === null ? null : (entries.find((e) => e.seq === openSeq) ?? null);
+
+  const openCall = open === null ? null : toolCallFor(open, entries, rules);
 
   if (entries.length === 0) {
     return (
@@ -93,7 +105,7 @@ export function RecordList({ page, devKey, timezone, onOpenEntry }: RecordListPr
         <ul className="cd-record__list" aria-label="Every entry, newest first">
           {entries.map((entry) => (
             <li key={entry.seq}>
-              <RecordRow entry={entry} timezone={timezone} open={entry.seq === openSeq} onOpen={(el) => openEntry(entry.seq, el)} />
+              <RecordRow toolCall={toolCallFor(entry, entries, rules)} entry={entry} timezone={timezone} open={entry.seq === openSeq} onOpen={(el) => openEntry(entry.seq, el)} />
             </li>
           ))}
         </ul>
@@ -106,7 +118,9 @@ export function RecordList({ page, devKey, timezone, onOpenEntry }: RecordListPr
             devKey={devKey}
             onClose={close}
             tabIndex={scrollsItself ? 0 : -1}
-          />
+          >
+            {openCall !== null ? <ToolCallSection call={openCall} entry={open} rules={rules} /> : null}
+          </FullTrace>
         ) : (
           <p className="cd-safety__hint cd-type-meta">Choose an entry to see its full trace.</p>
         )}
