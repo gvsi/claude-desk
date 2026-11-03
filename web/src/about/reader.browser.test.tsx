@@ -31,7 +31,7 @@ const PAGES = {
   proposal: {
     route: '/about/proposal',
     title: 'Product proposal',
-    summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how I’ll know it works.',
+    summary: 'What Claude Desk is, who it’s for, what the first release enforces in code, and how we’ll know it works.',
     // The meta line above the title, as the Vision article's: the kind, the date and the reading time.
     meta: ['Proposal', 'November 2, 2026', '2026-11-02', '7 min read'],
     sections: [
@@ -39,7 +39,7 @@ const PAGES = {
       'Who it’s for and the problem',
       'Why Anthropic',
       'The first release',
-      'How I’ll know it works',
+      'How we’ll know it works',
       'Business path',
       'The prototype',
     ],
@@ -1949,9 +1949,9 @@ describe('ReaderPage', () => {
     await page.viewport(DESKTOP.width, DESKTOP.height);
     await expect.poll(() => window.innerHeight).toBe(DESKTOP.height);
     const laptopLine = DESKTOP.height * 0.4;
-    await jumpTo(placeOf('how-ill-know-it-works'));
-    await expect.poll(marked).toEqual(['How I’ll know it works (location)']);
-    await jumpTo(window.scrollY - (laptopLine - headingOf('how-ill-know-it-works').getBoundingClientRect().top) - 40);
+    await jumpTo(placeOf('how-well-know-it-works'));
+    await expect.poll(marked).toEqual(['How we’ll know it works (location)']);
+    await jumpTo(window.scrollY - (laptopLine - headingOf('how-well-know-it-works').getBoundingClientRect().top) - 40);
     await expect.poll(marked).toEqual(['The first release (location)']);
     await screen.unmount();
   });

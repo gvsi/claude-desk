@@ -41,7 +41,7 @@ The first release is for real owners, who sign in with their Claude account.
 
 **Beyond the prototype.** Codes and owner alerts are sent for real; real payments and calendars connect through the kernel. Before real money moves, each approval and rule confirmation will be signed with a key that stays in the owner's browser and is checked by the kernel, so a compromised chat layer can't forge one, though it could still mislead the owner about what they are approving. Each business gets separate data, abuse limits and model-spend controls. Not in the first release: voice, and high-risk recommendations such as credit decisions, which the [usage policy](https://www.anthropic.com/legal/aup) requires a qualified person to review. Still open: whose spending limits a Desk trusts.
 
-## How I'll know it works
+## How we'll know it works
 
 Kernel, prompt and starter-rule changes must pass an evals gate to merge; proofs gate owners' rule changes. Tier 1 runs deterministic checks on every commit. In tier 2, a simulated stranger or agent drives the real system through 48 attacks and 39 legitimate tasks, graded independently of the kernel's checks. The gate is zero baseline violations, and held-out completion at or above the Wilson 95% lower bound of the first recorded held-out run, a rule fixed before any results.
 

@@ -123,7 +123,7 @@ Three calls I made against what the agents or reviewers pushed for: a Desk resol
 ## Documents
 
 - [Capability prediction](docs/capability-prediction.md): what a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.
-- [Product proposal](docs/product-proposal.md): what Claude Desk is, who it's for, what the first release enforces in code, and how I'll know it works.
+- [Product proposal](docs/product-proposal.md): what Claude Desk is, who it's for, what the first release enforces in code, and how we'll know it works.
 - [Design canvas](https://claude.ai/artifact/M46eP5Mtsoi15ruVMZ1uUx?sk=bbGjca_v34tZ2PPYoF0OVA): the signed board for every screen, and the explorations behind them.
 - The Vision article, under About this prototype in the app (`/about/vision`): where a Desk could go next.
 - [Design spec](docs/specs/2026-10-28-claude-desk-design.md): the product, the locked decisions and why.
