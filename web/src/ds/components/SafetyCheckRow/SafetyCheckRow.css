@@ -39,7 +39,6 @@ li + li > .cd-safety-check-row {
 }
 
 .cd-safety-check-row__attempt,
-.cd-safety-check-row__checkpoint,
 .cd-safety-check-row__reason {
   color: var(--text-secondary);
 }
@@ -47,10 +46,6 @@ li + li > .cd-safety-check-row {
 .cd-safety-check-row .cd-safety-check-row__attempt,
 .cd-safety-check-row .cd-safety-check-row__reason {
   margin-top: var(--space-2);
-}
-
-.cd-safety-check-row .cd-safety-check-row__checkpoint {
-  margin-top: var(--space-4);
 }
 
 .cd-safety-check-row__outcome {

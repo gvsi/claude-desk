@@ -328,10 +328,13 @@ describe('customers', () => {
     expect(Math.round((column?.getBoundingClientRect().left ?? 0) - (content?.getBoundingClientRect().left ?? 0))).toBe(
       Math.round((content?.getBoundingClientRect().right ?? 0) - (column?.getBoundingClientRect().right ?? 0)),
     );
-    // The concept footer in the same column, as the board draws it.
-    const footer = screen.container.querySelector('[data-ds="concept-footer"]')?.getBoundingClientRect();
-    expect(Math.round(footer?.left ?? 0)).toBe(Math.round(column?.getBoundingClientRect().left ?? -1));
-    expect(footer?.right ?? Infinity).toBeLessThanOrEqual(column?.getBoundingClientRect().right ?? 0);
+    // The concept line belongs to the sidebar, under About, and stays inside its column.
+    const sidebar = screen.getByRole('complementary', { name: 'Claude Desk', exact: true }).element();
+    const footer = sidebar.querySelector('[data-ds="concept-footer"]')!.getBoundingClientRect();
+    expect(footer.left).toBeGreaterThanOrEqual(sidebar.getBoundingClientRect().left);
+    expect(footer.right).toBeLessThanOrEqual(sidebar.getBoundingClientRect().right);
+    expect(footer.top).toBeGreaterThanOrEqual(sidebar.querySelector('.cd-sidebar__about')!.getBoundingClientRect().bottom);
+    expect(main.querySelector('[data-ds="concept-footer"]')).toBeNull();
 
     // Each section's head over a hairline; every row one height, tagged or not.
     for (const head of main.querySelectorAll('.cd-people__head')) {
@@ -351,7 +354,9 @@ describe('customers', () => {
     expect(screen.getByRole('list', { name: 'Leads' }).getByRole('link').elements()).toEqual([]);
     await expectOwnerBoard(screen.container, { current: 'Customers', cards: false });
     const reached = await expectTabOrder(userEvent, [...people, caption]);
-    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption, footerLink(screen.container)]);
+    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption]);
+    expect(sidebar.contains(footerLink(screen.container))).toBe(true);
+    expect(reached).toContain(footerLink(screen.container));
   });
 
   it('empty_people_is_kind', async () => {

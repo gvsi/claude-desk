@@ -1,7 +1,6 @@
 /** Setup's tool review names the job and uses its signed owner line. */
 import { expect, it } from 'vitest';
 
-import { describeEffects } from '../ds/index.ts';
 import { businessToolRows, chenBusinessTools } from '../mocks/businessTools.ts';
 import { businessOwnerLine } from '../owner/connectors/businessWords.ts';
 import type { BusinessToolDef, ProposalCard, SetupMessage } from '../api/views.ts';
@@ -19,7 +18,7 @@ it('reviews every business block by its title and owner line instead of Claude-f
     const row = { ...tool, description_confirmed: '<img src="x"> Claude-facing description' };
     expect(reviewTool(row, [])).toMatchObject({
       name: tool.business?.title,
-      description: `${businessOwnerLine(tool.business?.config)} ${describeEffects(tool.effects, tool.reversible)}`,
+      description: businessOwnerLine(tool.business?.config) ?? '',
     });
   }
   const intro = chenBusinessTools[0];
@@ -31,7 +30,7 @@ it('reviews every business block by its title and owner line instead of Claude-f
   ]) {
     expect(reviewTool({ ...intro, business }, [])).toMatchObject({
       name: business?.title.trim() ? business.title : 'A connected tool',
-      description: [businessOwnerLine(business?.config), describeEffects(intro.effects, intro.reversible)].filter(Boolean).join(' '),
+      description: businessOwnerLine(business?.config) ?? '',
     });
   }
 });

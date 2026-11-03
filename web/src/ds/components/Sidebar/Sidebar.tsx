@@ -2,6 +2,8 @@ import { useId, useRef, useState, type ComponentType, type KeyboardEvent, type R
 
 import { Icon, type IconName } from '../../icons/index.tsx';
 import { CountPill } from '../CountPill/CountPill.tsx';
+import { AppShellOnly } from '../AppShell/AppShell.tsx';
+import { ConceptFooter } from '../ConceptFooter/ConceptFooter.tsx';
 import { Mark, Wordmark } from '../Mark/Mark.tsx';
 import { StatusDot } from '../StatusDot/StatusDot.tsx';
 import { Switch } from '../Switch/Switch.tsx';
@@ -36,6 +38,7 @@ export type SidebarHrefs = Record<Exclude<NavKey, OptionalRow>, string> & Partia
 export interface SidebarLinkProps {
   href: string;
   className: string;
+  'aria-label'?: string;
   'aria-current'?: 'page';
   children: ReactNode;
 }
@@ -79,7 +82,11 @@ export interface SidebarProps {
   current: NavKey;
   /** Where each row goes. Without `connectors` or `notifications`, that row isn't drawn and the rows close up. */
   hrefs: SidebarHrefs;
-  /** The business's word for the people it serves, the third row: "Customers", "Clients". */
+  /** The lockup's destination, independent of the nav rows; `hrefs.today` by default. */
+  brandHref?: string;
+  /** The destination in the lockup's accessible name, after its visible name and badge. */
+  brandDestination?: 'today' | 'home';
+  /** The business's word for the people it serves, the row under Notifications: "Customers", "Clients". */
   peopleLabel: string;
   /**
    * Counts on Conversations, Safety and Notifications only; `attention` adds a held dot beside
@@ -99,6 +106,8 @@ export interface SidebarProps {
   linkComponent?: ComponentType<SidebarLinkProps>;
   /** The "About this prototype" group, just above the Answering block. Left out, nothing shows. */
   about?: SidebarAbout;
+  /** The owner app's concept line under About, in the wide shell only. */
+  conceptFooter?: boolean;
 }
 
 /**
@@ -121,11 +130,11 @@ export const NAV_LABELS = {
 const NAV_ROWS = [
   { key: 'today', icon: 'today', label: NAV_LABELS.today },
   { key: 'conversations', icon: 'conversations', label: NAV_LABELS.conversations },
-  { key: 'people', icon: 'people', label: null },
   { key: 'rules', icon: 'rules', label: NAV_LABELS.rules },
   { key: 'connectors', icon: 'connectors', label: NAV_LABELS.connectors },
   { key: 'safety', icon: 'safety', label: NAV_LABELS.safety },
   { key: 'notifications', icon: 'bell', label: NAV_LABELS.notifications },
+  { key: 'people', icon: 'people', label: null },
   { key: 'profile', icon: 'store', label: NAV_LABELS.profile },
   { key: 'share', icon: 'share', label: NAV_LABELS.share },
   { key: 'knowledge', icon: 'knowledge', label: NAV_LABELS.knowledge },
@@ -157,6 +166,8 @@ export function Sidebar({
   onSwitchDesk,
   current,
   hrefs,
+  brandHref = hrefs.today,
+  brandDestination = 'today',
   peopleLabel,
   counts,
   answering,
@@ -165,17 +176,19 @@ export function Sidebar({
   owner,
   linkComponent: Link = PlainLink,
   about,
+  conceptFooter = false,
 }: SidebarProps) {
+  const preview = true;
   const aboutId = useId();
   // One page is current: while a document from the about group is open, the main nav marks none.
   const mainCurrent = about?.links.some((link) => link.current === true) ? null : current;
   return (
     <div className="cd-sidebar">
       {/* The lockup (owner, 2026-10-30): the 36 px bell, the name and the Preview badge, on one line. */}
-      <div className="cd-sidebar__brand">
+      <Link href={brandHref} className="cd-sidebar__brand" aria-label={`Claude Desk${preview ? ' Preview' : ''}, ${brandDestination === 'home' ? 'home' : 'go to Today'}`}>
         <Mark size={36} />
-        <Wordmark preview />
-      </div>
+        <Wordmark preview={preview} />
+      </Link>
       <button
         type="button"
         className="cd-sidebar__business cd-type-control"
@@ -240,6 +253,13 @@ export function Sidebar({
               </Link>
             ))}
           </nav>
+        ) : null}
+        {conceptFooter ? (
+          <AppShellOnly layout="wide">
+            <div className="cd-sidebar__concept-footer" data-owner-footer>
+              <ConceptFooter />
+            </div>
+          </AppShellOnly>
         ) : null}
       </div>
       <div className="cd-sidebar__footer">

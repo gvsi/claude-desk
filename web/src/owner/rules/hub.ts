@@ -219,7 +219,7 @@ function toolSummary(row: ToolRow, key: ConnectorKey, active: ActiveCards, peopl
  * payment limit leads Payments and Stripe. A connector turned off leaves the list and comes back
  * through the picker.
  */
-export function hubSections(view: RulesView, people: PeopleOut | null | undefined): HubSection[] {
+export function hubSections(view: Pick<RulesView, 'tools'> & { active: ActiveCards }, people: PeopleOut | null | undefined): HubSection[] {
   return CONNECTORS.flatMap((connector): HubSection[] => {
     if (connector.tools.length === 0 || !connectorOn(connector, view.tools)) return [];
     const rows = connector.tools.flatMap((tool) => view.tools.filter((row) => row.tool === tool).slice(0, 1));

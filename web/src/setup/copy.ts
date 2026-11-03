@@ -226,6 +226,8 @@ export const SETUP_COPY = {
   rules: {
     title: 'Your rules',
     subtitle: "What I'll do on my own, what I'll ask you about, and what I never do.",
+    /** The caption under Rules' "Tool by tool": the tools, each with the rules it starts under (REV-SETUP-3, option A). */
+    toolsCaption: 'What you turned on, with the rules each tool starts under.',
     loading: 'Drafting your rules',
     empty: 'No rules yet',
     emptyBody: 'Until you add rules, Claude asks you before it does anything.',

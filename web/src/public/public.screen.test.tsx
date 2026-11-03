@@ -1141,8 +1141,10 @@ describe('public chat page', () => {
     const { screen } = await renderRoute(PAGE, { viewport });
     await ready(screen);
     const composer = screen.container.querySelector<HTMLElement>('.cd-composer__box')!;
+    // Heights are compared to within 0.05 px: layout can land a few millionths of a pixel apart
+    // between reads, while a changed line or padding moves the box by whole pixels.
     const height = composer.getBoundingClientRect().height;
-    expect(height).toBe(52);
+    expect(height).toBeCloseTo(52, 1);
     // The send fails on the server's side without being kept: the chat checks, then says so.
     mockStore.inject({ route: 'sendMessage', status: 500 });
     await type(screen, 'How much is drain clearing?');
@@ -1150,7 +1152,7 @@ describe('public chat page', () => {
     await expect.element(failed.getByText("That didn't send. Your message is still here.", { exact: true })).toBeVisible();
     await expect.element(screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
     expect(requests('sendMessage')).toHaveLength(1);
-    expect(composer.getBoundingClientRect().height).toBe(height);
+    expect(composer.getBoundingClientRect().height).toBeCloseTo(height, 1);
     expect(screen.container.querySelector('.cd-composer__kept')).toBeNull();
     expect(requests('visitorSession')).toHaveLength(2);
 
@@ -2283,6 +2285,36 @@ describe('public chat page', () => {
     const reply = watchReveal();
     await say(screen, 'How much is drain clearing?');
     expectShownWhole(await reply);
+  });
+
+  it.each(['desktop', 'phone'] as const)('the_visitors_own_chat_keeps_their_words_right_and_claudes_left_on_%s', async (viewport) => {
+    // The owner's view flips the sides (board REV-FLIP); the visitor's own chat doesn't: their words
+    // on the right and Claude's on the left, so each side reads its own words on the right.
+    const { screen } = await renderRoute(PAGE, { viewport });
+    await ready(screen);
+    const question = 'How much is drain clearing?';
+    await say(screen, question);
+    const log = screen.getByRole('log').element();
+    expect(log.classList.contains('cd-transcript--owner')).toBe(false);
+    const box = log.getBoundingClientRect();
+    const bubble = rowOf(screen.getByRole('log').getByText(question, { exact: true }).element()).querySelector('.cd-visitor-message__bubble');
+    if (!bubble) throw new Error('no visitor bubble');
+    expect(Math.abs(bubble.getBoundingClientRect().right - box.right), 'their bubble ends at the right edge').toBeLessThanOrEqual(1);
+    const replies = [...log.querySelectorAll<HTMLElement>('.cd-claude-message')];
+    expect(replies.length).toBeGreaterThan(0);
+    for (const reply of replies) {
+      // Claude's reply and its receipts start at the left edge, across the chat's column.
+      for (const part of rowOf(reply).querySelectorAll(':scope > :is(.cd-transcript-row__main, .cd-transcript-row__margin)')) {
+        const rect = part.getBoundingClientRect();
+        expect(Math.abs(rect.left - box.left), "Claude's side starts at the left edge").toBeLessThanOrEqual(1);
+        expect(Math.abs(rect.width - box.width), "Claude's side takes the chat's width").toBeLessThanOrEqual(1);
+      }
+    }
+    // Its card keeps its own 520 px cap, from the left edge.
+    const card = log.querySelector('.cd-claude-message .cd-reply-card');
+    if (!card) throw new Error('no reply card');
+    expect(card.getBoundingClientRect().width).toBeLessThanOrEqual(520);
+    expect(Math.abs(card.getBoundingClientRect().left - box.left)).toBeLessThanOrEqual(1);
   });
 
   it('the_end_follows_a_reply_as_its_words_are_revealed', async () => {

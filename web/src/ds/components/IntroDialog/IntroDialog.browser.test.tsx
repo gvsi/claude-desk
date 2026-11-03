@@ -185,6 +185,16 @@ it('an_unknown_error_code_reads_as_unreachable', async () => {
   expect(document.body.innerHTML).not.toContain('brand_new_code');
 });
 
+it('the_field_asks_for_the_passcode_in_every_state', async () => {
+  // The owner's words, never the passcode itself. The label still names the field.
+  for (const args of [{}, { error: 'wrong_passcode' as const }, { busy: true }]) {
+    const dialog = await runWith(args);
+    const field = dialog.querySelector<HTMLInputElement>('input[type="password"]');
+    expect(field?.placeholder, JSON.stringify(args)).toBe('Enter the passcode');
+    expect(field?.labels?.[0]?.textContent, JSON.stringify(args)).toBe('Passcode');
+  }
+});
+
 afterEach(async () => {
   await page.viewport(1280, 820);
 });
@@ -202,7 +212,7 @@ it('brand_row_shows_the_preview_badge_as_the_lockup_does', async () => {
     await page.viewport(width, height);
     const { dialog } = await openDialog();
     const brand = dialog.querySelector<HTMLElement>('.cd-intro__brand');
-    expect(brand?.textContent, where).toBe('Claude DeskPreview');
+    expect(brand?.textContent, where).toBe('Claude Desk Preview');
     const mark = brand?.querySelector(':scope > svg.cd-mark');
     const name = brand?.querySelector(':scope > .cd-wordmark > .cd-type-wordmark');
     const badge = brand?.querySelector(`:scope > .cd-wordmark > ${CAPS_BADGE.selector}`);
