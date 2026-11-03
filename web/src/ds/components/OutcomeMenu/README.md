@@ -10,12 +10,12 @@
 
 ## What it shows
 
-- The outcome's dot (`OUTCOME_TONE`: Automatic handled, Ask me first held, Never refused, `aria-hidden`) beside `outcomePhrase(value, limit)`. Status is never shown by the dot alone.
-- `limit` is the screen's formatted amount ("$300") for an auto card with `max_amount_cents`, which holds anything above it for the owner through its hold twin: "Automatic up to $300; over $300, ask me first". Other modes show no limit, whatever is passed.
+- The outcome's dot (`OUTCOME_TONE`: Allow handled, Ask me first held, Never refused, `aria-hidden`) beside `outcomePhrase(value)`. Status is never shown by the dot alone.
+- `limit` is no longer shown: the outcome is its word alone, and an auto card's limit lives in its rule's sentence (`RuleSentence`: "Claude can send payment links up to $300").
 - Read-only: the words in `.cd-type-meta`.
 - With `onChange`: a 32 px (`size-control`) button outlined in `line-control` (`line-control-hover` on hover and while open), radius 8 px, no fill, in `.cd-type-control`: the dot, the phrase and `chevron-down`. Neither form keeps its width: on a narrow line a long phrase wraps, inside the button or on its own lines, so nothing scrolls sideways.
 - The button is named "{phrase}. Change the outcome of: {label}" (`label` is the rule's reason), with `aria-haspopup="menu"` and `aria-expanded`.
-- Its menu is a popover 6 px under it, aligned to its right edge, on `bg-surface` with a `line-card` border, `radius-card` and `shadow-dialog`: three `menuitemradio`s, "Automatic", "Ask me first" and "Never", the current one checked (`aria-checked`, with a check mark).
+- Its menu is a popover 6 px under it, aligned to its right edge, on `bg-surface` with a `line-card` border, `radius-card` and `shadow-dialog`: three `menuitemradio`s, "Allow", "Ask me first" and "Never", the current one checked (`aria-checked`, with a check mark).
 
 ## Keyboard and pointer
 
@@ -33,10 +33,10 @@ As on `ApprovalCard`'s menus:
 `outcomeWords.ts`, also exported:
 
 - `RuleMode = RuleCard['mode']`.
-- `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Automatic", `ask` "Ask me first", `never` "Never". Used wherever a rule's outcome shows.
+- `OUTCOME_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Allow", `ask` "Ask me first", `never` "Never". Used wherever a rule's outcome shows.
 - `OUTCOME_TONE`: `auto` handled, `ask` held, `never` refused.
-- `OUTCOME_GROUP_WORDS` (`satisfies Record<RuleMode, string>`): `auto` "Does on its own", `ask` "Asks you", `never` "Never does", the headings of the setup's groups of rules by outcome (`OutcomeGroups`), each beside its `OUTCOME_TONE` dot.
-- `outcomePhrase(mode, limit?)`.
+- `OUTCOME_GROUP_WORDS` (`satisfies Record<RuleMode, string>`): the same three words as `OUTCOME_WORDS`, the headings of the setup's groups of rules by outcome (`OutcomeGroups`), each beside its `OUTCOME_TONE` dot.
+- `outcomePhrase(mode)`: the outcome's word alone.
   - `RulesPreset = 'ask_first' | 'auto'`, the master plan's two presets. There is no Custom mode: the Desk's rules are its own, whichever preset they started from.
   - `PRESET_WORDS`, in that order, each with its `label` and its `description`, as the signed presets board words them: "Ask me first" ("Quotes, bookings, documents and payments wait for your answer.") and "Recommended rules" ("Quotes at list price, weekday bookings in your hours, documents to verified customers. Payments ask you first."). The Rules page's "Start from a preset" menu (`PresetMenu`) offers them. The descriptions describe the master plan's preset cards (`desk.presets.PRESETS`); `preset_descriptions_match_the_presets` checks each claim against those cards, read from the generated presets export, `web/src/api/presets.gen.json`, and is skipped until that export exists.
 

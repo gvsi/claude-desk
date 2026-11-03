@@ -1,0 +1,10 @@
+/* EffectTags: a tool's tags on its title's line, 8 px after the title and 4 px apart. They wrap
+   under the title together when the line is too narrow. */
+
+.cd-effect-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-inline-start: var(--space-8);
+  vertical-align: middle;
+}

@@ -52,7 +52,7 @@ it.each([1440, 1512, 390])('at %i px, Rules lists the on jobs in API order with 
   await expect.element(intake.getByText('Asks: Is this for you or for a business? Which tax years do you need help with? Do you already have a bookkeeper?')).toBeVisible();
   await expect.element(intake.getByText(INTAKE_RULE.reason)).toBeVisible();
   await expect.element(intake.getByText('Anyone', { exact: true })).toBeVisible();
-  await expect.element(intake.getByText('Automatic', { exact: true })).toBeVisible();
+  await expect.element(intake.getByText('Allow', { exact: true })).toBeVisible();
   await expect.element(intake.getByText('Anything else here: ask me.')).toBeVisible();
   expect(jobs.getByRole('link').elements()).toHaveLength(0);
   expect(jobs.element().compareDocumentPosition(screen.getByRole('list', { name: 'Connectors' }).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -72,7 +72,7 @@ it.each([1440, 1512, 390])('at %i px, All rules starts with the same jobs, rules
   await expect.element(jobs.getByText('Free intro call, 20 minutes, in your opening hours')).toBeVisible();
   await expect.element(jobs.getByText('Asks: Is this for you or for a business? Which tax years do you need help with? Do you already have a bookkeeper?')).toBeVisible();
   await expect.element(jobs.getByText(INTAKE_RULE.reason)).toBeVisible();
-  await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+  await expect.element(jobs.getByText('Allow', { exact: true })).toBeVisible();
   await expect.element(jobs.getByText('Not covered by a rule you set, so I ask you.')).toBeVisible();
   await expect.element(jobs.getByText('Ask me first', { exact: true })).toBeVisible();
   expect(jobs.getByText('Anything else here: ask me.').elements()).toHaveLength(1);
@@ -159,7 +159,7 @@ it('keeps active jobs and their rules with safe fallback names and descriptions 
     for (const [index, card] of untitled.entries()) {
       expect(card.querySelector('.cd-rule-row__reason')?.textContent).toBe(INTAKE_RULE.reason);
       expect(card.querySelectorAll('.cd-rule-row')).toHaveLength(1);
-      expect(card.textContent).toContain(['Automatic', 'Never', 'Ask me first'][index]);
+      expect(card.textContent).toContain(['Allow', 'Never', 'Ask me first'][index]);
       expect(card.querySelectorAll('a')).toHaveLength(0);
     }
     expect(jobs.element().textContent).not.toMatch(/desk\./);

@@ -120,7 +120,7 @@ function ChangedTag() {
 function Outcome({ side, strong = false }: { side: ChangeSide; strong?: boolean }) {
   return (
     <span className={`cd-change-review__outcome cd-type-meta${strong ? ' cd-change-review__strong' : ''}`}>
-      <StatusLabel tone={OUTCOME_TONE[side.mode]}>{outcomePhrase(side.mode, side.limit)}</StatusLabel>
+      <StatusLabel tone={OUTCOME_TONE[side.mode]}>{outcomePhrase(side.mode)}</StatusLabel>
     </span>
   );
 }

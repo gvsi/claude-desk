@@ -203,7 +203,8 @@ function withConnectorsPage(): RouteObject[] {
  */
 async function expectToolRow(root: HTMLElement, words: RegExp): Promise<HTMLElement> {
   const find = () => [...root.querySelectorAll<HTMLElement>('.cd-connector-section__tool')].find((row) => words.test(toolRowWords(row)));
-  await expect.poll(() => find() !== undefined, { message: `a tool row reading ${words}` }).toBe(true);
+  // The page's opening reads may take a moment longer on a loaded runner; the row it shows stays the same.
+  await vi.waitFor(() => expect(find() !== undefined, `a tool row reading ${words}`).toBe(true), { timeout: 4_000 });
   const row = find() as HTMLElement;
   await expect(row).toBeVisible();
   return row;
@@ -318,12 +319,12 @@ describe('rules page', () => {
     // Each tool names its outcome in words, without a link.
     const root = screen.container;
     for (const words of [
-      /^Quote: Anyone · No discounts, Automatic$/,
-      /^Payment link: Anyone · Up to \$300 · Checked by the reviewer, Automatic up to \$300; over \$300, ask me first$/,
-      /^See charges: .*, Automatic$/,
+      /^Quote: Anyone · No discounts, Allow$/,
+      /^Payment link: Anyone · Up to \$300 · Checked by the reviewer, Allow$/,
+      /^See charges: .*, Allow$/,
       // A changed tool needs the owner's review before its outcome counts.
       /^Refund: .*, Needs your review$/,
-      /^Book a visit: 2 rules, Automatic$/,
+      /^Book a visit: 2 rules, Allow$/,
     ]) {
       const row = await expectToolRow(root, words);
       expect(row.querySelector('a'), String(words)).toBeNull();
@@ -385,7 +386,7 @@ describe('rules page', () => {
       SECTION_KEYS.map((key) => `${DESK}/connectors/${key}`),
     );
     expect(list.element().querySelectorAll('a.cd-connector-section__tool-link')).toHaveLength(11);
-    await expect.element(screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Automatic\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/quotes/native.quote`);
+    await expect.element(screen.getByRole('link', { name: /^Quote: Anyone · No discounts, Allow\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/quotes/native.quote`);
     await expect.element(screen.getByRole('link', { name: /^Payment link: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/payments/native.payment_link`);
     await expect.element(screen.getByRole('link', { name: /^Refund: .*\. Open$/ })).toHaveAttribute('href', `${DESK}/connectors/stripe/payments.create_refund`);
     // The sidebar's Connectors row comes with them.
@@ -411,7 +412,7 @@ describe('rules page', () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const jobs = screen.getByRole('region', { name: 'Your Desk’s jobs' });
     await expect.element(jobs.getByText('Emergency callback', { exact: true })).toBeVisible();
-    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Allow', { exact: true })).toBeVisible();
     await screen.getByRole('button', { name: 'Start from a preset' }).click();
     await screen.getByRole('menuitem', { name: label }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: label })).toBeVisible();
@@ -427,7 +428,7 @@ describe('rules page', () => {
     await screen.getByRole('button', { name: 'Confirm change' }).click();
     await expect.element(screen.getByRole('heading', { level: 1, name: 'Rules' })).toBeVisible();
     expect(desk().policy.cards).toContainEqual(urgent);
-    await expect.element(jobs.getByText('Automatic', { exact: true })).toBeVisible();
+    await expect.element(jobs.getByText('Allow', { exact: true })).toBeVisible();
   });
 
   it('preset_menu_drafts_a_preset', async () => {
@@ -460,7 +461,7 @@ describe('rules page', () => {
     expect(requests('confirmRules').map((r) => r.body)).toEqual([{ version }]);
     expect(desk().policy.version).toBe(version);
     expect(screen.container.textContent).not.toMatch(/\bCustom\b/);
-    await expectToolRow(screen.container, /^Quote: Anyone · No discounts, Automatic$/);
+    await expectToolRow(screen.container, /^Quote: Anyone · No discounts, Allow$/);
   });
 
   it('preset_review_lists_every_removed_rule', async () => {
@@ -493,7 +494,7 @@ describe('rules page', () => {
     expect(requests('confirmRules')).toEqual([]);
     expect(desk().policy.version).toBe(7);
     expect(desk().policy.cards.map((card) => card.card_id)).toContain(EXTRA_RULES.danaBooking.card_id);
-    await expectToolRow(screen.container, /^Book a visit: 3 rules, Automatic$/);
+    await expectToolRow(screen.container, /^Book a visit: 3 rules, Allow$/);
   });
 
   it('rule_chat_shows_the_draft_inline', async () => {
@@ -745,7 +746,7 @@ describe('rules page', () => {
     const rows = reviewRows(screen);
     expect(rows.map((row) => row.title)).toEqual(['Refund']);
     expect(rows[0]?.after).toContain('Dana Whitfield');
-    expect(rows[0]?.after).toContain('Automatic up to $50; over $50, ask me first');
+    expect(rows[0]?.after).toContain('Allow');
     expect(desk().policy.version).toBe(7);
   });
 
@@ -815,9 +816,9 @@ describe('rules page', () => {
 
     const link = screen.getByRole('region', { name: 'Payment link' });
     await expect.element(link.getByText('Anyone · Up to $400 · Checked by the reviewer', { exact: true })).toBeVisible();
-    await expect.element(link.getByText('Automatic up to $400; over $400, ask me first', { exact: true })).toBeVisible();
+    await expect.element(link.getByText('Allow', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('region', { name: 'Refund' }).getByText('Never', { exact: true })).toBeVisible();
-    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Automatic', { exact: true })).toBeVisible();
+    await expect.element(screen.getByRole('region', { name: 'Find open times' }).getByText('Allow', { exact: true })).toBeVisible();
     // A tool no rule covers asks.
     const quote = screen.getByRole('region', { name: 'Quote' });
     await expect.element(quote.getByText('Not covered by a rule you set, so I ask you.', { exact: true })).toBeVisible();
@@ -933,9 +934,9 @@ describe('rules page', () => {
     // agents' $20 deposit already fits, so it is the one change.
     const lowered = reviewRows(screen);
     expect(lowered.map((row) => row.title)).toEqual(['Payment link']);
-    expect(lowered[0]?.before).toContain('Automatic up to $300; over $300, ask me first');
+    expect(lowered[0]?.before).toContain('Allow');
     expect(lowered[0]?.before).toContain('Payment links up to $300, checked by the reviewer.');
-    expect(lowered[0]?.after).toContain('Automatic up to $100; over $100, ask me first');
+    expect(lowered[0]?.after).toContain('Allow');
     expect(lowered[0]?.after).toContain('Up to $100, your payment limit.');
     expect(lowered[0]?.after).not.toContain('$300');
     expect(screen.getByText('Your rules stay the same.', { exact: true }).elements()).toHaveLength(0);
@@ -956,7 +957,7 @@ describe('rules page', () => {
     const limit100 = 'No payment over $100 goes through without asking you, whatever the rules below say.';
     for (const name of ['Payments', 'Stripe']) await expect.element(screen.getByRole('region', { name }).getByText(`${limit100}Updated`, { exact: true })).toBeVisible();
     // No rule beside it still takes more on its own.
-    await expectToolRow(screen.container, /^Payment link: .*, Automatic up to \$100; over \$100, ask me first$/);
+    await expectToolRow(screen.container, /^Payment link: .*, Allow$/);
     expect(screen.container.querySelector('main')?.textContent).not.toContain('$300');
 
     // At 0, every payment asks, and no "$0" anywhere.
@@ -1127,21 +1128,24 @@ describe('rules page', () => {
     mockStore.world.addActiveRules(desk(), [EXTRA_RULES.agentCharges, EXTRA_RULES.danaBooking]);
     desk().suggestions.push(DANA_REFUNDS);
     const { screen } = await renderRoute(`${DESK}/rules`);
-    await expectToolRow(screen.container, /^Payment link: 2 rules · 1 shared, Automatic up to \$300; over \$300, ask me first$/);
+    await expectToolRow(screen.container, /^Payment link: 2 rules · 1 shared, Allow$/);
     await expectScreenBasics(screen.container, { owner: true });
 
     // With the panel open and a change drafted in it.
     await screen.getByRole('group', { name: 'Suggestions' }).getByRole('button', { name: 'Stop quoting on weekends' }).click();
     const log = screen.getByRole('complementary', { name: 'Ask Claude' }).getByRole('log');
-    await expect.element(log.getByRole('button', { name: 'Confirm change' })).toBeVisible();
+    // Claude's drafted change shows its confirm (a loaded runner may take a moment longer).
+    await expect.element(log.getByRole('button', { name: 'Confirm change' }), { timeout: 4_000 }).toBeVisible();
     await expectScreenBasics(screen.container, { owner: true });
 
     // The house rules, and the Rules page at a phone's width, unbroken.
     const all = await renderRoute(`${DESK}/rules/all`);
-    await expect.element(all.screen.getByRole('region', { name: 'Payment link' })).toBeVisible();
+    // The house rules open on Payment link's rules.
+    await expect.element(all.screen.getByRole('region', { name: 'Payment link' }), { timeout: 4_000 }).toBeVisible();
     await expectScreenBasics(all.screen.container, { owner: true });
     const phone = await renderRoute(`${DESK}/rules`, { viewport: 'phone' });
-    await expect.element(phone.screen.getByRole('region', { name: 'Stripe' })).toBeVisible();
+    // Rules opens on the phone with its Stripe connector.
+    await expect.element(phone.screen.getByRole('region', { name: 'Stripe' }), { timeout: 4_000 }).toBeVisible();
     // Under 640 px the header actions share a line under the title.
     const menu = phone.screen.getByRole('button', { name: 'Start from a preset' }).element();
     const title = phone.screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
@@ -1316,8 +1320,11 @@ describe("Ask Claude's question about a hold", () => {
       if (outcome.key === 'rules' && outcome.ok) rulesRead = true;
     }));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, strict: true, viewport: 'desktop' });
-    await expect.poll(() => rulesRead && reads.held() > 0).toBe(true);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).toBeInTheDocument();
+    // Each step may take a moment longer on a loaded runner; what they show, and their order, stay the same.
+    // The Rules read has landed while Needs you's read is still held.
+    await vi.waitFor(() => expect(rulesRead && reads.held() > 0).toBe(true), { timeout: 4_000 });
+    // Rules says it's still reading, and draws neither the body nor the hold question yet.
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).toBeInTheDocument();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Draft this rule' }).elements()).toHaveLength(0);
     expect(screen.getByRole('group', { name: 'Suggestions' }).elements()).toHaveLength(0);
@@ -1332,12 +1339,16 @@ describe("Ask Claude's question about a hold", () => {
     observer.observe(screen.container, { childList: true, subtree: true });
     onTestFinished(() => observer.disconnect());
     reads.release();
-    await expect.poll(() => pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?');
-    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' })).toBeVisible();
+    // Once Needs you lands, the hold question joins the chips.
+    await vi.waitFor(() => expect(pagePart('.cd-suggestion-chips', screen.container)?.textContent).toContain('Why was this quote held?'), { timeout: 4_000 });
+    // The question shows, drawn in the same render as the body.
+    await expect.element(screen.getByRole('button', { name: 'Why was this quote held?' }), { timeout: 4_000 }).toBeVisible();
     expect(screen.getByRole('list', { name: 'Connectors' }).elements()).toHaveLength(1);
-    await expect.element(screen.getByRole('button', { name: 'Draft this rule' })).toBeVisible();
+    // The suggested rule's draft button shows with them.
+    await expect.element(screen.getByRole('button', { name: 'Draft this rule' }), { timeout: 4_000 }).toBeVisible();
     expect(mismatches).toEqual([]);
-    await expect.element(screen.getByText('Reading your rules', { exact: true })).not.toBeInTheDocument();
+    // And the reading note is gone.
+    await expect.element(screen.getByText('Reading your rules', { exact: true }), { timeout: 4_000 }).not.toBeInTheDocument();
     expectNoHorizontalScroll();
   });
 

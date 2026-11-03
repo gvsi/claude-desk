@@ -60,7 +60,7 @@ function ConnectorRules({ deskId, section, view, people }: { deskId: string; sec
 
 /**
  * `rules/all`: every rule on the Desk, by connector and tool, each in its words with its outcome
- * ("Automatic", "Ask me first", "Never"), read-only; a tool no rule covers says it asks. Then the
+ * ("Allow", "Ask me first", "Never"), read-only; a tool no rule covers says it asks. Then the
  * always-on rules. Changing a rule is asking Claude, on Rules or a tool's page.
  */
 export function HouseRules() {

@@ -158,7 +158,7 @@ function movesMoney(card: RuleCard, row: Pick<ToolRow, 'effects'>): boolean {
  * contract, or why none can be:
  * - to "Ask me first" or "Never": the card without what only an automatic rule has (no amount
  *   limit, hours or reviewer check, and no discount);
- * - to "Automatic": the card as it is, except that a rule that moves money and has no limit of its
+ * - to "Allow": the card as it is, except that a rule that moves money and has no limit of its
  *   own takes the Desk's payment limit `capCents`, which the review shows before anything applies.
  *   With no limit set (0), nothing is drafted: `aboveMoneyCapCopy(0)` says to set one first.
  */
