@@ -4,6 +4,8 @@ Claude Desk is a concept prototype: a public, always-on Claude for a person or s
 
 The demo business is Turner Plumbing. You play Mike Turner, its owner, while Claude answers his customers and their agents.
 
+https://github.com/user-attachments/assets/ec1094cd-36d2-4c0a-862a-9480daea00f8
+
 ## Try it
 
 [desk.alcantara.xyz](https://desk.alcantara.xyz)
