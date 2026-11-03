@@ -866,22 +866,37 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: calc(var(--space-40) * 2 + var(--space-8)) var(--about-gutter) 0;
   text-align: center;
 }
 
-.cd-about-hero__kicker {
-  margin: calc(var(--space-18) * 2) 0 0;
-  color: var(--text-secondary);
+/* The article head, the same as the Vision article's (owner, 2026-11-02): its box, its type and the gaps between the
+   app icon, the meta line, the title and the summary, at every width; the Vision article's values, so the three agree. */
+.cd-about-hero__head {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 880px;
+  padding: 88px 40px 40px;
+  text-align: center;
 }
+
+.cd-about-hero__head > .cd-mark-app-icon {
+  margin: 0 auto calc(var(--space-18) * 2);
+}
+
 
 /* The meta line, as the Vision article's: the document's kind in the ink and a heavier weight, then its date and
    reading time, spaced apart on one line, centred in the hero. */
-.cd-about-hero__meta {
+.cd-about-page .cd-about-hero__meta {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: var(--space-6) var(--space-18);
+  gap: 6px 18px;
+  margin: 0 0 28px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  color: var(--va-ink-2);
 }
 
 .cd-about-page .cd-about-hero__meta strong {
@@ -890,23 +905,33 @@
 }
 
 .cd-about-page .cd-about-hero__title {
-  max-width: calc(var(--size-content) + var(--space-20));
-  margin: calc(var(--space-20) + var(--space-2)) 0 0;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 68px;
+  line-height: 72px;
+  letter-spacing: -1.4px;
+  font-variation-settings: 'opsz' 60;
+  color: var(--va-ink);
   text-wrap: balance;
 }
 
-.cd-about-hero__summary {
-  max-width: calc(var(--size-reading) - var(--space-20));
-  margin: var(--space-24) 0 0;
-  color: var(--text-secondary);
-  text-wrap: balance;
+.cd-about-page .cd-about-hero__summary {
+  max-width: 720px;
+  margin: 26px auto 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 33px;
+  font-weight: 400;
+  font-variation-settings: 'opsz' 24;
+  color: var(--va-ink-2);
+  text-wrap: pretty;
 }
 
 .cd-about-hero__figure {
-  width: 100%;
+  width: calc(100% - 2 * var(--about-gutter));
   max-width: calc(var(--size-article-measure) + 2 * var(--size-article-side) - var(--space-8));
-  margin-top: calc(var(--space-24) * 3);
+  margin-top: var(--space-32);
 }
 
 /* The prediction's hero figure is its claim card, in the article's type: its words left-aligned, as the article's. */
@@ -932,40 +957,6 @@
   max-width: calc(var(--size-article-measure) + 4 * var(--size-article-side) + 2 * var(--about-gutter));
   margin: 0 auto;
   padding: var(--about-step) var(--about-gutter) 0;
-}
-
-.cd-about-meta {
-  align-self: start;
-  justify-self: end;
-  width: var(--size-article-side);
-}
-
-.cd-about-meta dl {
-  margin: 0;
-  border-bottom: 1px solid var(--line-hairline);
-}
-
-.cd-about-meta dl > div {
-  display: grid;
-  grid-template-columns: calc(var(--space-40) * 2 + var(--space-4)) minmax(0, 1fr);
-  gap: var(--space-12);
-  padding: var(--space-10) 0;
-  border-top: 1px solid var(--line-hairline);
-}
-
-.cd-about-meta dt {
-  font-weight: 520;
-  color: var(--text-primary);
-}
-
-.cd-about-meta dd {
-  margin: 0;
-  color: var(--text-secondary);
-}
-
-.cd-about-meta__links {
-  display: grid;
-  gap: var(--space-8);
 }
 
 /* The article: the document in serif, its headings in sans. Only the article's own blocks: a figure inside
@@ -1186,21 +1177,9 @@
   --about-gutter: var(--space-20);
 }
 
-.cd-about-page--compact .cd-about-hero {
-  padding-top: calc(var(--space-18) * 2);
-}
 
-.cd-about-page--compact .cd-about-hero__kicker {
-  margin-top: var(--space-28);
-}
 
-.cd-about-page--compact .cd-about-hero__title {
-  margin-top: var(--space-14);
-}
 
-.cd-about-page--compact .cd-about-hero__summary {
-  margin-top: var(--space-16);
-}
 
 .cd-about-hero__byline {
   margin: var(--space-20) 0 0;
@@ -1251,4 +1230,33 @@
 .cd-about-page--compact .cd-about-chart__plot {
   max-width: calc(var(--size-article-measure) * 0.75);
   margin: 0 auto;
+}
+
+/* On a phone, the article head as the Vision article's on a phone: to the left, with its phone sizes. */
+@media (max-width: 720px) {
+  .cd-about-hero__head {
+    padding: 56px 16px 28px;
+    text-align: left;
+  }
+
+  .cd-about-hero__head > .cd-mark-app-icon {
+    margin: 0 0 var(--space-28);
+  }
+
+  .cd-about-page .cd-about-hero__meta {
+    justify-content: flex-start;
+    margin-bottom: 20px;
+  }
+
+  .cd-about-page .cd-about-hero__title {
+    font-size: 42px;
+    line-height: 46px;
+    letter-spacing: -0.8px;
+  }
+
+  .cd-about-page .cd-about-hero__summary {
+    margin-top: 18px;
+    font-size: 19px;
+    line-height: 28px;
+  }
 }
