@@ -9,6 +9,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type ReactNode } from 'react';
+import { useLocation } from 'react-router';
 
 import type { SessionState } from '../../api/contracts.ts';
 import { ApiError, request } from '../../api/http.ts';
@@ -37,6 +38,8 @@ import { useAnswer, type HeldItem } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { publicLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
+import { useRequestRules } from '../rules/useRequestRules.ts';
+import { requestInHash } from '../today/requestLink.ts';
 import { heldOldestFirst, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure, type ReadFailure } from '../useReadFailure.ts';
 import { DEMO_VISITOR_PILL, TAKE_OVER_HELPER, TRANSCRIPT_NOTE, WHISPER_PLACEHOLDER, WHISPER_PLACEHOLDER_SAMPLE, takeOverPlaceholder, whisperHelper } from './copy.ts';
@@ -148,6 +151,7 @@ function startedLine(read: OwnerTranscriptRead, slug: string, who: string, timez
 
 export function ConversationDetail({ sessionId, summary, listRead, notice, sampleDesk, demoVisitorRun = null }: ConversationDetailProps) {
   const { business, desk } = useOwnerDesk();
+  const location = useLocation();
   // Who the owner is in this chat's lines ("{owner} joined the chat", "{owner} said") and on their own
   // messages' avatar: their name, or the business's when they gave none (owner, 2026-11-02).
   const ownerShown = givenOwnerName(business.owner_display_name) ?? business.name;
@@ -178,6 +182,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
   const needsYou = useNeedsYou(deskId);
   // The requests held here come from Needs you: a failed read says so, rather than a hold with nothing to answer.
   const heldFailure = useReadFailure(needsYou, { pausedRoute: 'needsYou' });
+  // The rules a request held here names on its card.
+  const rules = useRequestRules(deskId);
   const answers = useAnswer(deskId);
   // A request answered here keeps focus as the button pressed goes.
   const answeredFocus = useAnsweredFocus(answers.answered);
@@ -262,10 +268,13 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
     else if (mode === 'owner') foot?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
   }, [takeOverSent, controls.changing, controls.modeError, mode]);
 
-  // The pane's first view draws from the chat, from Needs you (the requests held in it) and from the
-  // list (who it is with): until each has settled, data or failure, the pane draws its shapes. Every
-  // way the pane ends up draws inside the one region, so it stays mounted as they change.
-  const loading = (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || !listRead;
+  // The pane's first view draws from the chat, from Needs you (the requests held in it, and with one
+  // held the rules its card names) and from the list (who it is with): until each has settled, data
+  // or failure, the pane draws its shapes. Every way the pane ends up draws inside the one region,
+  // so it stays mounted as they change.
+  const heldHere = (needsYou.data ?? []).some((item) => item.decision?.session_id === sessionId);
+  const loading =
+    (chat.data === undefined && failure === null) || (needsYou.data === undefined && heldFailure === null) || (heldHere && !rules.settled) || !listRead;
   // The owner's own preview is never unread, and the API answers 404 for its marker, so it isn't marked.
   useConversationRead(deskId, sessionId, !loading && readSinceOpened && summary?.owner_preview !== true
     ? chat.data.items.reduce((max, item) => Math.max(max, item.n), 0)
@@ -282,6 +291,20 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
       opened.current = document.activeElement === nameRef.current;
     }
   }, [loading, chat.data]);
+  // A request address takes its landing after useEndInView's initial end-of-chat scroll and the
+  // ordinary phone/handoff arrival. Card refs exist once the loaded transcript has committed.
+  // Spend each history arrival once, so polling never takes focus back after the owner moves on.
+  const requestArrival = useRef<string | null>(null);
+  const { cardFor } = answeredFocus;
+  useEffect(() => {
+    if (loading || chat.data === undefined || !ready || requestArrival.current === location.key) return;
+    requestArrival.current = location.key;
+    const decisionId = requestInHash(location.hash);
+    const card = decisionId === null ? undefined : cardFor(decisionId);
+    if (card === undefined) return;
+    card.focus();
+    card.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  }, [loading, chat.data, ready, location.key, location.hash, cardFor]);
   const pane = (content: ReactNode) => (
     <SkeletonScreen loading={loading} status="Opening the conversation" skeleton={<ConversationSkeleton />} className="cd-conversation-pane">
       {content}
@@ -335,7 +358,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
     if (item === undefined) return null;
     return (
       <div className="cd-conversation__held">
-        <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={answeredFocus.register} />
+        <HeldRequest item={item} answers={answers} readAt={readAt} now={now} rules={rules.rules} registerCard={answeredFocus.register} />
       </div>
     );
   };
@@ -434,6 +457,8 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
       {notice !== null ? <Notice tone="error">{notice}</Notice> : null}
       {failure !== null ? <FailedRead failure={failure} /> : null}
       {heldFailure !== null ? <FailedRead failure={heldFailure} /> : null}
+      {/* A request held here can't name its rule while the rules' latest read has failed. */}
+      {heldFailure === null && heldIds.length > 0 && rules.failure !== null ? <FailedRead failure={rules.failure} /> : null}
       {/* The transcript and its handoff cards scroll between the bar and the owner's controls, or in a short window under the bar, with them, as one. */}
       <div ref={endInView.ref} className="cd-conversation__scroll" onFocus={showTheWholeMenu}>
         {callbacks.length > 0 ? (
@@ -445,7 +470,7 @@ export function ConversationDetail({ sessionId, summary, listRead, notice, sampl
         ) : null}
         {/* A demo visitor's note opens the transcript, over its opening lines, and scrolls away with them. */}
         {demo ? <DemoVisitorNote deskId={deskId} phase={demoRun} onStopped={() => nameRef.current?.focus({ preventScroll: true })} /> : null}
-        <Transcript label={`Conversation with ${who}`} logRef={transcriptRef}>
+        <Transcript variant="owner" label={`Conversation with ${who}`} logRef={transcriptRef}>
           <TranscriptHeader left={started ?? 'No messages yet.'} right={TRANSCRIPT_NOTE} />
           <OwnerTranscript
             items={read.items}

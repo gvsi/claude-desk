@@ -18,7 +18,10 @@ import { framesWithin } from '../ds/test/framesWithin.ts';
 /** The axe rule tags a screen must pass with zero violations. */
 export const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] as const;
 
-/** Words the owner never reads, with their plurals (the full trace and quoted untrusted text excepted). */
+/**
+ * Words the owner never reads, with their plurals (the full trace, a tool's or a rule's advanced
+ * details, which the owner opens to see them, and quoted untrusted text excepted).
+ */
 export const OWNER_JARGON = ['policy', 'Cedar', 'MCP', 'SymCC', 'kernel', 'schema', 'JSON', 'API', 'token', 'proof', 'proven', 'hash'] as const;
 
 const JARGON =
@@ -27,10 +30,14 @@ const JARGON =
 /** Attributes whose text is read aloud or shown. */
 const READ_ATTRIBUTES = ['aria-label', 'aria-description', 'aria-valuetext', 'title', 'placeholder', 'alt'];
 
-/** Subtrees the jargon check skips: the full trace, someone's own words, what isn't read. */
+/**
+ * Subtrees the jargon check skips: the full trace, an opened Details panel (REV-RULES-D's "Policy
+ * hash"), someone's own words, what isn't read.
+ */
 function skipped(el: Element): boolean {
   return (
     el.classList.contains('cd-type-trace') ||
+    el.classList.contains('cd-advanced-details') ||
     el.getAttribute('data-copy') === 'user' ||
     el.getAttribute('aria-hidden') === 'true' ||
     ['script', 'style', 'template', 'noscript'].includes(el.localName)
@@ -161,6 +168,20 @@ export function focusIsOn(el: Element): boolean {
 /** Two animation frames: long enough for a change, such as a navigation's transition, to be drawn. */
 export async function nextFrames(): Promise<void> {
   await framesWithin('screen redraw frames', 2);
+}
+
+/**
+ * Scrolls an open conversation to its top, for a screen check after it has landed. Opened at the
+ * chat's end, a phone can rest a receipt mostly under the pinned bar, where axe counts only its
+ * visible sliver as the button and finds it too close to the receipt under it; at the top every line
+ * is whole. Whatever scrolls the log is scrolled: the transcript, or the column scrolled as one.
+ */
+export async function conversationAtTop(): Promise<void> {
+  for (let node = document.querySelector('[role="log"]'); node !== null; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) node.scrollTop = 0;
+  }
+  await nextFrames();
 }
 
 /**

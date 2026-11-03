@@ -22,11 +22,11 @@ export const WithCountAndCaption: Story = {
   },
   play: async ({ canvas, canvasElement }) => {
     const heading = canvas.getByRole('heading', { level: 2, name: 'Needs you' });
-    expectComputed(heading, { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+    expectComputed(heading, { fontSize: '16px', lineHeight: '21px', fontWeight: '520' });
     // The count is read as what it means, not as a bare number.
     await expect(canvas.getByRole('img', { name: '2 things need you' })).toHaveTextContent('2');
     const caption = canvas.getByText('Everything else overnight stayed inside your rules.');
-    expectComputed(caption, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(caption, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
     // The caption sits at the right end of the heading's line.
     const headingBox = heading.getBoundingClientRect();
     const captionBox = caption.getBoundingClientRect();

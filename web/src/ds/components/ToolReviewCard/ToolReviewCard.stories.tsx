@@ -58,7 +58,7 @@ export const CreateRefundChanged: Story = {
     await expect(noticed).toBeVisible();
     // quoted_definition_is_text: the summary in serif, Claude's words.
     const summary = within(card).getByText(SUMMARY);
-    expectComputed(summary, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '18px' });
+    expectComputed(summary, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '20px' });
     // What was confirmed before: the confirmed description and its effects.
     await expect(within(card).getByRole('heading', { level: 3, name: 'What you confirmed before' })).toBeVisible();
     await expect(within(card).getByText(changed.description_confirmed)).toBeVisible();

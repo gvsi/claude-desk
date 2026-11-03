@@ -71,7 +71,7 @@ export { SectionHeader, type SectionHeaderProps } from './components/SectionHead
 export { Mark, MarkAppIcon, Wordmark, type MarkAppIconProps, type MarkProps, type WordmarkProps } from './components/Mark/Mark.tsx';
 export { MARK_GEOMETRY } from './components/Mark/markGeometry.ts';
 export { AUTHOR_NAME, AUTHOR_URL, ConceptFooter, type ConceptFooterProps } from './components/ConceptFooter/ConceptFooter.tsx';
-export { AppShell, type AppShellProps } from './components/AppShell/AppShell.tsx';
+export { AppShell, AppShellOnly, type AppShellProps, type AppShellOnlyProps } from './components/AppShell/AppShell.tsx';
 export {
   NAV_LABELS,
   Sidebar,
@@ -194,7 +194,7 @@ export { cardView, type CardView } from './components/ReplyCard/cardView.ts';
 export { CARD_CHROME, cardChrome, MONEY_TEMPLATES, type CardChrome } from './components/ReplyCard/chrome.ts';
 
 // Conversation
-export { Transcript, type TranscriptProps } from './components/Transcript/Transcript.tsx';
+export { Transcript, type TranscriptProps, type TranscriptVariant } from './components/Transcript/Transcript.tsx';
 export { VisitorMessage, type VisitorMessageProps } from './components/VisitorMessage/VisitorMessage.tsx';
 export { ClaudeMessage, PROSE_LINKS, type ClaudeMessageProps } from './components/ClaudeMessage/ClaudeMessage.tsx';
 export { ChatMarkdown, type ChatMarkdownProps } from './components/ChatMarkdown/ChatMarkdown.tsx';
@@ -234,7 +234,7 @@ export {
 } from './components/RecordedHistoryLink/RecordedHistoryLink.tsx';
 
 // Owner decisions
-export { ApprovalCard, type ApprovalCardProps } from './components/ApprovalCard/ApprovalCard.tsx';
+export { ApprovalCard, type ApprovalCardProps, type ApprovalRule } from './components/ApprovalCard/ApprovalCard.tsx';
 export { TakeOverBar, type TakeOverBarProps } from './components/TakeOverBar/TakeOverBar.tsx';
 
 // Rules and connectors
@@ -251,6 +251,9 @@ export { OutcomeMenu, type OutcomeMenuProps } from './components/OutcomeMenu/Out
 export { OutcomeGroups, type OutcomeGroupRow, type OutcomeGroupsProps } from './components/OutcomeGroups/OutcomeGroups.tsx';
 export { RuleRow, ruleWordsLine, type RuleRowProps, type RuleWord } from './components/RuleRow/RuleRow.tsx';
 export { ToolTitleList, type ToolTitles } from './components/RuleRow/ToolTitles.tsx';
+export { RuleSentence, type RuleMeta, type RuleSentenceProps, type SentencePart } from './components/RuleSentence/RuleSentence.tsx';
+export { AdvancedDetails, DetailsSlot, type AdvancedDetailsProps, type DetailsCode, type DetailsField } from './components/AdvancedDetails/AdvancedDetails.tsx';
+export { jsonText } from './components/AdvancedDetails/detailsJson.ts';
 export { PersonRules, type PersonRuleView, type PersonRulesProps } from './components/PersonRules/PersonRules.tsx';
 export { ToolRulesCard, type RulesLinkProps, type ToolRulesCardProps } from './components/ToolRulesCard/ToolRulesCard.tsx';
 export { rulesForTool, type RulesTool } from './components/ToolRulesCard/toolRules.ts';
@@ -262,7 +265,7 @@ export {
   type ConnectorSectionProps,
   type ToolSummaryView,
 } from './components/ConnectorSection/ConnectorSection.tsx';
-export { describeEffects } from './components/ConnectorSection/describeEffects.ts';
+export { describeEffects, effectPhrases } from './components/ConnectorSection/describeEffects.ts';
 export { ConnectorList, type ConnectorListProps } from './components/ConnectorList/ConnectorList.tsx';
 export {
   ConnectorDirectory,
@@ -340,5 +343,6 @@ export { Icon, ICON_NAMES, type IconName, type IconProps, type IconSize } from '
 export { SidebarSkeleton } from './components/Sidebar/SidebarSkeleton.tsx';
 export { ReviewerBarSkeleton } from './components/ReviewerBar/ReviewerBarSkeleton.tsx';
 export { PageHeaderSkeleton, type PageHeaderSkeletonProps } from './components/PageHeader/PageHeaderSkeleton.tsx';
+export { LandedGlow, UpdatedPill } from './components/ConnectorSection/Landing.tsx';
 
 export { ApprovalStatus } from './components/ApprovalCard/ApprovalStatus.tsx';

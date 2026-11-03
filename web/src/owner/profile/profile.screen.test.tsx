@@ -17,10 +17,10 @@ it.each(['desktop', 'phone'] as const)('profile_is_a_main_page_%s', async (viewp
   expect([...nav.element().querySelectorAll('.cd-sidebar__label')].map((row) => row.textContent)).toEqual([
     'Today',
     'Conversations',
-    'Customers',
     'Rules',
     'Safety',
     'Notifications',
+    'Customers',
     'Profile',
     'Share',
     'Knowledge',

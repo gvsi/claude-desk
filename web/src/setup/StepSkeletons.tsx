@@ -11,9 +11,12 @@
  */
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 
-import { ALWAYS_ON, PageHeaderSkeleton, Skeleton, SkeletonCard, SkeletonScreen, type SkeletonText } from '../ds/index.ts';
+import type { Effect, RuleCard, ToolName } from '../api/contracts.ts';
+import type { ToolRow } from '../api/views.ts';
+import { PageHeaderSkeleton, Skeleton, SkeletonCard, SkeletonScreen, type SkeletonText } from '../ds/index.ts';
 import { connectorByKey, type ConnectorKey } from '../owner/connectors/catalog.ts';
-import { moneyLimitLine } from '../owner/rules/ruleWords.ts';
+import type { ToolsView } from '../owner/rules/HouseRules.tsx';
+import { ToolRulesShapes } from '../owner/rules/RulesSkeleton.tsx';
 import { PUBLIC_LINE_KEYS, SETUP_COPY } from './copy.ts';
 import { publicLineLabel } from './publicLinesFormat.ts';
 
@@ -39,7 +42,7 @@ export function SetupOpening({ loading, children }: { loading: boolean; children
 /** A secondary button inline in a row, as "Add" and "Connect" are drawn. */
 const ROW_BUTTON = 'cd-button cd-button--secondary cd-button--inline cd-type-control';
 
-/** The payment limit the draft's line is measured with: the amount is the owner's answer, the words the app's. */
+/** The payment limit the draft's money rules are worded at: the amount is the owner's answer, the words the app's. */
 const MEASURED_LIMIT_CENTS = 50_000;
 
 /** The tricks the safety check's own lines are measured with: the count is the check's, the words the app's. */
@@ -109,12 +112,15 @@ function MeasuredLines({ words, text = 'body' }: { words: string; text?: Skeleto
   );
 }
 
-/** How many lines some words take: the same at every width, or more on a phone, where they wrap. */
+/**
+ * How many lines some words take: the same at every width, or apart on a phone, whose column can be
+ * narrower than a laptop's (a row's title) or wider (a row's right column, which drops under it).
+ */
 type LineCount = number | { wide: number; phone: number };
 
 /**
  * Lines of one type style for words that come with the read, an estimate: the last one short
- * (`last`, or `phoneLast` for a phone's). Where a phone wraps the words onto more lines, the
+ * (`last`, or `phoneLast` for a phone's). Where a phone wraps the words onto other lines, the
  * laptop's lines and the phone's are drawn apart, each shown only at its own width.
  */
 function Lines({ count, text = 'body', last = '70%', phoneLast = last }: { count: LineCount; text?: SkeletonText; last?: string; phoneLast?: string }) {
@@ -130,7 +136,7 @@ function Lines({ count, text = 'body', last = '70%', phoneLast = last }: { count
         {...(only === undefined ? {} : { className: `cd-setup-skeleton__${only}-line` })}
       />
     ));
-  return wide === phone ? <>{set(wide)}</> : <>{set(wide, 'wide')}{set(phone, 'phone')}</>;
+  return wide === phone && last === phoneLast ? <>{set(wide)}</> : <>{set(wide, 'wide')}{set(phone, 'phone')}</>;
 }
 
 /** A fresh Desk's built-in connectors, in the catalog's order, and where each stands or its button. */
@@ -222,111 +228,63 @@ export function ToolsListSkeleton() {
   );
 }
 
-/** One rule's row: what Claude does (its line's width on a laptop, and its lines on a phone) and who it's for. */
-interface RuleRowShape {
-  text: string;
-  phone: number;
-  phoneLast?: string;
-  /** Who it's for, in px. */
-  who: number;
+/** A built-in tool a fresh copy's setup turns on, as the kernel's tool rows have it. */
+function draftTool(tool: ToolName, effects: Effect[], reversible = true): ToolRow {
+  return {
+    tool, source: 'native', effects, reversible, status: 'enabled', description_confirmed: '',
+    definition_sha256: null, pending_definition_text: null, pending_sha256: null, review_reason: null, business: null,
+  };
+}
+
+/** A rule for anyone on `applies_to`, automatic unless `fields` says otherwise. */
+function draftCard(card_id: string, applies_to: RuleCard['applies_to'], fields: Partial<RuleCard> = {}): RuleCard {
+  return {
+    card_id, applies_to, mode: 'auto', who: 'anyone', person_id: null, agent_key_id: null, max_amount_cents: null,
+    max_discount_bp: 0, hours: null, review: false, is_default: false, reason: '', ...fields,
+  };
 }
 
 /**
- * The draft a fresh copy's example answers make, by group: what Claude does on its own (the ask-first
- * preset's open rules, then quotes, weekday bookings, documents and the agents' deposit), what asks
- * you (Saturday bookings, payment links) and what it never does (refunds).
+ * The draft a fresh copy's example answers make, as Your rules lists it, for the shapes alone:
+ * the built-in connectors setup starts on (Quotes, Bookings, Leads and callbacks, Verification),
+ * the ask-first preset's open rules, quotes at list price, and weekday bookings in the opening
+ * hours with Saturday's asking first; and its payments asking first and money never going out,
+ * which cover no tool that is on yet, so they sit under "Other tools", as Rules lists them. The
+ * page's own model (`toolGroups`) words it, never shown.
  */
-const RULE_GROUPS: readonly { title: number; rows: readonly RuleRowShape[] }[] = [
-  {
-    title: 104,
-    rows: [
-      { text: '45%', phone: 1, who: 43 },
-      { text: '55%', phone: 2, phoneLast: '25%', who: 43 },
-      { text: '40%', phone: 1, who: 43 },
-      { text: '85%', phone: 2, phoneLast: '60%', who: 43 },
-      { text: '80%', phone: 2, phoneLast: '30%', who: 43 },
-      { text: '85%', phone: 2, phoneLast: '60%', who: 43 },
-      { text: '85%', phone: 2, phoneLast: '45%', who: 43 },
-      { text: '50%', phone: 1, who: 43 },
-      { text: '40%', phone: 1, who: 43 },
-      { text: '55%', phone: 2, phoneLast: '50%', who: 161 },
-      { text: '90%', phone: 3, phoneLast: '40%', who: 80 },
+const DRAFT_SAMPLE: ToolsView = {
+  tools: [
+    draftTool('native.quote', ['change']),
+    draftTool('native.find_slots', ['read']),
+    draftTool('native.book', ['change']),
+    draftTool('native.capture_lead', ['change']),
+    draftTool('native.request_callback', ['change']),
+    draftTool('native.start_verification', ['send_message'], false),
+  ],
+  active: {
+    cards: [
+      draftCard('find-slots', 'native.find_slots'),
+      draftCard('capture-lead', 'native.capture_lead'),
+      draftCard('request-callback', 'native.request_callback'),
+      draftCard('start-verification', 'native.start_verification'),
+      draftCard('quote', 'native.quote'),
+      draftCard('book-weekdays', 'native.book', { hours: { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:00:00', end: '18:00:00' } }),
+      draftCard('book-saturday', 'native.book', { mode: 'ask', hours: { days: ['sat'], start: '09:00:00', end: '13:00:00' } }),
+      draftCard('payments', 'effect:charge', { mode: 'ask' }),
+      draftCard('money-out', 'effect:pay_out', { mode: 'never' }),
     ],
   },
-  { title: 56, rows: [{ text: '38%', phone: 1, who: 43 }, { text: '35%', phone: 1, who: 43 }] },
-  { title: 76, rows: [{ text: '42%', phone: 1, who: 43 }] },
-];
-
-/** The anchor each group's rows are named by, in `OutcomeGroups`' order. */
-const GROUP_NAMES = ['auto', 'ask', 'never'] as const;
+};
 
 /**
- * "Your rules" while the draft is made (`DraftRules`): the payment limit's card, the rules by what
- * Claude does under each group's dot, the always-on rules' card, the check's line and "Check real
- * situations".
+ * "Your rules" while the draft is made (`DraftRules`): Rules' own shapes (`ToolRulesShapes`), read
+ * only, over a fresh copy's draft: "Across your Desk", then "Tool by tool" with each connector's
+ * tools and their rules; then the check's line and "Check real situations".
  */
 export function DraftRulesSkeleton() {
   return (
     <div className="cd-setup-skeleton">
-      <div className="cd-outcome-groups">
-        <SkeletonCard padding={16} anchor="rules-money-limit">
-          <div className="cd-money-limit cd-money-limit--prominent">
-            <div className="cd-money-limit__reading">
-              <div className="cd-money-limit__line cd-type-body">
-                <MeasuredLines words={moneyLimitLine(MEASURED_LIMIT_CENTS)} />
-              </div>
-            </div>
-          </div>
-        </SkeletonCard>
-        {RULE_GROUPS.map((group, g) => (
-          <div key={g} className="cd-outcome-groups__group">
-            <SkeletonCard padding={16}>
-              <div className="cd-outcome-groups__title cd-type-control">
-                <Skeleton shape="circle" size={6} />
-                <Skeleton shape="line" text="control" width={group.title} />
-              </div>
-              <ul className="cd-outcome-groups__rows">
-                {group.rows.map((row, i) => (
-                  <li key={i} className="cd-outcome-groups__row" data-skeleton-anchor={`rules-${GROUP_NAMES[g]}-row-${i}`}>
-                    <span className="cd-outcome-groups__text cd-type-body">
-                      <Lines count={{ wide: 1, phone: row.phone }} last={row.text} phoneLast={row.phoneLast} />
-                    </span>
-                    <span className="cd-outcome-groups__who cd-type-meta">
-                      <Skeleton shape="line" text="meta" width={row.who} />
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </SkeletonCard>
-          </div>
-        ))}
-      </div>
-      <SkeletonCard padding={16} anchor="rules-always-on">
-        <div className="cd-always-on">
-          <div className="cd-section-header">
-            <div className="cd-section-header__title">
-              <Skeleton shape="line" text="section" width={69} />
-            </div>
-            {/* The caption keeps its width, so on a phone it drops under the title as the words do. */}
-            <div className="cd-section-header__caption">
-              <Skeleton shape="line" text="meta" width={369} />
-              <Skeleton shape="line" text="meta" width={180} className="cd-setup-skeleton__phone-line" />
-            </div>
-          </div>
-          <ul className="cd-always-on__list">
-            {ALWAYS_ON.map((rule) => (
-              <li key={rule} className="cd-always-on__item cd-type-body">
-                <span className="cd-always-on__lock cd-setup-skeleton__lock">
-                  <Skeleton shape="block" width={14} height={14} />
-                </span>
-                <span className="cd-setup-skeleton__fill">
-                  <MeasuredLines words={rule} />
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </SkeletonCard>
+      <ToolRulesShapes sample={DRAFT_SAMPLE} cap={MEASURED_LIMIT_CENTS} toolsCaption={SETUP_COPY.rules.toolsCaption} version={null} readOnly className="cd-setup-skeleton" />
       <ul className="cd-setup-rules__checks" data-skeleton-anchor="rules-checks">
         <li className="cd-type-meta">
           <span className="cd-status-label">
@@ -354,29 +312,39 @@ function MainButton({ label, variant = 'primary' }: { label: string; variant?: '
   );
 }
 
-/** One situation's row: its title's width on a laptop and its lines on a phone, who is asking, and the reason. */
+/** One situation's row: its title's lines (`title` the last one's width on a laptop), who is asking, and its reason. */
 interface SituationShape {
   title: string;
+  /** The title's lines on a laptop: 1 when left out. */
+  wide?: number;
   phone: number;
   phoneLast?: string;
   who: string;
-  reason: string;
+  reason: ReasonShape;
   /** "Not what we planned" under who is asking. */
   flag?: boolean;
 }
 
 /**
- * The situations a fresh copy's draft is tried on: a weekday drain, a cash discount, an agent's
- * deposit, a customer's invoice, a Saturday visit the draft doesn't book as planned, and another
- * customer's address.
+ * A row's reason: the kernel's own words, one meta line this wide, or, for a situation one draft
+ * rule decided, that rule's sentence (`RuleSentence`), body lines in the right column's width: 300 px
+ * on a laptop, the whole row on a phone, where it drops under who is asking.
+ */
+type ReasonShape = string | { sentence: LineCount; last: string; phoneLast?: string };
+
+/**
+ * The situations a fresh copy's draft is tried on, at the lines and widths a fresh CPA copy's words
+ * take: a weekday drain and a Saturday visit the draft doesn't book as planned, read as the bookings
+ * rule's sentence; a cash discount in the kernel's words; an agent's deposit and a customer's
+ * invoice, read as their rules' sentences; and another customer's address in the kernel's words.
  */
 const SITUATIONS: readonly SituationShape[] = [
-  { title: '92%', phone: 2, phoneLast: '30%', who: '35%', reason: '40%' },
-  { title: '75%', phone: 1, who: '35%', reason: '27%' },
-  { title: '68%', phone: 1, who: '48%', reason: '55%' },
-  { title: '66%', phone: 1, who: '33%', reason: '42%' },
-  { title: '95%', phone: 2, phoneLast: '15%', who: '34%', reason: '40%', flag: true },
-  { title: '76%', phone: 1, who: '35%', reason: '45%' },
+  { title: '98%', phone: 2, phoneLast: '20%', who: '36%', reason: { sentence: 2, last: '32%', phoneLast: '17%' } },
+  { title: '77%', phone: 1, who: '36%', reason: '49%' },
+  { title: '71%', phone: 1, who: '52%', reason: { sentence: 2, last: '67%', phoneLast: '55%' } },
+  { title: '70%', phone: 1, who: '35%', reason: { sentence: { wide: 2, phone: 1 }, last: '25%', phoneLast: '94%' } },
+  { title: '10%', wide: 2, phone: 2, phoneLast: '22%', who: '36%', reason: { sentence: 2, last: '32%', phoneLast: '17%' }, flag: true },
+  { title: '87%', phone: 1, who: '36%', reason: '81%' },
 ];
 
 /**
@@ -394,7 +362,7 @@ export function SituationsSkeleton() {
               <div className="cd-situation-row">
                 <div className="cd-situation-row__grid">
                   <div className="cd-situation-row__situation">
-                    <Lines count={{ wide: 1, phone: row.phone }} text="control" last={row.title} phoneLast={row.phoneLast} />
+                    <Lines count={{ wide: row.wide ?? 1, phone: row.phone }} text="control" last={row.title} phoneLast={row.phoneLast} />
                     <div className="cd-situation-row__who">
                       <Skeleton shape="line" text="meta" width={row.who} />
                     </div>
@@ -420,7 +388,7 @@ export function SituationsSkeleton() {
 }
 
 /** A row's right column, as `SituationRow` and `SafetyCheckRow` draw it: the outcome beside its dot, the reason under it. */
-function ResultShape({ reason, kind = 'situation' }: { reason: string; kind?: 'situation' | 'safety-check' }) {
+function ResultShape({ reason, kind = 'situation' }: { reason: ReasonShape; kind?: 'situation' | 'safety-check' }) {
   return (
     <div className={`cd-${kind}-row__result`}>
       <div className={`cd-${kind}-row__outcome cd-type-meta`}>
@@ -428,7 +396,7 @@ function ResultShape({ reason, kind = 'situation' }: { reason: string; kind?: 's
         <Skeleton shape="line" text="meta" width={64} />
       </div>
       <div className={`cd-${kind}-row__reason`}>
-        <Skeleton shape="line" text="meta" width={reason} />
+        {typeof reason === 'string' ? <Skeleton shape="line" text="meta" width={reason} /> : <Lines count={reason.sentence} last={reason.last} phoneLast={reason.phoneLast} />}
       </div>
     </div>
   );

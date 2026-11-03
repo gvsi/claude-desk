@@ -330,3 +330,12 @@ export function formatHours(w: HoursWindow): string {
   const { days, times } = hoursParts(w);
   return `${days}, ${times}`;
 }
+
+/** Stored booking windows as a sentence clause; no hours means no clause. */
+export function bookingHoursWords(hours: readonly HoursWindow[]): string {
+  return listWords(hours.map((window) => {
+    const { days, times } = hoursParts(window);
+    const lowered = /^(Weekdays|Weekends|Every day)\b/.test(days) ? `${days.charAt(0).toLowerCase()}${days.slice(1)}` : days;
+    return `${lowered.startsWith('every day') ? '' : 'on '}${lowered}, ${times}`;
+  }));
+}

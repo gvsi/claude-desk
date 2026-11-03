@@ -725,8 +725,9 @@ describe('ReaderPage', () => {
   it('phone_switch_keeps_the_three_pages_on_one_row', async () => {
     // Under the phone bar, the set's three pages sit on one row at 390 and 375 px: "Vision" never drops to a
     // line of its own and pushes the page down, and nothing runs past the window's width. The laptop switch
-    // keeps its 12 px either side of each name. Measured in the interface's web font, as the page ships, which the
-    // other tests here don't load; the sheet goes again after, so they keep measuring as before.
+    // keeps its 12 px either side of each name; the phone uses 4 px and keeps the 32 px tap height. Measured in the
+    // interface's web font, as the page ships, which the other tests here don't load; the sheet goes again after,
+    // so they keep measuring as before.
     onTestFinished(() => {
       const want = new URL(FONT_SHEET_URL).href;
       for (const link of document.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')) if (link.href === want) link.remove();
@@ -741,6 +742,11 @@ describe('ReaderPage', () => {
         expect(links.map((link) => flat(link.textContent)).sort(), where).toEqual(['Capability prediction', 'Product proposal', 'Vision']);
         const tops = links.map((link) => link.getBoundingClientRect().top);
         expect(new Set(tops).size, `${where}: tops ${tops.join(', ')}`).toBe(1);
+        for (const link of links) {
+          const style = getComputedStyle(link);
+          expect([style.paddingLeft, style.paddingRight], where).toEqual(['4px', '4px']);
+          expect(link.getBoundingClientRect().height, where).toBe(32);
+        }
         // One row: the switch is as tall as its space above and one 32 px link.
         const box = (nav as HTMLElement).getBoundingClientRect();
         expect(box.height - parseFloat(getComputedStyle(nav as HTMLElement).paddingTop), where).toBe(32);
@@ -1545,9 +1551,8 @@ describe('ReaderPage', () => {
         // One link into the prototype, in the top bar, the same words at every width, never naming the
         // business, with the app window icon: to this browser's Desk when it has opened one. It is the page's
         // primary button: the design system's primary fill and words, in the paper's ink and on its paper.
-        const back = [...(screen.container.querySelector('header')?.querySelectorAll('a') ?? [])].filter(
-          (link) => !link.closest('nav'),
-        );
+        const back = screen.getByRole('link', { name: 'Try Desk prototype', exact: true }).elements();
+        expect(back[0]?.closest('header'), where).not.toBeNull();
         expect(back.map(readText), where).toEqual(['Try Desk prototype']);
         expect(back[0]?.querySelector('svg')?.innerHTML, where).toBe(APP_ICON);
         const root = screen.container.querySelector('.cd-about-paper--app') as HTMLElement;
@@ -1629,6 +1634,8 @@ describe('ReaderPage', () => {
     (screen.container.querySelector('.cd-about-try') as HTMLElement).focus();
     window.scrollTo(0, 50);
     await expect.poll(() => window.scrollY).toBe(50);
+    await userEvent.tab();
+    await expect.element(screen.getByRole('link', { name: 'Claude Desk, home', exact: true })).toHaveFocus();
     await userEvent.tab();
     const focused = document.activeElement as HTMLElement;
     expect(focused.closest('nav[aria-label="About this prototype"]')).not.toBeNull();

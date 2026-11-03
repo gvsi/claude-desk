@@ -19,16 +19,17 @@ import pytest
 from fastapi import FastAPI
 from procrastinate.testing import InMemoryConnector
 
+from desk.api.demo_visitors import OPENING_LINES
 from desk.api.main import create_app
 from desk.api.metrics import record_model_call
-from desk.api.prompts import demo_visitor_brief
+from desk.api.prompts import VisitorStep, demo_visitor_brief
 from desk.contracts import CopyCreated
 from desk.kernel_api import CreateCopyRequest
 from tests.api.fakes import ScriptedModel, gated
 from tests.api.loopback import StreamingLoopback
 from tests.api.test_copies import production_settings, usage_row
 from tests.api.test_demo_agent import owner_desk, setup_row
-from tests.api.test_demo_visitors import ByRoute, owner_of, say, step
+from tests.api.test_demo_visitors import ByRoute, owner_of, rows, say, step
 from tests.api.test_public_chat import open_session
 from tests.kernel_contract.fake_kernel import fake_kernel_app
 
@@ -74,6 +75,40 @@ async def start(owner: httpx.AsyncClient, desk_id: str, key: str = "click-1") ->
     return await owner.post(f"/api/owner/desks/{desk_id}/demo_visitor", json={"idempotency_key": key})
 
 
+async def test_start_stores_the_opening_before_answering_without_a_visitor_model_call(
+        app, browser, fake, copy, visitor_model, desk_model, engine):
+    release = asyncio.Event()
+    answering = gated(say("Yes, we can help."), release)
+    desk_model.add(answering)
+    try:
+        started = await start(owner_of(app, browser, copy), copy.desk_ids[0])
+        assert started.status_code == 202, started.text
+        assert await rows(engine, started.json()["session_id"], "visitor_text") == [
+            "Hi, my kitchen sink is leaking under the cabinet. Can you fix that?"]
+        assert visitor_model.requests == []
+    finally:
+        await app.state.runtime.demo_visitors.close()
+        release.set()
+        await app.state.runtime.runner.drain()
+
+
+@pytest.mark.parametrize("status", [401, 429])
+async def test_a_run_whose_opening_cannot_be_sent_is_unavailable(
+        app, browser, copy, visitor_model, monkeypatch, status):
+    transport = app.state.runtime.a2a_transport
+    handle = transport.handle_async_request
+
+    async def refuse(request):
+        if request.url.path.endswith("/messages"):
+            return httpx.Response(status, json={"error": "no_session" if status == 401 else "rate_limited"})
+        return await handle(request)
+
+    monkeypatch.setattr(transport, "handle_async_request", refuse)
+    refused = await start(owner_of(app, browser, copy), copy.desk_ids[0])
+    assert (refused.status_code, refused.json()) == (503, {"error": "demo_visitor_unavailable"})
+    assert visitor_model.requests == []
+
+
 async def test_starting_one_answers_its_run_and_its_open_session(app, browser, fake, copy, visitor_model):
     owner = owner_of(app, browser, copy)
     desk_id = copy.desk_ids[0]
@@ -91,7 +126,7 @@ async def test_starting_one_answers_its_run_and_its_open_session(app, browser, f
     newest = await owner.get(f"/api/owner/desks/{desk_id}/demo_visitor")
     assert newest.status_code == 200, newest.text
     assert newest.json() == {"run_id": body["run_id"], "desk_id": desk_id, "first_name": "Riley",
-                             "session_id": opened, "state": "done", "messages_sent": 0, "ended": "finished"}
+                             "session_id": opened, "state": "done", "messages_sent": 1, "ended": "finished"}
 
 
 async def test_the_routes_need_the_owner_and_one_of_the_copys_own_desks(app, browser, fake, kernel_http, copy,
@@ -180,7 +215,7 @@ async def test_one_runs_at_a_time_in_a_copy_until_the_owner_stops_it(app, browse
     stopped = await owner.post(stop)
     assert stopped.status_code == 200, stopped.text
     assert stopped.json() == {"run_id": run_id, "desk_id": desk_id, "first_name": "Riley",
-                              "session_id": first.json()["session_id"], "state": "stopped", "messages_sent": 0,
+                              "session_id": first.json()["session_id"], "state": "stopped", "messages_sent": 1,
                               "ended": "stopped_by_owner"}
     release.set()
     await app.state.runtime.demo_visitors.drain()
@@ -210,7 +245,7 @@ async def test_each_run_is_read_by_its_id_on_its_own_desk(app, browser, fake, ke
     read = await owner.get(path)
     assert read.status_code == 200, read.text
     assert read.json() == {"run_id": first["run_id"], "desk_id": desk_id, "first_name": "Riley",
-                           "session_id": first["session_id"], "state": "done", "messages_sent": 0,
+                           "session_id": first["session_id"], "state": "done", "messages_sent": 1,
                            "ended": "finished"}
     newest = (await owner.get(f"/api/owner/desks/{desk_id}/demo_visitor")).json()
     assert newest["run_id"] == runs[1]["run_id"]
@@ -359,7 +394,11 @@ async def test_it_plays_the_persona_of_the_desks_set(app, browser, fake, kernel_
     run = app.state.runtime.demo_visitors.run(started.json()["run_id"], copy.copy_id)
     assert (run.desk_id, run.first_name) == (desk_id, "Priya")
     (request,) = visitor_model.requests
-    assert request.messages == [{"role": "user", "content": [{"type": "text", "text": demo_visitor_brief("office")}]}]
+    assert request.messages[:2] == [
+        {"role": "user", "content": [{"type": "text", "text": demo_visitor_brief("office")}]},
+        {"role": "assistant", "content": [{"type": "text", "text":
+            VisitorStep(message=OPENING_LINES["office"], done=False).model_dump_json()}]}]
+    assert await rows(engine, started.json()["session_id"], "visitor_text") == [OPENING_LINES["office"]]
 
 
 # The owner's reads ---------------------------------------------------------------------------------------------
@@ -396,7 +435,9 @@ async def test_its_chat_is_flagged_in_conversations_and_its_transcript_across_a_
         # Listed as soon as its chat opens, named by its persona's first name and flagged; the real visitor isn't.
         assert (listed[demo]["demo_visitor"], listed[demo]["display_name"]) == (True, "Riley")
         assert (listed[person]["demo_visitor"], listed[person]["display_name"]) == (False, None)
-        assert transcript["demo_visitor"] is True and transcript["items"] == []     # the mark is never an item
+        assert transcript["demo_visitor"] is True
+        assert [(item["kind"], item["text"]) for item in transcript["items"]] == [
+            ("visitor_text", OPENING_LINES["rivera"])]  # the mark is never an item; the fixed opening is
         assert (await read(app, person))[1]["demo_visitor"] is False
 
     # Another process, with no memory of the run: its chat is still flagged.
@@ -473,7 +514,7 @@ async def test_the_app_closes_its_demo_visitors_when_it_stops(db, fake, api_sett
         visitors = runtime.demo_visitors
     # Stopping the app ended the run still going, with its stream closed, and the runtime no longer offers it.
     run = visitors.run(started.json()["run_id"], copy.copy_id)
-    assert (run.state, run.ended, run.messages_sent) == ("failed", "failed", 0)
+    assert (run.state, run.ended, run.messages_sent) == ("failed", "failed", 1)
     assert runtime.demo_visitors is None
     assert runtime.stream_slots.open_counts() == ({}, {})
     release.set()

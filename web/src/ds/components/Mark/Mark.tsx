@@ -75,7 +75,8 @@ export function Wordmark({ preview = false }: WordmarkProps) {
   return (
     <span className="cd-wordmark">
       <span className="cd-wordmark__name cd-type-wordmark">Claude Desk</span>
-      {preview ? <Pill caps>Preview</Pill> : null}
+      {/* Separate the words in text content; flex supplies the visible gap. */}
+      {preview ? <>{' '}<Pill caps>Preview</Pill></> : null}
     </span>
   );
 }

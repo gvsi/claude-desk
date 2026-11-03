@@ -82,7 +82,7 @@ export const Board: Story = {
       await expect(status).toHaveTextContent('Dana is typing');
       const bubble = status.querySelector<HTMLElement>('.cd-writing-indicator__bubble') as HTMLElement;
       await expect(bubble).toHaveAttribute('aria-hidden', 'true');
-      expectComputed(bubble, { backgroundColor: SPEC.bubble.backgroundColor, borderTopLeftRadius: '12px', height: '37px' });
+      expectComputed(bubble, { backgroundColor: SPEC.bubble.backgroundColor, borderTopLeftRadius: '12px', height: '38px' });
       for (const theirs of some(log, '.cd-visitor-message__bubble')) {
         await expect(Math.round(bubble.getBoundingClientRect().right)).toBe(Math.round(theirs.getBoundingClientRect().right));
       }

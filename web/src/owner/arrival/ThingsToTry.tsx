@@ -14,6 +14,7 @@ import { customerLink } from '../customerLink.ts';
 import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { firstName, isLive, useToday } from '../useDesks.ts';
 import { TODAY_COPY } from '../today/copy.ts';
+import { requestPath } from '../today/requestLink.ts';
 import { doneCaption, type UncountedAnswer } from './doneSignals.ts';
 import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY, UNCOUNTED_ANSWER_LINES } from './ideas.ts';
 import { useDoneSignals, type Done } from './useDoneSignals.ts';
@@ -28,8 +29,6 @@ export interface ThingsToTryProps {
   answered: Iterable<{ state: Decision['state'] }>;
   /** The decision of the request answered on Today last, as last read, kept when its card is dismissed. */
   latestAnswer: { decision_id: string; state: Decision['state']; owner_plain?: string | null } | null;
-  /** "Open the request": brings the held request's card into view and focus. */
-  onFocusRequest: () => void;
 }
 
 const [CHAT, BREAK, ANSWER, CREATE] = THINGS_TO_TRY;
@@ -99,7 +98,7 @@ function routerClick(go: () => void) {
  * public page always opens in a new tab, never on Today. "Hide this list" is
  * remembered in this browser when it can be, and a hidden list reads nothing.
  */
-export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest }: ThingsToTryProps) {
+export function ThingsToTry({ firstHeld, answered, latestAnswer }: ThingsToTryProps) {
   const { business, desk } = useOwnerDesk();
   const today = useToday(desk.desk_id, { retryOnMount: false });
   const navigate = useNavigate();
@@ -196,7 +195,7 @@ export function ThingsToTry({ firstHeld, answered, latestAnswer, onFocusRequest 
             detail={answerWaits ? heldLine(firstHeld?.held_by) : TODAY_COPY.heldNone}
             detailRoom={answerWaits ? ANSWER_ROOM : undefined}
             end={answerEnd}
-            step={answerWaits ? { label: 'Open the request', onClick: onFocusRequest } : null}
+            step={answerWaits && firstHeld?.decision ? { label: 'Open the request', href: requestPath(desk.desk_id, firstHeld.decision.decision_id, firstHeld.session) } : null}
           />
           <Thing
             icon="plus"

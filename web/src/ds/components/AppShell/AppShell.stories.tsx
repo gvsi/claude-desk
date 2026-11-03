@@ -4,6 +4,7 @@ import { expect, fn, within } from 'storybook/test';
 import { rivera } from '../../fixtures/index.ts';
 import { loadWebFonts } from '../../test/fonts.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
+import { fixtureHeldRule } from '../../test/heldRule.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { Greeting } from '../Greeting/Greeting.tsx';
 import { ReviewerBar } from '../ReviewerBar/ReviewerBar.tsx';
@@ -34,9 +35,9 @@ function RouterLink({ children, href, ...props }: SidebarLinkProps) {
 const hrefs = {
   today: '/app/desk-rivera-main/today',
   conversations: '/app/desk-rivera-main/conversations',
-  people: '/app/desk-rivera-main/people',
   rules: '/app/desk-rivera-main/rules',
   safety: '/app/desk-rivera-main/safety',
+  people: '/app/desk-rivera-main/people',
   profile: '/app/desk-rivera-main/profile',
   share: '/app/desk-rivera-main/share',
   knowledge: '/app/desk-rivera-main/knowledge',
@@ -77,10 +78,10 @@ const sidebar = (
 );
 
 /** The nine pages, including Knowledge, without Connectors. */
-const PAGES = ['Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
+const PAGES = ['Today', 'Conversations', 'Rules', 'Safety', 'Customers', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
 /** The ten pages with Connectors after Rules and Knowledge just above Settings. */
-const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Customers', 'Rules', 'Connectors', 'Safety', 'Profile', 'Share', 'Knowledge', 'Settings'];
+const PAGES_WITH_CONNECTORS = ['Today', 'Conversations', 'Rules', 'Connectors', 'Safety', 'Customers', 'Profile', 'Share', 'Knowledge', 'Settings'];
 
 /** The words of each page row in a nav, in order (a row's count is read separately). */
 function pageNames(nav: HTMLElement): string[] {
@@ -101,7 +102,7 @@ const today = (
       <div style={{ maxWidth: 'var(--size-reading)' }}>
         <ApprovalCard
           decision={rivera.decisions.held}
-          heldBy={rivera.ruleCards['rv-quote'].reason}
+          rule={fixtureHeldRule(rivera.decisions.held)}
           waiting="Web chat, 2 min ago"
           onAnswer={fn()}
         />
@@ -114,6 +115,8 @@ const meta = {
   title: 'Layout/AppShell',
   component: AppShell,
   args: {
+    todayHref: hrefs.today,
+    linkComponent: RouterLink,
     business: rivera.business.name,
     sidebar,
     banner: <ReviewerBar ownerName={rivera.business.ownerName} onStartOver={fn()} />,
@@ -504,7 +507,7 @@ export const Skeleton: Story = {
         />
       </div>
       <div data-shaped-frame aria-hidden="true" ref={(element) => element?.setAttribute('inert', '')}>
-        <AppShell skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
+        <AppShell todayHref={hrefs.today} skeleton business="" banner={<ReviewerBarSkeleton />} sidebar={<SidebarSkeleton rows={9} about={ABOUT.links.length} />}>
           <div />
         </AppShell>
       </div>

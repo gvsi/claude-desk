@@ -32,12 +32,12 @@ export const PaymentLink: Story = {
   play: async ({ args, canvas, userEvent }) => {
     // The reason, then the words that say what it enforces, joined by " · " in secondary meta.
     const reason = canvas.getByText(link.reason);
-    expectComputed(reason, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(reason, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     const words = canvas.getByText('Anyone · Up to $300 · Checked by the reviewer');
-    expectComputed(words, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(words, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     // The outcome at the right, with the card's amount limit.
     const button = canvas.getByRole('button', {
-      name: `Automatic up to $300; over $300, ask me first. Change the outcome of: ${link.reason}`,
+      name: `Allow. Change the outcome of: ${link.reason}`,
     });
     await expect(button.getBoundingClientRect().left).toBeGreaterThan(words.getBoundingClientRect().right);
     // No shared line on a tool's own rule.
@@ -58,19 +58,19 @@ export const Shared: Story = {
     shared: rivera.sharedChargeShared,
   },
   parameters: {
-    canvasNote: "The shared rule is the demo agent's charges up to $20, automatic, read as \"Automatic up to $20; over $20, ask me first\"; the board's example is illustrative.",
+    canvasNote: "The shared rule is the demo agent's charges up to $20, automatic, read as \"Allow\"; the board's example is illustrative.",
   },
   play: async ({ canvas, canvasElement }) => {
     // limit_reads_automatic_up_to
-    const button = canvas.getByRole('button', { name: `Automatic up to $20; over $20, ask me first. Change the outcome of: ${shared.reason}` });
-    await expect(button).toHaveTextContent('Automatic up to $20; over $20, ask me first');
+    const button = canvas.getByRole('button', { name: `Allow. Change the outcome of: ${shared.reason}` });
+    await expect(button).toHaveTextContent('Allow');
     await expect(canvas.getByText("Alex Kim's assistant · Up to $20")).toBeVisible();
     // shared_rule_says_what_it_covers: the shared icon, hidden, and the words in caption type.
     const line = canvasElement.querySelector<HTMLElement>('.cd-rule-row__shared > span');
     if (line === null) throw new Error('No shared line');
     await expect(line).toHaveTextContent(`Shared rule. ${SHARED_APPLIES_TO}`);
     await expect(line).toBeVisible();
-    expectComputed(line, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     // Each tool's title is its own user-text item, set off on a line of its own under the app's words.
     for (const title of rivera.sharedChargeShared.titles) expectUserText(line, title);
     const titles = [...line.querySelectorAll<HTMLElement>('[data-copy="user"]')];
@@ -113,11 +113,10 @@ export const NarrowMaxLimit: Story = {
     await expect(width).toBe(320);
     // Under 640 px the outcome sits on its own line, under the words, lined up with them.
     const words = canvas.getByText('Verified customers · Up to $10,000');
-    const button = canvas.getByRole('button', { name: /^Automatic up to \$10,000; over \$10,000, ask me first\./ });
+    const button = canvas.getByRole('button', { name: /^Allow\./ });
     await expect(button.getBoundingClientRect().top).toBeGreaterThanOrEqual(words.getBoundingClientRect().bottom);
     await expect(Math.round(button.getBoundingClientRect().left)).toBe(Math.round(words.getBoundingClientRect().left));
-    // The phrase wraps inside the button, and nothing scrolls sideways.
-    await expect(button.getBoundingClientRect().height).toBeGreaterThan(32);
+    // Nothing scrolls sideways.
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);

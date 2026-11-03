@@ -5,6 +5,7 @@ import { HeldRequest, type AnsweredFocus } from '../approvals/HeldRequest.tsx';
 import type { HeldItem, UseAnswer } from '../approvals/useAnswer.ts';
 import { CallbackCard, type CallbackItem } from '../handoffs/CallbackCard.tsx';
 import { ReadFailed } from '../ReadFailed.tsx';
+import type { RequestRules } from '../rules/useRequestRules.ts';
 import { heldOldestFirst } from '../useDesks.ts';
 import { useTodayNow } from './todayClock.ts';
 
@@ -26,11 +27,19 @@ function countLabel(n: number): string {
 export interface NeedsYouProps {
   /** Held requests still waiting for the owner, oldest first. */
   held: readonly HeldItem[];
+  /** Requests this view drew held, now absent from Needs you, whose final decisions are being read. */
+  reading: readonly HeldItem[];
   /** Open handoffs, in the order Needs you lists them. */
   callbacks: readonly CallbackItem[];
   answers: UseAnswer;
   /** When Needs you was last read (its `dataUpdatedAt`), which tells whether `held` shows a request as it stands since a conflict. */
   readAt: number;
+  /** The active rules, once read, which name the rule that held each request. */
+  rules: RequestRules | null;
+  /** The rules' latest read failed, so the held requests can't name their rules: said with Try again while any is listed. */
+  rulesFailure: ReadFailure | null;
+  /** Tracks focus before the rules' recovered read removes its Try again. */
+  rulesRetryRef: Ref<HTMLButtonElement>;
   /** Called with each request's card as it mounts and unmounts, so "Open the request" and a request's address can focus it. */
   registerCard: (decisionId: string, el: HTMLElement | null) => void;
   /** `useAnsweredFocus` over `answers.answered`, kept by the page so a request's address can find its answered card. */
@@ -48,17 +57,35 @@ export interface NeedsYouProps {
 }
 
 /**
- * Today's "Needs you": a failed read first, when the latest one failed; then one list of the held
+ * Today's "Needs you": a failed read first, when the latest one failed, and with a request listed, a
+ * failed read of the rules its card would name; then one list of the held
  * requests and those answered here, oldest first, each an approval card answered in place, then
  * each open handoff. A request answered here stays where it was answered, with its final line and
- * Dismiss under it, until the owner dismisses it. The count counts only what is still open.
+ * Dismiss under it, until the owner dismisses it. A request seen held here that closes elsewhere
+ * stays in the same way. The count counts only what is still open.
  */
-export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answeredFocus, readFailure, retryRef, sectionRef, onDismiss, onDone }: NeedsYouProps) {
+export function NeedsYou({
+  held,
+  reading,
+  callbacks,
+  answers,
+  readAt,
+  rules,
+  rulesFailure,
+  rulesRetryRef,
+  registerCard,
+  answeredFocus,
+  readFailure,
+  retryRef,
+  sectionRef,
+  onDismiss,
+  onDone,
+}: NeedsYouProps) {
   const titleId = useId();
   const now = useTodayNow();
   const open = held.length + callbacks.length;
   // Each request keeps its place, and its card, from held to answered.
-  const requests = heldOldestFirst([...held, ...[...answers.answered.values()].map((entry) => entry.item)]);
+  const requests = heldOldestFirst([...held, ...reading, ...[...answers.answered.values()].map((entry) => entry.item)]);
   // The chats with a request held and not yet answered here: their handoff cards leave Claude's note out.
   const heldChats = new Set(held.filter((item) => !answers.answered.has(item.decision.decision_id)).map((item) => item.decision.session_id));
   const { register: registerAnswered } = answeredFocus;
@@ -83,13 +110,15 @@ export function NeedsYou({ held, callbacks, answers, readAt, registerCard, answe
     <section ref={sectionRef} className="cd-today__section" aria-labelledby={titleId} tabIndex={-1}>
       <SectionHeader id={titleId} title="Needs you" count={open > 0 ? { n: open, label: countLabel(open) } : undefined} />
       <ReadFailed failure={readFailure} buttonRef={retryRef} />
+      {/* One line at a time: Needs you's own failure first, then the rules', once a request is listed. */}
+      {readFailure === null && requests.length > 0 ? <ReadFailed failure={rulesFailure} buttonRef={rulesRetryRef} /> : null}
       {requests.length + callbacks.length > 0 ? (
         <ul className="cd-needs-you">
           {requests.map((item) => {
             const id = item.decision.decision_id;
             return (
               <li key={id} className="cd-needs-you__item">
-                <HeldRequest item={item} answers={answers} readAt={readAt} now={now} registerCard={register}>
+                <HeldRequest item={item} answers={answers} readAt={readAt} now={now} rules={rules} registerCard={register}>
                   {answers.answered.has(id) ? (
                     <div className="cd-needs-you__dismiss">
                       <Button variant="ghost" onClick={() => dismiss(id)}>

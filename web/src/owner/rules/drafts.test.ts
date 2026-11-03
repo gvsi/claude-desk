@@ -390,7 +390,7 @@ describe('rule drafts', () => {
     // so neither side repeats it: the row's title names it (N-Conn-18).
     const quote = rowFor('rv-quote');
     expect(quote).toMatchObject({ change: 'changed', title: 'Quote', connector: view('quotes'), changed: ['limits'] });
-    expect(quote.before).toEqual({ mode: 'auto', reason: ruleCards['rv-quote'].reason, words: ruleWords(ruleCards['rv-quote'], PEOPLE) });
+    expect(quote.before).toMatchObject({ mode: 'auto', reason: ruleCards['rv-quote'].reason, words: ruleWords(ruleCards['rv-quote'], PEOPLE) });
     expect(quote.after?.appliesTo).toBeUndefined();
     expect(quote.after?.words).toContainEqual({ field: 'limits', text: 'Discounts up to 10%' });
 
@@ -399,12 +399,12 @@ describe('rule drafts', () => {
     // to the row's title, which names it.
     const shared = rowFor('card-charges');
     expect(shared).toMatchObject({ change: 'added', title: 'Payment link and Charge within a signed limit', connector: view('payments'), before: null, changed: [] });
-    expect(shared.after).toEqual({ mode: 'auto', limit: '$300', reason: charges.reason, words: ruleWords(charges, PEOPLE) });
+    expect(shared.after).toMatchObject({ mode: 'auto', limit: '$300', reason: charges.reason, words: ruleWords(charges, PEOPLE) });
 
     // A card retargeted from Payment link to every tool that charges money says so on both sides.
     const link = rowFor('rv-link');
     expect(link).toMatchObject({ change: 'changed', title: 'Payment link', connector: view('payments'), changed: ['applies_to'] });
-    expect(link.before).toEqual({
+    expect(link.before).toMatchObject({
       appliesTo: 'Payment link',
       mode: 'auto',
       limit: '$300',
@@ -433,11 +433,11 @@ describe('rule drafts', () => {
     const draft = draftFromDiff(rulesDraft({ cards: preset, diff: { added: preset, removed: owner, changed: [] } }), version(7, owner), 'ask_first');
     const rows = changeRows(draft, PEOPLE, TOOLS);
 
-    // A changed row per dropped card, personal ones included: nothing in the preset covers them, so
-    // each falls to the default ask, and only a new outcome is tagged. The rows go by connector, as
+    // A removed row per dropped card, personal ones included: nothing in the preset covers them.
+    // Each shows Before alone. The rows go by connector, as
     // the Connectors page lists them, and by tool within one (N-Conn-18). The shared rule for the
     // agent's charges sits with Payments, right after the first tool it covers, as the board draws it.
-    const dropped = rows.filter((row) => row.change === 'changed');
+    const dropped = rows.filter((row) => row.change === 'removed');
     expect(dropped.map((row) => row.key)).toEqual([
       'rv-quote',
       'rv-book-wk',
@@ -474,9 +474,9 @@ describe('rule drafts', () => {
       'See charges',
       'Refund',
     ]);
-    // The default ask is for the same tool, so neither side names a target: the row's title does.
+    // The removed rule has no After side; its Before still names its own tool.
     for (const row of dropped) {
-      expect(row.after, row.key).toEqual(DEFAULT_SIDE);
+      expect(row.after, row.key).toBeNull();
       expect(row.before?.appliesTo, row.key).toBeUndefined();
     }
     const byKey = new Map(rows.map((row) => [row.key, row]));
@@ -487,7 +487,7 @@ describe('rule drafts', () => {
     // The preset's own cards, which Turner's rules didn't have here, are added rows.
     const added = rows.filter((row) => row.change === 'added');
     expect(added.map((row) => row.key)).toEqual(ids(preset));
-    expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', "Confirm it's them", 'Website reading', 'Memory reading', 'Web search']);
+    expect(added.map((row) => row.title)).toEqual(['Find open times', 'Save a lead', 'Request a callback', 'Confirm it’s them', 'Website reading', 'Memory reading', 'Web search']);
     expect(rows).toHaveLength(owner.length + preset.length);
   });
 
@@ -513,7 +513,7 @@ describe('rule drafts', () => {
     expect(rowFor('card-never-private')?.connector).toBeUndefined();
     // An automatic one covers a tool with other effects only jointly, so messages alone don't
     // cover Share a document, which also touches private data: only "Confirm it's them".
-    expect(rowFor('card-auto-messages')).toMatchObject({ title: "Confirm it's them", connector: view('verification') });
+    expect(rowFor('card-auto-messages')).toMatchObject({ title: 'Confirm it’s them', connector: view('verification') });
     // The added rows by the tools' places: Verification, then Payments, then the one that spans.
     // Each shared rule's row says so ("Payments · Shared rule", or "Shared rule" leading with no
     // connector); a tool's own rule doesn't.
@@ -537,7 +537,7 @@ describe('rule drafts', () => {
     // A shared rule dropped with nothing to go to, or changed in place, is still the shared rule.
     const withShared = version(7, [...RIVERA_CARDS, rivera.sharedChargeCard]);
     const dropped = changeRows(draftFromDiff(rulesDraft({ cards: RIVERA_CARDS, diff: { added: [], removed: [rivera.sharedChargeCard], changed: [] } }), withShared), PEOPLE, TOOLS);
-    expect(dropped).toEqual([expect.objectContaining({ key: 'rv-agent-charges', change: 'changed', connector: view('payments'), shared: true, after: DEFAULT_SIDE })]);
+    expect(dropped).toEqual([expect.objectContaining({ key: 'rv-agent-charges', change: 'removed', connector: view('payments'), shared: true, after: null })]);
     const lower = changed(rivera.sharedChargeCard, { max_amount_cents: 1500 });
     const inPlace = changeRows(
       draftFromDiff(rulesDraft({ cards: [...RIVERA_CARDS, lower], diff: { added: [], removed: [], changed: [[rivera.sharedChargeCard, lower]] } }), withShared),
@@ -655,8 +655,8 @@ describe('rule drafts', () => {
     const row = rows[2];
     expect(row).toMatchObject({ change: 'changed', title: 'Share a document, See charges and Refund', shared: true, changed: ['applies_to', 'mode', 'who', 'reason'] });
     expect(row?.connector).toBeUndefined();
-    expect(row?.before).toEqual({ appliesTo: 'See charges', mode: 'auto', reason: autoPrivate.reason, words: ruleWords(autoPrivate, PEOPLE) });
-    expect(row?.after).toEqual({ appliesTo: 'Share a document, See charges and Refund', mode: 'never', reason: neverPrivate.reason, words: ruleWords(neverPrivate, PEOPLE) });
+    expect(row?.before).toMatchObject({ appliesTo: 'See charges', mode: 'auto', reason: autoPrivate.reason, words: ruleWords(autoPrivate, PEOPLE) });
+    expect(row?.after).toMatchObject({ appliesTo: 'Share a document, See charges and Refund', mode: 'never', reason: neverPrivate.reason, words: ruleWords(neverPrivate, PEOPLE) });
   });
 
   it('shared_rule_covering_less_after_a_change_names_every_tool', () => {
@@ -715,7 +715,7 @@ describe('rule drafts', () => {
     // the preset's weekday bookings, so they fall to the default ask rather than claiming "Automatic".
     expect(byKey.has('rv-book-wk')).toBe(false);
     expect(rows.filter((row) => row.title === 'Book a visit').map((row) => row.key)).toEqual(['rv-book-sat']);
-    expect(byKey.get('rv-book-sat')?.after).toEqual(DEFAULT_SIDE);
+    expect(byKey.get('rv-book-sat')?.after).toBeNull();
     expect(byKey.get('rv-book-sat')?.before?.appliesTo).toBeUndefined();
     expect(rows.filter((row) => row.change === 'added')).toEqual([]);
   });
@@ -739,8 +739,8 @@ describe('rule drafts', () => {
     // Weekday bookings from 8:00 am to 6:00 pm reach outside the 9-to-5 rule and Saturdays lie outside
     // it, so both fall to the default ask rather than claiming "Automatic"; the 9-to-5 rule, which no
     // dropped rule goes to, is added at "Automatic".
-    expect(byKey.get('rv-book-wk')?.after).toEqual(DEFAULT_SIDE);
-    expect(byKey.get('rv-book-sat')?.after).toEqual(DEFAULT_SIDE);
+    expect(byKey.get('rv-book-wk')?.after).toBeNull();
+    expect(byKey.get('rv-book-sat')?.after).toBeNull();
     expect(byKey.get('preset-book-weekday')).toMatchObject({ change: 'added', title: 'Book a visit', after: { mode: 'auto' } });
     expect(byKey.get('preset-book-weekday')?.after?.appliesTo).toBeUndefined();
     expect([...byKey.values()].filter((row) => row.change === 'added').map((row) => row.key)).toEqual(['preset-book-weekday']);
@@ -784,7 +784,7 @@ describe('rule drafts', () => {
     const draft = draftFromVersion(version(7, noPayments), version(8, noPayments), turnedOn);
     expect(draft.turnedOn).toEqual(turnedOn);
     const rows = changeRows(draft, PEOPLE, TOOLS);
-    expect(rows).toEqual([
+    expect(rows).toMatchObject([
       { key: 'turned-on:native.payment_link', change: 'turned_on', title: 'Payment link', connector: view('payments'), before: null, after: DEFAULT_SIDE, changed: [] },
       {
         key: 'turned-on:native.charge_mandate',
@@ -807,7 +807,7 @@ describe('rule drafts', () => {
     // A rule for one person runs for her, so the tool turns on at "Automatic" in her rule's words.
     const forDana: RuleCard = { ...ruleCards['rv-link'], card_id: 'card-dana-links', who: 'person', person_id: DANA.personId, reason: 'Dana pays by link up to $300.' };
     const linkOn = (cards: RuleCard[]) => changeRows(draftFromVersion(version(7, cards), version(8, cards), turnedOn.slice(0, 1)), PEOPLE, TOOLS)[0]?.after;
-    expect(linkOn([...noPayments, forDana])).toEqual({ mode: 'auto', limit: '$300', reason: forDana.reason, words: ruleWords(forDana, PEOPLE) });
+    expect(linkOn([...noPayments, forDana])).toMatchObject({ mode: 'auto', limit: '$300', reason: forDana.reason, words: ruleWords(forDana, PEOPLE) });
     // At the same limit as the rule for anyone, the row reads by that rule; above it, by hers.
     expect(linkOn([...noPayments, ruleCards['rv-link'], forDana])).toMatchObject({ mode: 'auto', limit: '$300', reason: ruleCards['rv-link'].reason });
     const danaMore: RuleCard = { ...forDana, card_id: 'card-dana-links-450', max_amount_cents: 45_000, reason: 'Dana pays by link up to $450.' };
@@ -820,7 +820,7 @@ describe('rule drafts', () => {
     const refundAuto: RuleCard = { ...ruleCards['rv-refund'], card_id: 'card-refund-auto', mode: 'auto', who: 'anyone', max_amount_cents: 5_000, reason: 'Refunds up to $50 go through.' };
     const neverPayOut: RuleCard = { card_id: 'card-never-pay-out', applies_to: 'effect:pay_out', mode: 'never', who: 'anyone', reason: 'Money never goes out.' };
     const noRefund = RIVERA_CARDS.filter((card) => card.card_id !== 'rv-refund');
-    expect(turnOn([...noRefund, refundAuto, neverPayOut])).toEqual({ mode: 'never', reason: neverPayOut.reason, words: ruleWords(neverPayOut, PEOPLE) });
+    expect(turnOn([...noRefund, refundAuto, neverPayOut])).toMatchObject({ mode: 'never', reason: neverPayOut.reason, words: ruleWords(neverPayOut, PEOPLE) });
     // An automatic and an ask rule at the same specificity ask, whichever comes first.
     const refundAsk: RuleCard = { ...refundAuto, card_id: 'card-refund-ask', mode: 'ask', max_amount_cents: null, reason: 'Refunds wait for you.' };
     expect(turnOn([...noRefund, refundAuto, refundAsk])).toMatchObject({ mode: 'ask', reason: refundAsk.reason });
@@ -832,7 +832,7 @@ describe('rule drafts', () => {
     // out alone, Refund asks; with private data for verified customers too, a verified customer's
     // refund runs on its own, so Refund turns on at Automatic, as Rules would read it.
     const autoPayOut: RuleCard = { ...neverPayOut, card_id: 'card-auto-pay-out', mode: 'auto', reason: 'Money goes out on its own.' };
-    expect(turnOn([...noRefund, autoPayOut])).toEqual(DEFAULT_SIDE);
+    expect(turnOn([...noRefund, autoPayOut])).toMatchObject(DEFAULT_SIDE);
     const verifiedData: RuleCard = { ...autoPayOut, card_id: 'card-verified-data', applies_to: 'effect:private_data', who: 'verified', reason: 'Verified customers see their own records.' };
     expect(turnOn([...noRefund, autoPayOut, verifiedData])).toMatchObject({ mode: 'auto', reason: autoPayOut.reason });
     const anyoneData: RuleCard = { ...verifiedData, card_id: 'card-anyone-data', who: 'anyone' };
@@ -933,7 +933,7 @@ describe('rule drafts', () => {
       },
     ];
     for (const { name, tool, cards, mode, limit } of cases) {
-      const onRules = hubSections({ active: version(8, cards), tools: TOOLS, preset: null }, PEOPLE)
+      const onRules = hubSections({ active: version(8, cards), tools: TOOLS }, PEOPLE)
         .flatMap((section) => section.tools)
         .find((row) => row.key === tool);
       const turnedOn = changeRows(draftFromVersion(version(7, cards), version(8, cards), [toolRow(tool, { status: 'needs_review' })]), PEOPLE, TOOLS)[0]?.after;

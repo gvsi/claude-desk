@@ -11,11 +11,11 @@
   overflow-wrap: anywhere;
 }
 
-/* Centers the 6 px dot on the caption's 17 px first line. */
+/* Centers the 6 px dot on the caption's 18 px first line. */
 .cd-margin-line__dot {
   display: flex;
   flex: none;
-  padding-top: 5px;
+  padding-top: var(--space-6);
 }
 
 .cd-margin-line__text {
@@ -92,7 +92,7 @@
 
 .cd-transcript-row--live.cd-transcript-row--following > .cd-transcript-row__margin .cd-margin-line__dot > *,
 .cd-transcript-row--live.cd-transcript-row--following > .cd-transcript-row__margin .cd-margin-line__check path {
-  animation-delay: calc(var(--motion-follow) * (var(--cd-follow-next) + var(--cd-follow-line, 1) - 1));
+  animation-delay: var(--cd-follow-delay);
 }
 
 @keyframes cd-margin-line-dot {

@@ -72,8 +72,11 @@
   padding-top: var(--space-16);
 }
 
+/* A title that takes two lines splits them evenly, so no word is left alone on the second ("Try it
+   with a demo key" in a narrow column). */
 .cd-agents-card__title {
   margin: 0;
+  text-wrap: balance;
 }
 
 .cd-agents-card__lead {

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { LeadRow, PersonRow } from '../components/PersonRow/PersonRow.tsx';
@@ -77,7 +78,7 @@ function HistoryPeople() {
               ))}
             </ul>
           </section>
-          <ConceptFooter />
+          <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
         </div>
       </div>
     </RiveraFrame>
@@ -150,20 +151,21 @@ export const Board: Story = {
       await expect(tag.getBoundingClientRect().top).toBeGreaterThanOrEqual(time.getBoundingClientRect().bottom);
     }
     // Every lead keeps one height, tagged or not.
-    await expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([51]));
+    await expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([53]));
 
     await expectFooter(canvasElement);
     await expectFooterAtFoot(canvasElement);
 
-    // focus_order_is_logical: the business, the pages, Claude acts for you, then the caption, the page's one
-    // stop, and the footer's author link.
+    // The author link is in the sidebar before Claude acts for you; the caption is the page's stop.
     const column = canvas.getByRole('complementary', { name: 'Claude Desk' });
     const reached = await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(within(column).getByRole('navigation', { name: 'Main' })).getAllByRole('link'),
+      footerLink(canvasElement),
       within(column).getByRole('switch', { name: 'Claude acts for you' }),
       caption,
     ]);
-    await expect(reached.filter((stop) => main.contains(stop))).toEqual([caption, footerLink(canvasElement)]);
+    await expect(reached.filter((stop) => main.contains(stop))).toEqual([caption]);
+    await expect(column.contains(footerLink(canvasElement))).toBe(true);
   },
 };

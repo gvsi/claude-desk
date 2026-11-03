@@ -254,8 +254,8 @@ export const PaymentLimitEdit: Story = {
     const main = within(canvasElement).getByRole('main');
     const payments = section(main, 'Payments');
     const line = one(payments, '.cd-connector-section__above');
-    // The field open in Payments, 163 px with its hairline; Stripe's limit still reads.
-    await expect(line.getBoundingClientRect().height).toBe(163);
+    // The field open in Payments, 165 px with its hairline; Stripe's limit still reads.
+    await expect(line.getBoundingClientRect().height).toBe(165);
     const field = within(line).getByRole('textbox', { name: 'Most a payment can be without asking you, in dollars' });
     await expect(field).toHaveValue('1000');
     await expect(field).toHaveAccessibleDescription(rivera.paymentLimit.hint);

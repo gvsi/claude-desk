@@ -122,7 +122,7 @@ export const Payments: Story = {
       await expect(sharedLine).toBeVisible();
       await expectSharedTitles(rows[0] as HTMLElement);
     }
-    await expect(within(link).getByRole('button', { name: /^Automatic up to \$300; over \$300, ask me first\. Change the outcome of: / })).toBeVisible();
+    await expect(within(link).getByRole('button', { name: `Allow. Change the outcome of: ${rivera.ruleCards['rv-link'].reason}` })).toBeVisible();
     // The turn-off panel: its heading, its line and the button that asks first.
     const off = canvas.getByRole('button', { name: 'Turn off Payments' });
     expectComputed(off, SPEC.secondaryMain);
@@ -300,7 +300,7 @@ export const Refund: Story = {
     for (const outcome of ['Waiting for your answer', 'Stopped', 'You allowed it']) await expect(within(page.main).getByText(outcome)).toBeVisible();
     // As the board sets them: why in caption type, under what was asked.
     for (const why of page.main.querySelectorAll<HTMLElement>('.cd-recent-requests__why')) {
-      expectComputed(why, { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' });
+      expectComputed(why, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
     }
     // focus_order_is_logical: the trail, the rule's outcome and Add a rule, the composer and its chips, then the requests.
     await expectTabOrder(
@@ -338,7 +338,7 @@ export const Quote: Story = {
     await expect(within(page.main).queryByText(/Definition/)).toBeNull();
     await expect(within(page.main).getByText('Built in')).toBeVisible();
     const [menu] = expectOutcomeMenus(page.main);
-    await expect(menu).toHaveAccessibleName('Automatic. Change the outcome of: Quotes from your price list, at list price.');
+    await expect(menu).toHaveAccessibleName('Allow. Change the outcome of: Quotes from your price list, at list price.');
     const rows = within(page.main).getAllByRole('link', { name: /asked/ });
     await expect(rows).toHaveLength(rivera.recentRequests.quote.length);
     await expectTabOrder(

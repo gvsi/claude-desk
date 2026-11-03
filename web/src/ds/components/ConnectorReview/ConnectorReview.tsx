@@ -4,6 +4,7 @@ import { BUSINESS_WORDS, type BusinessSetupRow } from '../../../owner/connectors
 import type { IconName } from '../../icons/index.tsx';
 import { Button } from '../Button/Button.tsx';
 import { useSendOnce } from '../Button/useSendOnce.ts';
+import { RuleSentence, type RuleSentenceProps } from '../RuleSentence/RuleSentence.tsx';
 import { Card } from '../Card/Card.tsx';
 import { ConnectorIcon } from '../ConnectorIcon/ConnectorIcon.tsx';
 import { ConnectorName, type ConnectorView } from '../ConnectorName/ConnectorName.tsx';
@@ -28,7 +29,7 @@ export interface ReviewToolView {
   /** The tool's key on the screen: its `ToolName`. */
   key: string;
   name: string;
-  /** What it does and its effects. */
+  /** What it does. Its effects show only in its Details, on Rules. */
   description: string;
   /** The outcome it starts at: "Ask me first" for every new tool, until the owner changes it. */
   mode: RuleMode;
@@ -45,6 +46,9 @@ interface ReviewControls {
   /** The heading, for focus when the screen replaces the tools list. */
   titleRef?: Ref<HTMLHeadingElement>;
   tools: readonly ReviewToolView[];
+  /** Setup shows each tool’s starting rule in one shared box. Other reviews keep their controls. */
+  startingRules?: readonly RuleSentenceProps[];
+  moneyHint?: boolean;
   /** Makes each tool's outcome a menu; the pick goes to the screen with the tool's key. */
   onChangeOutcome?: (key: string, mode: RuleMode) => void;
   /** Called once per press; the review then waits until `pending` has come and gone or an error is delivered. */
@@ -84,7 +88,7 @@ function coverageLines(tool: ReviewToolView): string[] {
     if (rule.mode === 'always_on') return `Covered by your always-on rule: ${rule.text}`;
     // An outcome this build doesn't know is left out, never guessed.
     if (!Object.hasOwn(OUTCOME_WORDS, rule.mode)) return `Covered by your rule: ${rule.text}`;
-    return `Covered by your rule: ${rule.text} · ${outcomePhrase(rule.mode, rule.limit)}`;
+    return `Covered by your rule: ${rule.text} · ${outcomePhrase(rule.mode)}`;
   });
 }
 
@@ -93,7 +97,7 @@ function coverageLines(tool: ReviewToolView): string[] {
  * outcome it starts at. "Turn it on" asks the screen to draft the change, which shows in
  * `ChangeReview` before anything runs.
  */
-export function ConnectorReview({ connector, job, intro, connection, onConnect, tools, onChangeOutcome, onTurnOn, onCancel, pending = false, error, titleRef }: ConnectorReviewProps) {
+export function ConnectorReview({ connector, job, intro, connection, onConnect, tools, startingRules, moneyHint = false, onChangeOutcome, onTurnOn, onCancel, pending = false, error, titleRef }: ConnectorReviewProps) {
   const { waiting, send } = useSendOnce<'turn_on' | 'connect'>(pending, error);
   const failed = error !== undefined && error.trim() !== '';
   const builtIn = connector?.source.kind === 'built_in';
@@ -158,24 +162,31 @@ export function ConnectorReview({ connector, job, intro, connection, onConnect, 
             <li key={tool.key} className="cd-connector-review__tool">
               <div className="cd-connector-review__layout">
                 <div className="cd-connector-review__text">
-                  <p className="cd-connector-review__name cd-type-body">{tool.name}</p>
+                  <p className="cd-connector-review__name cd-type-body"><span className="cd-user-name" data-copy="user">{tool.name}</span></p>
                   <p className="cd-connector-review__description cd-type-meta">{tool.description}</p>
-                  {coverageLines(tool).map((line, index) => (
+                  {(startingRules ? (tool.uncoveredLine ? [tool.uncoveredLine] : []) : coverageLines(tool)).map((line, index) => (
                     <p key={`${index}-${line}`} className="cd-connector-review__covered cd-type-meta">
                       {line}
                     </p>
                   ))}
                 </div>
-                <OutcomeMenu
+                {startingRules ? null : <OutcomeMenu
                   label={tool.name}
                   value={tool.mode}
                   onChange={onChangeOutcome ? (mode) => onChangeOutcome(tool.key, mode) : undefined}
                   disabled={waiting}
-                />
+                />}
               </div>
             </li>
           ))}
         </ul>
+        {app !== 'not_connected' && startingRules && startingRules.length > 0 ? (
+          <section className="cd-connector-review__rules" aria-label={job ? 'The rule that will cover it' : 'The rules that will cover them'}>
+            <h2 className="cd-connector-review__rules-title cd-type-caption">{job ? 'The rule that will cover it' : 'The rules that will cover them'}</h2>
+            {startingRules.map((rule, index) => <RuleSentence key={index} {...rule} />)}
+          </section>
+        ) : null}
+        {app !== 'not_connected' && moneyHint ? <p className="cd-connector-review__money cd-type-meta">Until you set a limit in Rules, every payment asks you first.</p> : null}
       </Card>
       <div className="cd-connector-review__controls">
         <div className="cd-connector-review__buttons">

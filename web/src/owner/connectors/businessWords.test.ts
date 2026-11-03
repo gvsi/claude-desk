@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 
+import type { HoursWindow } from '../../api/contracts.ts';
 import type { BusinessToolDef } from '../../api/views.ts';
 import { businessGlyph, businessLine, businessOwnerLine, businessRows, businessRulesDescription, isBusinessDef } from './businessWords.ts';
 
@@ -7,6 +8,30 @@ const booking: BusinessToolDef = {
   title: 'Book a free intro call', description: 'Books an intro call.',
   config: { block: 'typed_booking', appointment_type: 'Free intro call', minutes: 20 },
 };
+
+it('names stored hours in a booking line using the rule sentence words', () => {
+  const hours: HoursWindow[] = [{ days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' }];
+  const line = 'Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm';
+  expect(businessLine(booking, hours)).toBe(line);
+  expect(businessRulesDescription(booking, hours)).toBe(line);
+});
+
+it('drops the hours phrase when no hours are stored', () => {
+  for (const hours of [undefined, []]) {
+    expect(businessLine(booking, hours)).toBe('Free intro call, 20 minutes');
+    expect(businessRulesDescription(booking, hours)).toBe('Free intro call, 20 minutes');
+  }
+});
+
+it('joins two stored hours windows in the rule sentence words', () => {
+  const hours: HoursWindow[] = [
+    { days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '09:00:00', end: '18:00:00' },
+    { days: ['sat'], start: '10:00:00', end: '13:00:00' },
+  ];
+  const line = 'Free intro call, 20 minutes, on weekdays, 9:00 am to 6:00 pm and on Saturdays, 10:00 am to 1:00 pm';
+  expect(businessLine(booking, hours)).toBe(line);
+  expect(businessRulesDescription(booking, hours)).toBe(line);
+});
 
 it('returns the signed owner line for every block and no line for an unknown block', () => {
   expect(businessOwnerLine({ block: 'intake' })).toBe("Saves the person's name, contact details and answers to your questions, so you can follow up.");
@@ -30,7 +55,7 @@ it('describes Rules intake by its questions and other jobs by their configuratio
 
 it('describes valid Rules configuration independently of missing or blank business titles', () => {
   for (const title of [undefined, ' ']) {
-    expect(businessRulesDescription({ ...booking, title } as BusinessToolDef)).toBe('Free intro call, 20 minutes, in your opening hours');
+    expect(businessRulesDescription({ ...booking, title } as BusinessToolDef)).toBe('Free intro call, 20 minutes');
     expect(businessRulesDescription({
       title, config: { block: 'intake', questions: ['Which year?'] },
     } as BusinessToolDef)).toBe('Asks: Which year?');
@@ -39,7 +64,7 @@ it('describes valid Rules configuration independently of missing or blank busine
 });
 
 it('describes a booking and follows its starting outcome without a Who row', () => {
-  expect(businessLine(booking)).toBe('Free intro call, 20 minutes, in your opening hours');
+  expect(businessLine(booking)).toBe('Free intro call, 20 minutes');
   expect(businessGlyph(booking.config)).toBe('calendar');
   expect(businessRows(booking, 'auto')).toEqual([
     { label: 'Appointment', value: 'Free intro call' },
@@ -53,7 +78,7 @@ it('describes a booking and follows its starting outcome without a Who row', () 
 it('accepts empty descriptions and formats a zero-dollar purpose payment', () => {
   const emptyDescription = { ...booking, description: '' };
   expect(isBusinessDef(emptyDescription)).toBe(true);
-  expect(businessLine(emptyDescription)).toBe('Free intro call, 20 minutes, in your opening hours');
+  expect(businessLine(emptyDescription)).toBe('Free intro call, 20 minutes');
   expect(businessRows(emptyDescription, 'ask')).toEqual(businessRows(booking, 'ask'));
   const payment: BusinessToolDef = {
     title: 'Take a deposit', description: '',

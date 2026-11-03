@@ -1,11 +1,3 @@
-/* The setup chat reads at 16/24: Claude's prose and the owner's own words alike. Only on setup's chat
-   (the shell's chat page), so the public chat, the owner's preview of it and Conversations keep the
-   design system's 15 px. The dock's question, Markdown and all, keeps its own type, below. */
-.cd-setup--chat :is(.cd-type-reply, .cd-visitor-message__bubble):not(.cd-setup-q3__question, .cd-setup-q3__question *) {
-  font-size: 16px;
-  line-height: 24px;
-}
-
 .cd-setup-kbd {
   display: inline-flex;
   align-items: center;
@@ -54,8 +46,8 @@
   margin: var(--space-6) 0 0;
   color: var(--text-primary);
   font-family: var(--font-serif);
-  font-size: 17px;
-  line-height: 25px;
+  font-size: 19px;
+  line-height: 28px;
 }
 
 /* Claude's question as Markdown keeps the dock's own type, its paragraphs 12 px apart and its line
@@ -91,6 +83,11 @@
 
 .cd-setup-q3__row.is-active {
   background: var(--fill-secondary);
+}
+
+/* A choice's number key stays a 22 px square: its meta-type digit is wider than the 6 px sides leave. */
+.cd-setup-q3__row .cd-setup-kbd {
+  padding-inline: var(--space-4);
 }
 
 .cd-setup-q3__row.is-active .cd-setup-kbd {
@@ -361,6 +358,16 @@
 .cd-setup-c3__decision { display: inline-flex; align-items: center; gap: var(--space-4); margin: 0; color: var(--text-secondary); }
 .cd-setup-c3__decision--accepted { color: var(--text-primary); }
 .cd-setup-c3__amount { max-width: calc(var(--space-40) * 7); }
+.cd-setup-c3__rule {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line-card);
+  border-radius: var(--radius-control);
+  min-width: 0;
+}
+.cd-setup-c3__rule-label { margin: 0 0 var(--space-6); color: var(--text-secondary); }
+.cd-setup-c3__rule .cd-rule-sentence__layout { flex-direction: row; align-items: flex-start; }
 .cd-setup-c3__failed { display: flex; flex-direction: column; gap: var(--space-12); }
 .cd-setup-c3__error { margin: 0; color: var(--status-refused); }
 .cd-setup-c3--declined .cd-setup-c3__title, .cd-setup-c3--declined dd { color: var(--text-secondary); }

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, within } from 'storybook/test';
 
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { PageHeader } from '../components/PageHeader/PageHeader.tsx';
 import { LeadRow, PersonRow } from '../components/PersonRow/PersonRow.tsx';
@@ -54,7 +55,7 @@ function PeoplePhone() {
               ))}
             </ul>
           </section>
-          <ConceptFooter />
+          <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
         </div>
       </div>
     </RiveraFrame>
@@ -104,8 +105,8 @@ export const Board: Story = {
       await expect(tag.getBoundingClientRect().top).toBeGreaterThanOrEqual(note.getBoundingClientRect().bottom);
       await expect(Math.round(time.getBoundingClientRect().right)).toBe(Math.round(row.getBoundingClientRect().right) - 10);
     }
-    // A live lead keeps its 51 px; a replayed one grows by the tag's line.
-    await expect(Math.round(rows[0]!.getBoundingClientRect().height)).toBe(51);
+    // A live lead keeps its 53 px; a replayed one grows by the tag's line.
+    await expect(Math.round(rows[0]!.getBoundingClientRect().height)).toBe(53);
     await expectFooter(canvasElement);
   },
 };

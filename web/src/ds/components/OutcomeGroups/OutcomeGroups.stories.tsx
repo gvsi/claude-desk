@@ -44,8 +44,8 @@ export const SetupRules: Story = {
     // outcome_groups_in_order: what Claude does on its own, what it asks about, what it never does,
     // each a section named by its heading, beside its outcome's status dot.
     const headings = canvas.getAllByRole('heading', { level: 2 });
-    await expect(headings.map((heading) => heading.textContent)).toEqual(['Does on its own', 'Asks you', 'Never does']);
-    await expect(Object.values(OUTCOME_GROUP_WORDS)).toEqual(['Does on its own', 'Asks you', 'Never does']);
+    await expect(headings.map((heading) => heading.textContent)).toEqual(['Allow', 'Ask me first', 'Never']);
+    await expect(Object.values(OUTCOME_GROUP_WORDS)).toEqual(['Allow', 'Ask me first', 'Never']);
     for (const mode of ['auto', 'ask', 'never'] as const) {
       const section = canvas.getByRole('region', { name: OUTCOME_GROUP_WORDS[mode] });
       const heading = within(section).getByRole('heading', { level: 2 });
@@ -53,7 +53,7 @@ export const SetupRules: Story = {
       await expect(heading.querySelector('.cd-status-dot')).toHaveAttribute('aria-hidden', 'true');
     }
     // Each rule is a row: what Claude does at the left, who it's for at the right in secondary meta.
-    const own = canvas.getByRole('region', { name: 'Does on its own' });
+    const own = canvas.getByRole('region', { name: 'Allow' });
     const rows = within(own).getAllByRole('listitem');
     await expect(rows.map((row) => row.textContent)).toEqual([
       'Quotes from your price list, at list price Anyone',
@@ -64,14 +64,14 @@ export const SetupRules: Story = {
     ]);
     const quotes = rows[0] as HTMLElement;
     const who = within(quotes).getByText('Anyone');
-    expectComputed(who, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
-    expectComputed(within(quotes).getByText(/^Quotes from/), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(who, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(quotes).getByText(/^Quotes from/), { fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(who.getBoundingClientRect().right).toBeCloseTo(quotes.getBoundingClientRect().right, 0);
-    await expect(within(canvas.getByRole('region', { name: 'Never does' })).getByText('Refunds')).toBeVisible();
+    await expect(within(canvas.getByRole('region', { name: 'Never' })).getByText('Refunds')).toBeVisible();
 
     // outcome_groups_geometry, as the board draws it: the money line's card first, then a card per
-    // group 20 px apart, each padded 16 px; the heading's 20 px line 10 px over a hairline; rows
-    // 40 px tall under hairlines.
+    // group 20 px apart, each padded 16 px; the heading's 21 px line 10 px over a hairline; rows
+    // 41 px tall under hairlines.
     const cards = [...canvasElement.querySelectorAll<HTMLElement>('.cd-card')];
     await expect(cards).toHaveLength(4);
     // money_line_leads: the limit's line, which holds over every rule below it, in weight 520,
@@ -84,14 +84,14 @@ export const SetupRules: Story = {
       const next = cards[i + 1];
       if (next) await expect(next.getBoundingClientRect().top - card.getBoundingClientRect().bottom).toBe(20);
     }
-    // The line alone, 16 px in from the card's border: 54 px.
-    await expect(Math.round((cards[0] as HTMLElement).getBoundingClientRect().height)).toBe(54);
+    // The line alone, 16 px in from the card's border: 55 px.
+    await expect(Math.round((cards[0] as HTMLElement).getBoundingClientRect().height)).toBe(55);
     const [first] = groups(canvasElement);
     const title = first?.querySelector<HTMLElement>('.cd-outcome-groups__title');
     if (!title) throw new Error('No title');
-    expectComputed(title, { lineHeight: '20px', paddingBottom: '10px' });
+    expectComputed(title, { lineHeight: '21px', paddingBottom: '10px' });
     for (const row of rows) {
-      await expect(Math.round(row.getBoundingClientRect().height)).toBe(41);
+      await expect(Math.round(row.getBoundingClientRect().height)).toBe(42);
       expectComputed(row, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '10px' });
     }
   },
@@ -101,7 +101,7 @@ export const NothingItNeverDoes: Story = {
   args: { rows: { auto: rivera.setupOutcomes.auto, ask: rivera.setupOutcomes.ask }, moneyLimit: undefined },
   parameters: { canvasNote: `${NOTE} A group with no rules is left out, and with no payment limit there's no money line.` },
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(['Does on its own', 'Asks you']);
+    await expect(canvas.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(['Allow', 'Ask me first']);
     await expect(canvasElement.querySelectorAll('.cd-card')).toHaveLength(2);
   },
 };
@@ -112,7 +112,7 @@ export const Phone: Story = {
     const width = window.innerWidth;
     await expect(width).toBe(390);
     // Who a rule is for stays at the right of its row; a long rule wraps beside it.
-    const row = within(canvas.getByRole('region', { name: 'Does on its own' })).getAllByRole('listitem')[0] as HTMLElement;
+    const row = within(canvas.getByRole('region', { name: 'Allow' })).getAllByRole('listitem')[0] as HTMLElement;
     const who = within(row).getByText('Anyone');
     await expect(who.getBoundingClientRect().right).toBeCloseTo(row.getBoundingClientRect().right, 0);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);

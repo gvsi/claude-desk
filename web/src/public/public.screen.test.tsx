@@ -23,7 +23,7 @@ import { DEMO_CODE, HELD_PROSE, SCRIPT, VISITOR_PLAIN, matchRule, turnEnd, type 
 import { RIVERA } from '../mocks/seed.ts';
 import { mockStore } from '../mocks/store.ts';
 import { watchLandings } from '../test/landings.ts';
-import { expectRevealed, expectShownWhole, watchReveal, watchRevealing } from '../test/reveal.ts';
+import { expectInSequence, expectRevealed, expectShownWhole, watchReveal, watchRevealing, watchSequence } from '../test/reveal.ts';
 import { liveSetupDesk } from '../test/liveSetupDesk.ts';
 import { mockDrain } from '../test/mockDrain.ts';
 import { VIEWPORTS, renderRoute } from '../test/renderRoute.tsx';
@@ -1141,8 +1141,10 @@ describe('public chat page', () => {
     const { screen } = await renderRoute(PAGE, { viewport });
     await ready(screen);
     const composer = screen.container.querySelector<HTMLElement>('.cd-composer__box')!;
+    // Heights are compared to within 0.05 px: layout can land a few millionths of a pixel apart
+    // between reads, while a changed line or padding moves the box by whole pixels.
     const height = composer.getBoundingClientRect().height;
-    expect(height).toBe(52);
+    expect(height).toBeCloseTo(52, 1);
     // The send fails on the server's side without being kept: the chat checks, then says so.
     mockStore.inject({ route: 'sendMessage', status: 500 });
     await type(screen, 'How much is drain clearing?');
@@ -1150,7 +1152,7 @@ describe('public chat page', () => {
     await expect.element(failed.getByText("That didn't send. Your message is still here.", { exact: true })).toBeVisible();
     await expect.element(screen.getByText('How much is drain clearing?', { exact: true })).toBeVisible();
     expect(requests('sendMessage')).toHaveLength(1);
-    expect(composer.getBoundingClientRect().height).toBe(height);
+    expect(composer.getBoundingClientRect().height).toBeCloseTo(height, 1);
     expect(screen.container.querySelector('.cd-composer__kept')).toBeNull();
     expect(requests('visitorSession')).toHaveLength(2);
 
@@ -2023,8 +2025,32 @@ describe('public chat page', () => {
     // showed. Then its words come in word by word, its quote card a beat after them, and the quote's
     // receipt a beat after the card.
     const frames = await reply;
-    expectRevealed(frames, { cards: [0.12], lines: [0.24] });
+    expectRevealed(frames, { cards: [0.2], lines: [0.4] });
     expect(frames.at(-1)?.words).toBe("Here's the price for clearing a drain, from Mike's price list.");
+  });
+
+  it('a_live_replys_parts_come_in_one_after_another_and_a_late_line_waits_its_turn', async () => {
+    const { screen } = await renderRoute(PAGE);
+    await ready(screen);
+    const played = watchSequence();
+    await say(screen, 'How much is drain clearing?');
+
+    // A line the stream brings once the reply's words are whole, while its card and its receipt are
+    // still on their beats.
+    await vi.waitFor(() => expect(document.querySelector('.cd-transcript-row--following')).not.toBeNull(), { interval: 10 });
+    const ran = chatEvents().findLast(({ ev }) => ev.type === 'receipt')?.ev;
+    if (ran?.type !== 'receipt') throw new Error('the quote ran');
+    const late = 'Saved as a new lead.';
+    mockStore.emit(RIVERA.slug, { ...ran, decision_id: `${ran.decision_id}-late`, visitor_plain: late, ledger_seq: ran.ledger_seq + 100 });
+
+    // Its words, then its card, then each line under it, the late one last: each starts once the
+    // one before has ended.
+    const parts = await played;
+    const row = [...document.querySelectorAll('.cd-claude-message')].at(-1)?.closest('.cd-transcript-row');
+    const lines = [...(row?.querySelectorAll(':scope > .cd-transcript-row__margin > *') ?? [])].map((line) => `line ${line.textContent ?? ''}`);
+    expect(lines).toHaveLength(2);
+    expect(lines.at(-1)).toContain(late);
+    expectInSequence(parts, ['words', 'card 1', ...lines]);
   });
 
   it('takes_typing_while_a_reply_is_on_its_way_and_revealed_and_sends_it_once_it_has_come_in', async () => {
@@ -2257,6 +2283,36 @@ describe('public chat page', () => {
     const reply = watchReveal();
     await say(screen, 'How much is drain clearing?');
     expectShownWhole(await reply);
+  });
+
+  it.each(['desktop', 'phone'] as const)('the_visitors_own_chat_keeps_their_words_right_and_claudes_left_on_%s', async (viewport) => {
+    // The owner's view flips the sides (board REV-FLIP); the visitor's own chat doesn't: their words
+    // on the right and Claude's on the left, so each side reads its own words on the right.
+    const { screen } = await renderRoute(PAGE, { viewport });
+    await ready(screen);
+    const question = 'How much is drain clearing?';
+    await say(screen, question);
+    const log = screen.getByRole('log').element();
+    expect(log.classList.contains('cd-transcript--owner')).toBe(false);
+    const box = log.getBoundingClientRect();
+    const bubble = rowOf(screen.getByRole('log').getByText(question, { exact: true }).element()).querySelector('.cd-visitor-message__bubble');
+    if (!bubble) throw new Error('no visitor bubble');
+    expect(Math.abs(bubble.getBoundingClientRect().right - box.right), 'their bubble ends at the right edge').toBeLessThanOrEqual(1);
+    const replies = [...log.querySelectorAll<HTMLElement>('.cd-claude-message')];
+    expect(replies.length).toBeGreaterThan(0);
+    for (const reply of replies) {
+      // Claude's reply and its receipts start at the left edge, across the chat's column.
+      for (const part of rowOf(reply).querySelectorAll(':scope > :is(.cd-transcript-row__main, .cd-transcript-row__margin)')) {
+        const rect = part.getBoundingClientRect();
+        expect(Math.abs(rect.left - box.left), "Claude's side starts at the left edge").toBeLessThanOrEqual(1);
+        expect(Math.abs(rect.width - box.width), "Claude's side takes the chat's width").toBeLessThanOrEqual(1);
+      }
+    }
+    // Its card keeps its own 520 px cap, from the left edge.
+    const card = log.querySelector('.cd-claude-message .cd-reply-card');
+    if (!card) throw new Error('no reply card');
+    expect(card.getBoundingClientRect().width).toBeLessThanOrEqual(520);
+    expect(Math.abs(card.getBoundingClientRect().left - box.left)).toBeLessThanOrEqual(1);
   });
 
   it('the_end_follows_a_reply_as_its_words_are_revealed', async () => {

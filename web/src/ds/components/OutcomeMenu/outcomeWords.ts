@@ -4,14 +4,14 @@ import type { StatusTone } from '../StatusDot/StatusDot.tsx';
 /** What a rule card does with a request it covers: `auto`, `ask` or `never`. */
 export type RuleMode = RuleCard['mode'];
 
-/** Each outcome in the owner's words, wherever a rule's outcome shows. */
+/** Each outcome in the owner's words, wherever a rule's outcome shows: Allow, Ask me first or Never. */
 export const OUTCOME_WORDS = {
-  auto: 'Automatic',
+  auto: 'Allow',
   ask: 'Ask me first',
   never: 'Never',
 } as const satisfies Record<RuleMode, string>;
 
-/** Each outcome's dot, beside its words: automatic is handled, ask me first held, never refused. */
+/** Each outcome's dot, beside its words: allow is handled, ask me first held, never refused. */
 export const OUTCOME_TONE = {
   auto: 'handled',
   ask: 'held',
@@ -19,26 +19,19 @@ export const OUTCOME_TONE = {
 } as const satisfies Record<RuleMode, StatusTone>;
 
 /**
- * An outcome in words. An `auto` card with an amount limit holds anything above it for the owner
- * through its hold twin, so with `limit` (the screen's formatted amount, "$100") it reads
- * "Automatic up to $100; over $100, ask me first". No other mode shows a limit.
+ * An outcome in words: its one word, and nothing else. A limit lives in the rule's sentence
+ * (`ruleSentence`: "Claude can send payment links up to $300"), never in the outcome.
  */
-export function outcomePhrase(mode: RuleMode, limit?: string): string {
-  const shown = limit?.trim() ?? '';
-  if (mode === 'auto' && shown !== '') return `${OUTCOME_WORDS.auto} up to ${shown}; over ${shown}, ask me first`;
+export function outcomePhrase(mode: RuleMode): string {
   return OUTCOME_WORDS[mode];
 }
 
 /**
- * The setup interview's rules grouped by outcome (`OutcomeGroups`), each group's heading in the
- * setup board's words. Each sits beside its outcome's `OUTCOME_TONE` dot, so a group reads as the
- * outcome its rules have everywhere else.
+ * Rules grouped by outcome (`OutcomeGroups`, and Rules' own groups), each group headed by its
+ * outcome's word beside its `OUTCOME_TONE` dot, so a group reads as the outcome its rules have
+ * everywhere else.
  */
-export const OUTCOME_GROUP_WORDS = {
-  auto: 'Does on its own',
-  ask: 'Asks you',
-  never: 'Never does',
-} as const satisfies Record<RuleMode, string>;
+export const OUTCOME_GROUP_WORDS = OUTCOME_WORDS;
 
 /**
  * The rule presets the owner can start from: the master plan's (`desk.presets.PRESETS`). There is no

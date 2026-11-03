@@ -126,7 +126,7 @@ test('open_a_document_from_the_sidebar', async ({ page }) => {
   const about = page.getByRole('navigation', { name: 'About this prototype' });
   await expect(about).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Main', exact: true }).locator('.cd-sidebar__label')).toHaveText([
-    'Today', 'Conversations', 'Customers', 'Rules', 'Safety', 'Notifications', 'Profile', 'Share', 'Knowledge', 'Settings',
+    'Today', 'Conversations', 'Rules', 'Safety', 'Notifications', 'Customers', 'Profile', 'Share', 'Knowledge', 'Settings',
   ]);
   const github = about.getByRole('link', { name: 'GitHub (opens in a new tab)', exact: true });
   await expect(github).toHaveAttribute('target', '_blank');

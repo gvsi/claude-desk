@@ -60,7 +60,7 @@ export const Board: Story = {
     await expect(top(answering) - bottom(nav)).toBe(16);
     await expect(page.getByRole('switch', { name: 'Claude acts for you' })).toHaveAccessibleDescription('Within your rules');
     const switchRow = within(answering).getByRole('switch', { name: 'Claude acts for you' });
-    await expect(Math.round(answering.getBoundingClientRect().height)).toBe(71);
+    await expect(Math.round(answering.getBoundingClientRect().height)).toBe(73);
     await expect(top(switchRow) - top(answering)).toBe(11);
     await expect(bottom(answering) - bottom(switchRow)).toBe(11);
 

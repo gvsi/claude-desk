@@ -40,20 +40,20 @@ const PROMPTLY_MS = 250;
 
 /** Each line's type style, its line box and the pill centred in it, as the boards draw them. */
 const LINES: readonly { text: SkeletonText; label: string; box: number; pill: number; width: number }[] = [
-  { text: 'caption', label: 'Caption', box: 17, pill: 10, width: 220 },
-  { text: 'meta', label: 'Meta', box: 18, pill: 10, width: 240 },
-  { text: 'pill', label: 'Pill', box: 16, pill: 10, width: 64 },
-  { text: 'body', label: 'Body', box: 20, pill: 12, width: 320 },
-  { text: 'control', label: 'Control', box: 20, pill: 12, width: 140 },
-  { text: 'section', label: 'Section', box: 20, pill: 12, width: 120 },
-  { text: 'message', label: 'Message', box: 21, pill: 12, width: 280 },
-  { text: 'reply', label: 'Reply', box: 23, pill: 12, width: 360 },
+  { text: 'caption', label: 'Caption', box: 18, pill: 10, width: 220 },
+  { text: 'meta', label: 'Meta', box: 19, pill: 10, width: 240 },
+  { text: 'pill', label: 'Pill', box: 17, pill: 10, width: 64 },
+  { text: 'body', label: 'Body', box: 21, pill: 12, width: 320 },
+  { text: 'control', label: 'Control', box: 21, pill: 12, width: 140 },
+  { text: 'section', label: 'Section', box: 21, pill: 12, width: 120 },
+  { text: 'message', label: 'Message', box: 22, pill: 12, width: 280 },
+  { text: 'reply', label: 'Reply', box: 26, pill: 12, width: 360 },
   { text: 'brand-name', label: 'Brand name', box: 22, pill: 14, width: 160 },
-  { text: 'summary', label: 'Summary', box: 27, pill: 14, width: 420 },
-  { text: 'page-title', label: 'Page title', box: 32, pill: 24, width: 200 },
+  { text: 'summary', label: 'Summary', box: 30, pill: 14, width: 420 },
+  { text: 'page-title', label: 'Page title', box: 34, pill: 24, width: 200 },
   { text: 'figure-small', label: 'Figure, small', box: 32, pill: 24, width: 48 },
   { text: 'figure', label: 'Figure', box: 40, pill: 32, width: 120 },
-  { text: 'greeting', label: 'Greeting', box: 44, pill: 36, width: 360 },
+  { text: 'greeting', label: 'Greeting', box: 48, pill: 36, width: 360 },
 ];
 
 /** Blocks at each radius, with the computed corner each takes. */
@@ -216,7 +216,7 @@ export const Shapes: Story = {
     const fullWidth = anchored(canvasElement, 'line-default');
     const row = fullWidth.parentElement?.getBoundingClientRect();
     await expect(fullWidth.getBoundingClientRect().width).toBe(row?.width);
-    await expect(fullWidth.getBoundingClientRect().height).toBe(20);
+    await expect(fullWidth.getBoundingClientRect().height).toBe(21);
 
     // Blocks take their sizes and radii, control corners by default; circles their diameters.
     for (const { radius, width, height, corner } of BLOCKS) {

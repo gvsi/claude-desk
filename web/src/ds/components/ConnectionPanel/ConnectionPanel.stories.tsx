@@ -106,7 +106,7 @@ export const DisconnectStripe: Story = {
     const row = list.querySelector('dt')?.parentElement;
     if (!row) throw new Error('No details row');
     expectComputed(row, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)' });
-    expectComputed(list.querySelector('dt') as Element, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(list.querySelector('dt') as Element, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(
       canvas.getByText(`${stripe.consequence} You'll see the change before it applies. Your rules for them are kept in case you connect again.`),
     ).toBeVisible();

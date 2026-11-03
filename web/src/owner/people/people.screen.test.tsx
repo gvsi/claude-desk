@@ -328,10 +328,13 @@ describe('customers', () => {
     expect(Math.round((column?.getBoundingClientRect().left ?? 0) - (content?.getBoundingClientRect().left ?? 0))).toBe(
       Math.round((content?.getBoundingClientRect().right ?? 0) - (column?.getBoundingClientRect().right ?? 0)),
     );
-    // The concept footer in the same column, as the board draws it.
-    const footer = screen.container.querySelector('[data-ds="concept-footer"]')?.getBoundingClientRect();
-    expect(Math.round(footer?.left ?? 0)).toBe(Math.round(column?.getBoundingClientRect().left ?? -1));
-    expect(footer?.right ?? Infinity).toBeLessThanOrEqual(column?.getBoundingClientRect().right ?? 0);
+    // The concept line belongs to the sidebar, under About, and stays inside its column.
+    const sidebar = screen.getByRole('complementary', { name: 'Claude Desk', exact: true }).element();
+    const footer = sidebar.querySelector('[data-ds="concept-footer"]')!.getBoundingClientRect();
+    expect(footer.left).toBeGreaterThanOrEqual(sidebar.getBoundingClientRect().left);
+    expect(footer.right).toBeLessThanOrEqual(sidebar.getBoundingClientRect().right);
+    expect(footer.top).toBeGreaterThanOrEqual(sidebar.querySelector('.cd-sidebar__about')!.getBoundingClientRect().bottom);
+    expect(main.querySelector('[data-ds="concept-footer"]')).toBeNull();
 
     // Each section's head over a hairline; every row one height, tagged or not.
     for (const head of main.querySelectorAll('.cd-people__head')) {
@@ -340,7 +343,7 @@ describe('customers', () => {
     }
     const rows = [...main.querySelectorAll<HTMLElement>('.cd-people__rows > li')];
     expect(rows).toHaveLength(5);
-    expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([51]));
+    expect(new Set(rows.map((row) => Math.round(row.getBoundingClientRect().height)))).toEqual(new Set([53]));
 
     // The frame with Customers current and no card on the page. Tab, once past the sidebar, stops at
     // each person's row (a link to their page), then the recorded-history link, and nowhere else: a
@@ -351,7 +354,9 @@ describe('customers', () => {
     expect(screen.getByRole('list', { name: 'Leads' }).getByRole('link').elements()).toEqual([]);
     await expectOwnerBoard(screen.container, { current: 'Customers', cards: false });
     const reached = await expectTabOrder(userEvent, [...people, caption]);
-    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption, footerLink(screen.container)]);
+    expect(reached.filter((stop) => main.contains(stop))).toEqual([...people, caption]);
+    expect(sidebar.contains(footerLink(screen.container))).toBe(true);
+    expect(reached).toContain(footerLink(screen.container));
   });
 
   it('empty_people_is_kind', async () => {
@@ -423,9 +428,9 @@ describe('customers', () => {
     await expect.element(rules).toBeVisible();
     const rows = rules.getByRole('listitem').elements();
     expect(rows.map((row) => row.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
-      `Book a visit ${DANA_BOOK.reason} ${dana.name} · Saturdays, 9:00 am to 1:00 pm Automatic`,
-      `Share a document ${DANA_DOCS.reason} ${dana.name} · Verified Automatic`,
-      `Payment link ${DANA_LINK.reason} ${dana.name} · Up to $300 Automatic up to $300; over $300, ask me first`,
+      `Book a visit ${DANA_BOOK.reason} ${dana.name} · Saturdays, 9:00 am to 1:00 pm Allow`,
+      `Share a document ${DANA_DOCS.reason} ${dana.name} · Verified Allow`,
+      `Payment link ${DANA_LINK.reason} ${dana.name} · Up to $300 Allow`,
     ]);
     expect(rules.getByRole('button').elements()).toEqual([]);
     await expect.element(rules.getByRole('link', { name: 'Change them on Rules' })).toHaveAttribute('href', `${DESK}/rules`);
@@ -852,7 +857,7 @@ describe('share', () => {
     const link = screen.getByRole('region', { name: 'Your link' });
     const shown = link.getByText(displayLink(url), { exact: true });
     await expect.element(shown).toBeVisible();
-    expectComputed(shown.element() as HTMLElement, { fontSize: '15px', fontWeight: '520' });
+    expectComputed(shown.element() as HTMLElement, { fontSize: '16px', fontWeight: '520' });
     expect(link.element().querySelector('[data-copy="code"]')).toBeNull();
     expectComputed(link.getByRole('button', { name: 'Copy link' }).element() as HTMLElement, SPEC.primary);
     const open = link.getByRole('link', { name: /^Open/ });

@@ -176,7 +176,7 @@
   --size-control-main: 40px;
   --size-touch: 44px;
   --size-nav-row: 36px;
-  --size-caption-line: 17px;
+  --size-caption-line: 18px;
   --size-icon: 20px;
   --size-dot: 6px;
   --size-spinner: 16px;
@@ -200,7 +200,7 @@
   --motion-base: 200ms;
   --motion-stagger: 150ms;
   --motion-settle: 150ms;
-  --motion-follow: 120ms;
+  --motion-follow: 200ms;
   --motion-ease: ease-out;
   --motion-ease-emphasis: cubic-bezier(.165,.84,.44,1);
   --motion-ease-bounce: cubic-bezier(0.37, 0, 0.63, 1);
@@ -215,8 +215,8 @@
 
 .cd-type-greeting {
   font-family: var(--font-serif);
-  font-size: 36px;
-  line-height: 44px;
+  font-size: 40px;
+  line-height: 48px;
   font-weight: 300;
   letter-spacing: -0.3px;
   font-variation-settings: 'opsz' 48;
@@ -224,8 +224,8 @@
 
 .cd-type-page-title {
   font-family: var(--font-serif);
-  font-size: 24px;
-  line-height: 32px;
+  font-size: 26px;
+  line-height: 34px;
   font-weight: 460;
   font-variation-settings: 'opsz' 24;
 }
@@ -250,17 +250,17 @@
 
 .cd-type-summary {
   font-family: var(--font-serif);
-  font-size: 18px;
-  line-height: 27px;
+  font-size: 20px;
+  line-height: 30px;
   font-weight: 360;
   font-variation-settings: 'opsz' 20;
 }
 
 .cd-type-reply {
   font-family: var(--font-serif);
-  font-size: 15px;
-  line-height: 23px;
-  font-weight: 360;
+  font-size: 17px;
+  line-height: 26px;
+  font-weight: 380;
   font-variation-settings: 'opsz' 20;
 }
 
@@ -274,36 +274,36 @@
 
 .cd-type-body {
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 380;
-}
-
-.cd-type-control {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 420;
-}
-
-.cd-type-section {
-  font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 20px;
-  font-weight: 520;
-}
-
-.cd-type-message {
-  font-family: var(--font-sans);
   font-size: 15px;
   line-height: 21px;
   font-weight: 380;
 }
 
+.cd-type-control {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 21px;
+  font-weight: 420;
+}
+
+.cd-type-section {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 21px;
+  font-weight: 520;
+}
+
+.cd-type-message {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 380;
+}
+
 .cd-type-meta {
   font-family: var(--font-sans);
-  font-size: 13px;
-  line-height: 18px;
+  font-size: 14px;
+  line-height: 19px;
   font-weight: 380;
 }
 
@@ -316,21 +316,21 @@
 
 .cd-type-caption {
   font-family: var(--font-sans);
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 13px;
+  line-height: 18px;
   font-weight: 380;
 }
 
 .cd-type-pill {
   font-family: var(--font-sans);
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 17px;
   font-weight: 420;
 }
 
 .cd-type-count {
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 18px;
   font-weight: 400;
 }

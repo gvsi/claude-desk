@@ -34,7 +34,7 @@ const MENU_BUTTON = {
   paddingLeft: '12px',
   paddingRight: '10px',
   color: 'rgba(250, 249, 245, 0.92)',
-  fontSize: '14px',
+  fontSize: '15px',
 } as const;
 
 export const ReadOnly: Story = {
@@ -42,16 +42,16 @@ export const ReadOnly: Story = {
   play: async ({ canvas, canvasElement }) => {
     // outcome_read_only_without_on_change: the words and the dot, and no button.
     await expect(canvas.queryByRole('button')).toBeNull();
-    await expect(canvas.getByText('Automatic')).toBeVisible();
+    await expect(canvas.getByText('Allow')).toBeVisible();
     await expect(canvasElement.querySelector('.cd-status-dot--handled')).toHaveAttribute('aria-hidden', 'true');
   },
 };
 
-export const Automatic: Story = {
+export const Allow: Story = {
   play: async ({ args, canvas, userEvent }) => {
     // outcome_named_for_screen_readers
     const button = canvas.getByRole('button', {
-      name: 'Automatic. Change the outcome of: Payment links up to $300, checked by the reviewer.',
+      name: 'Allow. Change the outcome of: Payment links up to $300, checked by the reviewer.',
     });
     expectComputed(button, MENU_BUTTON);
     await expect(button).toHaveAttribute('aria-haspopup', 'menu');
@@ -65,8 +65,8 @@ export const Automatic: Story = {
     const menu = canvas.getByRole('menu');
     await expect(button).toHaveAttribute('aria-expanded', 'true');
     const items = canvas.getAllByRole('menuitemradio');
-    await expect(items.map((item) => item.textContent)).toEqual(['Automatic', 'Ask me first', 'Never']);
-    await expect(canvas.getByRole('menuitemradio', { name: 'Automatic' })).toHaveAttribute('aria-checked', 'true');
+    await expect(items.map((item) => item.textContent)).toEqual(['Allow', 'Ask me first', 'Never']);
+    await expect(canvas.getByRole('menuitemradio', { name: 'Allow' })).toHaveAttribute('aria-checked', 'true');
     await expect(canvas.getByRole('menuitemradio', { name: 'Never' })).toHaveAttribute('aria-checked', 'false');
     await expect(items[0]).toHaveFocus();
     await expect(menu).toBeVisible();
@@ -80,7 +80,7 @@ export const Automatic: Story = {
     await expect(args.onChange).toHaveBeenCalledWith('never');
     await expect(canvas.queryByRole('menu')).toBeNull();
     await expect(button).toHaveFocus();
-    await expect(button).toHaveTextContent('Automatic');
+    await expect(button).toHaveTextContent('Allow');
 
     // Open again, then Escape: closed, focus on the button, no call.
     await userEvent.keyboard('{Enter}');
@@ -94,7 +94,7 @@ export const Automatic: Story = {
     await userEvent.keyboard('{ArrowUp}');
     await expect(canvas.getByRole('menuitemradio', { name: 'Never' })).toHaveFocus();
     await userEvent.keyboard('{ArrowDown}');
-    await expect(canvas.getByRole('menuitemradio', { name: 'Automatic' })).toHaveFocus();
+    await expect(canvas.getByRole('menuitemradio', { name: 'Allow' })).toHaveFocus();
     // Tab closes it too, and gives focus back to the button.
     await userEvent.keyboard('{Tab}');
     await expect(canvas.queryByRole('menu')).toBeNull();
@@ -103,14 +103,14 @@ export const Automatic: Story = {
   },
 };
 
-export const AutomaticWithLimit: Story = {
+export const AllowWithLimit: Story = {
   args: { label: shared.reason, limit: '$20' },
   play: async ({ canvas }) => {
     // limit_reads_automatic_up_to: an auto card with an amount limit holds anything over it.
     const button = canvas.getByRole('button', {
-      name: `Automatic up to $20; over $20, ask me first. Change the outcome of: ${shared.reason}`,
+      name: `Allow. Change the outcome of: ${shared.reason}`,
     });
-    await expect(button).toHaveTextContent('Automatic up to $20; over $20, ask me first');
+    await expect(button).toHaveTextContent('Allow');
   },
 };
 
@@ -142,7 +142,7 @@ export const Never: Story = {
     await expect(button.querySelector('.cd-status-dot--refused')).not.toBeNull();
     // A click on another word chooses it once.
     await userEvent.click(button);
-    await userEvent.click(canvas.getByRole('menuitemradio', { name: 'Automatic' }));
+    await userEvent.click(canvas.getByRole('menuitemradio', { name: 'Allow' }));
     await expect(args.onChange).toHaveBeenCalledTimes(1);
     await expect(args.onChange).toHaveBeenCalledWith('auto');
     await expect(button).toHaveFocus();

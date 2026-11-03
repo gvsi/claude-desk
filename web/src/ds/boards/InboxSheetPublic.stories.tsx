@@ -90,6 +90,7 @@ const meta = {
       'The public page below 1280 px: the code arrives and DemoInboxSheet opens itself from the bottom over the dimmed, inert page, with DemoInboxPanel in it and Close at the right of its title.',
       'The board doesn’t draw the sheet’s “Demo inbox” button; here it sits after the page, under the sheet, where the web app (plan 04) places it.',
       'The entry is the panel’s, signed on N-Public-Verify-Run1, 2 px shorter than this board draws it, so the sheet starts 2 px lower.',
+      'At the raised type scale (2026-11-02) every line is a pixel taller and the subtitle wraps to a second line at 390 px, so the sheet is 242 px tall and starts at 602 px, 22 px higher than the board draws it.',
     ].join(' '),
   },
 } satisfies Meta;
@@ -103,11 +104,12 @@ export const Board: Story = {
     await expect([window.innerWidth, window.innerHeight]).toEqual([390, 844]);
     window.dispatchEvent(new Event(CODE_ARRIVES));
     const sheet = await canvas.findByRole('dialog', { name: 'Demo inbox' });
-    // From the bottom, about the board's 220 px tall with the code (the panel's entry is 2 px
-    // shorter than the board draws it), padded 16 px, Close in reach.
+    // From the bottom, 242 px tall with the code, padded 16 px, Close in reach. The board draws it
+    // 220 px tall at the earlier type scale (and the panel's entry 2 px shorter than that); at the
+    // current one each line is a pixel taller and the subtitle takes a second line on a phone.
     const box = sheet.getBoundingClientRect();
     await expect([Math.round(box.left), Math.round(box.width), Math.round(box.bottom)]).toEqual([0, 390, 844]);
-    await expect(Math.abs(Math.round(box.top) - 624)).toBeLessThanOrEqual(2);
+    await expect(Math.abs(Math.round(box.top) - 602)).toBeLessThanOrEqual(2);
     expectComputed(sheet, { backgroundColor: 'rgb(42, 41, 39)', borderTopColor: 'rgba(250, 249, 245, 0.14)', borderTopLeftRadius: '12px' });
     // Opened by itself, focus goes to the sheet's heading, not to Close under the visitor's next key.
     await waitFor(() => expect(within(sheet).getByRole('heading', { level: 2, name: 'Demo inbox' })).toHaveFocus());

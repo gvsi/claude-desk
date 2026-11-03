@@ -32,6 +32,7 @@ function DocsSidebar() {
         onAnsweringChange={fn()}
         owner={{ name: rivera.business.ownerName, status: 'Available for chats' }}
         about={ABOUT}
+        conceptFooter
       />
     </aside>
   );
@@ -70,9 +71,11 @@ export const Board: Story = {
     // The group: its caption title in secondary ink, behind a hairline, just above the foot.
     const about = canvas.getByRole('navigation', { name: 'About this prototype' });
     const group = about.closest('.cd-sidebar__about') as HTMLElement;
-    expectComputed(within(about).getByText('About this prototype'), { fontSize: '12px', lineHeight: '17px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(about).getByText('About this prototype'), { fontSize: '13px', lineHeight: '18px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.64)' });
     expectComputed(group, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.12)', paddingTop: '14px' });
-    await expect(Math.round(foot.getBoundingClientRect().top - group.getBoundingClientRect().bottom)).toBe(4);
+    const concept = one(column, '.cd-sidebar__concept-footer');
+    await expect(Math.round(concept.getBoundingClientRect().top - group.getBoundingClientRect().bottom)).toBe(4);
+    await expect(Math.round(foot.getBoundingClientRect().top - concept.getBoundingClientRect().bottom)).toBe(4);
 
     // Its rows: nav rows like the main ones, the document icon, the open document current.
     const links = within(about).getAllByRole('link');
@@ -89,28 +92,29 @@ export const Board: Story = {
     const nav = within(column).getByRole('navigation', { name: 'Main' });
     await expect(within(nav).queryAllByRole('link', { current: 'page' })).toEqual([]);
 
-    // Connectors is fifth, after Rules, and Knowledge sits just above Settings.
+    // Connectors is fourth, after Rules, and Knowledge sits just above Settings.
     const pages = within(nav).getAllByRole('link');
     await expect(pages.map((page) => page.querySelector('.cd-sidebar__label')?.textContent)).toEqual([
       'Today',
       'Conversations',
-      'Customers',
       'Rules',
       'Connectors',
       'Safety',
+      'Customers',
       'Profile',
       'Share',
       'Knowledge',
       'Settings',
     ]);
-    const connectors = pages[4] as HTMLElement;
-    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(270);
+    const connectors = pages[3] as HTMLElement;
+    await expect(Math.round(connectors.getBoundingClientRect().top - column.getBoundingClientRect().top)).toBe(232);
 
     // focus_order_is_logical: the business, the main nav, the about links, then Claude acts for you.
     await expectTabOrder(userEvent, [
       within(column).getByRole('button', { name: `Switch business, current: ${rivera.business.name}` }),
       ...within(nav).getAllByRole('link'),
       ...links,
+      within(column).getByRole('link', { name: 'Giovanni Alcantara' }),
       within(column).getByRole('switch', { name: 'Claude acts for you' }),
     ]);
   },

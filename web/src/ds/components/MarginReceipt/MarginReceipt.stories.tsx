@@ -6,6 +6,7 @@ import { rivera } from '../../fixtures/index.ts';
 import { expectComputed } from '../../test/expectComputed.ts';
 import { expectDrawsShortArmFirst } from '../../test/expectDrawsShortArmFirst.ts';
 import { settled } from '../../test/settled.ts';
+import { fixtureHeldRule } from '../../test/heldRule.ts';
 import { ApprovalCard } from '../ApprovalCard/ApprovalCard.tsx';
 import { ClaudeMessage } from '../ClaudeMessage/ClaudeMessage.tsx';
 import { Transcript } from '../Transcript/Transcript.tsx';
@@ -83,7 +84,7 @@ function ownerReceipt(decision: Decision) {
 const OWNER_LINES = [
   { receipt: ownerReceipt(rivera.decisions.held), words: 'Held for you', tone: 'held' },
   { receipt: ownerReceipt(rivera.decisions.refused), words: 'Stopped', tone: 'refused' },
-  { receipt: { ...executed, reason: rivera.decisions.allowed.reason_plain }, words: 'Automatic', tone: 'handled' },
+  { receipt: { ...executed, reason: rivera.decisions.allowed.reason_plain }, words: 'Allowed', tone: 'handled' },
   { receipt: ownerReceipt(rivera.decisions.allowed), words: 'Running', tone: 'handled' },
 ] as const;
 
@@ -118,8 +119,8 @@ async function expectLeadLook(receipt: HTMLElement): Promise<void> {
   expectComputed(leadIn(receipt), {
     color: TEXT_PRIMARY,
     fontFamily: line.fontFamily,
-    fontSize: '12px',
-    lineHeight: '17px',
+    fontSize: '13px',
+    lineHeight: '18px',
     fontWeight: line.fontWeight,
   });
   const text = receipt.querySelector('.cd-margin-line__text');
@@ -159,7 +160,7 @@ export const Executed: Story = {
     await expect(receipt).toHaveTextContent(executed.plain);
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     // The line is a secondary caption.
-    expectComputed(receipt, { fontFamily: /Hanken Grotesk/, fontSize: '12px', lineHeight: '17px', color: await restingColor(receipt) });
+    expectComputed(receipt, { fontFamily: /Hanken Grotesk/, fontSize: '13px', lineHeight: '18px', color: await restingColor(receipt) });
 
     // receipt_opens_trace_by_keyboard: Tab reaches it, Enter opens the trace for its entry, once.
     await userEvent.tab();
@@ -358,7 +359,7 @@ export const HeldWithCardBelow: Story = {
       </TranscriptRow>
       <ApprovalCard
         decision={rivera.decisions.held}
-        heldBy={rivera.ruleCards['rv-quote'].reason}
+        rule={fixtureHeldRule(rivera.decisions.held)}
         waiting="Web chat, 2 min ago"
         onAnswer={fn()}
       />
@@ -440,7 +441,7 @@ export const RulesConfirmed: Story = {
     await expect(line.tagName).toBe('P');
     await expect(dotIn(canvasElement)).toHaveClass('cd-status-dot--handled');
     expectComputed(line.querySelector('.cd-margin-line__lead') ?? line, { color: TEXT_PRIMARY });
-    expectComputed(line, { fontSize: '12px', lineHeight: '17px', color: TEXT_SECONDARY });
+    expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: TEXT_SECONDARY });
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       for (const el of [line, dotIn(canvasElement)]) expectComputed(el, { animationName: 'none' });
     } else {

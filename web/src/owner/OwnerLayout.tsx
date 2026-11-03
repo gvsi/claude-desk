@@ -24,6 +24,7 @@ import { givenOwnerName } from '../public/brand.ts';
 import { NotFound } from '../app/NotFound.tsx';
 import {
   AppShell,
+  AppShellOnly,
   Button,
   ConceptFooter,
   Dialog,
@@ -207,7 +208,7 @@ function DeskGate({ deskId }: { deskId: string }) {
   // are read (a reload), the shape this browser last saw for the Desk stands in, so the loading page
   // draws the card from its first frame instead of dropping everything under it when the Desks arrive.
   const [remembered] = useState(() => rememberedSetup(deskId));
-  const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk);
+  const setupShape = shown === null ? (desks.data === undefined ? remembered : undefined) : skeletonSetupOf(shown.desk, shown.business);
   // Each settled read of the Desks rewrites the record: their unfinished Desks only.
   const settledDesks = desks.data !== undefined && !desks.isFetching ? desks.data : null;
   useEffect(() => {
@@ -220,7 +221,7 @@ function DeskGate({ deskId }: { deskId: string }) {
   const next = shown ? (
     <DeskFrame businesses={desks.data ?? []} business={shown.business} desk={shown.desk} onHold={setHeld} />
   ) : failed ? (
-    <OwnerState error={desks.error} focusRetry={retried.current} onRetry={() => {
+    <OwnerState deskId={deskId} error={desks.error} focusRetry={retried.current} onRetry={() => {
       retried.current = true;
       void desks.refetch();
     }} />
@@ -461,6 +462,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
   return (
     <AppShell
       business={business.name}
+      todayHref={todayPath(deskId)}
+      linkComponent={RouterLink}
       banner={
         <ReviewerBar ownerName={givenOwnerName(business.owner_display_name)} onStartOver={() => setConfirming(true)} />
       }
@@ -480,9 +483,11 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
           </OwnerDeskProvider>
         </AskClaudeProvider>
         {fill ? null : (
-          <footer className="cd-owner-layout__footer">
-            <ConceptFooter />
-          </footer>
+          <AppShellOnly layout="compact">
+            <footer className="cd-owner-layout__footer" data-owner-footer>
+              <ConceptFooter />
+            </footer>
+          </AppShellOnly>
         )}
       </div>
       {answeringChange !== null ? (
@@ -511,6 +516,8 @@ function DeskFrame({ businesses, business, desk, onHold }: DeskFrameProps) {
 }
 
 export interface OwnerSidebarProps {
+  /** The landing's inert preview omits the owner's concept line. */
+  conceptFooter?: boolean;
   businesses: BusinessOut[];
   business: BusinessOut;
   desk: DeskSummary;
@@ -557,6 +564,7 @@ export function OwnerSidebar(props: OwnerSidebarProps) {
         owner={{ name: givenOwnerName(business.owner_display_name) ?? business.name, status: 'Available for chats' }}
         linkComponent={RouterLink}
         about={SIDEBAR_ABOUT}
+        conceptFooter={props.conceptFooter ?? true}
       />
       {props.switching ? (
         <BesideTheBusinessRow container={ref}>
@@ -598,7 +606,7 @@ function BesideTheBusinessRow({ container, children }: { container: RefObject<HT
 }
 
 /** When the copy's Desks cannot be read: the product's name, an error and a next step. */
-function OwnerState({ error, onRetry, focusRetry = false }: { error: unknown; onRetry?: () => void; focusRetry?: boolean }) {
+function OwnerState({ deskId, error, onRetry, focusRetry = false }: { deskId?: string; error: unknown; onRetry?: () => void; focusRetry?: boolean }) {
   const titleId = useId();
   const retryButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -610,8 +618,10 @@ function OwnerState({ error, onRetry, focusRetry = false }: { error: unknown; on
   return (
     <div className="cd-owner-state">
       <header className="cd-owner-state__brand">
-        <Mark />
-        <Wordmark />
+        <Link to={deskId ? todayPath(deskId) : '/'} className="cd-owner-state__home" aria-label={deskId ? 'Claude Desk, go to Today' : 'Claude Desk, home'}>
+          <Mark />
+          <Wordmark />
+        </Link>
       </header>
       <main className="cd-owner-state__main" aria-labelledby={titleId}>
         <h1 id={titleId} className="cd-sr-only">

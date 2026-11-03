@@ -1252,8 +1252,10 @@
   padding-top: var(--space-16);
 }
 
+/* As the agents page's own card title: two lines split evenly. */
 .board-agents__card-title {
   margin: 0;
+  text-wrap: balance;
 }
 
 .board-agents__card-lead {

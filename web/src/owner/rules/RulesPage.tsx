@@ -1,17 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { ApiError, ownerErrorCopy, request } from '../../api/http.ts';
 import type { PolicyVersionOut, RulesDraft, RulesPreset, Suggestion } from '../../api/views.ts';
 import { pollMs } from '../../app/poll.ts';
 import {
-  AlwaysOnList,
   Button,
   Card,
   Composer,
-  ConnectorList,
-  ConnectorSection,
+  SectionHeader,
   SkeletonScreen,
   MoneyLimit,
   Notice,
@@ -19,33 +17,32 @@ import {
   PageHeader,
   PresetMenu,
   SuggestionChips,
-  TextLink,
   useAskClaudeIsSheet,
   type NoticeTone,
+  type SentencePart,
 } from '../../ds/index.ts';
+import { listWords } from '../../lib/format.ts';
 import { inApp, useDocumentTitle } from '../../lib/useDocumentTitle.ts';
-import { CONNECTORS } from '../connectors/catalog.ts';
-import { connectorPageHref } from '../connectors/pages.ts';
 import { followInAppLinks } from '../inAppLinks.ts';
-import { RouterLink, useOwnerDesk } from '../OwnerLayout.tsx';
-import { TODAY_COPY } from '../today/copy.ts';
+import { useOwnerDesk } from '../OwnerLayout.tsx';
 import { deskPath, RIVERA_SAMPLE_BUSINESS_NAME, useNeedsYou } from '../useDesks.ts';
 import { useReadFailure } from '../useReadFailure.ts';
 import { WORDS_MAX, useAskClaude } from './askClaude.tsx';
-import { BusinessJobs } from './BusinessJobs.tsx';
 import { capOf, draftFromDiff, type RuleDraft } from './drafts.ts';
-import { holdQuestion, hubSections, parseLimit } from './hub.ts';
+import { AcrossYourDeskRules, moneyTitles, NeverMovesMoney, NOTHING_LANDED, ToolConnectors, ToolRule, type LandedRules, type ToolGroup } from './HouseRules.tsx';
+import { holdQuestion, parseLimit } from './hub.ts';
 import { reducesMotion, takeLanding, useLanding, type Landing } from './landing.ts';
 import { draftFailure } from './RuleChat.tsx';
 import { peopleQuery, rulesQuery, type RuleDraftState } from './RuleDraftReview.tsx';
+import { moneyCapBandSentence } from './ruleSentence.ts';
 import { ABOVE_CEILING, moneyLimitHint, moneyLimitLine } from './ruleWords.ts';
 
 import { RulesSkeleton } from './RulesSkeleton.tsx';
-import { COMPOSER_HELPER, RULES_SUBTITLE, rulesChipsToOffer, rulesVersionLine } from './copy.ts';
+import { COMPOSER_HELPER, RULES_SECTIONS, RULES_SUBTITLE, rulesChipsToOffer, rulesVersionLine } from './copy.ts';
 
 import './RulesPage.css';
 
-/** The Rules page's title, which the pages under it (All rules, a change's review) name it by. */
+/** The Rules page's title, which the pages under it (a change's review) name it by. */
 export const RULES_TITLE = 'Rules';
 
 // The optional reads share one deadline, starting when the rules read settles.
@@ -83,32 +80,33 @@ interface Said {
   line: string;
 }
 
-/** What has landed on Rules since the owner opened it: each tool's latest landing, and the payment limit's. */
-interface Landed {
-  tools: ReadonlyMap<string, number>;
-  limit: number | null;
-}
-
-const NOTHING_LANDED: Landed = { tools: new Map(), limit: null };
-
-/** `landed` with `landing`'s rows, each now from it. */
-function withLanding(landed: Landed, landing: Landing): Landed {
+/**
+ * `landed` with `landing`'s rows, each now from it: the cards it changed, by id; the tools it turned
+ * on (every tool it changed, from a caller that names no cards); the tools its review listed; a
+ * removed rule's default; and the payment limit.
+ */
+function withLanding(landed: LandedRules, landing: Landing): LandedRules {
+  const { rows } = landing;
   const tools = new Map(landed.tools);
-  for (const tool of landing.rows.tools) tools.set(tool, landing.id);
-  return { tools, limit: landing.rows.moneyLimit ? landing.id : landed.limit };
+  for (const tool of rows.cards === undefined ? rows.tools : rows.turnedOn ?? []) tools.set(tool, landing.id);
+  const reviewed = new Map(landed.reviewed);
+  for (const tool of rows.tools) reviewed.set(tool, landing.id);
+  const cards = new Map(landed.cards);
+  for (const card of rows.cards ?? []) cards.set(card, landing.id);
+  return {
+    cards, tools, reviewed,
+    fallback: rows.fallback === true ? landing.id : landed.fallback,
+    limit: rows.moneyLimit ? landing.id : landed.limit,
+  };
 }
 
 /**
- * The first row `landing` changed, in the page's order, within `page`: a business job's card or a
- * tool's row (each carries its landing as `data-landed`), or the payment limit's line. Null when
+ * The first row `landing` changed, in the page's order, within `page`: a rule's row, the payment
+ * limit's, or "Anything not listed here" (each carries its landing as `data-landed`). Null when
  * none is drawn.
  */
 function firstLandedRow(page: Element, landing: Landing): HTMLElement | null {
-  const rows = [...page.querySelectorAll<HTMLElement>(`[data-landed="${landing.id}"]`)];
-  const limit = landing.rows.moneyLimit ? page.querySelector<HTMLElement>('.cd-money-limit--updated') : null;
-  if (limit !== null) rows.push(limit);
-  rows.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
-  return rows[0] ?? null;
+  return page.querySelector<HTMLElement>(`[data-landed="${landing.id}"]`);
 }
 
 /** The nearest ancestor of `el` that scrolls, or none when the window does. */
@@ -166,11 +164,10 @@ function focusableRow(row: HTMLElement): HTMLElement {
 /** "Start from a preset", in Rules' header. */
 const presetButton = (page: HTMLElement) => usable(page.querySelector<HTMLElement>('.cd-preset-menu > button'));
 
-/** The payment limit's "Change" atop the connector group `group` (its id), in that group's section. */
+/** The payment limit's "Change" in the money band atop the connector card `group` (its id). */
 function limitChange(page: HTMLElement, group: string): HTMLElement | null {
-  const name = CONNECTORS.find((connector) => connector.view.id === group)?.view.name;
-  const section = [...page.querySelectorAll<HTMLElement>('section[aria-label]')].find((el) => el.getAttribute('aria-label') === name && usable(el) !== null);
-  return usable(section?.querySelector<HTMLElement>('.cd-money-limit__reading button'));
+  const band = [...page.querySelectorAll<HTMLElement>('[data-money-band]')].find((el) => el.dataset.moneyBand === group && usable(el) !== null);
+  return usable(band?.querySelector<HTMLElement>('[data-money-limit] .cd-house-rules__rule-actions > .cd-button'));
 }
 
 /** The suggested rule for `tool`'s "Draft this rule", until its rule is confirmed. */
@@ -189,13 +186,12 @@ interface LimitField {
 }
 
 /**
- * `rules` (N-Conn-17-Presets; N-Conn-22-Phone-Presets at 390 px): the Desk's outcomes grouped by
- * connector, each group and tool linking to its page under Connectors once those pages are built
- * (`connectorPageHref`), and drawn without a link until then; Ask Claude under the
- * header; the header's "See all rules" link before "Start from a preset", which drafts a preset
- * as one change; the payment limit atop
- * Payments and Stripe; the always-on rules, then "Open Safety", where every attempt is shown. Every
- * change opens its proved review first.
+ * `rules` (REV-RULES-D, A): every rule the Desk has, on one page. Under the header and its "Start
+ * from a preset", which drafts a preset as one change, Ask Claude; then "Across your Desk", the
+ * always-on rules over every tool and what happens to anything else; then the Desk's tools, tool by
+ * tool, each with the rules that cover it, the payment limit with "Change" atop Payments and
+ * Stripe. Each tool links to its page under Connectors once those pages are built. Every
+ * change opens its proved review first, and lands back here on the rules it changed.
  */
 export function RulesPage() {
   const { desk, reachPlace } = useOwnerDesk();
@@ -204,6 +200,8 @@ export function RulesPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { ask, open: asking, busy: answering } = useAskClaude();
+  const acrossId = useId();
+  const toolsId = useId();
   const rules = useQuery({ ...rulesQuery(deskId), refetchInterval: pollMs('rules') });
   // Turner's fixed examples, less any whose change is already in effect: all of them until the rules are read.
   const fixedChips = desk.business_name === RIVERA_SAMPLE_BUSINESS_NAME ? rulesChipsToOffer(rules.data?.active.cards) : [];
@@ -283,7 +281,7 @@ export function RulesPage() {
   // changed once Rules is drawn with the version it made, so its words cross-fade as the row lights
   // up; while Ask Claude is a sheet over the page, once the sheet closes. Each row keeps "Updated"
   // until the owner leaves Rules.
-  const [kept, setKept] = useState<Landed>(NOTHING_LANDED);
+  const [kept, setKept] = useState<LandedRules>(NOTHING_LANDED);
   const [toReveal, setToReveal] = useState<Landing | null>(null);
   // Where Ask Claude is a sheet over the page, a change lands once the sheet closes.
   const isSheet = useAskClaudeIsSheet();
@@ -440,49 +438,52 @@ export function RulesPage() {
     body = null;
   } else {
     const cap = capOf(active);
-    const sections = hubSections(rules.data, people.data ?? null);
+    const view = { ...rules.data, hours: desk.hours };
+    // The payment limit, then "never moves money", atop a card whose tools move money.
+    const moneyBand = (group: ToolGroup) => {
+      const titles = moneyTitles(group, view);
+      const editing = limit !== null && limit.group === group.key ? limit : null;
+      return (
+        <>
+          <CapRow
+            parts={moneyCapBandSentence(cap)}
+            line={listWords(titles)}
+            version={active}
+            landed={landed.limit ?? undefined}
+            editing={editing}
+            field={
+              <MoneyLimit
+                line={moneyLimitLine(cap)}
+                editing
+                value={editing?.value ?? ''}
+                hint={moneyLimitHint(cap)}
+                {...(editing?.error === undefined ? {} : { error: editing.error })}
+                disabled={editing?.pending ?? false}
+                onEdit={() => {}}
+                onChange={(value) => setLimit((now) => (now === null ? null : { ...now, value, error: undefined }))}
+                onReview={() => void reviewLimit()}
+                onCancel={() => setLimit(null)}
+              />
+            }
+            onEdit={() => setLimit({ group: group.key, value: '', pending: false })}
+          />
+          <NeverMovesMoney titles={titles} />
+        </>
+      );
+    };
     body = (
       <>
-        <BusinessJobs view={rules.data} people={people.data ?? null} landed={landed.tools} />
-        <ConnectorList summary={rulesVersionLine(active.version)}>
-          {sections.map((section) => {
-            const editing = limit !== null && limit.group === section.connector.id ? limit : null;
-            return (
-              <ConnectorSection
-                key={section.connector.id}
-                connector={section.connector}
-                href={connectorPageHref(deskId, section.href)}
-                tools={section.tools.map((tool) => {
-                  const at = landed.tools.get(tool.key);
-                  return { ...tool, href: connectorPageHref(deskId, tool.href), ...(at === undefined ? {} : { landed: at }) };
-                })}
-                linkComponent={RouterLink}
-                {...(section.moneyLimit
-                  ? {
-                      aboveTools: (
-                        <MoneyLimit
-                          line={moneyLimitLine(cap)}
-                          editing={editing !== null}
-                          value={editing?.value ?? ''}
-                          hint={moneyLimitHint(cap)}
-                          {...(editing?.error === undefined ? {} : { error: editing.error })}
-                          disabled={editing?.pending ?? false}
-                          updated={landed.limit !== null}
-                          onEdit={() => setLimit({ group: section.connector.id, value: '', pending: false })}
-                          onChange={(value) => setLimit((now) => (now === null ? null : { ...now, value, error: undefined }))}
-                          onReview={() => void reviewLimit()}
-                          onCancel={() => setLimit(null)}
-                        />
-                      ),
-                    }
-                  : {})}
-              />
-            );
-          })}
-        </ConnectorList>
-        <p className="cd-rules__all cd-type-meta">
-          <TextLink href={`${deskPath(deskId)}/rules/all`}>See all rules</TextLink>
-        </p>
+        <section className="cd-rules__section" aria-labelledby={acrossId}>
+          <SectionHeader id={acrossId} title={RULES_SECTIONS.across.title} caption={RULES_SECTIONS.across.caption} />
+          <AcrossYourDeskRules landed={landed.fallback ?? undefined} />
+        </section>
+        <section className="cd-rules__section" aria-labelledby={toolsId}>
+          <SectionHeader id={toolsId} title={RULES_SECTIONS.tools.title} caption={RULES_SECTIONS.tools.caption} />
+          <div className="cd-rules__tool-cards">
+            <ToolConnectors deskId={deskId} view={view} people={people.data ?? null} landed={landed} moneyBand={moneyBand} cap={cap} />
+          </div>
+          <p className="cd-rules__version cd-type-meta">{rulesVersionLine(active.version)}</p>
+        </section>
       </>
     );
   }
@@ -493,14 +494,7 @@ export function RulesPage() {
         <PageHeader
           title={RULES_TITLE}
           subtitle={RULES_SUBTITLE}
-          actions={
-            <>
-              <span className="cd-type-control">
-                <TextLink href={`${deskPath(deskId)}/rules/all`}>See all rules</TextLink>
-              </span>
-              <PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />
-            </>
-          }
+          actions={<PresetMenu onPick={(preset) => void pickPreset(preset)} pending={presetPending} />}
           actionsBelowOnPhone
           hideSubtitleOnPhone
         />
@@ -517,17 +511,42 @@ export function RulesPage() {
           <Notice tone="error" action={<Button variant="secondary" busy={peopleFailure.retrying} onClick={peopleFailure.retry}>Try again</Button>}>{peopleFailure.line}</Notice>
         )}
         {body}
-        {waitingForOpening ? null : (
-          // Always on, then where its last promise, that every attempt is shown, is kept.
-          <div className="cd-rules__always-on">
-            <AlwaysOnList />
-            <p className="cd-rules__safety cd-type-meta">
-              <TextLink href={`${deskPath(deskId)}/safety`}>{TODAY_COPY.openSafety}</TextLink>
-            </p>
-          </div>
-        )}
       </SkeletonScreen>
     </div>
+  );
+}
+
+/**
+ * The payment limit's row in a money band: its sentence, the tools it holds over, then "Change", its
+ * held dot and its Details. "Change" opens `field` under its words, focus in it; closing it puts focus
+ * back on "Change". Only when the owner switches it, never on first render, so a page that opens with
+ * the field steals no focus.
+ */
+function CapRow({ parts, line, version, landed, editing, field, onEdit }: {
+  parts: readonly SentencePart[]; line: string; version: PolicyVersionOut; landed: number | undefined;
+  editing: LimitField | null; field: ReactNode; onEdit: () => void;
+}) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const open = editing !== null;
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current === open) return;
+    wasOpen.current = open;
+    const row = anchor.current?.closest('li');
+    const target = open ? row?.querySelector<HTMLElement>('input') : row?.querySelector<HTMLElement>('.cd-house-rules__rule-actions > .cd-button');
+    target?.focus();
+  }, [open]);
+  return (
+    <ToolRule
+      parts={parts}
+      line={line}
+      status="held"
+      {...(landed === undefined ? {} : { landed })}
+      details={{ version, cards: [], moneyCap: true }}
+      data={{ 'data-money-limit': true }}
+      actions={open ? null : <Button variant="secondary" waiting={false} onClick={onEdit}>Change</Button>}
+      below={<div ref={anchor} className="cd-rules__cap-field">{open ? field : null}</div>}
+    />
   );
 }
 

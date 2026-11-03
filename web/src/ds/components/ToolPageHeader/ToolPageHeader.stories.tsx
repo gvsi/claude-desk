@@ -53,9 +53,9 @@ export const Refund: Story = {
   play: async ({ args, canvas, canvasElement }) => {
     // The tool's name is the page's serif h1, its description under it.
     const title = canvas.getByRole('heading', { level: 1, name: 'Refund' });
-    expectComputed(title, { fontSize: '24px', fontFamily: '"Source Serif 4", Georgia, serif' });
+    expectComputed(title, { fontSize: '26px', fontFamily: '"Source Serif 4", Georgia, serif' });
     const description = canvas.getByText(args.description);
-    expectComputed(description, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(description, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.64)' });
     // The source line: Stripe's mark, 20 px with no tile, "From Stripe" with its Mock badge, and the status.
     const source = canvasElement.querySelector('.cd-tool-page-header__source');
     if (!(source instanceof HTMLElement)) throw new Error('No source line');
@@ -64,7 +64,7 @@ export const Refund: Story = {
     expectComputed(source.querySelector('.cd-connector-icon svg') as Element, { width: '20px', height: '20px' });
     await expect(expectMockBesideExternalNames(canvasElement)).toBe(1);
     await expectStatus(canvasElement, 'On · Definition unchanged', 'handled');
-    expectComputed(source, { fontSize: '13px' });
+    expectComputed(source, { fontSize: '14px' });
     await expect(source.getBoundingClientRect().top).toBeGreaterThanOrEqual(description.getBoundingClientRect().bottom);
     // simulate_only_when_on: without onSimulateChange there is no strip.
     await expectNoSimulate(canvasElement);
@@ -142,7 +142,7 @@ export const WithSimulate: Story = {
       paddingLeft: '14px',
     });
     const caption = within(strip).getByText(SIMULATE_CAPTION);
-    expectComputed(caption, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(caption, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     const button = canvas.getByRole('button', { name: 'Simulate a tool change' });
     await expect(button).toHaveClass('cd-button--ghost');
     await expect(strip.getBoundingClientRect().right - button.getBoundingClientRect().right).toBe(15);

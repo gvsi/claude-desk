@@ -55,13 +55,13 @@ export const Quotes: Story = {
     await expect([overlay.position, overlay.top, overlay.bottom]).toEqual(['absolute', '0px', '0px']);
     await expect(header).toHaveTextContent('1 tool');
     // The tool's name in weight 520, its line in secondary meta, the summary and the outcome at the right.
-    expectComputed(canvas.getByText('Quote'), { fontWeight: '520', fontSize: '14px' });
+    expectComputed(canvas.getByText('Quote'), { fontWeight: '520', fontSize: '15px' });
     expectComputed(canvas.getByText('Prices a job from your price list. Changes something. Can be undone.'), {
-      fontSize: '13px',
+      fontSize: '14px',
       color: 'rgba(250, 249, 245, 0.64)',
     });
     await expect(canvas.getByText('Anyone · No discounts')).toBeVisible();
-    await expect(canvas.getByText('Automatic')).toBeVisible();
+    await expect(canvas.getByText('Allow')).toBeVisible();
     await expect(canvasElement.querySelectorAll('.cd-status-dot--handled')).toHaveLength(1);
   },
 };
@@ -94,7 +94,7 @@ export const WithoutLinks: Story = {
     await expect(header).toHaveTextContent('1 tool');
     // The tool's name in the linked row's type and weight, plain, with no overlay over the row.
     const name = canvas.getByText('Quote');
-    expectComputed(name, { fontWeight: '520', fontSize: '14px', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(name, { fontWeight: '520', fontSize: '15px', color: 'rgba(250, 249, 245, 0.92)' });
     await expect(getComputedStyle(name, '::after').content).toBe('none');
     // The words and the outcome still at the row's right edge, where the chevron no longer is.
     const item = name.closest('li');
@@ -103,7 +103,7 @@ export const WithoutLinks: Story = {
     if (outcome === null) throw new Error('no outcome');
     await expect(Math.round(item.getBoundingClientRect().right - outcome.getBoundingClientRect().right)).toBe(16);
     await expect(canvas.getByText('Anyone · No discounts')).toBeVisible();
-    await expect(canvas.getByText('Automatic')).toBeVisible();
+    await expect(canvas.getByText('Allow')).toBeVisible();
   },
 };
 
@@ -117,12 +117,12 @@ export const Payments: Story = {
     await expect(header).not.toHaveTextContent('Built in');
     // Each tool row is a link to its page, named by its name, summary and outcome; an automatic
     // rule with an amount limit reads its limit phrase.
-    await expect(args.tools.map((tool) => outcomePhrase(tool.mode, tool.limit))).toEqual([
-      'Automatic up to $300; over $300, ask me first',
-      'Automatic up to $20; over $20, ask me first',
+    await expect(args.tools.map((tool) => outcomePhrase(tool.mode))).toEqual([
+      'Allow',
+      'Allow',
     ]);
     for (const tool of args.tools) {
-      const row = canvas.getByRole('link', { name: rowName(tool, outcomePhrase(tool.mode, tool.limit)) });
+      const row = canvas.getByRole('link', { name: rowName(tool, outcomePhrase(tool.mode)) });
       await expect(row).toHaveAttribute('href', tool.href);
       // Its line is its description.
       await expect(row).toHaveAccessibleDescription(tool.description);
@@ -201,7 +201,7 @@ export const AddedJustNow: Story = {
   },
   play: async ({ canvas }) => {
     const note = canvas.getByText('Added just now');
-    expectComputed(note, { fontSize: '12px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(note, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(canvas.getByRole('link', { name: /^Payments Lets clients .* Added just now 2 tools$/ })).toBeVisible();
     const [link, mandate] = addedPayments.tools;
     if (!link || !mandate) throw new Error('Expected two tools');
@@ -228,7 +228,7 @@ export const Phone: Story = {
       // lined up, as the updated phone board draws them.
       const name = canvas.getByText(tool.name).getBoundingClientRect();
       const summary = canvas.getByText(tool.summary).getBoundingClientRect();
-      const outcome = canvas.getByText(outcomePhrase(tool.mode, tool.limit)).getBoundingClientRect();
+      const outcome = canvas.getByText(outcomePhrase(tool.mode)).getBoundingClientRect();
       await expect(summary.top).toBeGreaterThanOrEqual(name.bottom - 1);
       await expect(Math.round(summary.left)).toBe(Math.round(name.left));
       await expect(outcome.top).toBeGreaterThanOrEqual(summary.bottom - 1);
@@ -259,13 +259,13 @@ export const NarrowMaxLimit: Story = {
   play: async ({ canvas, canvasElement }) => {
     const width = window.innerWidth;
     await expect(width).toBe(320);
-    const phrase = 'Automatic up to $10,000; over $10,000, ask me first';
-    const outcome = canvas.getByText(phrase);
+    // Payment link's outcome, the first tool's.
+    const outcome = canvas.getAllByText('Allow')[0];
+    if (outcome === undefined) throw new Error('No outcome');
     const summary = canvas.getAllByText('2 rules · 1 shared')[0];
     if (summary === undefined) throw new Error('No summary');
     await expect(outcome.getBoundingClientRect().top).toBeGreaterThanOrEqual(summary.getBoundingClientRect().bottom - 1);
-    // The phrase wraps on its line, and nothing scrolls sideways.
-    await expect(outcome.getBoundingClientRect().height).toBeGreaterThan(18);
+    // Nothing scrolls sideways.
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
     const tooWide = [...canvasElement.querySelectorAll('*')].filter((el) => el.getBoundingClientRect().right > width);
     await expect(tooWide).toEqual([]);
@@ -319,7 +319,7 @@ export const Landed: Story = {
     const middle = (el: Element) => (el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2;
     await expect(Math.abs(middle(pill) - middle(name))).toBeLessThan(1);
     // The link's name starts with the words it shows, says the row was updated, and has its new words.
-    await expect(canvas.getByRole('link', { name: 'Quote, updated: Anyone · No discounts · Weekdays, all day, Automatic. Open' })).toBeVisible();
+    await expect(canvas.getByRole('link', { name: 'Quote, updated: Anyone · No discounts · Weekdays, all day, Allow. Open' })).toBeVisible();
     await expect(row).toHaveAttribute('data-landed', '1');
     const glow = row.querySelector<HTMLElement>('.cd-landed-glow');
     if (!glow) throw new Error('no glow behind the landed row');

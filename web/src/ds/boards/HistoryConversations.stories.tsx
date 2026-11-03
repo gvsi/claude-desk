@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, within } from 'storybook/test';
 
+import { AppShellOnly } from '../components/AppShell/AppShell.tsx';
 import { ConceptFooter } from '../components/ConceptFooter/ConceptFooter.tsx';
 import { Pill } from '../components/Pill/Pill.tsx';
 import { RecordedHistoryLink } from '../components/RecordedHistoryLink/RecordedHistoryLink.tsx';
@@ -125,7 +126,7 @@ function HistoryConversations() {
             <TurnRows turns={TURNS} onOpenTrace={fn()} notes={{ 0: UNVERIFIED_NOTE, 5: DRAFT_NOTE }} />
           </Transcript>
         </div>
-        <ConceptFooter />
+        <AppShellOnly layout="compact"><ConceptFooter /></AppShellOnly>
       </ConversationsPage>
     </RiveraFrame>
   );
@@ -181,7 +182,7 @@ export const Board: Story = {
       const time = one(row, '.cd-conversation-item__time');
       await expect(tag.parentElement).toHaveClass('cd-conversation-item__status');
       await expect(Math.round(tag.getBoundingClientRect().right)).toBe(Math.round(time.getBoundingClientRect().right));
-      await expect(Math.round(row.getBoundingClientRect().height)).toBe(49);
+      await expect(Math.round(row.getBoundingClientRect().height)).toBe(51);
     }
     // unnamed_rows_read_once: a row with no name says "Visitor" or "Agent" once, as the app draws it:
     // no status words or dot under the name, only the Recorded tag. A named row keeps its status line.
@@ -206,7 +207,7 @@ export const Board: Story = {
     const log = canvas.getByRole('log', { name: 'Conversation with Visitor' });
     await expect(Math.round(note.getBoundingClientRect().top - head.getBoundingClientRect().bottom)).toBe(6);
     await expect(Math.round(log.getBoundingClientRect().top - note.getBoundingClientRect().bottom)).toBe(20);
-    expectComputed(within(head).getByRole('heading', { level: 2, name: 'Visitor' }), { fontSize: '15px', lineHeight: '20px', fontWeight: '520' });
+    expectComputed(within(head).getByRole('heading', { level: 2, name: 'Visitor' }), { fontSize: '16px', lineHeight: '21px', fontWeight: '520' });
 
     // Serif replies, visitor bubbles, receipts and notes attached under their messages.
     expectConversationType(log);

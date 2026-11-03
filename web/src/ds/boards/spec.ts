@@ -25,12 +25,12 @@ export const SPEC = {
     height: '36px',
     backgroundColor: 'rgb(60, 57, 47)',
     borderTopLeftRadius: '8px',
-    fontSize: '14px',
-    lineHeight: '20px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
-  pageTitle: { fontFamily: SERIF, fontSize: '24px', lineHeight: '32px', fontWeight: '460' },
-  greeting: { fontFamily: SERIF, fontSize: '36px', lineHeight: '44px', fontWeight: '300' },
+  pageTitle: { fontFamily: SERIF, fontSize: '26px', lineHeight: '34px', fontWeight: '460' },
+  greeting: { fontFamily: SERIF, fontSize: '40px', lineHeight: '48px', fontWeight: '300' },
   /** Today's "Last 7 days" (N-Today-Run1): the booked total, then the smaller stopped count, with tabular figures. */
   figure: { fontFamily: SANS, fontSize: '32px', lineHeight: '40px', fontWeight: '500', letterSpacing: '-0.3px', fontVariantNumeric: 'tabular-nums' },
   figureSmall: { fontFamily: SANS, fontSize: '24px', lineHeight: '32px', fontWeight: '420', letterSpacing: 'normal', fontVariantNumeric: 'tabular-nums' },
@@ -39,7 +39,7 @@ export const SPEC = {
   /** The conversation boards: the page fills the main area, so its list starts at the sidebar's seam. */
   mainFilled: { paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', paddingLeft: '0px' },
   contentFilled: { maxWidth: 'none' },
-  reply: { fontFamily: SERIF, fontSize: '15px', lineHeight: '23px', fontWeight: '360', color: 'rgba(250, 249, 245, 0.92)' },
+  reply: { fontFamily: SERIF, fontSize: '17px', lineHeight: '26px', fontWeight: '380', color: 'rgba(250, 249, 245, 0.92)' },
   bubble: {
     backgroundColor: 'rgba(250, 249, 245, 0.06)',
     borderTopLeftRadius: '12px',
@@ -47,10 +47,10 @@ export const SPEC = {
     paddingRight: '14px',
     paddingBottom: '8px',
     paddingLeft: '14px',
-    fontSize: '15px',
-    lineHeight: '21px',
+    fontSize: '16px',
+    lineHeight: '22px',
   },
-  receipt: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+  receipt: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' },
   dot: { width: '6px', height: '6px' },
   /** Share's More channels: four rows in one card, separated by hairlines. */
   shareChannelRow: { paddingTop: '16px', paddingRight: '16px', paddingBottom: '16px', paddingLeft: '16px' },
@@ -66,8 +66,8 @@ export const SPEC = {
     height: '40px',
     borderTopLeftRadius: '8px',
     backgroundColor: 'rgba(250, 249, 245, 0.1)',
-    fontSize: '14px',
-    lineHeight: '20px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
   dangerMain: {
@@ -75,21 +75,21 @@ export const SPEC = {
     borderTopLeftRadius: '8px',
     backgroundColor: 'rgba(220, 130, 144, 0.16)',
     color: 'rgb(235, 163, 174)',
-    fontSize: '14px',
-    lineHeight: '20px',
+    fontSize: '15px',
+    lineHeight: '21px',
     fontWeight: '420',
   },
   primary: { backgroundColor: 'rgb(239, 236, 228)', color: 'rgb(28, 27, 25)' },
   composer: { backgroundColor: 'rgb(42, 41, 39)', borderTopLeftRadius: '16px', boxShadow: /0px 4px 20px/ },
-  footer: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)' },
+  footer: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' },
   /** The Recorded tag (RecordedTag): caption type in secondary ink, the icon 4 px before the word, on one line. */
-  recordedTag: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '4px', whiteSpace: 'nowrap' },
+  recordedTag: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '4px', whiteSpace: 'nowrap' },
   /** The line on an opened replayed item (RecordedNote): caption type in secondary ink, the words 6 px after the icon. */
-  recordedNote: { fontSize: '12px', lineHeight: '17px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' },
+  recordedNote: { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)', columnGap: '6px' },
   /** "Includes recorded history" (RecordedHistoryLink): caption type in secondary ink, underlined in line-control 3 px down. */
   recordedLink: {
-    fontSize: '12px',
-    lineHeight: '17px',
+    fontSize: '13px',
+    lineHeight: '18px',
     color: 'rgba(250, 249, 245, 0.64)',
     textDecorationLine: 'underline',
     textDecorationColor: 'rgba(250, 249, 245, 0.22)',
@@ -179,9 +179,17 @@ export async function expectRecordedLink(link: HTMLElement, href: string): Promi
   expectComputed(link, SPEC.recordedLink);
 }
 
-/** The footer at the window's foot, 20 px up, as the recorded-history boards draw it on a short page. */
+/** Owner columns carry the line under About; other short pages keep it 20 px above the window foot. */
 export async function expectFooterAtFoot(root: HTMLElement): Promise<void> {
   const footer = one(root, '[data-ds="concept-footer"]');
+  const sidebar = footer.closest('.cd-sidebar');
+  if (sidebar) {
+    const about = one(sidebar, '.cd-sidebar__about');
+    const answering = one(sidebar, '.cd-sidebar__footer');
+    await expect(footer.getBoundingClientRect().top).toBeGreaterThanOrEqual(about.getBoundingClientRect().bottom);
+    await expect(footer.getBoundingClientRect().bottom).toBeLessThanOrEqual(answering.getBoundingClientRect().top);
+    return;
+  }
   await expect(Math.round(window.innerHeight - footer.getBoundingClientRect().bottom), 'the footer 20 px over the window foot').toBe(20);
 }
 
@@ -199,8 +207,9 @@ export function expectCards(root: HTMLElement): void {
 /**
  * receipts_sit_under_their_message: every receipt or note is attached space-8 under the message it
  * belongs to, on its side: from the left edge of Claude's or a person's words, or ending at the
- * right edge of a visitor's or an agent's bubble. Its line is caption type in text-secondary, and
- * its dot is 6 px. Returns how many rows carry receipts.
+ * right edge of a visitor's or an agent's bubble (starting at its left edge in the owner's own
+ * conversation view, where the bubble is on the left). Its line is caption type in text-secondary,
+ * and its dot is 6 px. Returns how many rows carry receipts.
  */
 export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<number> {
   const rows = [...root.querySelectorAll<HTMLElement>('.cd-transcript-row:not(.cd-transcript-header)')].filter((row) =>
@@ -213,7 +222,9 @@ export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<nu
     const marginBox = margin.getBoundingClientRect();
     await expect(Math.round(marginBox.top - mainBox.bottom), 'space between a message and its receipts').toBe(8);
     const bubble = main.querySelector<HTMLElement>('.cd-visitor-message__bubble, .cd-agent-message__bubble');
-    if (bubble) {
+    if (bubble && row.closest(OWNER_LOG) !== null) {
+      await expect(Math.round(marginBox.left), 'receipts start at the bubble').toBe(Math.round(bubble.getBoundingClientRect().left));
+    } else if (bubble) {
       await expect(Math.round(marginBox.right), 'receipts end at the bubble').toBe(Math.round(bubble.getBoundingClientRect().right));
     } else {
       const words = main.firstElementChild as HTMLElement;
@@ -225,6 +236,50 @@ export async function expectReceiptsUnderMessages(root: HTMLElement): Promise<nu
     for (const dot of margin.querySelectorAll<HTMLElement>('.cd-status-dot')) expectComputed(dot, SPEC.dot);
   }
   return rows.length;
+}
+
+/** The log in the owner's own conversation view (`Transcript`'s owner variant). */
+const OWNER_LOG = '.cd-transcript--owner';
+
+/** The other side's parts in the owner's view: a visitor's bubble, an agent's request, a visitor typing. */
+const THEIR_SIDE = '.cd-visitor-message__bubble, .cd-agent-message__who, .cd-agent-message__bubble, .cd-writing-indicator__bubble';
+
+/** A row from the Desk's side: Claude's reply, the owner's whisper, or the owner's own message. */
+const OUR_SIDE = ':scope > .cd-transcript-row__main > :is(.cd-claude-message, .cd-whisper, .cd-person-message)';
+
+/**
+ * The owner's own conversation view (board REV-FLIP), the sides flipped from the visitor's chat, so
+ * each side reads its own words on the right: the other side's bubbles start at the log's left
+ * edge, and every row from the Desk's side sits in one column min(520 px, 88%) of the log wide, flush
+ * with its right edge, its receipts with it. Inside the column each message, its first part and each
+ * receipt start at the column's left edge, and a reply's cards fill it. Returns how many rows sit in
+ * the column.
+ */
+export async function expectOwnerSides(log: HTMLElement): Promise<number> {
+  await expect(log.matches(OWNER_LOG), "the log is the owner's variant").toBe(true);
+  const box = log.getBoundingClientRect();
+  const column = Math.min(520, box.width * 0.88);
+  for (const part of log.querySelectorAll(THEIR_SIDE)) {
+    await expect(Math.abs(part.getBoundingClientRect().left - box.left), `${part.className} starts at the log's left edge`).toBeLessThanOrEqual(1);
+  }
+  const ours = [...log.querySelectorAll<HTMLElement>('.cd-transcript-row')].filter((row) => row.querySelector(OUR_SIDE) !== null);
+  for (const row of ours) {
+    for (const part of row.querySelectorAll<HTMLElement>(':scope > :is(.cd-transcript-row__main, .cd-transcript-row__margin)')) {
+      const rect = part.getBoundingClientRect();
+      await expect(Math.abs(rect.width - column), `${part.className} is min(520 px, 88%) of the log`).toBeLessThanOrEqual(1);
+      await expect(Math.abs(rect.right - box.right), `${part.className} ends at the log's right edge`).toBeLessThanOrEqual(1);
+      for (const child of part.children) {
+        await expect(Math.abs(child.getBoundingClientRect().left - rect.left), `${child.className} starts at the column's left edge`).toBeLessThanOrEqual(1);
+      }
+    }
+    const first = one(row, OUR_SIDE).firstElementChild;
+    if (!first) throw new Error('the message has parts');
+    await expect(Math.abs(first.getBoundingClientRect().left - (box.right - column)), `${first.className} starts at the column's left edge`).toBeLessThanOrEqual(1);
+    for (const card of row.querySelectorAll('.cd-reply-card')) {
+      await expect(Math.abs(card.getBoundingClientRect().width - column), 'a reply card fills the column').toBeLessThanOrEqual(1);
+    }
+  }
+  return ours.length;
 }
 
 /** The footer's one link, the author's name, under `root`. */
@@ -421,7 +476,7 @@ export async function expectAgentsDisclosure(root: HTMLElement): Promise<void> {
   const line = one(root, '.cd-disclosure-line');
   await expect(line.textContent).toBe('Turner Plumbing answers with Claude, an AI.');
   await expect(line).toHaveAttribute('lang', 'en');
-  expectComputed(line, { fontSize: '13px', lineHeight: '18px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '14px', lineHeight: '19px', color: 'rgba(250, 249, 245, 0.64)' });
   const title = within(root).getByRole('heading', { level: 1 });
   await expect(Math.round(line.getBoundingClientRect().top - title.getBoundingClientRect().bottom)).toBe(16);
 }
@@ -463,7 +518,7 @@ export async function expectVisionBar(root: HTMLElement, backHref: string): Prom
  */
 export async function expectChannelsContent(content: HTMLElement, lead: string): Promise<void> {
   const line = within(content).getByText(lead);
-  expectComputed(line, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)' });
+  expectComputed(line, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.64)' });
   const channels = within(content).getByRole('region', { name: 'Channels' });
   await expect(Math.round(channels.getBoundingClientRect().top - line.getBoundingClientRect().bottom)).toBe(20);
   await expect(Math.round(channels.getBoundingClientRect().width)).toBe(720);
@@ -478,9 +533,9 @@ export async function expectChannelsContent(content: HTMLElement, lead: string):
   ]);
   await expect(within(rows[0] as HTMLElement).getByText('On')).toBeVisible();
   await expect(within(channels).getAllByText('Coming later')).toHaveLength(5);
-  // The board's rows: 68 px for one line under the name, 86 px where it wraps (Email, WhatsApp), and
-  // a 1 px hairline over every row but the first.
-  await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([68, 87, 69, 87, 69, 69]);
+  // The board's rows: 70 px for one line under the name, 89 px where it wraps (Email, WhatsApp, and
+  // Slack, whose line takes two lines in the larger type), and a 1 px hairline over every row but the first.
+  await expect(rows.map((row) => Math.round(row.getBoundingClientRect().height))).toEqual([70, 90, 71, 90, 90, 71]);
   await expect(within(content).queryByRole('button')).toBeNull();
   await expect(within(content).queryByRole('switch')).toBeNull();
 }

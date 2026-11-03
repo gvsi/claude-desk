@@ -25,13 +25,25 @@ html {
   height: var(--space-12);
 }
 
+/* A host style change invalidates Chromium's scrollbar paint on area hover-in/out.
+   Pseudo-element selectors alone leave the last painted hover colour behind. */
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame)),
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *) {
+  --cd-scrollbar-thumb: var(--line-control);
+}
+
+:is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame)):hover,
+:not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *):hover {
+  --cd-scrollbar-thumb: var(--text-tertiary);
+}
+
 :is(:root, body):not(:has(.cd-about-paper, .cd-vision-frame))::-webkit-scrollbar-thumb,
 :not(:root, body, .cd-about-paper, .cd-about-paper *, .cd-vision-frame, .cd-vision-frame *)::-webkit-scrollbar-thumb {
   min-width: var(--space-32);
   min-height: var(--space-32);
   border: calc(var(--space-6) / 2) solid transparent;
   border-radius: var(--radius-full);
-  background-color: var(--line-control);
+  background-color: var(--cd-scrollbar-thumb);
   background-clip: padding-box;
 }
 
@@ -79,8 +91,8 @@ body {
   background: var(--bg-app);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 20px;
+  font-size: 15px;
+  line-height: 21px;
   font-weight: 380;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
