@@ -1,6 +1,6 @@
 /* OutcomeGroups: cards 20 px apart, each padded 16 px. A group's heading is its outcome's 6 px dot
-   and its name on a 20 px line, 10 px over the first row's hairline; each row is 10 px over and
-   under a 20 px line, under a hairline, what Claude does at the left and who it's for at the right
+   and its name on a 21 px line, 10 px over the first row's hairline; each row is 10 px over and
+   under a 21 px line, under a hairline, what Claude does at the left and who it's for at the right
    in secondary meta. */
 
 .cd-outcome-groups {

@@ -27,6 +27,9 @@ it.each([false, true])('an unread row deepens on real hover, including while cur
     expect(row.querySelector('.cd-conversation-item__unread-dot')?.getAttribute('aria-hidden')).toBe('true');
     expect(row.querySelector('.cd-sr-only')?.textContent).toBe('Unread: ');
     expect(getComputedStyle(row).paddingLeft).toBe('26px');
+    // The pointer the last case left over its row would rest on this one: move it off first.
+    await userEvent.unhover(row);
+    expect(row.matches(':hover')).toBe(false);
     expect(getComputedStyle(row).backgroundColor).toBe('rgba(250, 249, 245, 0.06)');
     await userEvent.hover(row);
     expect(row.matches(':hover')).toBe(true);

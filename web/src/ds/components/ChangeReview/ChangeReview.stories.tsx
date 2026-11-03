@@ -165,7 +165,7 @@ export const TurnOnPayments: Story = {
     await expect(tags(canvasElement)).toEqual(['Turned on', 'Turned on']);
     const tag = canvasElement.querySelector('.cd-change-review__tag');
     if (tag === null) throw new Error('No tag');
-    expectComputed(tag, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.22)', fontSize: '12px' });
+    expectComputed(tag, { borderTopWidth: '1px', borderTopColor: 'rgba(250, 249, 245, 0.22)', fontSize: '13px' });
     // The title, then the connector's name (no "Built in") and the side's words; then what applies,
     // under "After" beside the handled bar: the words, the reason and the outcome.
     const rows = within(changes).getAllByRole('listitem');
@@ -681,7 +681,7 @@ export const AskMeFirst: Story = {
     // cancel_line_only_when_asked: a preset can cancel open payment links, so the screen asks for
     // the fixed line. It sits above the buttons, under the checks, in secondary body text.
     const line = canvas.getByText(CANCELS_LINKS);
-    expectComputed(line, { fontSize: '14px', lineHeight: '20px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(line, { fontSize: '15px', lineHeight: '21px', color: 'rgba(250, 249, 245, 0.64)' });
     const checks = canvas.getByRole('region', { name: 'Checked before you confirm' });
     const confirm = canvas.getByRole('button', { name: 'Confirm change' });
     await expect(line.getBoundingClientRect().top - checks.getBoundingClientRect().bottom).toBe(20);

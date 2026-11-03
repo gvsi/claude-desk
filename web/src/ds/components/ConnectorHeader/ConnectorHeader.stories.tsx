@@ -38,11 +38,11 @@ export const Payments: Story = {
   play: async ({ canvas, canvasElement }) => {
     // The connector's name is the page's h1, in serif page-title type, with "Built in" beside it.
     const title = canvas.getByRole('heading', { level: 1, name: 'Payments Built in' });
-    expectComputed(title.querySelector('.cd-connector-name__name') as Element, { fontSize: '24px', fontFamily: '"Source Serif 4", Georgia, serif' });
+    expectComputed(title.querySelector('.cd-connector-name__name') as Element, { fontSize: '26px', fontFamily: '"Source Serif 4", Georgia, serif' });
     // Its 48 px tile, then the description under the name.
     expectComputed(canvasElement.querySelector('.cd-connector-icon') as Element, { width: '48px', height: '48px' });
     const description = canvas.getByText(views.payments.description);
-    expectComputed(description, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(description, { fontSize: '15px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(description.getBoundingClientRect().top).toBeGreaterThanOrEqual(title.getBoundingClientRect().bottom);
     await expectStatus(canvasElement, 'On', 'handled');
     // The status sits at the right of the title's line.
@@ -93,8 +93,8 @@ export const GoogleCalendar: Story = {
     const promise = canvas.getByRole('group', { name: rivera.googleCalendar.promise.title });
     expectComputed(promise, { borderTopLeftRadius: '12px', paddingTop: '16px' });
     await expect(promise.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
-    expectComputed(within(promise).getByText(rivera.googleCalendar.promise.title), { fontWeight: '520', fontSize: '14px' });
-    expectComputed(within(promise).getByText(rivera.googleCalendar.promise.detail), { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(within(promise).getByText(rivera.googleCalendar.promise.title), { fontWeight: '520', fontSize: '15px' });
+    expectComputed(within(promise).getByText(rivera.googleCalendar.promise.detail), { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     const header = canvas.getByRole('heading', { level: 1 });
     await expect(promise.getBoundingClientRect().top).toBeGreaterThan(header.getBoundingClientRect().bottom);
   },

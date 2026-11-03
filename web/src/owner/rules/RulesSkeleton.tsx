@@ -444,7 +444,7 @@ export function ToolRulesShapes({ sample, cap, toolsCaption, version, readOnly, 
           <SkeletonCard padding={0} anchor="rules-across">
             <div className="cd-house-rules__rules cd-house-rules__rules--card">
               {ACROSS_DESK_SENTENCES.map((rule) => <RuleShape key={rule.key} id={`across:${rule.key}`} parts={rule.parts} {...(rule.line === undefined ? {} : { line: rule.line })} end="always" />)}
-              <RuleShape id="across:fallback" parts={[{ text: RULES_FALLBACK }]} end="dot" details={details} />
+              <RuleShape id="across:fallback" parts={[{ text: RULES_FALLBACK }]} end="dot" details={false} />
             </div>
           </SkeletonCard>
         </div>
@@ -455,7 +455,7 @@ export function ToolRulesShapes({ sample, cap, toolsCaption, version, readOnly, 
               <SkeletonCard key={group.key} padding={0} anchor={index === 0 ? 'rules-first-card' : `rules-card-${index}`}>
                 <div className="cd-house-rules__connector">
                   <div className="cd-house-rules__connector-header">
-                    {group.connector === null ? null : <Skeleton shape="block" className="cd-connector-icon cd-connector-icon--section" />}
+                    {group.connector === null && group.key !== 'jobs' ? null : <Skeleton shape="block" className="cd-connector-icon cd-connector-icon--section" />}
                     <div className="cd-house-rules__identity">
                       <div className="cd-house-rules__jobs-name cd-type-section"><Skeleton shape="line" text="section" width="40%" /></div>
                       {group.line === '' ? null : <TextShape id={`${group.key}:line`} parts={[group.line]} className="cd-house-rules__identity-line cd-type-meta" text="meta" />}

@@ -81,7 +81,7 @@ function DraftRules({ draft, people, tools, check, hours }: { draft: RulesDraft;
     <>
       <section className="cd-rules__section" aria-labelledby={acrossId}>
         <SectionHeader id={acrossId} title={RULES_SECTIONS.across.title} caption={RULES_SECTIONS.across.caption} />
-        <AcrossYourDeskRules details={false} />
+        <AcrossYourDeskRules />
       </section>
       <section className="cd-rules__section" aria-labelledby={toolsId}>
         <SectionHeader id={toolsId} title={RULES_SECTIONS.tools.title} caption={copy.toolsCaption} />

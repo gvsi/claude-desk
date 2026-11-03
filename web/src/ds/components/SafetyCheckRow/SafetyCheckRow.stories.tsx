@@ -64,8 +64,8 @@ export const Tricks: Story = {
     const attempt = first.querySelector<HTMLElement>('[data-copy="user"]')!;
     await expect(attempt.textContent).toBe(TRICKS[0]!.attempt);
     await expect(attempt.parentElement!.textContent).toBe(`“${TRICKS[0]!.attempt}”`);
-    expectComputed(attempt.parentElement!, { fontSize: '13px', lineHeight: '18px', color: SECONDARY });
-    expectComputed(within(first).getByText('Posing as you'), { fontSize: '14px', lineHeight: '20px', fontWeight: '520', color: PRIMARY });
+    expectComputed(attempt.parentElement!, { fontSize: '14px', lineHeight: '19px', color: SECONDARY });
+    expectComputed(within(first).getByText('Posing as you'), { fontSize: '15px', lineHeight: '21px', fontWeight: '520', color: PRIMARY });
     for (const [index, row] of rows.entries()) {
       expectComputed(row, { borderTopWidth: index === 0 ? '0px' : '1px' });
       if (index > 0) expectComputed(row, { borderTopColor: 'rgba(250, 249, 245, 0.12)' });

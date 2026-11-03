@@ -27,6 +27,7 @@ import { RouterLink } from '../OwnerLayout.tsx';
 import { JOBS_LINE, OTHER_TOOLS, RULES_FALLBACK } from './copy.ts';
 import { RuleDetails, ToolDetails } from './details.tsx';
 import { governingRules, hubSections } from './hub.ts';
+import { inRulesOrder } from './toolOrder.ts';
 import { ACROSS_DESK_SENTENCES, ALWAYS_ON_SENTENCES, moneyCapSentence, ruleQualifiers, ruleSentence, type AlwaysOnSentence, type SentenceWords } from './ruleSentence.ts';
 
 import './HouseRules.css';
@@ -70,7 +71,7 @@ export interface RuleRowDetails {
  * control (the payment limit's "Change"), its status dot, then Details, or Details' empty place for
  * a row without it, so every dot sits in one column. An always-on rule ends with its lock and
  * "Always on" instead, flush right where Details ends, with no dot and no Details. Where no row has
- * Details (setup's Your rules), `detailsPlace` is false and the dot ends the row.
+ * Details (Across your Desk and setup's Your rules), `detailsPlace` is false and the dot ends the row.
  */
 export function ToolRule({ parts, line, status, shared, repeated, card, landed, actions, below, details, detailsPlace = true, data }: {
   parts: readonly SentencePart[]; line?: string; status: RuleStatus; shared?: readonly string[]; repeated?: boolean;
@@ -163,15 +164,15 @@ function MoneyToolRules({ cap, landed, detailsPlace }: { cap: number; landed: nu
 /**
  * "Across your Desk"'s card (REV-RULES-D, A): the always-on rules over every tool, then the ask
  * anything no rule lists falls back to, "Updated" once a removed rule `landed` on it. Rules and
- * setup's Your rules both draw it; setup's rows have no Details, so `details` is false and keeps no
- * place for them.
+ * setup's Your rules both draw it. No row has Details, so the fallback's dot ends flush right,
+ * where the always-on labels end.
  */
-export function AcrossYourDeskRules({ landed, details = true }: { landed?: number | undefined; details?: boolean }) {
+export function AcrossYourDeskRules({ landed }: { landed?: number | undefined }) {
   return (
     <Card padding={0}>
       <ul className="cd-house-rules__rules cd-house-rules__rules--card" role="list">
         {ACROSS_DESK_SENTENCES.map((rule) => <AlwaysOnRule key={rule.key} parts={rule.parts} {...(rule.line === undefined ? {} : { line: rule.line })} />)}
-        <ToolRule parts={[{ text: RULES_FALLBACK }]} status="held" landed={landed} detailsPlace={details} data={{ 'data-fallback': true }} />
+        <ToolRule parts={[{ text: RULES_FALLBACK }]} status="held" landed={landed} detailsPlace={false} data={{ 'data-fallback': true }} />
       </ul>
     </Card>
   );
@@ -283,8 +284,8 @@ export interface ToolsView {
 const LEARNING_TOOLS: ReadonlySet<string> = new Set(['native.fetch_website', 'native.read_memory', 'native.web_search']);
 
 /**
- * Rules' tools, tool by tool, as words: the Desk's own jobs, then one card per connector that is on
- * (`hubSections`), each tool with the rules that cover it (`governingRules`) in its sentences and
+ * Rules' tools, tool by tool, as words: one card per connector that is on (`hubSections`), in Rules'
+ * reading order, then the Desk's own jobs, each tool with the rules that cover it (`governingRules`) in its sentences and
  * cell lines, in one order, so each shared rule is expanded exactly once across connectors. Last,
  * "Other tools" holds what no card above lists: a connected tool this version's catalog doesn't
  * know, and a stored rule that covers no tool on the page ("A rule for a tool this version can't
@@ -297,12 +298,12 @@ export function toolGroups(view: ToolsView, people: PeopleOut | null): ToolGroup
     && Array.isArray(row.effects) && row.effects.every((effect) => ['read', 'private_data', 'change', 'charge', 'pay_out', 'send_message'].includes(effect))
     && ['on', 'changed'].includes(toolState(row)));
   const groups: { key: string; name: string; connector: ConnectorView | null; line: string; money: boolean; tools: ToolRow[] }[] = [
-    ...(jobs.length === 0 ? [] : [{ key: 'jobs', name: BUSINESS_WORDS.jobs, connector: null, line: JOBS_LINE, money: false, tools: jobs }]),
-    ...hubSections(view, people).map((section) => ({
+    ...inRulesOrder(hubSections(view, people)).map((section) => ({
       key: section.connector.id, name: section.connector.name, connector: section.connector,
       line: section.connector.description, money: section.moneyLimit,
       tools: section.tools.flatMap((tool) => view.tools.filter((row) => row.tool === tool.key).slice(0, 1)),
     })),
+    ...(jobs.length === 0 ? [] : [{ key: 'jobs', name: BUSINESS_WORDS.jobs, connector: null, line: JOBS_LINE, money: false, tools: jobs }]),
   ];
   // A tool that is on or waits for review but that no card above lists: one this version's catalog
   // doesn't know. A catalog tool off with its connector, and a job off, stay off the page.
@@ -404,7 +405,8 @@ export function ToolConnectors(props: ToolConnectorsProps) {
     <Card key={group.key} as="section" label={group.name} padding={0}>
       <div className="cd-house-rules__connector">
         <div className="cd-house-rules__connector-header">
-          {group.connector === null ? null : <ConnectorIcon icon={group.connector.icon} size="section" />}
+          {group.key === 'jobs' ? <ConnectorIcon icon="store" size="section" />
+            : group.connector === null ? null : <ConnectorIcon icon={group.connector.icon} size="section" />}
           <div className="cd-house-rules__identity">
             {group.connector === null
               ? <span className="cd-house-rules__jobs-name cd-type-section">{group.name}</span>

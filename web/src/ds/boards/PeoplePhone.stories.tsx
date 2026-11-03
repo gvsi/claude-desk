@@ -105,8 +105,8 @@ export const Board: Story = {
       await expect(tag.getBoundingClientRect().top).toBeGreaterThanOrEqual(note.getBoundingClientRect().bottom);
       await expect(Math.round(time.getBoundingClientRect().right)).toBe(Math.round(row.getBoundingClientRect().right) - 10);
     }
-    // A live lead keeps its 51 px; a replayed one grows by the tag's line.
-    await expect(Math.round(rows[0]!.getBoundingClientRect().height)).toBe(51);
+    // A live lead keeps its 53 px; a replayed one grows by the tag's line.
+    await expect(Math.round(rows[0]!.getBoundingClientRect().height)).toBe(53);
     await expectFooter(canvasElement);
   },
 };

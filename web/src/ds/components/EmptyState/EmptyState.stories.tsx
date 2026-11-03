@@ -31,8 +31,8 @@ export const NoConversations: Story = {
     await expect(title).toBeVisible();
     await expect(body).toBeVisible();
     // Says what will appear, quietly: the title in the interface's section style, the body secondary.
-    expectComputed(title, { fontSize: '15px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
-    expectComputed(body, { fontSize: '13px', color: 'rgba(250, 249, 245, 0.64)' });
+    expectComputed(title, { fontSize: '16px', fontWeight: '520', color: 'rgba(250, 249, 245, 0.92)' });
+    expectComputed(body, { fontSize: '14px', color: 'rgba(250, 249, 245, 0.64)' });
     await expect(title.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // No action was given, so there is no dead button.
     await expect(canvas.queryByRole('button')).toBeNull();

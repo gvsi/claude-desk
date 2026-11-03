@@ -170,9 +170,9 @@ const LIMIT_500 = 'Claude asks you before any payment over $500, whatever the ru
 const CANCELS_LINKS = "Open payment links I made on my own that the new rules don't allow will be cancelled.";
 
 /** The connector sections, in order, by their names. */
-const SECTIONS = ['Quotes', 'Bookings', 'Leads and callbacks', 'Verification', 'Documents', 'Payments', 'Stripe'] as const;
+const SECTIONS = ['Quotes', 'Bookings', 'Payments', 'Stripe', 'Documents', 'Leads and callbacks', 'Verification'] as const;
 
-/** The card of the Desk's own jobs, before the connectors. */
+/** The card of the Desk's own jobs, after the connectors. */
 const JOBS = 'Your Desk’s jobs';
 
 /** The rule sentences under `root`, in order. */
@@ -220,10 +220,10 @@ describe('rules page', () => {
     // One page of rules: nothing links to another.
     expect(screen.getByRole('link', { name: 'See all rules' }).elements()).toEqual([]);
     expect(screen.container.querySelectorAll('a[href$="/rules/all"]')).toHaveLength(0);
-    // Tool by tool: the Desk's own jobs first, then each connector, under the section's caption.
+    // Tool by tool: the connectors in reviewer order, then the Desk's own jobs.
     await expect.element(tools.getByRole('heading', { level: 2, name: 'Tool by tool' })).toBeVisible();
     await expect.element(tools.getByText('Each connector’s tools, with your rules for each.', { exact: true })).toBeVisible();
-    expect([...tools.element().querySelectorAll('.cd-card')].map((card) => card.getAttribute('aria-label'))).toEqual([JOBS, ...SECTIONS]);
+    expect([...tools.element().querySelectorAll('.cd-card')].map((card) => card.getAttribute('aria-label'))).toEqual([...SECTIONS, JOBS]);
     // Each tool lists the rules that cover it, with no effect tags beside its name.
     const link = tools.getByRole('region', { name: 'Payment link' });
     expect(sentencesIn(link.element())).toEqual(['Claude can send payment links up to $300']);
@@ -249,25 +249,16 @@ describe('rules page', () => {
     expect(tools.element().querySelector('.cd-connector-name__built-in')).toBeNull();
   });
 
-  it('anything_not_listed_keeps_the_whole_place_of_details_so_its_dot_lines_up', async () => {
-    const { screen } = await renderRoute(`${DESK}/rules`);
+  it.each(['desktop', 'phone'] as const)('anything_not_listed_ends_its_dot_at_the_always_on_edge_at_%s', async (viewport) => {
+    const { screen } = await renderRoute(`${DESK}/rules`, { viewport });
     const across = screen.getByRole('region', { name: 'Across your Desk' });
     await expect.element(across).toBeVisible();
     const row = across.element().querySelector<HTMLElement>('[data-fallback]')!;
-    const actions = row.querySelector<HTMLElement>('.cd-house-rules__rule-actions')!;
-    const slot = actions.querySelector<HTMLElement>('.cd-advanced-details__slot')!;
-    const dot = actions.querySelector<HTMLElement>('.cd-status-dot')!;
-    // Details' empty place keeps its whole box, as a row's Details does on the board, 2 px under the
-    // row's top, so the row is as tall as the place and its dot sits at the place's middle.
-    expect(getComputedStyle(slot).marginTop).toBe('0px');
-    const style = getComputedStyle(row);
-    const edges = ['paddingTop', 'paddingBottom', 'borderTopWidth', 'borderBottomWidth'] as const;
-    const inner = row.getBoundingClientRect().height - edges.reduce((sum, edge) => sum + Number.parseFloat(style[edge]), 0);
-    const top = Number.parseFloat(getComputedStyle(actions).paddingTop);
-    expect(top).toBeGreaterThan(0);
-    expect(Math.round(inner)).toBe(Math.round(slot.getBoundingClientRect().height + top));
-    const middle = (el: Element) => (el.getBoundingClientRect().top + el.getBoundingClientRect().bottom) / 2;
-    expect(Math.abs(middle(dot) - middle(slot))).toBeLessThan(1);
+    const dot = row.querySelector('.cd-status-dot')!;
+    const ends = [...across.element().querySelectorAll('.cd-house-rules__always-on')];
+    expect(ends).toHaveLength(2);
+    for (const end of ends) expect(dot.getBoundingClientRect().right).toBe(end.getBoundingClientRect().right);
+    expect(row.querySelector('.cd-advanced-details__slot')).toBeNull();
   });
 
   it('sets_every_apostrophe_it_writes_as_a_typographic_one', async () => {
@@ -429,7 +420,7 @@ describe('rules page', () => {
     const { screen } = await renderRoute(`${DESK}/rules`);
     const tools = screen.getByRole('region', { name: 'Tool by tool' });
     await expect.element(tools.getByRole('region', { name: 'Stripe' })).toBeVisible();
-    // Turner's urgent job first, then the connectors' eleven tools, each named without a link.
+    // The connectors' eleven tools, then Turner's urgent job, each named without a link.
     expect(tools.element().querySelectorAll('.cd-house-rules__tool-header')).toHaveLength(12);
     expect(tools.getByRole('link').elements()).toEqual([]);
     expect(screen.container.querySelectorAll('a[href*="/connectors"]')).toHaveLength(0);
@@ -917,7 +908,7 @@ describe('rules page', () => {
     const details = tools.getByRole('region', { name: 'See charges' }).element().querySelector('.cd-house-rules__rule .cd-advanced-details__toggle');
     const always = tools.getByRole('region', { name: 'See charges' }).element().querySelector('.cd-house-rules__always-on');
     expect(right(always)).toBe(right(details));
-    expect(right(rows[0]!.querySelector('.cd-house-rules__always-on'))).toBe(right(rows[2]!.querySelector('.cd-advanced-details__slot')));
+    expect(right(rows[0]!.querySelector('.cd-house-rules__always-on'))).toBe(right(rows[2]!.querySelector('.cd-status-dot')));
   });
 
   it('money_cap_shows_and_changes_through_a_draft', async () => {
@@ -1179,14 +1170,14 @@ describe('rules page', () => {
     expect(top(box) - bottom(header)).toBe(20);
     expect(top(row) - bottom(box)).toBe(10);
     // Then "Across your Desk" 20 px under them, its card 12 px under its header, and "Tool by tool"
-    // 32 px under that card, its first card, the Desk's own jobs, 12 px under its header.
+    // 32 px under that card, its first card, Quotes, 12 px under its header.
     const [across, tools] = [...main.querySelectorAll<HTMLElement>('.cd-rules__section')].filter((section) => section.closest('.cd-skeleton-screen__layer') === null);
     expect(top(across!) - bottom(row)).toBe(20);
     const acrossCard = across!.querySelector('.cd-card')!;
     expect(top(acrossCard) - bottom(across!.querySelector('.cd-section-header')!)).toBe(12);
     expect(top(tools!) - bottom(acrossCard)).toBe(32);
     expect(top(tools!.querySelector('.cd-card')!) - bottom(tools!.querySelector('.cd-section-header')!)).toBe(12);
-    expect(tools!.querySelector('.cd-card')?.getAttribute('aria-label')).toBe(JOBS);
+    expect(tools!.querySelector('.cd-card')?.getAttribute('aria-label')).toBe('Quotes');
     const title = screen.getByRole('heading', { level: 1, name: 'Rules' }).element();
     expect(menu.getBoundingClientRect().left).toBeGreaterThan(title.getBoundingClientRect().right);
     expect(top(menu) - top(title)).toBe(4);
@@ -1308,8 +1299,10 @@ describe("Ask Claude's question about a hold", () => {
     mockStore.inject({ route: 'suggestions', status: 200, body: [DANA_REFUNDS], until });
     const connectorTops = watchTop(() => pagePart('.cd-rules__tool-cards'));
     const { screen } = await renderRoute(`${DESK}/rules`, { pollScale: 100, viewport });
-    await expect.poll(() => finished.has('needsYou')).toBe(true);
-    await expect.poll(() => finished.has('rules')).toBe(true);
+    // The page's first reads finish about a second after it opens on a phone in the test browser,
+    // past the poll's default 1 s; the file's other waits allow more.
+    await expect.poll(() => finished.has('needsYou'), { timeout: 3_000 }).toBe(true);
+    await expect.poll(() => finished.has('rules'), { timeout: 3_000 }).toBe(true);
     await settled(screen.container);
     const before = connectorTops();
     release();

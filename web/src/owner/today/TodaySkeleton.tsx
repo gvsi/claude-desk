@@ -1,15 +1,16 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import type { DeskSummary, UnfinishedSetupStep } from '../../api/views.ts';
+import type { BusinessOut, DeskSummary, UnfinishedSetupStep } from '../../api/views.ts';
 import { Skeleton, SkeletonCard, type SkeletonText } from '../../ds/index.ts';
 import { rivera } from '../../ds/fixtures/index.ts';
 import { useTextLines, type TextPart } from '../../lib/useTextLines.ts';
 import { greetingFor } from '../../lib/format.ts';
+import { givenOwnerName } from '../../public/brand.ts';
 import { HeldRuleShape } from '../approvals/HeldRuleShape.tsx';
 import { ANSWER_ROOM, DEMO_VISITOR_THING, THINGS_TO_TRY } from '../arrival/ideas.ts';
 import { doneCaption } from '../arrival/doneSignals.ts';
 import { STEP_INDEX, STEP_NAMES } from '../../setup/copy.ts';
 import { publicLink } from '../customerLink.ts';
-import { isLive } from '../useDesks.ts';
+import { firstName, isLive } from '../useDesks.ts';
 import {
   CONTINUE_SETUP_COPY,
   continueSetupLine,
@@ -115,9 +116,12 @@ const PRESENCE: readonly TextPart[] = [
   'One person is talking to your Desk right now.',
 ];
 
-function GreetingWords() {
+/** The greeting's words: a Desk whose setup isn't finished greets its own owner, any other the fresh copy's. */
+function GreetingWords({ setup }: { setup?: SkeletonSetup }) {
   const box = useRef<HTMLDivElement>(null);
-  const greeting = `${greetingFor(new Date(), 'America/Los_Angeles')}, ${rivera.business.ownerName.split(' ')[0]}`;
+  const said = greetingFor(new Date(), setup?.timezone ?? 'America/Los_Angeles');
+  const name = setup === undefined ? rivera.business.ownerName.split(' ')[0] : setup.owner;
+  const greeting = name ? `${said}, ${name}` : said;
   const title = useWordWidth(box, greeting, 'cd-greeting__title cd-type-greeting', true);
   const presence = useWordWidth(box, PRESENCE, 'cd-greeting__presence cd-type-body', true);
   // The words' own width: the greeting's basis beside the link from 640 px, and its width on a phone.
@@ -172,7 +176,10 @@ const FRESH_OUTCOMES = todayOutcomes({ handled: 2, held: 1, turnedDown: 0 });
 /** A Desk whose setup isn't finished has most likely been asked nothing yet today. */
 const QUIET_OUTCOMES = todayOutcomes({ handled: 0, held: 0, turnedDown: 0 });
 
-/** What the "Not live yet" card needs to be drawn as it will land: the Desk's own words and step. */
+/**
+ * What a Desk whose setup isn't finished needs to be drawn as it will land: the "Not live yet" card's
+ * words and step, and whom the greeting names.
+ */
 export interface SkeletonSetup {
   /** The step setup stopped at. */
   step: UnfinishedSetupStep;
@@ -180,15 +187,27 @@ export interface SkeletonSetup {
   answering: boolean;
   /** The business's name, in the card's title. */
   business: string;
+  /** The owner's first name, as Today greets them, or '' when they gave none. */
+  owner: string;
+  /** The Desk's time zone, which sets the greeting's time of day. */
+  timezone: string;
 }
 
 /**
- * What Today's shapes draw the "Not live yet" card from: the Desk's unfinished setup, or nothing
- * once it is live. Today's own skeleton and the loading page both take it from here, so they agree.
+ * What Today's shapes draw the "Not live yet" card and the greeting from: the Desk's unfinished setup
+ * and its owner, or nothing once it is live. Today's own skeleton and the loading page both take it
+ * from here, so they agree.
  */
-export function skeletonSetupOf(desk: DeskSummary): SkeletonSetup | undefined {
+export function skeletonSetupOf(desk: DeskSummary, business: Pick<BusinessOut, 'owner_display_name' | 'timezone'>): SkeletonSetup | undefined {
   if (isLive(desk) || !desk.setup) return undefined;
-  return { step: desk.setup.step, answering: desk.answering, business: desk.business_name };
+  const given = givenOwnerName(business.owner_display_name);
+  return {
+    step: desk.setup.step,
+    answering: desk.answering,
+    business: desk.business_name,
+    owner: given === null ? '' : firstName(given).trim(),
+    timezone: business.timezone,
+  };
 }
 
 /**
@@ -351,7 +370,8 @@ function SectionTitle({ anchor, caption = false }: { anchor: string; caption?: b
       <div className="cd-section-header__title">
         <Skeleton shape="line" text="section" width={135} anchor={anchor} />
       </div>
-      {caption ? <Skeleton shape="line" text="caption" width={145} /> : null}
+      {/* The caption is in meta type (`SectionHeader`), and on a phone it drops under the title, where its line height counts. */}
+      {caption ? <Skeleton shape="line" text="meta" width={145} /> : null}
     </div>
   );
 }
@@ -367,7 +387,7 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
       <div className="cd-today__band">
         <div className="cd-today__greeting">
           <div className="cd-greeting">
-            <GreetingWords />
+            <GreetingWords setup={setup} />
             <div className="cd-greeting__actions">
               <Skeleton
                 shape="block"
@@ -465,8 +485,8 @@ export function TodaySkeleton({ setup }: { setup?: SkeletonSetup } = {}) {
               {['booking', 'answer'].map((kind) => (
                 <div key={kind} className="cd-briefing__item">
                   <div className="cd-briefing-row">
-                    {/* Decision 15: the time column depends on the copy's opening clock; it may land once at a different width. */}
-                    <Skeleton shape="line" text="caption" width={86} />
+                    {/* The time column is as wide as the widest time today, whatever the copy's opening clock. */}
+                    <Skeleton shape="line" text="caption" width="var(--cd-today-time-width)" />
                     <span className="cd-briefing-row__kind cd-type-meta">
                       <span className="cd-status-label">
                         <Skeleton shape="circle" size={6} />

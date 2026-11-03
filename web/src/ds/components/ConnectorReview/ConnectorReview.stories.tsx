@@ -49,7 +49,7 @@ export const ChenPayments: Story = {
     await expect(expectListsKeepTheirRole(canvasElement)).toBeGreaterThanOrEqual(1);
     // The page's h1, with the connector's "Built in" beside its name.
     const title = canvas.getByRole('heading', { level: 1, name: 'Review what Claude could do with Payments Built in' });
-    expectComputed(title, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '24px' });
+    expectComputed(title, { fontFamily: '"Source Serif 4", Georgia, serif', fontSize: '26px' });
     await expect(canvas.getByText("A built-in connector, so there's nothing to sign in to. Nothing runs until you turn it on.")).toBeVisible();
     // review_starts_at_ask_me_first: a row per tool, each at "Ask me first", with what covers it.
     const card = canvas.getByRole('region', { name: 'Tools' });

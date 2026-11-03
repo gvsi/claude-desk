@@ -8,9 +8,11 @@
 import { describe, expect, it } from 'vitest';
 import type { RenderResult } from 'vitest-browser-react';
 
-import type { DemoInboxEntry } from '../../api/contracts.ts';
+import type { DecisionState, DemoInboxEntry } from '../../api/contracts.ts';
+import { rivera } from '../../ds/fixtures/index.ts';
 import { expectComputed } from '../../ds/test/expectComputed.ts';
 import { formatDate } from '../../lib/format.ts';
+import { DECISIONS } from '../../mocks/script.ts';
 import { RIVERA } from '../../mocks/seed.ts';
 import { mockStore } from '../../mocks/store.ts';
 import { renderRoute } from '../../test/renderRoute.tsx';
@@ -45,6 +47,38 @@ const rows = (screen: RenderResult) => [...screen.getByRole('main').element().qu
 const dotted = (row: HTMLElement) => row.querySelector('.cd-notifications__dot--unread') !== null;
 
 describe('Notifications', () => {
+  it.each([
+    ['booking', 'Closed: the visitor booked first', 'The visitor booked before you answered, so this request closed.'],
+    ['expired', 'Closed: it expired before you answered', 'This request expired before you answered. Nothing was done.'],
+    ['cancelled', 'Closed: the visitor cancelled', 'The visitor cancelled before you answered. Nothing was done.'],
+    ['approved', 'Answered: you allowed it', 'You allowed this.'],
+    ['executed', 'Answered: you allowed it', "You allowed this. It's done."],
+    ['failed', 'Answered: you allowed it', "You allowed this, but it didn't go through. Nothing was done."],
+    ['unknown', 'Answered: you allowed it', 'You allowed this. Still confirming whether it went through.'],
+    ['refused_at_execution', 'Answered: you allowed it', "Your rules changed before this ran, so it wasn't done."],
+    ['denied', 'Answered: you denied it', 'You denied this.'],
+  ] as const)('ended_alert_reads_as_closed_when_%s', async (state, heading, status) => {
+    const record = [...mockStore.world.decisions.values()].find(({ decision }) => decision.reason_plain === rivera.decisions.held.reason_plain)!;
+    const { world } = mockStore;
+    if (state === 'booking') {
+      const session = world.sessions.get(record.decision.session_id)!;
+      world.at(world.now() + 1000, () => world.context(session, 'en', 'Book a visit').decide(DECISIONS.book));
+    } else if (state === 'cancelled') world.cancel(record);
+    else record.decision = { ...record.decision, state: state as DecisionState, answers: [] };
+    const alert = world.inbox.find(({ entry }) => entry.decision_id === record.decision.decision_id)!.entry;
+    const { screen } = await renderRoute(NOTIFICATIONS);
+    await expect.element(screen.getByText(status, { exact: true })).toBeVisible();
+    const row = rows(screen).find((item) => item.textContent?.includes(alert.body))!;
+    expect(row.querySelector('.cd-notifications__kind')?.textContent).toBe(heading);
+    expect(row.querySelector('.cd-notifications__dot')).not.toBeNull();
+    expect(dotted(row)).toBe(false);
+    expect(row.textContent).not.toContain('Unread:');
+    expect(row.textContent).not.toContain('Open the request');
+    expect(row.querySelector('a')?.hasAttribute('href')).toBe(false);
+    expectComputed(row.querySelector<HTMLElement>('.cd-notifications__kind')!, { color: SECONDARY, fontWeight: '520' });
+    expectComputed(row.querySelector<HTMLElement>('.cd-notifications__entry')!, { color: SECONDARY });
+  });
+
   it('unread_count_goes_as_the_page_shows_them', async () => {
     const code = addEntry({ kind: 'verification_code', to: 'd•••@example.com', body: 'Your Turner Plumbing code is 305817.' }, DAY_MS);
     const total = mockStore.world.inbox.length;
@@ -79,6 +113,8 @@ describe('Notifications', () => {
     // kernel's fixed line for what it's about, where an untitled one reads "Alert".
     const alertRow = rows(screen)[0]!;
     expect(alertRow.querySelector('.cd-notifications__kind')?.textContent).toBe('Unread: A request needs your answer');
+    expectComputed(alertRow.querySelector<HTMLElement>('.cd-notifications__kind')!, { color: PRIMARY, fontWeight: '520' });
+    await expect.element(main.getByRole('link', { name: /Open the request/ })).toBeVisible();
     // The last row of a day has no hairline under it: the next day's line separates them.
     for (const list of main.element().querySelectorAll('.cd-notifications__list')) {
       const last = list.lastElementChild as HTMLElement;
