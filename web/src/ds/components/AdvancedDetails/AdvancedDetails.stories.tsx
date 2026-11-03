@@ -145,7 +145,8 @@ export const Desktop: Story = {
     // The JSON as written, tinted: keys blue, strings primary, other values secondary, punctuation tertiary.
     const pre = panel.querySelector<HTMLElement>('pre')!;
     await expect(pre.textContent).toBe(jsonText(TOOL_JSON));
-    expectComputed(pre, { whiteSpace: 'pre', overflowX: 'auto', fontVariantLigatures: 'none', paddingTop: '12px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
+    expectComputed(pre, { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontVariantLigatures: 'none', paddingTop: '12px', backgroundColor: 'rgba(250, 249, 245, 0.1)' });
+    await expect(pre.scrollWidth).toBeLessThanOrEqual(pre.clientWidth);
     expectComputed(pre.querySelector<HTMLElement>('.cd-advanced-details__json-key')!, { color: BLUE });
     expectComputed(pre.querySelector<HTMLElement>('.cd-advanced-details__json-string')!, { color: PRIMARY });
     expectComputed(pre.querySelector<HTMLElement>('.cd-advanced-details__json-value')!, { color: SECONDARY });
@@ -169,7 +170,7 @@ export const Desktop: Story = {
   },
 };
 
-/** At 390 the panel keeps its label column; long values wrap, and a long JSON line scrolls inside its block, never the page. */
+/** At 390 the panel keeps its label column; long values and JSON lines wrap inside the block. */
 export const Phone: Story = {
   globals: { viewport: { value: 'phone', isRotated: false } },
   play: async ({ canvas, canvasElement, userEvent }) => {
@@ -178,7 +179,7 @@ export const Phone: Story = {
     await expect(canvasElement.querySelectorAll('.cd-advanced-details__panel')).toHaveLength(2);
     for (const label of canvasElement.querySelectorAll('dt')) await expect(label.getBoundingClientRect().width).toBe(104);
     const pre = canvasElement.querySelector<HTMLElement>('pre')!;
-    await expect(pre.scrollWidth).toBeGreaterThan(pre.clientWidth);
+    await expect(pre.scrollWidth).toBeLessThanOrEqual(pre.clientWidth);
     await expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(390);
   },
 };

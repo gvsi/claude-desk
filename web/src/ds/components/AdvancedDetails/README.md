@@ -23,7 +23,7 @@
 - **The list:** one line per field, 4 px above and below. The label sits in a 104 px column in `.cd-type-meta`, secondary; the value is in `.cd-type-meta`, primary, wrapping anywhere.
 - **The block:**
   - The label in `.cd-type-meta`, secondary, with a ghost inline "Copy" `Button` at the right, described by the label.
-  - The JSON (`jsonText`) in a `<pre class="cd-type-trace">` on `fill-secondary` at the control radius, padded 12 px, with `white-space: pre`, `font-variant-ligatures: none` and its own horizontal scroll. It is focusable, so a keyboard can scroll a long line into view; the page never scrolls sideways.
+  - The JSON (`jsonText`) in a `<pre class="cd-type-trace">` on `fill-secondary` at the control radius, padded 12 px, with `white-space: pre-wrap`, `overflow-wrap: anywhere` and `font-variant-ligatures: none`. Long strings and unbroken values wrap without horizontal scrolling. Each JSON line has a hanging indent equal to its leading spaces, so continuation lines start under that line's content. Literal spaces and newlines stay intact for selection, and Copy still copies the exact `jsonText(value)` text.
   - The tint: keys in `accent-blue`, strings in `text-primary`, numbers, booleans and null in `text-secondary`, and punctuation in `text-tertiary`. No status color, since nothing in the block is a verdict. Every pair reads 4.5:1 on `fill-secondary` over `bg-surface` (`contrast.ts`).
 - **After a press:** CopyField's line: "Copied.", or "Copy didn’t work. The text is selected, so copy it yourself." with the block's text selected (`useCopyText`, `copyResultLine`). It sits beside the Copy button, as a `status`, and only the latest copy on the page shows it.
 
@@ -37,6 +37,7 @@
 - `jsonText(value)` gives a 2-space indent and one field per line. A list of plain values stays on one line (`["charge"]`); a list holding objects or lists puts one entry per line.
 - It reads back as the same value (`JSON.parse`), and a field left undefined is left out, as `JSON.stringify` leaves it out.
 - `jsonTokens(value)` gives the same text as runs to tint.
+- `jsonLines(value)` groups those runs by line, retaining leading spaces and exposing their count for the hanging indent. Joining the lines with newlines gives the same text.
 
 ## Props
 
