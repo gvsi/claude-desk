@@ -80,6 +80,8 @@ export const REFERENCE_BOARDS = [
   // The agent's run inside the same card, its reply cards held there, and a charge over its limit.
   'N-R2-Agents-04-Run',
   'N-R2-Agents-05-Over-Limit',
+  // The agents page on a phone; both page boards redrawn on 2026-11-02 (canvas v326).
+  'N-R2-Agents-06-Phone',
   // The chat: a payment link a rule change cancelled.
   'N-R2-Chat-Link-Cancelled',
   // The public page while the owner is in the chat, take-over option A, signed on 2026-10-30: the
@@ -140,6 +142,7 @@ export const BOARD_VIEWPORTS = {
   sidebar: { name: 'Sidebar alone', width: 264, height: 982 },
   phone: { name: 'Phone', width: 390, height: 844 },
   'phone-900': { name: 'Phone, a 900 px page', width: 390, height: 900 },
+  'phone-2000': { name: 'Phone, a 2000 px page', width: 390, height: 2000 },
   'laptop-994': { name: '14-inch laptop, a 994 px page', width: 1512, height: 994 },
   'laptop-1061': { name: '14-inch laptop, a 1061 px page', width: 1512, height: 1061 },
   'laptop-1100': { name: '14-inch laptop, a 1100 px page', width: 1512, height: 1100 },
@@ -172,6 +175,7 @@ const BOARD_WINDOWS: Readonly<Partial<Record<ReferenceBoard, Exclude<BoardViewpo
   'N-R2-Agents-03-Send': 'laptop',
   'N-R2-Agents-04-Run': 'laptop-1150',
   'N-R2-Agents-05-Over-Limit': 'laptop',
+  'N-R2-Agents-06-Phone': 'phone-2000',
   'N-R2-Chat-Link-Cancelled': 'laptop',
   'N-R2-TakeOver-A-1512-EN': 'laptop',
   'N-R2-TakeOver-A-390-EN': 'phone',

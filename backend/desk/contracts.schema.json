@@ -109,6 +109,140 @@
       "title": "A2AResponse",
       "type": "object"
     },
+    "AgentAbility": {
+      "properties": {
+        "kind": {
+          "enum": [
+            "prose",
+            "card"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "enum": [
+                "quote",
+                "booking_options",
+                "booking_confirmed",
+                "payment_link",
+                "document_link",
+                "hours",
+                "policy",
+                "contact",
+                "handoff",
+                "verify_prompt",
+                "owner_said",
+                "charges",
+                "refund_issued",
+                "charge_confirmed",
+                "callback_confirmed",
+                "payment_confirmed",
+                "link_cancelled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Template"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "fact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fact Id"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "lines": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Lines",
+          "type": "array"
+        },
+        "href": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Href"
+        },
+        "options": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CardOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "allowed",
+                "asks_first",
+                "never"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outcome"
+        },
+        "outcome_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outcome Text"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "outcome",
+        "outcome_text"
+      ],
+      "title": "AgentAbility",
+      "type": "object"
+    },
     "AgentAuth": {
       "properties": {
         "agent_key_id": {
@@ -3540,7 +3674,7 @@
         },
         "agent_card": {
           "items": {
-            "$ref": "#/$defs/RenderedBlock"
+            "$ref": "#/$defs/AgentAbility"
           },
           "title": "Agent Card",
           "type": "array"

@@ -196,7 +196,7 @@ describe('Demo visitor', () => {
     const { session_id: sessionId } = await startOne('row-and-head');
     const { screen, router } = await renderRoute(LIST, { viewport });
     // The row: the persona's first name, then the pill right after it on the row's top line.
-    const row = screen.getByRole('link', { name: /^Riley Demo visitor/ });
+    const row = screen.getByRole('link', { name: /^Unread: Riley Demo visitor/ });
     await expect.element(row).toBeVisible();
     const top = row.element().querySelector('.cd-conversation-item__top')!;
     const name = top.querySelector('.cd-conversation-item__name')!;
