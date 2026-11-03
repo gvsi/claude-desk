@@ -1431,6 +1431,44 @@ describe('Conversations', () => {
     expect(transcript.scrollTop + transcript.clientHeight).toBeGreaterThanOrEqual(transcript.scrollHeight - 1);
   });
 
+  it.each(['desktop', 'phone'] as const)('a_request_link_lands_on_its_card_above_later_messages_on_%s', async (viewport) => {
+    lengthen(session(SEEDED_HOLD));
+    const { screen, router } = await renderRoute(`${DESK}/today`, { viewport });
+    const opener = screen.getByRole('region', { name: 'Things to try' }).getByRole('link', {
+      name: viewport === 'phone' ? 'Answer a held request' : 'Open the request', exact: true,
+    });
+    await expect.element(opener).toBeVisible();
+    opener.element().focus();
+    await userEvent.keyboard('{Enter}');
+    const card = heldCard(screen, SEEDED_REASON);
+    await expect.element(card).toBeInViewport({ ratio: 1 });
+    const focusTarget = page.elementLocator(card.element().closest('.cd-approval-card__card')!);
+    await expect.element(focusTarget).toHaveFocus();
+    await expect.element(card.getByRole('button', { name: 'Allow this time' })).toBeInViewport({ ratio: 1 });
+    await expect.element(card.getByRole('button', { name: 'Deny this time' })).toBeInViewport({ ratio: 1 });
+    // Polling does not take her back to the request after she moves on.
+    const composer = screen.getByRole('textbox', { name: 'Whisper to Claude' });
+    composer.element().focus();
+    await readsMore('conversation', 2);
+    await expect.element(composer).toHaveFocus();
+    // A new arrival at the same address lands again, even with a warm transcript.
+    const address = router.state.location.pathname + router.state.location.hash;
+    await router.navigate(address);
+    await expect.element(focusTarget).toHaveFocus();
+    await expect.element(card).toBeInViewport({ ratio: 1 });
+  });
+
+  it.each(['desktop', 'phone'] as const)('another_requests_hash_keeps_the_existing_chat_landing_on_%s', async (viewport) => {
+    const other = mockStore.world.addHeldRefund();
+    const last = lengthen(session(SEEDED_HOLD));
+    const { screen } = await renderRoute(`${conversation(SEEDED_HOLD)}#request-${other.decision_id}`, { viewport });
+    await expect.element(log(screen).getByText(last, { exact: true })).toBeInViewport({ ratio: 1 });
+    if (viewport === 'phone') await expect.element(screen.getByRole('heading', { level: 2, name: 'Visitor', exact: true })).toHaveFocus();
+    else expect(document.activeElement).toBe(document.body);
+    const focusTarget = page.elementLocator(heldCard(screen, SEEDED_REASON).element().closest('.cd-approval-card__card')!);
+    await expect.element(focusTarget).not.toHaveFocus();
+  });
+
   it('take_over_keeps_the_list_and_the_head_in_place', async () => {
     const last = lengthen(named(DANA_LIVE, DANA));
     const { screen } = await renderRoute(conversation(DANA_LIVE));
