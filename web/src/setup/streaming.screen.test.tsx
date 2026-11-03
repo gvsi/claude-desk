@@ -51,7 +51,7 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     mockStore.streamSetupTurns();
     const held = gate();
     mockStore.planStream('setup', { pauseAfter: 5, until: held.until });
-    await screen.getByRole('button', { name: 'Yes, use it', exact: true }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)', exact: true }).click();
 
     // Five words sent: the fifth waits for what follows it.
     await expect.poll(() => growing()?.textContent).toBe(growingWords(OPENING)[3]);
@@ -313,7 +313,7 @@ describe.each(['desktop', 'phone'] as const)('setup streaming at %s', (viewport:
     const state = await cpaInterview(null);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
     mockStore.streamSetupTurns();
-    await screen.getByRole('button', { name: 'Yes, use it', exact: true }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)', exact: true }).click();
     await expect.element(screen.getByRole('region', { name: FIRST_QUESTION, exact: true })).toBeVisible();
     // The API says done a moment before it unlocks the interview: an answer sent in that moment is
     // refused. The step reads the interview and keeps the words, and says nothing went wrong.

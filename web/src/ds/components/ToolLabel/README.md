@@ -1,10 +1,10 @@
 # ToolLabel
 
-`ToolLabel` is a quiet line for something Claude did with a tool during setup, such as "Searched your Claude memory".
+`ToolLabel` is a quiet line for something Claude did with a tool during setup, such as "Searched your sample Claude memory".
 
 ## When to use
 
-- In setup's conversation, for each `tool_label` message, between Claude's questions and the owner's answers: "Searched your Claude memory", "Read turnerplumbing.example", or a line saying a website couldn't be read.
+- In setup's conversation, for each `tool_label` message, between Claude's questions and the owner's answers: "Searched your sample Claude memory", "Read turnerplumbing.example", or a line saying a website couldn't be read.
 - Not for a visitor's conversation, where what Claude did shows as a receipt under its message (`MarginReceipt`).
 
 ## What it shows

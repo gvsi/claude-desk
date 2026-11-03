@@ -7,7 +7,7 @@ import { ToolLabel } from './ToolLabel.tsx';
 const meta = {
   title: 'Conversation/ToolLabel',
   component: ToolLabel,
-  args: { text: 'Searched your Claude memory' },
+  args: { text: 'Searched your sample Claude memory' },
   parameters: {
     layout: 'padded',
     canvas: 'none',

@@ -34,13 +34,13 @@ describe('stepSetupStream', () => {
   it('clears_the_text_on_reset_and_keeps_the_reads', () => {
     expect(
       through([
-        { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
+        { type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' },
         { type: 'delta', run, text: "Here's what I'd" },
         { type: 'reset', run },
       ]),
-    ).toEqual({ growing: { labels: [{ read: 'memory', text: 'Searched your Claude memory' }], text: '', final: false }, next: 'read_on' });
-    expect(shownLabels(through([{ type: 'label', run, read: 'memory', text: 'Searched your Claude memory' }, { type: 'reset', run }]).growing)).toEqual([
-      'Searched your Claude memory',
+    ).toEqual({ growing: { labels: [{ read: 'memory', text: 'Searched your sample Claude memory' }], text: '', final: false }, next: 'read_on' });
+    expect(shownLabels(through([{ type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' }, { type: 'reset', run }]).growing)).toEqual([
+      'Searched your sample Claude memory',
     ]);
   });
 
@@ -51,10 +51,10 @@ describe('stepSetupStream', () => {
     const ended = through([
       { type: 'reading', run, read: 'memory', host: null },
       { type: 'reading', run, read: 'website', host: 'chenco-cpa.example' },
-      { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
+      { type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' },
       { type: 'label', run, read: 'website', text: 'Read chenco-cpa.example' },
     ]).growing;
-    expect(shownLabels(ended)).toEqual(['Searched your Claude memory', 'Read chenco-cpa.example']);
+    expect(shownLabels(ended)).toEqual(['Searched your sample Claude memory', 'Read chenco-cpa.example']);
   });
 
   it('shows_each_label_in_the_order_its_read_started_whichever_ends_first', () => {
@@ -65,8 +65,8 @@ describe('stepSetupStream', () => {
       { type: 'label', run, read: 'website', text: 'Read chenco-cpa.example' },
     ]).growing;
     expect(shownLabels(ended)).toEqual(['Read chenco-cpa.example']);
-    expect(shownLabels(stepSetupStream(ended, { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' }, false).growing)).toEqual([
-      'Searched your Claude memory',
+    expect(shownLabels(stepSetupStream(ended, { type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' }, false).growing)).toEqual([
+      'Searched your sample Claude memory',
       'Read chenco-cpa.example',
     ]);
   });
@@ -82,22 +82,22 @@ describe('stepSetupStream', () => {
         through([
           ...searches,
           { type: 'label', run, read: 'web_search', text: 'Searched the web: hair salon color appointment deposits' },
-          { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
+          { type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' },
           { type: 'label', run, read: 'web_search', text: 'Searched the web: salon new client consultation form' },
         ]).growing,
       ),
-    ).toEqual(['Searched your Claude memory', 'Searched the web: hair salon color appointment deposits', 'Searched the web: salon new client consultation form']);
+    ).toEqual(['Searched your sample Claude memory', 'Searched the web: hair salon color appointment deposits', 'Searched the web: salon new client consultation form']);
     // Each failed search says so while the turn runs; the saved turn read back shows the one line it keeps.
     expect(
       shownLabels(
         through([
           ...searches,
-          { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
+          { type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' },
           { type: 'label', run, read: 'web_search', text: "Couldn't search the web just now" },
           { type: 'label', run, read: 'web_search', text: "Couldn't search the web just now" },
         ]).growing,
       ),
-    ).toEqual(['Searched your Claude memory', "Couldn't search the web just now", "Couldn't search the web just now"]);
+    ).toEqual(['Searched your sample Claude memory', "Couldn't search the web just now", "Couldn't search the web just now"]);
   });
 
   it('rebuilds_the_reads_from_what_a_reconnected_stream_replays', () => {
@@ -105,13 +105,13 @@ describe('stepSetupStream', () => {
       { type: 'reading', run, read: 'memory', host: null },
       { type: 'reading', run, read: 'web_search', host: null },
       { type: 'reading', run, read: 'web_search', host: null },
-      { type: 'label', run, read: 'memory', text: 'Searched your Claude memory' },
+      { type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' },
       { type: 'label', run, read: 'web_search', text: "Couldn't search the web just now" },
       { type: 'label', run, read: 'web_search', text: "Couldn't search the web just now" },
     ] as const;
     const replayed = through([...reads, { type: 'delta', run, text: 'Thanks. From' }, { type: 'reconnected' }, ...reads, { type: 'delta', run, text: 'Thanks. From your' }]).growing;
     // Each read once, and the two searches still two rows.
-    expect(shownLabels(replayed)).toEqual(['Searched your Claude memory', "Couldn't search the web just now", "Couldn't search the web just now"]);
+    expect(shownLabels(replayed)).toEqual(['Searched your sample Claude memory', "Couldn't search the web just now", "Couldn't search the web just now"]);
     expect(replayed.text).toBe('Thanks. From your');
     // A reconnected stream that replays no reads keeps those it showed.
     expect(shownLabels(through([...reads, { type: 'reconnected' }, { type: 'delta', run, text: 'Thanks.' }]).growing)).toHaveLength(3);
@@ -119,7 +119,7 @@ describe('stepSetupStream', () => {
 
   it('shows_a_label_whose_read_it_never_heard_start', () => {
     // A stream that came in late: the label still shows, after those it knows.
-    expect(shownLabels(through([{ type: 'label', run, read: 'memory', text: 'Searched your Claude memory' }]).growing)).toEqual(['Searched your Claude memory']);
+    expect(shownLabels(through([{ type: 'label', run, read: 'memory', text: 'Searched your sample Claude memory' }]).growing)).toEqual(['Searched your sample Claude memory']);
   });
 
   it('reads_an_unexpected_failure_and_a_deadline_alike', () => {

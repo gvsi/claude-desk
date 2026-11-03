@@ -22,7 +22,7 @@ import { expectNoHorizontalScroll, expectScreenBasics } from '../test/screen.ts'
 
 const CPA_DESCRIPTION = START_EXAMPLES.en.examples[3]!.description;
 const TITLE = "Let's set up your Desk";
-const YES = 'Yes, use it';
+const YES = 'Yes, use it (recommended)';
 const NO = "No, I'll type it";
 
 const requests = (key: RouteKey) => mockStore.requests.filter((r) => r.key === key);
@@ -85,7 +85,7 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     await screen.getByRole('button', { name: YES, exact: true }).click();
     // While the request is still out: the ask back in the conversation, the answer under it, the dots.
     const log = screen.getByRole('log', { name: 'Setup questions' });
-    await expect.element(log.getByText(YES, { exact: true })).toBeVisible();
+    await expect.element(log.getByText('Yes, use it', { exact: true })).toBeVisible();
     await expect.element(log.getByText(ask, { exact: true })).toBeVisible();
     await expect.element(log.getByRole('status').filter({ hasText: 'Claude is writing' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: ask, exact: true }).elements()).toHaveLength(0);
@@ -97,6 +97,7 @@ describe.each(['desktop', 'phone'] as const)('the memory question at %s', (viewp
     expectNoHorizontalScroll();
     held.release();
     await expect.element(screen.getByRole('region', { name: CPA_COPY.first, exact: true })).toBeVisible();
+    await expect.element(log.getByText('Yes, use it', { exact: true })).toBeVisible();
     expect(log.element().querySelectorAll('.cd-visitor-message')).toHaveLength(1);
   });
 

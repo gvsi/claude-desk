@@ -399,11 +399,11 @@ _OUTSIDE_OWNER_NAME = re.compile(rf"[^{OWNER_NAME_CHARS}]")
 _HOST = re.compile(r"[a-z0-9.-]{1,253}")
 
 # Owner-facing copy the API composes: sentence case, plain, no arrows or exclamation marks.
-CONSENT_QUESTION = ("Can I look at your Claude memory and your website to fill in what I can? If you'd rather not, "
-                    "you can type it all in.")
+CONSENT_QUESTION = ("Can I look at your sample Claude memory (this demo doesn't read your real one) and your website "
+                    "to fill in what I can? If you'd rather not, you can type it all in.")
 CONSENT_ANSWERS = {True: "Yes, use it", False: "No, I'll type it"}
-MEMORY_LABEL = "Searched your Claude memory"
-MEMORY_FAILED_LABEL = "Couldn't search your Claude memory"
+MEMORY_LABEL = "Searched your sample Claude memory"
+MEMORY_FAILED_LABEL = "Couldn't search your sample Claude memory"
 WEBSITE_LABEL = "Read {host}"
 WEBSITE_PAGES_LABEL = "Read {host}, {pages} pages"
 WEBSITE_FAILED_LABEL = "Couldn't read {host}"

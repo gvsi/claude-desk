@@ -3,7 +3,7 @@ import { Icon } from '../../icons/index.tsx';
 import './ToolLabel.css';
 
 export interface ToolLabelProps {
-  /** What Claude did, in the API's words: "Searched your Claude memory". Shown as text, never markup. */
+  /** What Claude did, in the API's words: "Searched your sample Claude memory". Shown as text, never markup. */
   text: string;
 }
 

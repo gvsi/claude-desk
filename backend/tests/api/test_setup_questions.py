@@ -1608,7 +1608,9 @@ async def test_setups_messages_leave_out_the_owners_description(app, browser, fa
     # description stays first in the stored transcript, which later turns read.
     owner = await new_owner(app, browser, kernel_http)
     state = await begin(owner, model, website=WEBSITE)
-    assert state["messages"] == [{"role": "claude", "text": desk_setup.CONSENT_QUESTION,
+    assert state["messages"] == [{"role": "claude", "text": (
+        "Can I look at your sample Claude memory (this demo doesn't read your real one) and your website "
+        "to fill in what I can? If you'd rather not, you can type it all in."),
                                    "choices": [], "card": None, "several": False, "owner_decided": False}]
     interview_id = state["interview_id"]
     assert (await owner.browser.get(f"/api/owner/setup/{interview_id}")).json()["messages"] == state["messages"]
@@ -1744,7 +1746,7 @@ async def test_setup_searches_the_web_after_consent(app, browser, fake, kernel_h
     assert sorted(fake.decisions[call.body["decision_id"]].tool
                   for call in fake.called("POST /execute")) == sorted(call.body["call"]["tool"] for call in decides)
     labels = [message["text"] for message in state["messages"] if message["role"] == "tool_label"]
-    assert labels == ["Searched your Claude memory", "Read turner-plumbing.example",
+    assert labels == ["Searched your sample Claude memory", "Read turner-plumbing.example",
                       *[f"Searched the web: {query}" for query in queries]]
     request = next(request for request in model.requests if request.output_schema is SetupUnderstanding)
     (message,) = request.messages
@@ -1935,7 +1937,7 @@ async def test_homework_decides_every_read_before_any_execution(
     assert call_order == ["/decide"] * 4 + ["/execute"] * 4
     assert len(set(completed_searches)) == len(queries)
     assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == [
-        "Searched your Claude memory", "Read turner-plumbing.example",
+        "Searched your sample Claude memory", "Read turner-plumbing.example",
         *[f"Searched the web: {query}" for query in queries]]
     assert state["question"] == "what_you_do" and not state["busy"]
 
@@ -1977,7 +1979,7 @@ async def test_homework_budget_includes_context_and_decisions(
     assert len(fake.called("POST /decide")) == (0 if blocked_route == "/context/" else 1)
     assert not fake.called("POST /execute")
     assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == [
-        "Couldn't search your Claude memory", "Couldn't read turner-plumbing.example",
+        "Couldn't search your sample Claude memory", "Couldn't read turner-plumbing.example",
         "Couldn't search the web just now"]
     assert state["question"] == "what_you_do" and not state["busy"]
 
@@ -2026,7 +2028,7 @@ async def test_homework_shares_a_budget_and_keeps_time_for_understanding(
     state = await consent(owner, state["interview_id"], True, model)
     assert state["consent"] is True and state["question"] == "what_you_do" and not state["busy"]
     labels = [message["text"] for message in state["messages"] if message["role"] == "tool_label"]
-    assert labels == ["Couldn't search your Claude memory", "Couldn't read turner-plumbing.example", *(
+    assert labels == ["Couldn't search your sample Claude memory", "Couldn't read turner-plumbing.example", *(
         ["Couldn't search the web just now"] if all_slow else
         [f"Searched the web: {queries[0]}", "Couldn't search the web just now", f"Searched the web: {queries[2]}"])]
     reads = [entry for entry in (await stored(engine, state["interview_id"]))["transcript"] if entry.get("read")]
@@ -2244,7 +2246,7 @@ async def test_consent_shows_only_one_search_failure_label(
 
     monkeypatch.setattr(desk_setup, "decide_setup_tool", refuse_some)
     state = await consent(owner, state["interview_id"], True, model)
-    expected = ["Searched your Claude memory"]
+    expected = ["Searched your sample Claude memory"]
     for index, query in enumerate(queries):
         if index not in failed_queries:
             expected.append(f"Searched the web: {query}")
@@ -2276,7 +2278,7 @@ async def test_a_failed_search_shows_its_label_and_setup_goes_on(
     state = await consent(owner, state["interview_id"], True, model)
     assert state["question"] == "what_you_do" and not state["busy"]
     assert [message["text"] for message in state["messages"] if message["role"] == "tool_label"] == [
-        "Searched your Claude memory", "Couldn't search the web just now"]
+        "Searched your sample Claude memory", "Couldn't search the web just now"]
     searches = [entry for entry in (await stored(engine, state["interview_id"]))["transcript"]
                 if entry.get("read") == "web_search"]
     assert len(searches) == 1 and searches[0].get("content") is None
@@ -2327,7 +2329,7 @@ async def test_tool_labels_are_inline_messages(app, browser, fake, kernel_http, 
 
     assert consented["consent"] is True and consented["question"] == "what_you_do"
     assert [(message["role"], message["text"]) for message in consented["messages"][1:]] == [
-        ("owner", "Yes, use it"), ("tool_label", "Searched your Claude memory"),
+        ("owner", "Yes, use it"), ("tool_label", "Searched your sample Claude memory"),
         ("tool_label", "Read turner-plumbing.example"), ("claude", question_text("what_you_do", "trade"))]
     read = await owner.browser.get(f"/api/owner/setup/{state['interview_id']}")
     assert read.status_code == 200 and read.json() == consented
@@ -2343,7 +2345,7 @@ async def test_refused_fetch_does_not_block_setup(app, browser, fake, kernel_htt
     state = await begin(owner, model, website=WEBSITE)
     consented = await consent(owner, state["interview_id"], True, model)
     assert [(message["role"], message["text"]) for message in consented["messages"][2:]] == [
-        ("tool_label", "Couldn't search your Claude memory"), ("tool_label", "Couldn't read turner-plumbing.example"),
+        ("tool_label", "Couldn't search your sample Claude memory"), ("tool_label", "Couldn't read turner-plumbing.example"),
         ("claude", question_text("what_you_do", "trade"))]
     assert not fake.called("POST /execute")
 
@@ -3520,7 +3522,7 @@ async def test_a_consent_reading_the_website_locks_nothing_and_a_duplicate_answe
     reply = await first
     assert reply.status_code == 202, reply.text
     assert [message["text"] for message in (await landed(owner, interview_id))["messages"][1:3]] == [
-        "Yes, use it", "Searched your Claude memory"]
+        "Yes, use it", "Searched your sample Claude memory"]
 
 
 async def test_an_answer_saves_nothing_when_the_interview_changed_meanwhile(app, browser, fake, kernel_http, model,

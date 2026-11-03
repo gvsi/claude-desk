@@ -834,7 +834,7 @@ it('draws the signed suggested group with actions per type and screen basics at 
     mockStore.reset('rivera');
     const { screen } = await openLines(viewport);
     await expect.element(screen.getByText('Suggested by Claude, please check', { exact: true })).toBeVisible();
-    await expect.element(screen.getByText('Claude found these in your memory and online. Customers see them only once you choose “Looks right”.', { exact: true })).toBeVisible();
+    await expect.element(screen.getByText('Claude found these in your sample memory and online. Customers see them only once you choose “Looks right”.', { exact: true })).toBeVisible();
     const group = screen.container.querySelector('.cd-public-lines-suggested')!;
     expect(group.querySelector('.cd-status-dot--held')).not.toBeNull();
     const rows = [...group.querySelectorAll('.cd-public-lines__row')];

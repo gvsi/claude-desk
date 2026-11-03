@@ -399,7 +399,7 @@ describe('setup', () => {
     await screen.getByRole('button', { name: 'Start' }).click();
 
     // The description and the browser's own time zone, once, with the press's idempotency key.
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).toBeVisible();
     expect(requests('startSetup').map((r) => r.body)).toEqual([
       { description: DESCRIPTION, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, idempotency_key: expect.any(String) },
@@ -414,7 +414,7 @@ describe('setup', () => {
     expect(inSerif(consent.element())).toBe(true);
     expect(screen.container.querySelector('.cd-page-header__subtitle')).toBeNull();
 
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     const first = SETUP_QUESTIONS[0]?.text ?? '';
     await expect.element(screen.getByText(first, { exact: true })).toBeVisible();
     expect(requests('setupConsent').map((r) => r.body)).toEqual([{ allow: true }]);
@@ -422,7 +422,7 @@ describe('setup', () => {
     expect(inSerif(screen.getByText(first, { exact: true }).element())).toBe(true);
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Yes, use it' }).elements()).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Yes, use it (recommended)' }).elements()).toHaveLength(0);
     // The answer the owner gave shows as theirs.
     await expect.element(screen.getByText('Yes, use it', { exact: true })).toBeVisible();
     const setup = (await mockStore.dispatch('setup', { params: { id: router.state.location.pathname.split('/').at(-1) ?? '' } })) as { body: SetupState };
@@ -447,7 +447,7 @@ describe('setup', () => {
       expect(screen.getByRole('button', { name: 'Try again' }).elements()).toHaveLength(0);
     }
     await screen.getByRole('button', { name: 'Start' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     const keys = startKeys();
     expect(keys).toHaveLength(3);
     expect(new Set(keys).size).toBe(3);
@@ -464,7 +464,7 @@ describe('setup', () => {
     await spent.getByRole('button', { name: 'Try again' }).click();
     await expect.element(spent.getByText(setupStartSpentLine(), { exact: true })).toBeVisible();
     await spent.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(spent.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(spent.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     const spentKeys = startKeys().slice(3);
     expect(spentKeys).toHaveLength(3);
     expect(spentKeys[1]).toBe(spentKeys[0]);
@@ -498,7 +498,7 @@ describe('setup', () => {
       const tryAgain = page.getByRole('button', { name: 'Try again' });
       const button = tryAgain.element();
       await tryAgain.click();
-      await expect.element(page.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+      await expect.element(page.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
       document.removeEventListener('focusin', onFocus);
       const heading = focused[focused.indexOf(button) + 1];
       expect(heading?.tagName, JSON.stringify(fault)).toBe('H1');
@@ -545,7 +545,7 @@ describe('setup', () => {
     }
     await until(() => expect(answers).toEqual([false, false, true]));
     vi.useRealTimers();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     const sent = requests('startSetup').map((r) => r.body);
     expect(sent).toHaveLength(3);
     expect(new Set(sent.map((body) => JSON.stringify(body))).size).toBe(1);
@@ -645,7 +645,7 @@ describe('setup', () => {
     await expect.element(words).toBeVisible();
     expect(router.state.location.pathname).toBe('/app/setup');
     await screen.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     expect(router.state.location.pathname).toMatch(/^\/app\/setup\/setup-\d+$/);
     expect(startKeys()).toHaveLength(3);
     expect(new Set(startKeys()).size).toBe(1);
@@ -674,7 +674,7 @@ describe('setup', () => {
 
     end('made');
     await screen.getByRole('button', { name: 'Try again' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     expect(new Set(startKeys()).size).toBe(1);
     expect(startKeys()).toHaveLength(6);
     expect(mockStore.world.desks.length).toBe(desks + 1);
@@ -790,7 +790,7 @@ describe('setup', () => {
     const edited = `${START_EXAMPLES.en.examples[1]?.description ?? ''} Gas lines too.`;
     await expect.element(box).toHaveValue(edited);
     await screen.getByRole('button', { name: 'Start' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     expect(requests('startSetup').map((r) => (r.body as { description: string }).description)).toEqual([edited]);
     await expect.element(screen.getByText('Turner Plumbing', { exact: true }).first()).toBeVisible();
   });
@@ -1041,7 +1041,7 @@ describe('setup', () => {
     expect(document.execCommand('undo')).toBe(true);
     await expect.element(box).toHaveValue(typed);
     await screen.getByRole('button', { name: 'Start' }).click();
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     expect(requests('startSetup').map((r) => (r.body as { description: string }).description)).toEqual([typed]);
   });
 
@@ -1462,7 +1462,7 @@ describe('setup', () => {
       mockStore.inject({ route: 'setupEvents', status: 503, times: 10 });
       const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
       const answered = answerOf('setupConsent');
-      await screen.getByRole('button', { name: 'Yes, use it' }).click();
+      await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
       await answered;
       const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
       const wait = screen.getByText(words, { exact: true });
@@ -1504,12 +1504,12 @@ describe('setup', () => {
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
     const answered = answerOf('setupConsent');
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
     await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).not.toBeInTheDocument();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).not.toBeInTheDocument();
     await expect.element(screen.getByRole('button', { name: "No, I'll type it" })).not.toBeInTheDocument();
     const box = screen.getByRole('textbox', { name: 'Your answer' });
     await expect.element(box).toBeEnabled();
@@ -1531,17 +1531,17 @@ describe('setup', () => {
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport: 'phone' });
     const answered = answerOf('setupConsent');
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
     await answered;
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
     expectNoHorizontalScroll();
     finish('failed');
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     const notice = screen.getByRole('alert');
     await expect.element(notice).toHaveTextContent(UNREACHABLE_COPY.en);
-    expect(notice.element().compareDocumentPosition(screen.getByRole('button', { name: 'Yes, use it' }).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.element().compareDocumentPosition(screen.getByRole('button', { name: 'Yes, use it (recommended)' }).element()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expectNoHorizontalScroll();
     await screen.getByRole('button', { name: "No, I'll type it" }).click();
     await expect.element(screen.getByRole('textbox', { name: 'Your answer' })).toBeEnabled();
@@ -1552,10 +1552,10 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const answered = answerOf('setupConsent');
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
@@ -1587,10 +1587,10 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const answered = answerOf('setupConsent');
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
@@ -1623,10 +1623,10 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     // Another request got there first while this page still shows the consent buttons.
     await mockStore.dispatch('setupConsent', { params: { id: state.interview_id }, body: { allow: true } });
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
@@ -1643,10 +1643,10 @@ describe('setup', () => {
     const state = await startInterview(null);
     const finish = holdNextConsent(mockStore.world, state.interview_id);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     const mark = mockStore.requests.length;
     mockStore.inject({ route: 'setupConsent', status: 503, afterCommit: true });
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     const writing = screen.getByRole('status').filter({ hasText: 'Claude is writing' });
     await expect.element(writing).toBeVisible();
     expect(writing.element().querySelectorAll('.cd-writing-indicator__dot')).toHaveLength(3);
@@ -1709,10 +1709,10 @@ describe('setup', () => {
     const firstVisit = holdFirstVisit();
     onTestFinished(firstVisit.draw);
     const { screen, router } = await renderRoute(`/app/setup/${state.interview_id}`, { routes: firstVisit.routes });
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const answered = answerOf('setupConsent');
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     await until(() => {
       vi.advanceTimersByTime(0);
       expect(screen.container.querySelector('.cd-writing-indicator')).not.toBeNull();
@@ -1827,18 +1827,18 @@ describe('setup', () => {
   it('lost_consent_is_read_before_it_is_sent_again', async () => {
     const state = await startInterview(null);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`);
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
     const mark = mockStore.requests.length;
 
     // The API takes the consent but its reply is lost, and the read fails too: unknown.
     mockStore.inject({ route: 'setupConsent', status: 'network', afterCommit: true });
     mockStore.inject({ route: 'setup', status: 503 });
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     await expect.poll(() => requests('setup', mark).length).toBe(1);
-    await expect.element(screen.getByRole('button', { name: 'Yes, use it' })).toBeVisible();
+    await expect.element(screen.getByRole('button', { name: 'Yes, use it (recommended)' })).toBeVisible();
 
     // Pressed again, it reads first: consent was given, so the first question shows, with no second write.
-    await screen.getByRole('button', { name: 'Yes, use it' }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)' }).click();
     await expect.element(screen.getByText(SETUP_QUESTIONS[0]?.text ?? '', { exact: true })).toBeVisible();
     expect(requests('setupConsent', mark)).toHaveLength(1);
     // Opened at its address, nothing comes before Claude's consent question: the API doesn't send
@@ -4266,7 +4266,7 @@ describe('consultant setup', () => {
   it.each(['desktop', 'phone'] as const)('answers_the_first_panel_by_keys_after_consent_without_manual_focus_on_%s', async (viewport) => {
     const state = await startInterview(null, CPA_DESCRIPTION);
     const { screen } = await renderRoute(`/app/setup/${state.interview_id}`, { viewport });
-    await screen.getByRole('button', { name: 'Yes, use it', exact: true }).click();
+    await screen.getByRole('button', { name: 'Yes, use it (recommended)', exact: true }).click();
     const first = screen.getByRole('button', { name: 'Both, about evenly', exact: true });
     await expect.element(first).toHaveFocus();
     await userEvent.keyboard('{ArrowDown}2{Enter}');

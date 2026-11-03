@@ -53,7 +53,7 @@ it('polls_busy_questions_every_two_seconds_and_stops_when_the_question_lands', a
   await advance(1);
   expect(reread).toHaveBeenCalledTimes(1);
   // A state update while work is ongoing must not restart the clock.
-  show({ ...busy, messages: [...busy.messages, { role: 'tool_label', text: 'Searched your Claude memory', choices: [], card: null }] });
+  show({ ...busy, messages: [...busy.messages, { role: 'tool_label', text: 'Searched your sample Claude memory', choices: [], card: null }] });
   reread.mockResolvedValueOnce(landed);
   await advance(2000);
   expect(reread).toHaveBeenCalledTimes(2);
@@ -69,7 +69,7 @@ it('gives_up_only_after_a_turn_can_no_longer_be_running_including_failed_reads_a
   const polls = SETUP_WORK_GIVE_UP_MS / 2000 - 1;   // the deadline wins over the tick at the limit itself
   show(busy);
   await advance(44000);
-  show({ ...busy, messages: [...busy.messages, { role: 'tool_label', text: 'Searched your Claude memory', choices: [], card: null }] });
+  show({ ...busy, messages: [...busy.messages, { role: 'tool_label', text: 'Searched your sample Claude memory', choices: [], card: null }] });
   reread.mockResolvedValue(null);
   await advance(SETUP_WORK_GIVE_UP_MS - 44000 - 1);
   expect(reread).toHaveBeenCalledTimes(polls);
