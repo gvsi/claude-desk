@@ -262,7 +262,7 @@ export const ARTICLE = {
   note: 'Vision, not the prototype. Nothing on this page is live.',
   intro: [
     'Most of the questions a business gets are the same questions, asked at the wrong time. What does it cost? Can you come Tuesday? Where’s my invoice? Turner Plumbing’s Desk answers them at any hour, from Mike’s own price list and calendar, and asks him before it does anything his rules don’t cover.',
-    'That shape isn’t special to plumbing. Anywhere a person answers the same questions under rules they already know, a Desk can take the first conversation and hand off the rest. Here are four places we think it goes next.',
+    'That shape isn’t special to plumbing. Anywhere a person answers the same questions under rules they already know, a Desk can take the first conversation and hand off the rest. Here are four places I think it goes next.',
   ],
   end: 'Vision, not in the prototype. Nothing on this page is live; the businesses and people are fictional.',
 } as const;

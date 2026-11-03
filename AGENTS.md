@@ -4,7 +4,7 @@ This file is the source of truth for coding agents working in this repo (Claude 
 
 ## What this is
 
-Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes payments under the owner's rules, and it can't be talked around.
+Claude Desk is a concept prototype: a public, always-on Claude for a person or small business that strangers and other people's agents can talk to. It answers, books, quotes, releases documents to verified people and takes payments under the owner's rules.
 
 - **Self-serve first:** a Desk resolves what it can on its own and isn't a bridge to the owner. Claude asks the visitor before involving the owner, and the chat keeps going after a handoff or hold. Most honest conversations should go right because the agent's instructions and tools set Claude up well. The kernel's checks are mainly there to stop people trying to break it.
 - **Spec:** `docs/specs/` (design, decisions, threat model), summarised for readers in [the threat model](docs/threat-model.md) and [the architecture decisions](docs/architecture-decisions.md).

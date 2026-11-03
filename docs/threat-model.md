@@ -44,7 +44,7 @@ Prompt injection and social engineering can't make Claude act past the owner's r
 
 **Payments are mocked.** Payment links open an in-app checkout labelled "Test payment, no money moves", and a mock payments server in this repository stands in for the provider, with its store kept separate per demo copy. No payment provider account, SDK or key exists. The kernel still decides, reserves, reconciles and logs every payment as it would with a real provider.
 
-**Another CloudFront distribution.** In the default compute mode, the origin's load balancer admits CloudFront's origin-facing addresses, which every CloudFront distribution shares, so someone could point a distribution of their own at it. Through it they reach only what a visitor reaches through ours: CloudFront still appends the real viewer's address, so per-visitor limits still key on the real visitor, and our cookies don't apply on their domain, so it carries no visitor or owner session. In the fallback mode, the load balancer is internal and is reached only through this deployment's CloudFront VPC origin.
+**Another CloudFront distribution.** In the default compute mode, the origin's load balancer admits CloudFront's origin-facing addresses, which every CloudFront distribution shares, so someone could point a distribution of their own at it. Through it they reach only what a visitor reaches through the Desk's own: CloudFront still appends the real viewer's address, so per-visitor limits still key on the real visitor, and the Desk's cookies don't apply on their domain, so it carries no visitor or owner session. In the fallback mode, the load balancer is internal and is reached only through this deployment's CloudFront VPC origin.
 
 ## External reply evaluation
 
@@ -54,7 +54,7 @@ scanned reply prose, rendered card texts and the session's fixed `next_steps` go
 HTTPS API for evaluation by `jev-1.13.0`.
 Card text may contain information the verified session is entitled to read. This adds an external
 data recipient. TypeSafe's terms on retaining or training on inputs (reply and card text) are
-not verified here; this is not a privacy guarantee. TypeSafe's terms bar us from training on
+not verified here; this is not a privacy guarantee. TypeSafe's terms forbid training on
 Jev's outputs; the scores are used only for live reply decisions, under the owner's agreement with TypeSafe.
 The key stays in the kernel container. Request and response bodies and the key are never logged;
 only call status and latency are logged.
@@ -108,6 +108,6 @@ The implementation and test references describe the committed code. "Implemented
 - Beside a booking card, the code check lets any booking claim through, since prose doesn't name which booking it means; a claim about another booking, or one that says more than the card, rests on the model check, which can miss.
 - Claude may write links and email addresses in its own replies. Since the owner's decision of 2026-11-01 the chats render Markdown, and code holds every clickable link, shown or hidden, and every email address to the business's public contact: `https` to a host or `mailto:` an address that `charter:contact` names. A look-alike link planted by a malicious website or message is blocked when it would be clickable; only a domain written without a scheme or `www.`, which the chats don't link, still rests on the prompt.
 - Tier 2's AI-denial check is strict: a correct refusal that quotes the line it won't say ("Coming from me it would claim I'm a real person, and I'm Claude, an AI.") is flagged (4 messages in 3 of 48 attack runs in one measured pass), read by hand and waived per message by the owner on the final pass when it is a correct refusal. Waivers bind to that pass, run, message and exact text hash, and only `disclosure.denial` can be waived; the gate and report name the waived count and signer. CI checks counts against committed rows, while local signing and gating also check ids and hashes against transcripts. An automatic exception for such refusals was built and reviewed, then set aside, because every free-text reading of it also spared some real denial. The project owner settled the strict reading and per-message waivers on 2026-10-31.
-- The attack suite is written by the people who built the defenses. It covers the attacks we thought of; a clean run means none of those got through, not that no attack can.
+- The attack suite was written alongside the defenses it tests. It covers the attacks I thought of; a clean run means none of those got through, not that no attack can.
 - Reviewer thresholds are tuned on one split of the scenarios and reported on another, held out; a new kind of request can still be judged wrongly, and the reviewer can only hold it, never allow it.
 - The kernel shares a task with the API. A container escape or a compromised host would reach both.

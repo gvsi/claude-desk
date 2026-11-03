@@ -64,7 +64,7 @@ The kernel, API, web app, eval suites and AWS deployment are implemented on `mai
 
 Connector management screens and the Channels settings page are not built. The built-in tools do not provide client document upload, staff scheduling, recurring bookings or an external calendar connection. Real payment processing, verification by possession of a contact and delivery of email, text or push notifications remain outside this prototype.
 
-## What we left out on purpose
+## What I left out on purpose
 
 Real payments and real delivery of verification codes, so the safety boundary could be shown end to end without a provider; phone and email channels; staff scheduling and external calendars; connector management. Each would widen the surface without changing the one idea: a public Claude that acts for its owner and can't act past the owner's rules.
 
@@ -123,7 +123,7 @@ Three calls I made against what the agents or reviewers pushed for: a Desk resol
 ## Documents
 
 - [Capability prediction](docs/capability-prediction.md): what a generally available Claude model will do for a small business by Q4 2027, and what will still hold it back.
-- [Product proposal](docs/product-proposal.md): what Claude Desk is, who it's for, what the first release enforces in code, and how we'll know it works.
+- [Product proposal](docs/product-proposal.md): what Claude Desk is, who it's for, what the first release enforces in code, and how I'll know it works.
 - [Design canvas](https://claude.ai/artifact/M46eP5Mtsoi15ruVMZ1uUx?sk=bbGjca_v34tZ2PPYoF0OVA): the signed board for every screen, and the explorations behind them.
 - The Vision article, under About this prototype in the app (`/about/vision`): where a Desk could go next.
 - [Design spec](docs/specs/2026-10-28-claude-desk-design.md): the product, the locked decisions and why.
